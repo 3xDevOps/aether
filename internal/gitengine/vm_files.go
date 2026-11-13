@@ -3,6 +3,7 @@ package gitengine
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -23,8 +24,11 @@ func (e *Engine) vmFilesTree(ctx context.Context, run domain.RunID, dir string) 
 		return nil, err
 	}
 	g, err := e.vmGit(ctx, run)
-	if err != nil {
+	if errors.Is(err, guest.ErrVMNotRunning) {
 		return e.recordedFilesTree(ctx, run, dir)
+	}
+	if err != nil {
+		return nil, err
 	}
 	entries, err := g.Tree(ctx, string(run), dir)
 	if err != nil {
@@ -53,8 +57,11 @@ func (e *Engine) vmFilesRead(ctx context.Context, run domain.RunID, path string,
 		maxBytes = MaxFileBytes
 	}
 	g, err := e.vmGit(ctx, run)
-	if err != nil {
+	if errors.Is(err, guest.ErrVMNotRunning) {
 		return e.recordedFilesRead(ctx, run, path, maxBytes)
+	}
+	if err != nil {
+		return FileRead{}, err
 	}
 	content, truncated, size, err := g.ReadFile(ctx, string(run), path, maxBytes)
 	if err != nil {
@@ -89,8 +96,11 @@ func (e *Engine) vmFilesWrite(ctx context.Context, run domain.RunID, name string
 
 func (e *Engine) vmFileDiff(ctx context.Context, run domain.RunID, path string) (Patch, error) {
 	g, err := e.vmGit(ctx, run)
-	if err != nil {
+	if errors.Is(err, guest.ErrVMNotRunning) {
 		return e.recordedFileDiff(ctx, run, path)
+	}
+	if err != nil {
+		return Patch{}, err
 	}
 	p, err := g.FileDiff(ctx, string(run), path)
 	if err != nil {

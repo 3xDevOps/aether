@@ -228,7 +228,14 @@ func (s *Server) serveSync(ctx context.Context, member domain.MemberID, ch ssh.C
 
 	var served error
 	if vmSync != nil {
+		// Only a running VM serves its checkout; a sleeping session wakes.
+		release, holdErr := s.cfg.Runs.HoldRunAwake(authCtx, run.ID)
+		if holdErr != nil {
+			sendExitStatus(ch, 1)
+			return
+		}
 		served = vmSync.ServeVMSync(authCtx, run.ID, stream)
+		release()
 	} else {
 		served = remote.ServeEndpoint(logging.NewLogger(logging.LevelError, io.Discard), stream)
 	}

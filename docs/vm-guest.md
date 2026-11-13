@@ -322,12 +322,14 @@ VM the same way: the server packs what the parent lacks and `Install` sets
 A live overlay is pinned by the server as for a checkout on its disk, then
 relayed to the VM, whose endpoint pins the root to the checkout again, gives
 what it creates to the checkout's owner, and keeps its staging under
-`/run/aether-guest/data/git/mutagen`. Live sync needs the VM to run.
+`/run/aether-guest/data/git/mutagen`. Live sync to a sleeping session wakes
+it and holds it awake while the overlay runs.
 
 While the VM does not run, because the session sleeps or ended, its Files
 view and diffs come from the last snapshot the server recorded: nothing can
 have changed the checkout since. A Files write or upload to a sleeping
-session wakes it first; one to an ended session fails. Removing the checkout
+session wakes it first; one to an ended session, whose VM was removed,
+fails. Removing the checkout
 deletes its disk and first copies into the session's diff history what that
 history borrowed from the workspace repository, so the history outlives the
 workspace's own objects.

@@ -538,8 +538,22 @@ func TestStoppedVMSessionIsShownFromItsLastSnapshot(t *testing.T) {
 	if err != nil || !strings.Contains(diff.Text, "+changed") || !diff.Recorded {
 		t.Fatalf("file diff of a stopped VM = %+v, %v", diff, err)
 	}
-	if _, err = p.host.FilesWrite(ctx, testWorkspace, testRun, "", "README", []byte("x\n"), "", domain.GitIdentity{}, nil); !errors.Is(err, gitengine.ErrCheckoutNotFound) {
+	if _, err = p.host.FilesWrite(ctx, testWorkspace, testRun, "", "README", []byte("x\n"), "", domain.GitIdentity{}, nil); !errors.Is(err, guest.ErrVMNotRunning) {
 		t.Fatalf("write to a stopped VM = %v", err)
+	}
+	// Only the VM can read its uncommitted work, which cleanup must keep.
+	if _, err = p.host.CaptureEvidence(ctx, testRun, "uncommitted"); err == nil || errors.Is(err, gitengine.ErrCheckoutNotFound) {
+		t.Fatalf("evidence of a stopped VM's uncommitted checkout = %v, want an error that keeps the checkout", err)
+	}
+	p.down.Store(false)
+	commit, err := p.host.CommitAll(ctx, testRun, "wip: a task", domain.GitIdentity{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.down.Store(true)
+	revision, err := p.host.CaptureEvidence(ctx, testRun, "committed")
+	if err != nil || revision.Tree != runGit(t, p.checkout, "rev-parse", commit+"^{tree}") {
+		t.Fatalf("evidence of a stopped VM after its commit = %+v, %v", revision, err)
 	}
 
 	if err = p.host.RemoveRunCheckout(ctx, testRun); err != nil {
