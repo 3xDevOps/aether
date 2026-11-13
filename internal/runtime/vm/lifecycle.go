@@ -229,7 +229,10 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool)
 	waitCtx, cancel, rebooted := e.whileUp(ctx, key)
 	defer cancel()
 	code, err := h.Process(guest.MainID).Wait(waitCtx)
-	if err != nil && !rebooted.Load() {
+	// A guest back from its reboot within a tick of whileUp answers at once
+	// that it has no Main, so the event log is read here as well.
+	gone := rebooted.Load() || (err != nil && e.rebooted(key))
+	if err != nil && !gone {
 		return 0, false
 	}
 	unlock := e.lock(key)
@@ -241,7 +244,7 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool)
 	if rec.Exited || rec.Boots != boot {
 		return rec.ExitCode, true
 	}
-	if rebooted.Load() {
+	if gone {
 		e.kill(context.WithoutCancel(ctx), key)
 		rec.Exited, rec.ExitCode = true, lostExitCode
 		return lostExitCode, e.store(rec) == nil

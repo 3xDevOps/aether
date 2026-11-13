@@ -259,7 +259,9 @@ func TestKVMGuestRebootEndsTheSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	start := time.Now()
-	_, _, _, _ = e.exec(ctx, key, []string{"/bin/sh", "-c", "AETHER_VM_TEST_REBOOT_NOW=1 /opt/aether-vmtest -test.run '^TestKVMRebootNow$'"}, "")
+	if _, _, _, execErr := e.exec(ctx, key, []string{"/bin/sh", "-c", "AETHER_VM_TEST_REBOOT_NOW=1 /opt/aether-vmtest -test.run '^TestKVMRebootNow$'"}, ""); execErr != nil {
+		t.Logf("the exec that reboots the guest ended with: %v", execErr)
+	}
 	select {
 	case st := <-waited:
 		if st.Code != lostExitCode {
