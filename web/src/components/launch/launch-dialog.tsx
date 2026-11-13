@@ -71,6 +71,8 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
   const extraRepos = reposOffered && pickedExtras.length ? { extra_workspace_ids: pickedExtras } : {}
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [accountsRead, setAccountsRead] = useState(false)
+  const [accountsReadError, setAccountsReadError] = useState<string | null>(null)
+  const [accountAttempt, setAccountAttempt] = useState(0)
   const [account, setAccount] = useState(restored?.account ?? self?.id ?? '')
   const accountPicked = useRef(false)
   const fallbackPicked = useRef(false)
@@ -126,23 +128,28 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
   useEffect(() => {
     if (!open) return
     let live = true
+    setAccountsRead(false)
+    setAccountsReadError(null)
     api.accountList().then((access) => {
       if (!live) return
       setAccounts(access.accounts.some((member) => member.id === ownAccountID) || !self ? access.accounts : [self, ...access.accounts])
       setAccount((current) => current || access.accounts[0]?.id || '')
-    }).catch(() => {}).finally(() => {
-      if (live) setAccountsRead(true)
+      setAccountsRead(true)
+    }).catch((err: unknown) => {
+      if (!live) return
+      setAccountsReadError(message(err))
+      setAccountsRead(true)
     })
     return () => { live = false }
-  }, [open, ownAccountID, self])
+  }, [open, ownAccountID, self, accountAttempt])
 
   useEffect(() => {
-    if (!accountsRead || accountPicked.current || accounts.some((member) => member.id === account)) return
+    if (!accountsRead || accountsReadError || accounts.some((member) => member.id === account)) return
     setAccount(accounts.find((member) => member.id === ownAccountID)?.id ?? accounts[0]?.id ?? '')
-  }, [account, accounts, accountsRead, ownAccountID])
+  }, [account, accounts, accountsRead, accountsReadError, ownAccountID])
 
   useEffect(() => {
-    if (preset === 'done' || !savedRead.fresh || !accountsRead) return
+    if (preset === 'done' || !savedRead.fresh || !accountsRead || accountsReadError) return
     if (preset === 'local' && (savedRead.error !== null || !saved)) return
     if (preset === 'local') setPick((n) => n + 1)
     setPreset(savedRead.error === null ? 'done' : 'local')
@@ -153,16 +160,16 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
     const usable = savedAccount && !refused && accounts.some((member) => member.id === savedAccount)
     if (!accountPicked.current) setAccount((current) => usable ? savedAccount : ownAccountID || current)
     if (!fallbackPicked.current) setFallback(fallbackFromSaved(savedFallback, accounts))
-  }, [preset, savedRead.fresh, savedRead.error, saved, accounts, accountsRead, ownAccountID])
+  }, [preset, savedRead.fresh, savedRead.error, saved, accounts, accountsRead, accountsReadError, ownAccountID])
 
   useEffect(() => {
     const state = useStore.getState()
-    if (launchDraftError || ended.current || state.identityKey !== identityKey || (!open && state.launchDraft?.id !== draftID)) return
+    if (ended.current || state.identityKey !== identityKey || (!open && state.launchDraft?.id !== draftID)) return
     const draft: LaunchDraft = {
       version: 1, id: draftID, workspace: workspaceID, extras, account, fallback,
       permission, childRuns, limits, harness, mode, model, effort, task,
     }
-    const failure = state.setLaunchDraft(draft)
+    const failure = state.setLaunchDraft(draft, !launchDraftError)
     if (failure && !storageFailed.current) toast.error(`Draft could not be saved in this browser: ${failure}`)
     storageFailed.current = failure !== null
   }, [identityKey, draftID, open, workspaceID, extras, account, fallback, permission, childRuns, limits, harness, mode, model, effort, task, launchDraftError, linkStatus])
@@ -267,6 +274,16 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
             : ' Start a new draft to replace the unreadable saved data.'}
         </Callout>
       )}
+      {accountsReadError && (
+        <Callout
+          tone="failed"
+          role="alert"
+          title="Accounts could not be read."
+          actions={<Button type="button" size="sm" variant="secondary" onClick={() => setAccountAttempt((attempt) => attempt + 1)}>Retry account read</Button>}
+        >
+          {accountsReadError} Retry before launching to confirm the selected account is still available.
+        </Callout>
+      )}
       {workspaceID && !workspace && (
         <Callout tone="failed" role="alert" title="This workspace no longer exists.">
           {phone ? 'Choose another repository; your task is kept.' : 'Pick another workspace in the sidebar; your task is kept.'}
@@ -332,7 +349,7 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
     </>
   )
   // agents is null while the chosen account's list is read, and harness may still be the last account's.
-  const launchDisabled = launching || !workspace || !account || !harness || !agents || taskMissing || dictating
+  const launchDisabled = launching || !accountsRead || accountsReadError !== null || !workspace || !account || !harness || !agents || taskMissing || dictating
 
   if (!visible) return null
 
