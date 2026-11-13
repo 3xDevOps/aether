@@ -187,6 +187,9 @@ func TestStopEndsMainRecordsItsExitAndPowersOff(t *testing.T) {
 	if err := h.engine.pause(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, _, err := h.engine.exec(t.Context(), "run-a", []string{"true"}, ""); err == nil || !strings.Contains(err.Error(), "paused") {
+		t.Errorf("exec in a paused VM = %v", err)
+	}
 	vmm := h.units.vmm("run-a")
 	if err := h.engine.stop(t.Context(), "run-a", time.Second); err != nil {
 		t.Fatal(err)

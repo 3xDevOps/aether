@@ -73,6 +73,10 @@ func (e *engine) spawn(ctx context.Context, key string, spec guest.ProcessSpec) 
 	if err != nil {
 		return nil, nil, err
 	}
+	// A paused guest would hold the exec until ctx ends; Docker refuses it.
+	if state, stateErr := newCHAPI(e.path(key, apiSocket)).state(ctx); stateErr == nil && state == "Paused" {
+		return nil, nil, fmt.Errorf("vm runtime: exec in VM %s: it is paused", key)
+	}
 	h, err := e.helper(key)
 	if err != nil {
 		return nil, nil, err
