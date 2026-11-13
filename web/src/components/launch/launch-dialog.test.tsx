@@ -322,6 +322,7 @@ describe('saved launch draft', () => {
   })
 
   it('replaces a saved account that is no longer accessible while keeping the prompt', async () => {
+    allowDraftStorage()
     useStore.setState({ launchDraft: draft({ account: bob.id }) })
     await open()
     expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep this prompt')
@@ -331,6 +332,7 @@ describe('saved launch draft', () => {
   })
 
   it('keeps the restored account and blocks launch when the account list read fails', async () => {
+    allowDraftStorage()
     vi.mocked(api.accountList).mockRejectedValueOnce(new Error('account list unavailable'))
     useStore.setState({ launchDraft: draft({ account: bob.id, task: 'keep account and task' }) })
     render(<LaunchDialog />)
@@ -413,6 +415,10 @@ describe('child runs switch', () => {
 })
 
 describe('new run', () => {
+  beforeEach(() => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.launch', 'agent.list', 'account.list'], ws: [] } })
+  })
+
   it('returns focus to what had it before the dialog opened', async () => {
     render(<button type="button">Board</button>)
     const before = screen.getByRole('button', { name: 'Board' })
@@ -436,6 +442,19 @@ describe('new run', () => {
     expect(screen.getByRole('alert').textContent).toContain('This workspace no longer exists.')
     expect(launchButton().disabled).toBe(true)
     expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep me')
+  })
+
+  it('allows an own-account launch on servers without account.list', async () => {
+    useStore.setState({
+      capabilities: { gateway: 'remote', methods: ['run.launch', 'agent.list'], ws: [] },
+      launchDraft: draft({ account: bob.id, task: 'legacy server task' }),
+    })
+    await open()
+    expect(api.accountList).not.toHaveBeenCalled()
+    expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('legacy server task')
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ task: 'legacy server task' })))
+    expect(vi.mocked(api.runLaunch).mock.calls[0]?.[0]).not.toHaveProperty('account_member_id')
   })
 
   it('lists only installed agents with their login state, and sends Install more agents to Agents', async () => {
@@ -976,6 +995,10 @@ describe('extra repos', () => {
 })
 
 describe('saved launch defaults', () => {
+  beforeEach(() => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.launch', 'agent.list', 'account.list'], ws: [] } })
+  })
+
   const everyMethod = { gateway: 'remote' as const, methods: ['*'], ws: [] }
 
   beforeEach(() => {
