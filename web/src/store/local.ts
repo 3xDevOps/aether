@@ -4,6 +4,7 @@ import type {
   SyncSessionStatus,
   UpdateStatus,
 } from '@/lib/types'
+import { clearLaunchDraft, launchDraftLinkStatusPending, readLaunchDraft } from '@/components/launch/draft'
 import type { SliceCreator } from '@/store/slice'
 
 /**
@@ -51,7 +52,7 @@ export interface LocalSlice {
   setGatewayRestarting: (gatewayRestarting: boolean) => void
 }
 
-export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
+export const createLocalSlice: SliceCreator<LocalSlice> = (set, get) => ({
   syncSessions: {},
   setSyncSessions: (sessions) =>
     set({
@@ -60,7 +61,23 @@ export const createLocalSlice: SliceCreator<LocalSlice> = (set) => ({
       ),
     }),
   linkStatus: null,
-  setLinkStatus: (linkStatus) => set({ linkStatus }),
+  setLinkStatus: (linkStatus) => {
+    const state = get()
+    if (linkStatus.edge_url) {
+      const error = clearLaunchDraft(state.identityKey)
+      set({
+        linkStatus,
+        launchDraftError: error ? `Could not remove launch draft from this browser: ${error}` : null,
+      })
+      return
+    }
+    if (state.launchDraftError === launchDraftLinkStatusPending && state.identityKey && state.paletteDialog !== 'launch' && !state.launchDraft) {
+      const restored = readLaunchDraft(state.identityKey)
+      set({ linkStatus, launchDraft: restored.draft, launchDraftError: restored.error })
+      return
+    }
+    set({ linkStatus })
+  },
   pulls: {},
   recordPull: (runID, result) =>
     set((s) => ({ pulls: { ...s.pulls, [runID]: result } })),

@@ -108,9 +108,9 @@ export function paintSnapshot(store: RootStore): void {
     return
   }
   const s = store.getState()
+  s.setCapabilities(saved.capabilities ?? null)
   s.setIdentityKey(saved.identity)
   s.setInfo(saved.info as ServerInfo)
-  s.setCapabilities(saved.capabilities ?? null)
   // Not setWorkspaces: a route to a workspace made after the save must stay put.
   const workspaces = Object.fromEntries(saved.workspaces.map((w) => [w.id, w as Workspace]))
   store.setState({

@@ -3,6 +3,7 @@ import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } fr
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { toast } from 'sonner'
 import { useDictating } from '@/components/dictation/state'
+import { launchDraftLinkStatusPending, type LaunchDraft } from '@/components/launch/draft'
 import { RefusalNotes, SignedOutNote } from '@/components/launch/agent-picker'
 import { AccountPicker, readiness, useAccountStatus } from '@/components/launch/account-picker'
 import { agentLabel } from '@/components/launch/modes'
@@ -25,21 +26,32 @@ import { message } from '@/lib/format'
 import { multiRepoFeature, multiRepoMethod } from '@/lib/repos'
 import type { Member, Permission, Run } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
-import { cn, surface } from '@/lib/utils'
+import { cn, randomID, surface } from '@/lib/utils'
 import { type RootState, sameIdentity, useStore } from '@/store'
 import { useChildSettings, useChildSettingsRead } from '@/store/children'
 import { rememberChoice, saveLaunchDefaults, useLaunchDefaultsRead } from '@/store/launch-defaults'
 import { useCapability, useIsAdmin, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
-/** `open` turns false when the panel starts to leave; the host unmounts it after the slide. */
-export function LaunchDialog({ open = true }: { open?: boolean }) {
+/** A collapsed draft stays mounted; `visible` keeps its surface only through the closing slide. */
+export function LaunchDialog({ open = true, visible = true }: { open?: boolean; visible?: boolean }) {
   const returnFocus = useReturnFocus()
   const phone = useIsMobile()
-  const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(null)
+  const [identityKey] = useState(() => useStore.getState().identityKey)
+  const [restored] = useState(() => useStore.getState().launchDraft)
+  const [draftID] = useState(() => restored?.id ?? randomID('launch-draft'))
+  const ended = useRef(false)
+  const outsideClick = useRef(false)
+  const storageFailed = useRef(false)
+  const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(restored?.workspace ?? null)
   const [last] = useState(() => (window.matchMedia(mobileScreen).matches ? lastSession(useStore.getState()) : undefined))
   const activeWorkspace = useStore((s) => s.activeWorkspace)
-  const workspaceID = pickedWorkspace ?? (last?.workspace_id || activeWorkspace)
+  const workspaces = useStore((s) => s.workspaces)
+  const linkStatus = useStore((s) => s.linkStatus)
+  const suggestedWorkspace = last?.workspace_id && workspaces[last.workspace_id] ? last.workspace_id : activeWorkspace
+  const workspaceID = pickedWorkspace
+    ? workspaces[pickedWorkspace] ? pickedWorkspace : activeWorkspace
+    : suggestedWorkspace
   const workspace = useStore((s) => s.workspaces[workspaceID])
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
@@ -47,10 +59,9 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const self = useStore((s) => s.info?.member)
   const features = useStore((s) => s.info?.features)
   const cap = useCapability()
-  const workspaces = useStore((s) => s.workspaces)
   const allWorkspaces = useMemo(() => Object.values(workspaces).sort((a, b) => a.name.localeCompare(b.name)), [workspaces])
   const extraOptions = useMemo(() => allWorkspaces.filter((item) => item.id !== workspaceID), [allWorkspaces, workspaceID])
-  const [extras, setExtras] = useState<string[]>([])
+  const [extras, setExtras] = useState<string[]>(restored?.extras ?? [])
   const identity = useSelf()
   const ownAccountID = identity?.id ?? self?.id ?? ''
   const reposOffered = extraOptions.length > 0 && cap.hasMethod(multiRepoMethod) &&
@@ -60,8 +71,12 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const extraRepos = reposOffered && pickedExtras.length ? { extra_workspace_ids: pickedExtras } : {}
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [accountsRead, setAccountsRead] = useState(false)
-  const [account, setAccount] = useState(self?.id ?? '')
-  const [fallback, setFallback] = useState(automaticFallback)
+  const [accountsReadError, setAccountsReadError] = useState<string | null>(null)
+  const [accountAttempt, setAccountAttempt] = useState(0)
+  const [account, setAccount] = useState(restored?.account ?? self?.id ?? '')
+  const accountPicked = useRef(false)
+  const fallbackPicked = useRef(false)
+  const [fallback, setFallback] = useState(restored?.fallback ?? automaticFallback)
   const accountStatus = useAccountStatus(accounts, ownAccountID)
   const [savedAttempt, setSavedAttempt] = useState(0)
   const savedRead = useLaunchDefaultsRead(api, savedAttempt)
@@ -69,23 +84,25 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const savesDefaults = cap.hasMethod('launch.defaults.set')
   // local: preset while the saved choices could not be read, so a later
   // successful read presets again.
-  const [preset, setPreset] = useState<'pending' | 'local' | 'done'>('pending')
+  const [preset, setPreset] = useState<'pending' | 'local' | 'done'>(restored ? 'done' : 'pending')
   const [pick, setPick] = useState(0)
   const childRunsOffered = cap.hasMethod('run.children.allow')
   const childSettings = useChildSettingsRead()
   const childReadError = useChildSettings((s) => s.error)
-  const [childRuns, setChildRuns] = useState<ChildRunsChoice>('')
+  const launchDraftError = useStore((s) => s.launchDraftError)
+  const clearLaunchDraftError = useStore((s) => s.clearLaunchDraftError)
+  const [childRuns, setChildRuns] = useState<ChildRunsChoice>(restored?.childRuns ?? '')
   const limitsOffered = cap.hasMethod('server.run_limits')
   const serverLimits = useServerRunLimits(api, limitsOffered)
-  const [limits, setLimits] = useState(emptyLimits)
+  const [limits, setLimits] = useState(restored?.limits ?? emptyLimits)
   const permissionOffered = features?.includes(permissionFeature) ?? false
-  const [permission, setPermission] = useState<Permission>('default')
+  const [permission, setPermission] = useState<Permission>(restored?.permission ?? 'default')
   // A saved choice read after the member picked a tier must not replace it.
   const permissionPicked = useRef(false)
-  const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick, fallback: last?.harness })
+  const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick, fallback: last?.harness, initial: restored ?? undefined, open })
   const { agents, agentError, harness, mode, model, effort, noAgents } = choice
   const [shared] = useState(() => useStore.getState().paletteLaunchTask)
-  const [task, setTask] = useState(shared)
+  const [task, setTask] = useState(restored?.task ?? shared)
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
   const [unadopted, setUnadopted] = useState<{ workspace: string; command: string } | null>(null)
@@ -109,19 +126,36 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   }, [open])
 
   useEffect(() => {
+    if (!open) return
     let live = true
+    setAccountsRead(false)
+    setAccountsReadError(null)
+    if (!cap.hasMethod('account.list')) {
+      setAccounts(self ? [self] : [])
+      setAccount(self?.id ?? ownAccountID)
+      setAccountsRead(true)
+      return () => { live = false }
+    }
     api.accountList().then((access) => {
       if (!live) return
-      setAccounts(access.accounts)
+      setAccounts(access.accounts.some((member) => member.id === ownAccountID) || !self ? access.accounts : [self, ...access.accounts])
       setAccount((current) => current || access.accounts[0]?.id || '')
-    }).catch(() => {}).finally(() => {
-      if (live) setAccountsRead(true)
+      setAccountsRead(true)
+    }).catch((err: unknown) => {
+      if (!live) return
+      setAccountsReadError(message(err))
+      setAccountsRead(true)
     })
     return () => { live = false }
-  }, [])
+  }, [open, ownAccountID, self, accountAttempt, cap])
 
   useEffect(() => {
-    if (preset === 'done' || !savedRead.fresh || !accountsRead) return
+    if (!accountsRead || accountsReadError || accounts.some((member) => member.id === account)) return
+    setAccount(accounts.find((member) => member.id === ownAccountID)?.id ?? accounts[0]?.id ?? '')
+  }, [account, accounts, accountsRead, accountsReadError, ownAccountID])
+
+  useEffect(() => {
+    if (preset === 'done' || !savedRead.fresh || !accountsRead || accountsReadError) return
     if (preset === 'local' && (savedRead.error !== null || !saved)) return
     if (preset === 'local') setPick((n) => n + 1)
     setPreset(savedRead.error === null ? 'done' : 'local')
@@ -130,9 +164,37 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     if (savedPermission && !permissionPicked.current) setPermission(savedPermission)
     const refused = saved.invalid?.some((issue) => issue.field === 'account_member_id')
     const usable = savedAccount && !refused && accounts.some((member) => member.id === savedAccount)
-    setAccount((current) => usable ? savedAccount : ownAccountID || current)
-    setFallback(fallbackFromSaved(savedFallback, accounts))
-  }, [preset, savedRead.fresh, savedRead.error, saved, accounts, accountsRead, ownAccountID])
+    if (!accountPicked.current) setAccount((current) => usable ? savedAccount : ownAccountID || current)
+    if (!fallbackPicked.current) setFallback(fallbackFromSaved(savedFallback, accounts))
+  }, [preset, savedRead.fresh, savedRead.error, saved, accounts, accountsRead, accountsReadError, ownAccountID])
+
+  useEffect(() => {
+    const state = useStore.getState()
+    if (ended.current || state.identityKey !== identityKey || (!open && state.launchDraft?.id !== draftID)) return
+    const draft: LaunchDraft = {
+      version: 1, id: draftID, workspace: workspaceID, extras, account, fallback,
+      permission, childRuns, limits, harness, mode, model, effort, task,
+    }
+    const failure = state.setLaunchDraft(draft, !launchDraftError)
+    if (failure && !storageFailed.current) toast.error(`Draft could not be saved in this browser: ${failure}`)
+    storageFailed.current = failure !== null
+  }, [identityKey, draftID, open, workspaceID, extras, account, fallback, permission, childRuns, limits, harness, mode, model, effort, task, launchDraftError, linkStatus])
+
+  const collapse = () => {
+    setPickedWorkspace(workspaceID)
+    close()
+  }
+
+  const discard = () => {
+    ended.current = true
+    const state = useStore.getState()
+    if (state.identityKey !== identityKey) return
+    if (state.launchDraft?.id === draftID) {
+      const failure = state.setLaunchDraft(null)
+      if (failure) toast.error(`Draft could not be removed from this browser: ${failure}`)
+    }
+    close()
+  }
 
   const saveAccountDefault = () => saveLaunchDefaults((current) => ({
     ...current,
@@ -175,14 +237,16 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       ...(childRunsOffered && childRuns && mode !== 'headless' ? { children: childRuns } : {}),
       ...(Object.keys(parsedLimits.limits).length ? { limits: parsedLimits.limits } : {}),
     })
-    if (signedIn()) rememberChoice(harness, mode, chosenModel)
+    if (!signedIn()) return
+    rememberChoice(harness, mode, chosenModel)
     upsertRun(run)
-    close()
+    if (useStore.getState().launchDraft?.id === draftID) discard()
     navigate('run', { runId: run.id })
     toast.success('Session launched')
   }
 
   const submit = async () => {
+    const signedInIdentity = sameIdentity()
     setLaunching(true)
     setError(null)
     setSetup(null)
@@ -191,7 +255,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       await launchRun()
     } catch (err) {
       // Closed while the request ran, the dialog can no longer show the refusal.
-      if (!shown.current) toast.error(`Launch failed: ${message(err)}`)
+      if (!signedInIdentity()) return
+      if (!shown.current || ended.current) toast.error(`Launch failed: ${message(err)}`)
       setLaunching(false)
       setError(message(err))
       setSetup(setupOutput(err))
@@ -202,6 +267,29 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
 
   const notes = (
     <>
+      {launchDraftError && (
+        <Callout
+          tone="failed"
+          role="alert"
+          title={launchDraftError === launchDraftLinkStatusPending ? 'Draft recovery is waiting for the local gateway.' : 'Your saved launch draft could not be read or saved.'}
+          actions={<Button type="button" size="sm" variant="secondary" onClick={clearLaunchDraftError}>{launchDraftError === launchDraftLinkStatusPending ? 'Continue in memory' : 'Start a new draft'}</Button>}
+        >
+          {launchDraftError}
+          {launchDraftError === launchDraftLinkStatusPending
+            ? ' The current form stays in memory until the link check finishes.'
+            : ' Start a new draft to replace the unreadable saved data.'}
+        </Callout>
+      )}
+      {accountsReadError && (
+        <Callout
+          tone="failed"
+          role="alert"
+          title="Accounts could not be read."
+          actions={<Button type="button" size="sm" variant="secondary" onClick={() => setAccountAttempt((attempt) => attempt + 1)}>Retry account read</Button>}
+        >
+          {accountsReadError} Retry before launching to confirm the selected account is still available.
+        </Callout>
+      )}
       {workspaceID && !workspace && (
         <Callout tone="failed" role="alert" title="This workspace no longer exists.">
           {phone ? 'Choose another repository; your task is kept.' : 'Pick another workspace in the sidebar; your task is kept.'}
@@ -240,8 +328,8 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   const accountReadiness = (member: Member) => readiness(accountStatus[member.id], harness, member.id === ownAccountID ? undefined : member.display_name, now)
   const accountChoice = accounts.length > 1 && (
     <div className="flex flex-col gap-2">
-      <AccountPicker accounts={accounts} ownAccountID={ownAccountID} value={account} onChange={(next) => { setError(null); setAccount(next) }} agentName={harness ? agentLabel(choice.agent, harness) : ''} status={accountReadiness} disabled={launching} />
-      <FallbackOptions accounts={accounts} ownAccountID={ownAccountID} account={account} fallback={fallback} onFallback={setFallback} status={accountReadiness} />
+      <AccountPicker accounts={accounts} ownAccountID={ownAccountID} value={account} onChange={(next) => { accountPicked.current = true; setError(null); setAccount(next) }} agentName={harness ? agentLabel(choice.agent, harness) : ''} status={accountReadiness} disabled={launching} />
+      <FallbackOptions accounts={accounts} ownAccountID={ownAccountID} account={account} fallback={fallback} onFallback={(next) => { fallbackPicked.current = true; setFallback(next) }} status={accountReadiness} />
       {savesDefaults && <SaveAccountDefault choice={JSON.stringify([account, fallback])} onSave={saveAccountDefault} />}
     </div>
   )
@@ -267,13 +355,15 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
     </>
   )
   // agents is null while the chosen account's list is read, and harness may still be the last account's.
-  const launchDisabled = launching || !workspace || !account || !harness || !agents || taskMissing || dictating
+  const launchDisabled = launching || !accountsRead || accountsReadError !== null || !workspace || !account || !harness || !agents || taskMissing || dictating
+
+  if (!visible) return null
 
   if (phone) {
     return (
       <PhoneLaunchSheet
         open={open}
-        onClose={close}
+        onClose={discard}
         onSubmit={() => { if (!dictating) void submit() }}
         task={task}
         onTask={setTask}
@@ -307,12 +397,21 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
   }
 
   return (
-    <Dialog open={open} modal={false} onOpenChange={close}>
+    <Dialog open={open} modal={false} onOpenChange={(next) => { if (!next) discard() }}>
       <SlideOut open={open} width="26rem">
       <DialogPrimitive.Content
         {...returnFocus}
         forceMount
-        // The panel stays open while the view behind it is used; only Escape and its own buttons close it.
+        onCloseAutoFocus={(event) => {
+          if (outsideClick.current) { event.preventDefault(); outsideClick.current = false }
+          else returnFocus.onCloseAutoFocus(event)
+        }}
+        onPointerDownOutside={(event) => {
+          event.preventDefault()
+          outsideClick.current = true
+          collapse()
+        }}
+        onEscapeKeyDown={(event) => { event.preventDefault(); collapse() }}
         onInteractOutside={(event) => event.preventDefault()}
         className={cn(surface, 'relative grid h-full w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden rounded-none border-y-0 border-l-0 p-4 pt-[calc(1rem+var(--safe-top))] shadow-dialog outline-none')}
       >
@@ -337,7 +436,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
           <div className="min-w-0 max-sm:order-last sm:mr-auto">
             <WorkspaceLine workspace={workspace} />
           </div>
-          <Button variant="secondary" onClick={close}>Cancel</Button>
+          <Button variant="secondary" onClick={discard}>Cancel</Button>
           <Button type="submit" form="launch-form" disabled={launchDisabled}>{launchLabel}</Button>
         </DialogFooter>
         <DialogPrimitive.Close asChild>

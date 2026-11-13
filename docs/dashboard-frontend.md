@@ -335,12 +335,13 @@ top to bottom:
 2. **New session**, the only filled button in the shell, for a member who may
    launch. A slanted cut splits it in two. The left half, **New session** (`n`),
    slides the launch panel out of the sidebar's right edge over the view, with
-   no scrim; the panel stays open while you use the view behind it, and
-   Escape or its **Close** button closes it and returns focus to what opened
-   it. The right half appears once a launch has been saved: it shows the saved
-   agent's glyph and launches that agent, mode, model, account and fallback at
-   once with no task and with `children: "on"`, so subsessions are allowed
-   whatever your Settings choice (`quick-launch.ts`). Hovering or focusing it slides out the saved choices.
+   no scrim; clicking outside or pressing Escape slides it away to an arrow
+   that restores it. The outside click reaches the view behind it. **Close**
+   dismisses the form and its draft. The right half appears once a launch has
+   been saved: it shows the saved agent's glyph and launches that agent, mode,
+   model, account and fallback at once with no task and with `children: "on"`,
+   so subsessions are allowed whatever your Settings choice (`quick-launch.ts`).
+   Hovering or focusing it slides out the saved choices.
    A Background launch needs a task, so that half opens the panel instead, as
    it does when the saved choices name an agent or model the account cannot
    use. The panel's **Subsessions** switch follows your Settings choice and
@@ -2658,6 +2659,24 @@ installed in your environment." with a **Set up an agent** button in place of
 **Install more agents...**. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
 
+On desktop, clicking outside the form or pressing **Escape** slides it away
+and leaves an arrow at the sidebar edge (the window edge when the sidebar is
+hidden). The outside click still reaches the view behind it. The arrow and
+**New session** restore the task and launch settings. **X** and **Cancel**
+discard this draft; they do not reset saved launch defaults. A picker handles
+its own Escape first.
+
+The task and launch settings save on change in browser-local storage, scoped
+to the server and signed-in member. Refreshing or reopening the dashboard in
+the same browser profile restores a collapsed draft; another device, browser
+profile or the desktop app has separate storage. Edge-linked gateways keep
+the draft in memory only because another app could serve script from the
+gateway's loopback port. A read error is shown; the current form is kept in
+memory until the user starts a fresh draft. Clearing site data removes it. A
+successful launch clears the draft; a failed launch keeps it. Collapsing
+during launch keeps the pending request, so reopening does not launch twice.
+Shared text waits while a draft exists rather than replacing it.
+
 Below 768px the same form is a bottom sheet (`phone-launch.tsx`): **Task**
 first, focused, with one-word help; then the **Repository** chip, the base
 branch as muted text ("from main"; sessions always start from it) and the
@@ -2804,6 +2823,11 @@ use (no Enhanced support, or its adapter not installed) shows as Standard.
 **Account** (`account-picker.tsx`), below Agent and above Mode, appears when
 `account.list` returns more than the caller. It is a radio list: the caller
 first, marked "You", then each account shared with them, marked "Shared".
+Launch stays disabled while `account.list` is pending or failed. A failure
+shows the server error and **Retry account read**; the saved account is only
+replaced after a successful read confirms it is no longer available.
+If the gateway does not offer `account.list`, the form uses the caller's
+account and does not offer shared-account launches.
 Each row ends with what a launch of the chosen agent there meets, read once
 per open with `agent.list` and `account.usage` for every account, four reads
 at a time, and nothing until that account's `agent.list` answers: "Not

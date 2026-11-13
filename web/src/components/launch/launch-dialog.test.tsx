@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
+import type { LaunchDraft } from '@/components/launch/draft'
+import { useIsMobile } from '@/lib/breakpoints'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
@@ -8,7 +10,8 @@ import { useStore } from '@/store'
 import { useChildSettings } from '@/store/children'
 import { useLaunchDefaults } from '@/store/launch-defaults'
 import { optimisticDeadlineMs } from '@/store/optimistic'
-import { agentInfo, alice, bob, run, runRecords, serverInfo, vera, workspace } from '@/test/fixtures'
+import { atViewport } from '@/test/viewport'
+import { agentInfo, alice, bob, otherWorkspace, run, runRecords, serverInfo, vera, workspace } from '@/test/fixtures'
 import { chooseModel, pickModel } from '@/test/model'
 import { pickOption } from '@/test/select'
 
@@ -21,7 +24,9 @@ const claude = (over: Parameters<typeof agentInfo>[0] = {}) =>
   agentInfo({ display_name: 'Claude Code', enhanced: 'adapter', enhanced_installed: true, login_found: true, default_mode: 'tui', ...over })
 
 beforeEach(() => {
+  localStorage.clear()
   Element.prototype.scrollIntoView = vi.fn()
+  vi.mocked(api.runLaunch).mockResolvedValue(run())
   vi.mocked(api.agentList).mockResolvedValue([claude()])
   vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice], shared_with: [] })
   vi.mocked(api.accountUsage).mockResolvedValue({ account_member_id: alice.id, providers: [] })
@@ -31,10 +36,15 @@ beforeEach(() => {
     workspaces: { [workspace.id]: workspace },
     activeWorkspace: workspace.id,
     paletteDialog: 'launch',
+    launchDraft: null,
+    launchDraftError: null,
+    linkStatus: null,
+    identityKey: null,
     paletteRunID: null,
     route: { name: 'board', params: {} },
     runs: {},
     launchDefaults: {},
+    savedLaunchDefaults: {},
     agentModels: {},
     capabilities: null,
     info: serverInfo,
@@ -46,6 +56,7 @@ const signedOut = '~/.claude/.credentials.json: Claude OAuth access token is mis
 const launchButton = () => screen.getByRole('button', { name: 'Launch' }) as HTMLButtonElement
 const agentRow = (name: RegExp | string) => screen.getByRole('radio', { name }) as HTMLButtonElement
 const modeSegment = (name: string) => within(screen.getByRole('radiogroup', { name: 'Mode' })).getByRole('radio', { name }) as HTMLButtonElement
+const allowDraftStorage = () => useStore.getState().setCapabilities({ gateway: 'remote', methods: ['run.launch', 'agent.list', 'account.list'], ws: [] })
 
 async function open() {
   render(<LaunchDialog />)
@@ -56,14 +67,303 @@ function setTask(task: string) {
   fireEvent.change(screen.getByLabelText('Task'), { target: { value: task } })
 }
 
+const draft = (over: Partial<LaunchDraft> = {}): LaunchDraft => ({
+  version: 1, id: 'saved-draft', workspace: workspace.id, extras: [], account: alice.id,
+  fallback: { off: false, order: null, excluded: [] }, permission: 'default', childRuns: '',
+  limits: { cpus: '', memory: '', pids: '' }, harness: 'claude', mode: 'tui', model: '', effort: '', task: 'keep this prompt',
+  ...over,
+})
+
 describe('reopening', () => {
   it('starts a fresh form when New run opens again while the last panel is still leaving', async () => {
     render(<PaletteDialogs />)
     fireEvent.change(await screen.findByLabelText('Task'), { target: { value: 'first task' } })
-    act(() => useStore.setState({ paletteDialog: null }))
-    act(() => useStore.setState({ paletteDialog: 'launch' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    act(() => useStore.getState().openPaletteDialog('launch'))
     expect(((await screen.findAllByLabelText('Task')).at(-1) as HTMLTextAreaElement).value).toBe('')
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  })
+})
+
+describe('saved launch draft', () => {
+  const resume = () => screen.getByRole('button', { name: 'Resume new session draft' })
+
+  it('collapses on an outside click, keeps that click and restores the task and mode', async () => {
+    const mainClick = vi.fn()
+    render(<><button onClick={mainClick}>Main chat</button><PaletteDialogs /></>)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    setTask('keep my unfinished prompt')
+    fireEvent.click(modeSegment('Standard'))
+    await userEvent.click(screen.getByRole('button', { name: 'Main chat' }))
+    await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
+    expect(mainClick).toHaveBeenCalledOnce()
+    await userEvent.click(resume())
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep my unfinished prompt')
+    expect(modeSegment('Standard').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps the draft on Escape and restores it through New session', async () => {
+    render(<PaletteDialogs />)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    setTask('Escape preserves this')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
+    expect(resume()).toBeTruthy()
+    act(() => useStore.getState().openPaletteDialog('launch'))
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('Escape preserves this')
+  })
+
+  it('recovers the task, mode and model collapsed after a reload without applying saved defaults over them', async () => {
+    allowDraftStorage()
+    useStore.getState().setIdentityKey('server/alice')
+    const view = render(<PaletteDialogs />)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    setTask('recover after browser restart')
+    fireEvent.click(modeSegment('Standard'))
+    await chooseModel(screen.getByRole('combobox', { name: 'Model' }), 'draft-model')
+    view.unmount()
+    useStore.setState({ identityKey: null, launchDraft: null, paletteDialog: null })
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 2, defaults: { agents: { claude: { mode: 'headless', model: 'other-model' } } } })
+    useLaunchDefaults.setState({ result: null, error: null })
+    useStore.getState().setIdentityKey('server/alice')
+    render(<PaletteDialogs />)
+    expect(screen.queryByLabelText('Task')).toBeNull()
+    await userEvent.click(resume())
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('recover after browser restart')
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    expect(modeSegment('Standard').getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ task: 'recover after browser restart', mode: 'tui', model: 'draft-model' })))
+    expect(useStore.getState().launchDraft).toBeNull()
+  })
+
+  it.each(['Close', 'Cancel'])('discards the recovery copy with %s', async (name) => {
+    allowDraftStorage()
+    useStore.getState().setIdentityKey('server/alice')
+    render(<PaletteDialogs />)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    setTask('discard me')
+    await userEvent.click(screen.getByRole('button', { name }))
+    await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
+    expect(screen.queryByRole('button', { name: 'Resume new session draft' })).toBeNull()
+    act(() => {
+      useStore.getState().setIdentityKey('server/bob')
+      useStore.getState().setIdentityKey('server/alice')
+      useStore.getState().openPaletteDialog('launch')
+    })
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('preserves a pending launch through collapse and clears the draft when it succeeds', async () => {
+    let finish!: (value: ReturnType<typeof run>) => void
+    vi.mocked(api.runLaunch).mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    render(<PaletteDialogs />)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    setTask('launch once')
+    fireEvent.click(launchButton())
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
+    await userEvent.click(resume())
+    expect((screen.getByRole('button', { name: 'Launching…' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(api.runLaunch).toHaveBeenCalledOnce()
+    await act(async () => finish(run()))
+    await waitFor(() => expect(useStore.getState().launchDraft).toBeNull())
+  })
+
+  it('keeps the task and refusal when a collapsed launch fails', async () => {
+    let refuse!: (reason: Error) => void
+    vi.mocked(api.runLaunch).mockImplementation(() => new Promise((_, reject) => { refuse = reject }))
+    render(<PaletteDialogs />)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    setTask('retry this task')
+    fireEvent.click(launchButton())
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
+    await act(async () => refuse(new Error('server refused this launch')))
+    await userEvent.click(resume())
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('retry this task')
+    expect(screen.getByText('server refused this launch')).toBeTruthy()
+    expect(launchButton().disabled).toBe(false)
+  })
+
+  it('keeps the draft repository when the sidebar changes workspace after collapse', async () => {
+    useStore.setState({ workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace } })
+    render(<PaletteDialogs />)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    setTask('keep this repository')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
+    act(() => useStore.setState({ activeWorkspace: otherWorkspace.id }))
+    await userEvent.click(resume())
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ workspace_id: workspace.id, task: 'keep this repository' })))
+  })
+
+  it('isolates recovery by server and member', async () => {
+    allowDraftStorage()
+    useStore.getState().setIdentityKey('server/alice')
+    render(<PaletteDialogs />)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    setTask('Alice private draft')
+    act(() => useStore.getState().setIdentityKey('other-server/alice'))
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('')
+    setTask('other server draft')
+    act(() => useStore.getState().setIdentityKey('server/bob'))
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('')
+    act(() => useStore.getState().setIdentityKey('server/alice'))
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('Alice private draft')
+  })
+
+  it('keeps an Edge-linked draft in memory and removes its browser copy', () => {
+    const saved = draft()
+    allowDraftStorage()
+    useStore.setState({ identityKey: 'server/alice', launchDraft: saved })
+    useStore.getState().setLaunchDraft(saved)
+    expect(localStorage.getItem('aether.launch-draft.v1:server%2Falice')).not.toBeNull()
+
+    useStore.getState().setLinkStatus({ edge_url: 'http://127.0.0.1:4173' } as never)
+
+    expect(useStore.getState().launchDraft).toEqual(saved)
+    expect(localStorage.getItem('aether.launch-draft.v1:server%2Falice')).toBeNull()
+    useStore.getState().setLaunchDraft({ ...saved, task: 'still in memory' })
+    expect(localStorage.getItem('aether.launch-draft.v1:server%2Falice')).toBeNull()
+    useStore.setState({ identityKey: null, launchDraft: null })
+    useStore.getState().setIdentityKey('server/alice')
+    expect(useStore.getState().launchDraft).toBeNull()
+  })
+
+  it('waits for the local link status before reading a saved draft', () => {
+    const saved = draft()
+    const key = 'aether.launch-draft.v1:server%2Falice'
+    localStorage.setItem(key, JSON.stringify(saved))
+    useStore.setState({
+      paletteDialog: null,
+      capabilities: { gateway: 'local', methods: [], ws: [], local: ['link.status'] },
+    })
+    useStore.getState().setIdentityKey('server/alice')
+    expect(useStore.getState().launchDraft).toBeNull()
+    expect(useStore.getState().launchDraftError).toContain('Could not confirm')
+
+    useStore.getState().setLinkStatus({ linked: false } as never)
+
+    expect(useStore.getState().launchDraft).toEqual(saved)
+    expect(useStore.getState().launchDraftError).toBeNull()
+  })
+
+  it('never reads an Edge-linked draft from browser storage', () => {
+    const saved = draft()
+    const key = 'aether.launch-draft.v1:server%2Falice'
+    localStorage.setItem(key, JSON.stringify(saved))
+    useStore.setState({ capabilities: { gateway: 'local', methods: [], ws: [], local: ['link.status'] } })
+    useStore.getState().setIdentityKey('server/alice')
+    expect(useStore.getState().launchDraft).toBeNull()
+    expect(localStorage.getItem(key)).not.toBeNull()
+
+    useStore.getState().setLinkStatus({ edge_url: 'http://127.0.0.1:4173' } as never)
+
+    expect(useStore.getState().launchDraft).toBeNull()
+    expect(localStorage.getItem(key)).toBeNull()
+  })
+
+  it('reports invalid saved draft data and waits for an explicit fresh draft', async () => {
+    const key = 'aether.launch-draft.v1:server%2Falice'
+    localStorage.setItem(key, '{')
+    allowDraftStorage()
+    useStore.getState().setIdentityKey('server/alice')
+    expect(useStore.getState().launchDraftError).toContain('Could not read saved launch draft')
+    render(<LaunchDialog />)
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('Could not read saved launch draft')
+    expect(localStorage.getItem(key)).toBe('{')
+
+    await userEvent.click(within(alert).getByRole('button', { name: 'Start a new draft' }))
+    await waitFor(() => expect(useStore.getState().launchDraftError).toBeNull())
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(key) ?? 'null').version).toBe(1))
+  })
+
+  it('shows browser storage read errors without overwriting the saved draft', async () => {
+    const key = 'aether.launch-draft.v1:server%2Falice'
+    localStorage.setItem(key, JSON.stringify(draft()))
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage blocked') })
+    allowDraftStorage()
+    useStore.getState().setIdentityKey('server/alice')
+    getItem.mockRestore()
+    render(<LaunchDialog />)
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('storage blocked')
+    expect(JSON.parse(localStorage.getItem(key) ?? 'null').task).toBe('keep this prompt')
+  })
+
+  it('keeps typed work in memory and resumable when storage cannot be read', async () => {
+    allowDraftStorage()
+    localStorage.setItem('aether.launch-draft.v1:server%2Falice', '{')
+    useStore.getState().setIdentityKey('server/alice')
+    render(<><button>Main chat</button><PaletteDialogs /></>)
+    setTask('keep this new task in memory')
+    await waitFor(() => expect(useStore.getState().launchDraft?.task).toBe('keep this new task in memory'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Main chat' }))
+    await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
+    expect(screen.getByRole('button', { name: 'Resume new session draft' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Resume new session draft' }))
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep this new task in memory')
+  })
+
+  it('falls back to the active workspace when the saved workspace was deleted', async () => {
+    useStore.setState({
+      activeWorkspace: otherWorkspace.id,
+      workspaces: { [otherWorkspace.id]: otherWorkspace },
+      launchDraft: draft({ workspace: 'deleted-workspace' }),
+    })
+    await open()
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ workspace_id: otherWorkspace.id, task: 'keep this prompt' })))
+  })
+
+  it('replaces a saved account that is no longer accessible while keeping the prompt', async () => {
+    allowDraftStorage()
+    useStore.setState({ launchDraft: draft({ account: bob.id }) })
+    await open()
+    expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep this prompt')
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ workspace_id: workspace.id, task: 'keep this prompt' })))
+    expect(vi.mocked(api.runLaunch).mock.calls[0]?.[0]).not.toHaveProperty('account_member_id')
+  })
+
+  it('keeps the restored account and blocks launch when the account list read fails', async () => {
+    allowDraftStorage()
+    vi.mocked(api.accountList).mockRejectedValueOnce(new Error('account list unavailable'))
+    useStore.setState({ launchDraft: draft({ account: bob.id, task: 'keep account and task' }) })
+    render(<LaunchDialog />)
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('account list unavailable')
+    expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep account and task')
+    expect(launchButton().disabled).toBe(true)
+
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice], shared_with: [] })
+    await userEvent.click(within(alert).getByRole('button', { name: 'Retry account read' }))
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    await userEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ task: 'keep account and task' })))
+    expect(vi.mocked(api.runLaunch).mock.calls[0]?.[0]).not.toHaveProperty('account_member_id')
+  })
+
+  it('moves the resume arrow to the replacement sidebar after resizing back from phone', async () => {
+    const resize = atViewport(1024)
+    function Shell() {
+      const phone = useIsMobile()
+      return <>{!phone && <aside id="sidebar" />}<PaletteDialogs /></>
+    }
+    useStore.setState({ paletteDialog: null, launchDraft: draft() })
+    const view = render(<Shell />)
+    const original = document.getElementById('sidebar')
+    expect(screen.getByRole('button', { name: 'Resume new session draft' }).parentElement).toBe(original)
+    resize(767)
+    resize(1024)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Resume new session draft' }).parentElement).toBe(document.getElementById('sidebar')))
+    expect(document.getElementById('sidebar')).not.toBe(original)
+    view.unmount()
   })
 })
 
@@ -115,6 +415,10 @@ describe('child runs switch', () => {
 })
 
 describe('new run', () => {
+  beforeEach(() => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.launch', 'agent.list', 'account.list'], ws: [] } })
+  })
+
   it('returns focus to what had it before the dialog opened', async () => {
     render(<button type="button">Board</button>)
     const before = screen.getByRole('button', { name: 'Board' })
@@ -138,6 +442,19 @@ describe('new run', () => {
     expect(screen.getByRole('alert').textContent).toContain('This workspace no longer exists.')
     expect(launchButton().disabled).toBe(true)
     expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('keep me')
+  })
+
+  it('allows an own-account launch on servers without account.list', async () => {
+    useStore.setState({
+      capabilities: { gateway: 'remote', methods: ['run.launch', 'agent.list'], ws: [] },
+      launchDraft: draft({ account: bob.id, task: 'legacy server task' }),
+    })
+    await open()
+    expect(api.accountList).not.toHaveBeenCalled()
+    expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('legacy server task')
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ task: 'legacy server task' })))
+    expect(vi.mocked(api.runLaunch).mock.calls[0]?.[0]).not.toHaveProperty('account_member_id')
   })
 
   it('lists only installed agents with their login state, and sends Install more agents to Agents', async () => {
@@ -678,6 +995,10 @@ describe('extra repos', () => {
 })
 
 describe('saved launch defaults', () => {
+  beforeEach(() => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.launch', 'agent.list', 'account.list'], ws: [] } })
+  })
+
   const everyMethod = { gateway: 'remote' as const, methods: ['*'], ws: [] }
 
   beforeEach(() => {
@@ -752,7 +1073,7 @@ describe('saved launch defaults', () => {
     await waitFor(() => expect(launchButton().disabled).toBe(false))
     setTask('fix the cart')
     vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 1, defaults: { agent: 'codex', agents: { codex: { mode: 'tui' } } } })
-    act(() => useStore.setState({ identityKey: 'identity-b' }))
+    act(() => useStore.getState().setIdentityKey('identity-b'))
     await waitFor(() => expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true'))
     expect((screen.getByLabelText('Task') as HTMLTextAreaElement).value).toBe('')
   })
