@@ -114,7 +114,12 @@ are reserved. The user is `uid:gid`,
 the uid's passwd entry. `HOME`, Docker's default `PATH` and, on a terminal,
 `TERM=xterm` are added when the environment lacks them. A relative program
 is found from the working directory, which must exist; `Boot` creates the main
-process's, as Docker does. A process runs in its own session, either as the leader of a new terminal or with three pipes. A
+process's, as Docker does. With `no_new_privileges`, as Docker's `no-new-privileges` security option,
+neither the process nor its descendants can gain privileges through a
+set-user-ID program or file capabilities; Go cannot set this between fork and
+exec, so such a process starts as the helper binary, which sets it and then
+executes the program. `Boot` gives the setup script and dockerd the main
+process's setting. A process runs in its own session, either as the leader of a new terminal or with three pipes. A
 program that cannot be executed fails the spawn with exit code 127 when it
 was not found and 126 otherwise. A process a signal killed exits with 128
 plus the signal number. The helper keeps the records of the 32 most recent

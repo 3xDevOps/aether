@@ -55,6 +55,9 @@ message Process {
   // lossless blocks the process when its output is not read, instead of
   // dropping the oldest bytes.
   bool lossless = 7;
+  // no_new_privileges keeps the process and its descendants from gaining
+  // privileges through set-user-ID programs or file capabilities.
+  bool no_new_privileges = 8;
 }
 
 message BootRequest {

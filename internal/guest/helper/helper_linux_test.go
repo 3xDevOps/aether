@@ -24,6 +24,10 @@ import (
 var testProcs = newProcesses(nil)
 
 func TestMain(m *testing.M) {
+	// A process spawned with NoNewPrivileges starts as this binary.
+	if len(os.Args) > 2 && os.Args[1] == "guest" {
+		os.Exit(Main(os.Args[2:]))
+	}
 	// Orphans of the tests' commands come to this process, as they come to
 	// PID 1 in a VM.
 	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
@@ -266,6 +270,26 @@ func TestWorkingDirectory(t *testing.T) {
 	_, err := client.Spawn(ctx, guest.ProcessSpec{ID: t.Name() + "/nodir", User: self, Argv: []string{"true"}, Env: []string{"PATH=" + os.Getenv("PATH")}, Dir: filepath.Join(dir, "missing")})
 	if !errors.As(err, &startErr) || startErr.Code != 126 || !strings.Contains(err.Error(), "working directory") {
 		t.Fatalf("a missing working directory: %v", err)
+	}
+}
+
+func TestNoNewPrivileges(t *testing.T) {
+	_, client := startHelper(t)
+	// Without the option a process keeps the helper's own setting, which a
+	// test run inside a container may already have set.
+	inherited, err := unix.PrctlRetInt(unix.PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, nnp := range []bool{false, true} {
+		p := spawn(t, client, guest.ProcessSpec{ID: fmt.Sprint(nnp), Argv: []string{"sh", "-c", "grep NoNewPrivs /proc/self/status"}, NoNewPrivileges: nnp})
+		a := p.Attach(true)
+		out, _ := io.ReadAll(a.Stdout())
+		_ = a.Close()
+		want := map[bool]string{false: fmt.Sprint(inherited), true: "1"}[nnp]
+		if fields := strings.Fields(string(out)); len(fields) != 2 || fields[1] != want {
+			t.Errorf("NoNewPrivileges %v: a descendant reports %q", nnp, out)
+		}
 	}
 }
 

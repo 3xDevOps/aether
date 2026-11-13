@@ -99,6 +99,10 @@ type ProcessSpec struct {
 	// Lossless blocks the process while its unread output fills the
 	// helper's window, instead of dropping the oldest bytes.
 	Lossless bool
+	// NoNewPrivileges is Docker's no-new-privileges for this process and
+	// its descendants: no set-user-ID program or file capability raises
+	// them.
+	NoNewPrivileges bool
 }
 
 // BootSpec starts a session: dockerd when NestedDocker is set and the image
@@ -406,7 +410,7 @@ func retry[T any](ctx context.Context, call func() (T, error)) (T, error) {
 }
 
 func (s ProcessSpec) proto() *guestpb.Process {
-	p := &guestpb.Process{Id: s.ID, Argv: s.Argv, Env: s.Env, User: s.User, Dir: s.Dir, Lossless: s.Lossless}
+	p := &guestpb.Process{Id: s.ID, Argv: s.Argv, Env: s.Env, User: s.User, Dir: s.Dir, Lossless: s.Lossless, NoNewPrivileges: s.NoNewPrivileges}
 	if s.TTY != nil {
 		p.Terminal = s.TTY.proto()
 	}

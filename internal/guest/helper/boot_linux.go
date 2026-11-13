@@ -127,7 +127,7 @@ func (s *service) startDockerd(main guest.ProcessSpec) error {
 	if s.cgroup != nil {
 		argv = append(argv, "--cgroup-parent", sessionCgroupParent)
 	}
-	p, err := s.procs.spawn(spawnSpec{ProcessSpec: guest.ProcessSpec{ID: dockerdID, Argv: argv, Env: env}, log: log})
+	p, err := s.procs.spawn(spawnSpec{ProcessSpec: guest.ProcessSpec{ID: dockerdID, Argv: argv, Env: env, NoNewPrivileges: main.NoNewPrivileges}, log: log})
 	if err != nil {
 		return fmt.Errorf("start dockerd: %w", err)
 	}

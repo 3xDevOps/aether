@@ -26,7 +26,7 @@ import (
 func init() {
 	switch {
 	case os.Getpid() == 1:
-		os.Exit(Main())
+		os.Exit(Main(nil))
 	case len(os.Args) == 3 && os.Args[1] == "kvm-connect":
 		os.Exit(kvmConnect(os.Args[2]))
 	case len(os.Args) == 2 && os.Args[1] == "kvm-hog":
@@ -275,6 +275,15 @@ func TestKVMHelper(t *testing.T) {
 	if out, code := run("coord", "1000:1000", "/usr/local/bin/aether-internal", "kvm-connect", "/run/aether/coord3.sock"); code != 0 || !strings.Contains(out, "coord answers hello from the VM") {
 		t.Errorf("coordination socket: exit %d: %s", code, out)
 	}
+	nnp, err := client.Spawn(ctx, guest.ProcessSpec{ID: "nnp", Env: env, User: "1000:1000", NoNewPrivileges: true, Argv: []string{"/bin/sh", "-c", "grep NoNewPrivs /proc/self/status"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nnpOutput := nnp.Attach(true)
+	if out, _ := io.ReadAll(nnpOutput.Stdout()); !strings.Contains(string(out), "NoNewPrivs:\t1") {
+		t.Errorf("a NoNewPrivileges process in the VM: %q", out)
+	}
+	_ = nnpOutput.Close()
 	if out, code := run("signing", "1000:1000", "/usr/local/bin/aether-internal", "kvm-connect", "/run/aether-signing/agent.sock"); code != 0 || !strings.Contains(out, "signing answers") {
 		t.Errorf("signing socket: exit %d: %s", code, out)
 	}

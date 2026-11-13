@@ -8,7 +8,7 @@ import (
 )
 
 // Main runs only as PID 1 of a Linux session VM.
-func Main() int {
+func Main([]string) int {
 	fmt.Fprintln(os.Stderr, "aether-internal guest: runs only as PID 1 of a Linux session VM")
 	return 2
 }

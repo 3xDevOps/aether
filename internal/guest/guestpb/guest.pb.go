@@ -246,9 +246,12 @@ type Process struct {
 	Terminal *Size `protobuf:"bytes,6,opt,name=terminal,proto3" json:"terminal,omitempty"`
 	// lossless blocks the process when its output is not read, instead of
 	// dropping the oldest bytes.
-	Lossless      bool `protobuf:"varint,7,opt,name=lossless,proto3" json:"lossless,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Lossless bool `protobuf:"varint,7,opt,name=lossless,proto3" json:"lossless,omitempty"`
+	// no_new_privileges keeps the process and its descendants from gaining
+	// privileges through set-user-ID programs or file capabilities.
+	NoNewPrivileges bool `protobuf:"varint,8,opt,name=no_new_privileges,json=noNewPrivileges,proto3" json:"no_new_privileges,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Process) Reset() {
@@ -326,6 +329,13 @@ func (x *Process) GetTerminal() *Size {
 func (x *Process) GetLossless() bool {
 	if x != nil {
 		return x.Lossless
+	}
+	return false
+}
+
+func (x *Process) GetNoNewPrivileges() bool {
+	if x != nil {
+		return x.NoNewPrivileges
 	}
 	return false
 }
@@ -1397,7 +1407,7 @@ const file_guest_proto_rawDesc = "" +
 	"boot_error\x18\x04 \x01(\tR\tbootError\".\n" +
 	"\x04Size\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\x02 \x01(\rR\x04rows\"\xb4\x01\n" +
+	"\x04rows\x18\x02 \x01(\rR\x04rows\"\xe0\x01\n" +
 	"\aProcess\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04argv\x18\x02 \x03(\tR\x04argv\x12\x10\n" +
@@ -1405,7 +1415,8 @@ const file_guest_proto_rawDesc = "" +
 	"\x04user\x18\x04 \x01(\tR\x04user\x12\x10\n" +
 	"\x03dir\x18\x05 \x01(\tR\x03dir\x121\n" +
 	"\bterminal\x18\x06 \x01(\v2\x15.aether.guest.v1.SizeR\bterminal\x12\x1a\n" +
-	"\blossless\x18\a \x01(\bR\blossless\"\xa2\x01\n" +
+	"\blossless\x18\a \x01(\bR\blossless\x12*\n" +
+	"\x11no_new_privileges\x18\b \x01(\bR\x0fnoNewPrivileges\"\xa2\x01\n" +
 	"\vBootRequest\x12,\n" +
 	"\x04main\x18\x01 \x01(\v2\x18.aether.guest.v1.ProcessR\x04main\x12!\n" +
 	"\fsetup_script\x18\x02 \x01(\tR\vsetupScript\x12#\n" +

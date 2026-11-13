@@ -189,7 +189,11 @@ func (t *processes) start(p *process, spec spawnSpec, program, dir string, env [
 	for i, f := range child {
 		fds[i] = f.Fd()
 	}
-	pid, err := syscall.ForkExec(program, spec.Argv, &syscall.ProcAttr{Dir: dir, Env: env, Files: fds, Sys: attr})
+	path, argv := program, spec.Argv
+	if spec.NoNewPrivileges {
+		path, argv = "/proc/self/exe", append([]string{"aether-internal", "guest", noNewPrivsArg, program}, spec.Argv...)
+	}
+	pid, err := syscall.ForkExec(path, argv, &syscall.ProcAttr{Dir: dir, Env: env, Files: fds, Sys: attr})
 	if err != nil {
 		for _, f := range []*os.File{p.stdin, stdoutR, stderrR} {
 			if f != nil {

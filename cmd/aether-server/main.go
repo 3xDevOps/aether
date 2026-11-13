@@ -48,7 +48,7 @@ func main() {
 	}
 	// A session VM's kernel starts the binary as /init with this argument.
 	if len(os.Args) > 1 && os.Args[1] == "guest" {
-		os.Exit(helper.Main())
+		os.Exit(helper.Main(os.Args[2:]))
 	}
 	if filepath.Base(os.Args[0]) == "aether-internal" {
 		os.Exit(coordcli.Main(os.Args[1:]))

@@ -207,7 +207,10 @@ func (s *service) PowerOff(context.Context, *guestpb.PowerOffRequest) (*guestpb.
 }
 
 func processSpec(p *guestpb.Process) guest.ProcessSpec {
-	spec := guest.ProcessSpec{ID: p.GetId(), Argv: p.GetArgv(), Env: p.GetEnv(), User: p.GetUser(), Dir: p.GetDir(), Lossless: p.GetLossless()}
+	spec := guest.ProcessSpec{
+		ID: p.GetId(), Argv: p.GetArgv(), Env: p.GetEnv(), User: p.GetUser(), Dir: p.GetDir(),
+		Lossless: p.GetLossless(), NoNewPrivileges: p.GetNoNewPrivileges(),
+	}
 	if t := p.GetTerminal(); t != nil {
 		spec.TTY = &guest.Size{Cols: uint16(min(t.GetCols(), 65535)), Rows: uint16(min(t.GetRows(), 65535))}
 	}

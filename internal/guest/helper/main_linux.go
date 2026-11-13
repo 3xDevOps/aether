@@ -25,9 +25,18 @@ var forwarded = []os.Signal{
 	unix.SIGHUP, unix.SIGINT, unix.SIGQUIT, unix.SIGTERM, unix.SIGUSR1, unix.SIGUSR2, unix.SIGALRM, unix.SIGWINCH,
 }
 
-// Main runs the helper. It never returns as PID 1: a helper that cannot
-// serve powers the VM off, and the kernel would panic if PID 1 exited.
-func Main() int {
+// noNewPrivsArg runs the helper binary as the first step of a process
+// spawned with NoNewPrivileges: Go cannot set no_new_privs between fork and
+// exec, so the child sets it on itself and executes the program.
+const noNewPrivsArg = "no-new-privs"
+
+// Main runs the helper with the arguments after "guest". It never returns
+// as PID 1: a helper that cannot serve powers the VM off, and the kernel
+// would panic if PID 1 exited.
+func Main(args []string) int {
+	if len(args) > 2 && args[0] == noNewPrivsArg {
+		return execNoNewPrivs(args[1], args[2:])
+	}
 	if os.Getpid() != 1 {
 		fmt.Fprintln(os.Stderr, "aether-internal guest: runs only as PID 1 of a session VM")
 		return 2
@@ -37,6 +46,15 @@ func Main() int {
 	unix.Sync()
 	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF)
 	select {}
+}
+
+func execNoNewPrivs(program string, argv []string) int {
+	err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+	if err == nil {
+		err = unix.Exec(program, argv, os.Environ())
+	}
+	fmt.Fprintf(os.Stderr, "aether-internal guest: %s: %v\n", program, err)
+	return 126
 }
 
 func serve() error {
