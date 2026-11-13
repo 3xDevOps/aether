@@ -4,13 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"path"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -199,36 +197,15 @@ func (e *dockerManagedExec) forgotten(ctx context.Context, cause error) (devexec
 }
 
 func (e *dockerManagedExec) control(ctx context.Context, action string, grace time.Duration) (devexec.State, error) {
-	args := []string{coordtransport.CLIPath, devexec.Command, "control", e.identity.CreationKey, e.identity.ExecID, e.identity.ClaimToken, action, strconv.FormatInt(grace.Milliseconds(), 10)}
 	var stdout, stderr string
-	code, err := e.docker.exec(ctx, e.identity.ContainerID, args, "", e.identity.User, nil, func(r io.Reader) (copyErr error) {
+	code, err := e.docker.exec(ctx, e.identity.ContainerID, ExecControlArgv(e.identity, action, grace), "", e.identity.User, nil, func(r io.Reader) (copyErr error) {
 		stdout, stderr, copyErr = readExecOutput(r)
 		return copyErr
 	})
 	if err != nil {
 		return devexec.State{}, err
 	}
-	var state devexec.State
-	decodeErr := json.Unmarshal([]byte(stdout), &state)
-	if decodeErr == nil && state.ExecID == e.identity.ExecID && state.CreationKey == e.identity.CreationKey && state.ClaimToken == e.identity.ClaimToken {
-		if state.Error != "" {
-			if state.Exited && state.ExitCode != nil && (*state.ExitCode == 126 || *state.ExitCode == 127) {
-				if action == "start" {
-					return state, &ExecExitError{Code: *state.ExitCode}
-				}
-				return state, nil
-			}
-			return state, errors.New(state.Error)
-		}
-		if code == 0 {
-			return state, nil
-		}
-	}
-	failed := fmt.Errorf("%w: helper %s failed (status %d): %s", ErrExecUnavailable, action, code, strings.TrimSpace(stderr))
-	if strings.Contains(stderr, devexec.ErrNoSupervisor.Error()) {
-		return state, fmt.Errorf("%w: %w", devexec.ErrNoSupervisor, failed)
-	}
-	return state, failed
+	return ExecControlState(e.identity, action, code, stdout, stderr)
 }
 
 func (e *dockerManagedExec) Status(ctx context.Context) (ExecState, error) {

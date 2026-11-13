@@ -314,7 +314,7 @@ func TestSetupOutputMasksSecretEnv(t *testing.T) {
 	cfg, _ := d.containerConfig(spec, "")
 
 	secrets := secretEnvValues(cfg.Labels[labelSecretEnv], cfg.Env)
-	got := setupOutput("+ curl -H abc-and-more\nmode plain, token abc\n", false, secrets)
+	got := SetupOutput("+ curl -H abc-and-more\nmode plain, token abc\n", false, secrets)
 	if want := "+ curl -H ***\nmode plain, token ***\n"; got != want {
 		t.Errorf("setupOutput = %q, want %q", got, want)
 	}
@@ -327,7 +327,7 @@ func TestSetupOutputMasksSecretEnv(t *testing.T) {
 
 func TestSetupOutputKeepsTheEnd(t *testing.T) {
 	long := strings.Repeat("noise\n", setupOutputLimit) + "npm error missing script\n"
-	got := setupOutput(long, false, nil)
+	got := SetupOutput(long, false, nil)
 	if len(got) > setupOutputLimit+64 || !strings.HasPrefix(got, "[earlier output omitted]\nnoise\n") || !strings.HasSuffix(got, "npm error missing script\n") {
 		t.Errorf("setupOutput kept %d bytes, starting %q", len(got), got[:min(len(got), 40)])
 	}
@@ -354,12 +354,12 @@ func TestSetupOutputKeepsTheEnd(t *testing.T) {
 	if !cut || !strings.HasPrefix(text, "et-value\n") {
 		t.Fatalf("tail = %q, cut %v, want it to start inside the secret", text, cut)
 	}
-	if got := setupOutput(text, cut, []string{"secret-value"}); strings.Contains(got, "value") || !strings.HasSuffix(got, "last line\n") {
+	if got := SetupOutput(text, cut, []string{"secret-value"}); strings.Contains(got, "value") || !strings.HasSuffix(got, "last line\n") {
 		t.Errorf("setupOutput after a cut inside the secret = %q", got)
 	}
 	// Nor when a shorter secret, masked inside that second half, makes it longer.
 	grown := "qqqqqq\nZ9\n" + strings.Repeat("padding line\n", 4) + "last line\n"
-	if got := setupOutput(grown, true, []string{"q", "qqqqqqqq\nZ9"}); strings.Contains(got, "Z9") || !strings.HasSuffix(got, "last line\n") {
+	if got := SetupOutput(grown, true, []string{"q", "qqqqqqqq\nZ9"}); strings.Contains(got, "Z9") || !strings.HasSuffix(got, "last line\n") {
 		t.Errorf("setupOutput after a cut inside a secret that holds another = %q", got)
 	}
 }
@@ -397,7 +397,7 @@ func TestContainerConfigNoMountNoLimits(t *testing.T) {
 
 func TestTrustCheckoutKeepsWorkspaceGitConfig(t *testing.T) {
 	env := map[string]string{"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.editor", "GIT_CONFIG_VALUE_0": "vi"}
-	got := dockerEnv(trustCheckout(env, "/workspace"))
+	got := EnvList(trustCheckout(env, "/workspace"))
 	want := []string{"GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=core.editor", "GIT_CONFIG_KEY_1=safe.directory", "GIT_CONFIG_VALUE_0=vi", "GIT_CONFIG_VALUE_1=/workspace"}
 	if !slices.Equal(got, want) {
 		t.Errorf("env = %v, want %v", got, want)
@@ -408,7 +408,7 @@ func TestTrustCheckoutKeepsWorkspaceGitConfig(t *testing.T) {
 }
 
 func TestDockerEnvSorted(t *testing.T) {
-	got := dockerEnv(map[string]string{"ZED": "1", "ALPHA": "2", "MID": "3"})
+	got := EnvList(map[string]string{"ZED": "1", "ALPHA": "2", "MID": "3"})
 	want := []string{"ALPHA=2", "MID=3", "ZED=1"}
 	if !slices.Equal(got, want) {
 		t.Errorf("dockerEnv = %v, want %v", got, want)
@@ -433,7 +433,7 @@ func TestNanoCPUs(t *testing.T) {
 }
 
 func TestStreamBufferWriteNeverBlocks(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -452,7 +452,7 @@ func TestStreamBufferWriteNeverBlocks(t *testing.T) {
 }
 
 func TestStreamBufferDropsOldestPastCap(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	chunk := bytes.Repeat([]byte("a"), 4096)
 	for range 4 * maxStreamBuffer / len(chunk) {
 		if _, err := b.Write(chunk); err != nil {
@@ -477,7 +477,7 @@ func TestStreamBufferDropsOldestPastCap(t *testing.T) {
 }
 
 func TestStreamBufferReadBlocksUntilData(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	got := make(chan string, 1)
 	go func() {
 		p := make([]byte, 16)
@@ -502,7 +502,7 @@ func TestStreamBufferReadBlocksUntilData(t *testing.T) {
 }
 
 func TestStreamBufferCloseDrainsThenEOF(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	if _, err := b.Write([]byte("tail")); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestStreamBufferCloseDrainsThenEOF(t *testing.T) {
 }
 
 func TestStreamBufferCloseWithError(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	want := errors.New("boom")
 	b.CloseWithError(want)
 	b.CloseWithError(nil) // only the first close takes effect
@@ -530,7 +530,7 @@ func TestStreamBufferCloseWithError(t *testing.T) {
 }
 
 func TestStreamBufferConcurrent(t *testing.T) {
-	b := newStreamBuffer()
+	b := NewStreamBuffer()
 	const writers, lines = 8, 200
 	var wg sync.WaitGroup
 	for range writers {
@@ -694,7 +694,7 @@ func TestReadExecOutput(t *testing.T) {
 
 	var flood bytes.Buffer
 	chunk := bytes.Repeat([]byte("y"), 64<<10)
-	for flood.Len() <= execOutputLimit+1 {
+	for flood.Len() <= ExecOutputLimit+1 {
 		if writeErr := writeExecFrame(&flood, stdcopy.Stdout, chunk); writeErr != nil {
 			t.Fatal(writeErr)
 		}
@@ -703,8 +703,8 @@ func TestReadExecOutput(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "1048576 byte limit") {
 		t.Fatalf("readExecOutput on a flood = %v, want the cap named", err)
 	}
-	if len(stdout) > execOutputLimit {
-		t.Errorf("buffered %d bytes, want no more than %d", len(stdout), execOutputLimit)
+	if len(stdout) > ExecOutputLimit {
+		t.Errorf("buffered %d bytes, want no more than %d", len(stdout), ExecOutputLimit)
 	}
 }
 

@@ -314,6 +314,50 @@ pressure](failure-handling.md#recover-from-disk-pressure) and [Recover from
 memory pressure](failure-handling.md#recover-from-memory-pressure) have the
 thresholds and what to do.
 
+## Sessions in virtual machines
+
+`--session-runtime` (config key `session-runtime`) defaults to `docker`. With
+`vm`, each new session runs in its own [Cloud
+Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) virtual
+machine instead of a container. Environment terminals, the assistant, the
+agent updater, the development browser and **Save environment** stay on
+Docker.
+This is work in progress; [the plan](plans/2026-11-13-microvm-sessions.md)
+lists what is still to come.
+
+```sh
+sudo aether-server config set session-runtime vm
+sudo systemctl restart aether-server
+```
+
+The host needs `/dev/kvm`, `cloud-hypervisor`, `/usr/libexec/virtiofsd`,
+`qemu-img`, `mkfs.ext4`, `iptables` and systemd, besides Docker, and the
+release's guest kernel `aether-vmlinux-x86_64` at `/usr/local/lib/aether/vmlinux`
+(`--vm-kernel`, config key `vm-kernel`, names another path).
+
+What changes:
+
+- Each VM runs in the systemd unit `aether-vm-<run id>.service` in
+  `aether.slice`, so it keeps running through a server restart or update.
+  Its disks and logs are in `<data dir>/vm/<run id>/`: `monitor.log` holds the
+  VM monitor's output and `console.log` the guest kernel's.
+- The VM gets the CPU limit rounded up to whole vCPUs, held to the exact
+  limit by the unit's `CPUQuota`, and the memory limit as its memory. The
+  process limit applies inside the guest.
+- The checkout, the home and the other mounts reach the VM over one virtio-fs
+  share; read-only mounts stay read-only. Each VM has its own address in
+  `10.200.0.0/16` and reaches the internet through the host.
+- Starting a stopped session builds a fresh root disk from its image and runs
+  the setup script again: packages installed outside the mounts are gone.
+  Docker images inside the session stay on its data disk.
+- VMs reach the internet, but not each other or Docker's containers.
+- Not yet supported, refused at launch with an error naming the work item:
+  the Isolated tier and egress control, and the development browser beside a
+  session.
+- Close or kill every session that runs in a VM before you set
+  `session-runtime` back to `docker`: a Docker server does not manage VMs,
+  so their units would keep running unattended.
+
 ## After a session closes
 
 Reporting success or failure leaves an interactive session open for follow-up, and

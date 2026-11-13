@@ -21,8 +21,8 @@ type execAttachment struct {
 	tty  bool
 	resp client.HijackedResponse
 
-	stdout    *streamBuffer
-	stderr    *streamBuffer
+	stdout    *StreamBuffer
+	stderr    *StreamBuffer
 	done      chan struct{}
 	closeOnce sync.Once
 }
@@ -38,8 +38,8 @@ func newExecAttachment(cli *client.Client, id string, tty, lossless bool, resp c
 		id:     id,
 		tty:    tty,
 		resp:   resp,
-		stdout: newStreamBuffer(),
-		stderr: newStreamBuffer(),
+		stdout: NewStreamBuffer(),
+		stderr: NewStreamBuffer(),
 		done:   make(chan struct{}),
 	}
 	if !tty || lossless {

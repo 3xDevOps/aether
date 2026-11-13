@@ -4,6 +4,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -185,6 +186,14 @@ type Config struct {
 	// it registered, empty means the Docker daemon default.
 	ContainerRuntime string
 
+	// SessionRuntime is where sessions run: SessionRuntimeDocker (empty
+	// means the same) or SessionRuntimeVM, one Cloud Hypervisor VM each.
+	// Every other container stays on Docker either way.
+	SessionRuntime string
+	// VMKernel is the guest kernel session VMs boot; empty means
+	// DefaultVMKernel.
+	VMKernel string
+
 	// SysboxInstaller lets admins install Sysbox on the host through the
 	// control channel. Only cmd/aether-server sets it; an embedded server
 	// never runs host installers.
@@ -192,6 +201,11 @@ type Config struct {
 }
 
 const DefaultContainerRuntime = runtime.RuntimeAuto
+
+const (
+	SessionRuntimeDocker = "docker"
+	SessionRuntimeVM     = "vm"
+)
 
 // Server is the assembled Aether server.
 type Server struct {
@@ -311,6 +325,15 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 			return nil, err
 		}
 		s.rt = s.docker
+		switch cfg.SessionRuntime {
+		case "", SessionRuntimeDocker:
+		case SessionRuntimeVM:
+			if s.rt, err = newVMRuntime(cfg.DataDir, cmp.Or(cfg.VMKernel, DefaultVMKernel), s.docker); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("server: session-runtime %q: use %s or %s", cfg.SessionRuntime, SessionRuntimeDocker, SessionRuntimeVM)
+		}
 	}
 	removeAgentFiles := runtime.Remover(s.rt, cfg.StandardImage)
 

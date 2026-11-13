@@ -195,7 +195,7 @@ func TestLosslessExecKeepsStderrAndTerminalOutput(t *testing.T) {
 			time.Sleep(200 * time.Millisecond)
 			// Unread, the stream holds its small cap and one more
 			// write, not the megabytes a lossy stream retains.
-			held := tc.stream(attachment).(*streamBuffer)
+			held := tc.stream(attachment).(*StreamBuffer)
 			held.mu.Lock()
 			buffered := held.buf.Len()
 			held.mu.Unlock()

@@ -52,6 +52,30 @@ type InitPIDRuntime interface {
 	InitPID(context.Context, ID) (int, error)
 }
 
+// MemoryEventsRuntime optionally reports out-of-memory kills inside a
+// container whose own kernel does the killing, where its host cgroup cannot
+// see them. ok is false for a container its host cgroup accounts for.
+type MemoryEventsRuntime interface {
+	MemoryEvents(context.Context, ID) (events MemoryEvents, ok bool, err error)
+}
+
+// MemoryEvents counts kills since the container started; LimitBytes is 0
+// when unknown.
+type MemoryEvents struct {
+	OOMKills   uint64
+	LimitBytes uint64
+}
+
+// SaveRuntime optionally writes a running container's memory and device
+// state to disk and ends it, then later restores it with every process
+// where it was. A container that was saved and not restored is stopped:
+// Inspect reports it exited and Wait returns; Stop or Start discards the
+// saved state.
+type SaveRuntime interface {
+	Save(context.Context, ID) error
+	Restore(context.Context, ID) error
+}
+
 // Mount is one additional mount into a run container. Host paths are
 // validated against Aether-owned roots by the mount validator (see
 // mounts.go) before a spec reaches any runtime; the runtime itself only

@@ -89,7 +89,7 @@ func (s *Scheduler) checkOOMKills(ctx context.Context) {
 			s.publishTimeline(ctx, t.workspace, t.run, "", events.TimelineNote, oomMessage(stats))
 		}
 	}
-	for id := range s.oom.paths {
+	for id := range s.oom.kills {
 		if !seen[id] {
 			s.oom.forget(id)
 		}
@@ -102,6 +102,12 @@ func (w *oomWatcher) forget(id runtime.ID) {
 }
 
 func (w *oomWatcher) read(ctx context.Context, pids runtime.InitPIDRuntime, id runtime.ID) (memoryStats, error) {
+	if guest, ok := pids.(runtime.MemoryEventsRuntime); ok {
+		events, own, err := guest.MemoryEvents(ctx, id)
+		if own {
+			return memoryStats{oomKills: events.OOMKills, max: events.LimitBytes}, err
+		}
+	}
 	path, ok := w.paths[id]
 	if !ok {
 		pid, err := pids.InitPID(ctx, id)
