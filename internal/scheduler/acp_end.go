@@ -308,6 +308,38 @@ func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) err
 	return nil
 }
 
+// detach is shutdown for one run, before its VM is saved: the adapter and
+// its keeper run on with their records kept, and the next open after the
+// restore reattaches and adopts the session. An adapter without a keeper,
+// whose stdio this server holds, cannot outlive that and is stopped.
+func (d *acpDriver) detach(ctx context.Context, run domain.RunID) error {
+	defer d.lockOp(run)()
+	d.mu.Lock()
+	r := d.runs[run]
+	if r != nil && r.session != nil && r.keeper != nil {
+		delete(d.runs, run)
+		r.stopping = true
+	}
+	d.mu.Unlock()
+	if r == nil || r.session == nil {
+		return nil
+	}
+	if r.keeper == nil {
+		return d.stopAdapterLocked(ctx, run)
+	}
+	r.session.Detach()
+	err := r.keeper.Detach(ctx)
+	select {
+	case <-r.session.Done():
+	case <-ctx.Done():
+	}
+	r.release()
+	if err != nil {
+		return fmt.Errorf("detach from the agent's keeper: %w", err)
+	}
+	return nil
+}
+
 // shutdown detaches every session from its keeper without recording or
 // reporting its end: the adapter, its turn and its requests run on, and the
 // next server process reattaches and adopts them.

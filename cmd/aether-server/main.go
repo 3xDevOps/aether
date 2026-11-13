@@ -319,7 +319,8 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
 		"how long explicitly closed Standard and Enhanced session containers are retained (0 = 168h, negative = no retention)")
 	o.runSleepAfter = fs.Duration("run-sleep-after", scheduler.DefaultRunSleepAfter,
-		"how long an idle Enhanced session of an agent that can resume its conversation, open or closed, keeps its container running before it is stopped until its next use (0 = never)")
+		"how long an idle Enhanced session of an agent that can resume its conversation, open or closed, keeps its container running before it is stopped until its next use (0 = never); "+
+			"unset, an idle session VM is saved to disk after "+scheduler.DefaultVMSleepAfter.String()+" instead")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
 		"free-byte reserve on data/runtime filesystems (0 = automatic 5-20GiB, negative = disable disk admission)")
 	o.runCPUs = new(runCPUValue)
@@ -366,6 +367,12 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
+	vmSleepAfter := scheduler.DefaultVMSleepAfter
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "run-sleep-after" {
+			vmSleepAfter = *o.runSleepAfter
+		}
+	})
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, stopServe := context.WithCancelCause(ctx)
@@ -410,6 +417,7 @@ func serve(args []string) error {
 		CheckoutTTL:      *o.checkoutTTL,
 		RunContainerTTL:  *o.runContainerTTL,
 		RunSleepAfter:    *o.runSleepAfter,
+		VMSleepAfter:     vmSleepAfter,
 		MinFreeDiskBytes: *o.minFreeDisk,
 		RunCPULimit:      float64(*o.runCPUs),
 		RunMemoryBytes:   int64(*o.runMemory),

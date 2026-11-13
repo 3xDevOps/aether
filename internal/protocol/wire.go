@@ -59,10 +59,12 @@ type Run struct {
 	// Paused has no omitempty: absence must keep meaning "gateway too old
 	// to know", never "not paused", or clients cannot seed pause state.
 	Paused bool `json:"paused"`
-	// AsleepSince is when idleness stopped the live session's container, set
-	// while it sleeps; Waking while a wake starts it, and WakeError is the
-	// last wake's failure.
+	// AsleepSince is when idleness stopped the live session's container, or
+	// saved its VM, set while it sleeps; AsleepSaved while the saved VM
+	// keeps every process, Waking while a wake starts it, and WakeError is
+	// the last wake's failure.
 	AsleepSince *string `json:"asleep_since,omitempty"`
+	AsleepSaved bool    `json:"asleep_saved,omitempty"`
 	Waking      bool    `json:"waking,omitempty"`
 	WakeError   string  `json:"wake_error,omitempty"`
 	// Runtime retention is enriched from scheduler ownership, not run-row age.

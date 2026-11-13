@@ -265,6 +265,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
 	s.mu.Unlock()
 	resumed := false
+	var woken woke
 	rollback := func(cause error) error {
 		s.cfg.Git.StopDiffWatch(run)
 		_ = s.entryDriver(entry).Stop(context.WithoutCancel(ctx), run)
@@ -394,7 +395,9 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			close(waking)
 			s.mu.Unlock()
 		}()
-		if startErr := s.startAsleep(ctx, entry); startErr != nil {
+		how, startErr := s.startAsleep(ctx, entry)
+		woken = how
+		if startErr != nil {
 			rolledBack := rollback(startErr)
 			if errors.Is(startErr, runtime.ErrNotFound) {
 				rolledBack = errors.Join(rolledBack, s.expireRetainedLocked(ctx, entry, ""))
@@ -467,6 +470,9 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	s.mu.Unlock()
 	if asleep {
 		s.publishSleep(entry)
+	}
+	if woken.restoreErr != nil {
+		s.noteWake(ctx, run, woken)
 	}
 	return &runningRow, nil
 }
@@ -1998,6 +2004,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		accountSwap:         sc.AccountSwap,
 		usageLimit:          sc.UsageLimit,
 		asleepSince:         asleepSince,
+		asleepSaved:         sc.AsleepSaved,
 		wakeErr:             wakeErr,
 		done:                make(chan struct{}),
 	}

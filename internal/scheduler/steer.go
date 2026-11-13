@@ -1048,6 +1048,14 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 			if ttl < 0 {
 				s.stopCloseContainer(ctx, cid)
 				s.destroyClosedRetained(ctx, entry)
+				return nil
+			}
+			// A closed VM sleeps at once: unlike a frozen container, it gives
+			// its memory back. The sleep sweep tries again if this fails.
+			if _, saving := s.saver(cid); saving {
+				if err := s.sleepClosedLocked(ctx, entry); err != nil && !errors.Is(err, errStayAwake) {
+					slog.Warn("scheduler: save a closed session", "run", run, "error", err)
+				}
 			}
 			return nil
 		}

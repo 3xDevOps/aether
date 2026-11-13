@@ -10,7 +10,7 @@ import { useStore } from '@/store'
 import { useSelf } from '@/store/hooks'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
-/** An idle session whose container Aether stopped, and the wake that starts it again. */
+/** An idle session whose container Aether stopped or whose VM it saved, and the wake that brings it back. */
 export function SleepCallout({ run }: { run: RunRecord }) {
   const now = useClock()
   const self = useSelf(run.workspace_id)
@@ -37,6 +37,7 @@ export function SleepCallout({ run }: { run: RunRecord }) {
     }
   }
   const failed = failure !== undefined && !waking
+  const saved = run.asleep_saved === true
   const at = <time dateTime={since}>{clockTime(since, now)}</time>
   return (
     <Callout
@@ -45,16 +46,18 @@ export function SleepCallout({ run }: { run: RunRecord }) {
         ? <span className="inline-flex items-center gap-1.5"><Spinner label="Waking" />Waking…</span>
         : failed ? 'Wake failed' : <>Asleep since {at}</>}
       actions={waking || !maySteer ? undefined : (
-        <Button size="sm" variant="secondary" hint="Starts the container and restores the conversation" onClick={() => void wake()}>
+        <Button size="sm" variant="secondary" hint={saved ? 'Restores the saved session' : 'Starts the container and restores the conversation'} onClick={() => void wake()}>
           Wake
         </Button>
       )}
     >
-      {waking && <p>Starting the container and restoring the agent’s conversation.</p>}
+      {waking && <p>{saved ? 'Restoring the saved session.' : 'Starting the container and restoring the agent’s conversation.'}</p>}
       {!waking && (
         <p>
           {failed && <>Asleep since {at}. </>}
-          Aether stopped the idle container. The conversation, files and checkout are kept; running processes are not.
+          {saved
+            ? 'Aether saved the idle session to disk. Its processes, terminals and conversation come back where they were.'
+            : 'Aether stopped the idle container. The conversation, files and checkout are kept; running processes are not.'}
           {maySteer && ' Send a message or press Wake to start it.'}
         </p>
       )}

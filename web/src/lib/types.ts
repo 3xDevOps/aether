@@ -268,8 +268,10 @@ export interface Run {
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
-  /** When idleness stopped the live session's container; absent while it is awake. */
+  /** When idleness stopped the live session's container or saved its VM; absent while it is awake. */
   asleep_since?: string
+  /** The sleeping session's VM was saved with every process, which a wake restores. */
+  asleep_saved?: boolean
   /** A wake is starting the sleeping container. */
   waking?: boolean
   /** The last wake's failure while the session stays asleep. */
@@ -994,6 +996,7 @@ export interface RunEffortPayload {
 }
 export interface RunSleepPayload {
   asleep_since?: string
+  asleep_saved?: boolean
   waking?: boolean
   wake_error?: string
 }

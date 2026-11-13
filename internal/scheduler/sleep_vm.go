@@ -1,0 +1,299 @@
+package scheduler
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/runtime"
+)
+
+// woke is how a wake brought a sleeping session's container back.
+type woke struct {
+	// restored is a VM restored with every process it had.
+	restored bool
+	// restoreErr is why a VM's saved state could not be restored, so it
+	// started again from its disks.
+	restoreErr error
+}
+
+func (w woke) notice() string {
+	switch {
+	case w.restored:
+		return "Aether had saved this idle session to disk and restored it. Its processes, terminals and conversation carry on where they were."
+	case w.restoreErr != nil:
+		return "Aether could not restore this idle session's saved state, so it started the session again from its disk. Processes and terminals that were running were stopped; the conversation, files and checkout are kept. The restore failed: " + w.restoreErr.Error()
+	}
+	return "Aether had stopped this idle session's container. Processes and terminals that were running were stopped; the conversation, files and checkout are kept."
+}
+
+// saver is the runtime's SaveRuntime when it can save cid, which a session
+// VM sleeps by instead of a stop.
+func (s *Scheduler) saver(cid runtime.ID) (runtime.SaveRuntime, bool) {
+	saver, ok := s.cfg.Runtime.(runtime.SaveRuntime)
+	if !ok || cid == "" || !saver.Saves(cid) {
+		return nil, false
+	}
+	return saver, true
+}
+
+func (s *Scheduler) entrySaver(entry *supervised) (runtime.SaveRuntime, bool) {
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
+	return s.saver(cid)
+}
+
+// saveLive saves an idle open session's VM with every process in it. The
+// agent, its terminals and the diff watch are only let go of, and the wake
+// reattaches them. A save that fails reattaches them at once, and the run
+// stays awake until it is idle again. Caller holds entry.lifecycleMu, set
+// sleeping and marked the run asleep.
+func (s *Scheduler) saveLive(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
+	s.mu.Lock()
+	cid := entry.containerID
+	// From here exec and terminal recovery treat the VM as frozen.
+	entry.paused = true
+	s.mu.Unlock()
+	s.detachForSave(ctx, entry)
+	saveErr := saver.Save(ctx, cid)
+	if saveErr == nil {
+		s.recordSaved(entry, true)
+		s.endSleep(entry, true)
+		return nil
+	}
+	saveErr = fmt.Errorf("save the idle session: %w", saveErr)
+	s.mu.Lock()
+	entry.paused = false
+	s.mu.Unlock()
+	if err := s.reattach(ctx, entry, true); err != nil {
+		// Nothing holds the agent now: stopped, the VM wakes from its disks.
+		stopErr := s.cfg.Runtime.Stop(context.WithoutCancel(ctx), cid, s.cfg.StopGrace)
+		s.endSleep(entry, true)
+		return errors.Join(saveErr, err, stopErr)
+	}
+	s.mu.Lock()
+	entry.quietFrom = time.Now().UTC()
+	s.mu.Unlock()
+	return errors.Join(saveErr, s.unmarkAsleep(entry))
+}
+
+// detachForSave lets go of everything this server holds in entry's VM: the
+// agent's session and terminal, the development terminals and the diff
+// watch. What they connect to keeps running, and is saved with the VM.
+func (s *Scheduler) detachForSave(ctx context.Context, entry *supervised) {
+	run := entry.runID
+	s.cfg.Git.StopDiffWatch(run)
+	if err := s.detachDevelopmentTerminals(ctx, run); err != nil {
+		slog.Warn("scheduler: let go of a saving session's terminals", "run", run, "error", err)
+	}
+	s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(run, "")))
+	s.mu.Lock()
+	acpDriven := entry.acp && !entry.appServer
+	s.mu.Unlock()
+	if !acpDriven {
+		// The Standard drivers only hold the terminal and the bridge.
+		if err := s.entryDriver(entry).Stop(ctx, run); err != nil {
+			slog.Warn("scheduler: let go of a saving session's agent", "run", run, "error", err)
+		}
+		return
+	}
+	// A keeper left attached is preempted by the next generation that
+	// attaches after the restore.
+	if err := s.acp.detach(ctx, run); err != nil {
+		slog.Warn("scheduler: let go of a saving session's agent", "run", run, "error", err)
+	}
+	if err := s.cfg.PTY.StopSession(ctx, ptyhost.RunSession(run)); err != nil && !errors.Is(err, ptyhost.ErrNoSession) {
+		slog.Warn("scheduler: let go of a saving session's terminal", "run", run, "error", err)
+	}
+}
+
+// reattach takes up the session in entry's running container again: its
+// agent, terminal and diff watch, and the development terminals a save kept
+// running, or reopens them after a start ended them.
+func (s *Scheduler) reattach(ctx context.Context, entry *supervised, restored bool) error {
+	s.mu.Lock()
+	cid, workspace := entry.containerID, entry.workspaceID
+	s.mu.Unlock()
+	att, err := s.cfg.Runtime.Attach(ctx, cid)
+	if err != nil {
+		return err
+	}
+	if err = s.entryDriver(entry).Resume(ctx, entry, att); err != nil {
+		_ = att.Close()
+		return fmt.Errorf("restore the agent's conversation (if this keeps failing, launch a new session on this session's branch, which is kept with its checkout): %w", err)
+	}
+	if err = s.cfg.Git.StartDiffWatch(ctx, workspace, entry.runID); err != nil {
+		return err
+	}
+	if restored {
+		if err = s.RecoverDevelopmentTerminals(ctx, entry.runID); err != nil {
+			return fmt.Errorf("reattach to the terminals: %w", err)
+		}
+		return nil
+	}
+	return s.reopenDevelopment(ctx, entry.runID)
+}
+
+// restoreAsleep restores entry's saved VM under a fresh wait. A saved state
+// that cannot be restored falls back to a cold start from the VM's disks
+// when the agent restores its conversation there; otherwise the wake fails
+// with the restore's error and the VM keeps its disks. Caller holds
+// entry.lifecycleMu and has reserved capacity.
+func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) (woke, error) {
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
+	restoreErr := saver.Restore(ctx, cid)
+	if restoreErr == nil {
+		s.superviseWoken(entry)
+		return woke{restored: true}, nil
+	}
+	if errors.Is(restoreErr, runtime.ErrNotFound) {
+		return woke{}, restoreErr
+	}
+	if reason := s.coldStartRefusal(ctx, entry); reason != "" {
+		return woke{}, fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason)
+	}
+	slog.Warn("scheduler: restore a sleeping session; starting it from its disk", "run", entry.runID, "error", restoreErr)
+	// Stop discards the saved state and a half-restored VM alike.
+	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil {
+		return woke{}, errors.Join(restoreErr, fmt.Errorf("discard the saved state: %w", err))
+	}
+	if err := s.MarkDevelopmentContainerEnded(ctx, entry.runID); err != nil {
+		return woke{}, fmt.Errorf("record the terminals the cold start ended: %w", err)
+	}
+	// The browser in the VM did not survive; the next Browser call starts
+	// another.
+	if err := s.removeDevelopmentBrowser(ctx, entry.runID); err != nil {
+		s.mu.Lock()
+		entry.browserLeft = true
+		s.mu.Unlock()
+	}
+	if err := s.cfg.Runtime.Start(ctx, cid); err != nil {
+		return woke{}, errors.Join(restoreErr, err)
+	}
+	s.mu.Lock()
+	// The agent and its keeper did not survive, so the open restores the
+	// conversation rather than trying to reattach.
+	entry.agentExec, entry.agentKeeper = nil, nil
+	err := s.writeSidecar(entry.sidecar())
+	s.mu.Unlock()
+	if err != nil {
+		slog.Warn("scheduler: record the cold-started session", "run", entry.runID, "error", err)
+	}
+	s.superviseWoken(entry)
+	return woke{restoreErr: restoreErr}, nil
+}
+
+// coldStartRefusal is why entry cannot start again from its disk, empty
+// when it can: only an Enhanced session of an agent that restores its
+// conversation, in a VM created for Enhanced, whose main process is a bare
+// shell. A Standard session's would run its launch command, with the task,
+// again.
+func (s *Scheduler) coldStartRefusal(ctx context.Context, entry *supervised) string {
+	const keep = "the session's disk is kept: launch a new session on its branch, or try waking it again"
+	s.mu.Lock()
+	enhanced := entry.acp && entry.launchMode == domain.LaunchACP
+	s.mu.Unlock()
+	if !enhanced || !s.launchedEnhanced(ctx, entry) {
+		return "a Standard session cannot start again from its disk without running its task again; " + keep
+	}
+	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
+	if err != nil {
+		return "load the session: " + err.Error()
+	}
+	if !s.resumes(run.Harness) {
+		return fmt.Sprintf("%s cannot restore its conversation in a new process; %s", run.Harness, keep)
+	}
+	return ""
+}
+
+// superviseWoken waits on entry's container again after a wake started or
+// restored it.
+func (s *Scheduler) superviseWoken(entry *supervised) {
+	s.mu.Lock()
+	// The ACP driver will not exec into a container it thinks is frozen.
+	entry.paused = false
+	entry.asleepSaved = false
+	entry.sleepGen++
+	entry.waitStarted = true
+	s.wg.Add(1)
+	s.mu.Unlock()
+	go s.superviseWait(entry)
+}
+
+// recordSaved records whether entry's sleeping VM holds its saved memory.
+func (s *Scheduler) recordSaved(entry *supervised, saved bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry.asleepSaved = saved
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		slog.Warn("scheduler: record whether a sleeping session is saved", "run", entry.runID, "error", err)
+	}
+}
+
+// resaveAsleep saves entry's VM again after a failed wake reattached part of
+// it, and stops it when that fails too. Caller holds entry.lifecycleMu.
+func (s *Scheduler) resaveAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
+	s.mu.Lock()
+	cid := entry.containerID
+	entry.paused = true
+	s.mu.Unlock()
+	s.detachForSave(ctx, entry)
+	err := saver.Save(ctx, cid)
+	if err == nil {
+		s.recordSaved(entry, true)
+		return nil
+	}
+	s.mu.Lock()
+	entry.agentExec, entry.agentKeeper = nil, nil
+	s.mu.Unlock()
+	return errors.Join(fmt.Errorf("save the session again: %w", err), s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace))
+}
+
+// saveClosed saves a closed session's frozen VM. The close stopped its agent
+// and terminals; the VM runs again only to write its data to its disks
+// before the save. A save that fails leaves it frozen. Caller holds
+// entry.lifecycleMu, set sleeping and marked the run asleep.
+func (s *Scheduler) saveClosed(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
+	if err := s.cfg.Runtime.Resume(ctx, cid); err != nil {
+		return errors.Join(fmt.Errorf("resume the closed session to save it: %w", err), s.unmarkAsleep(entry))
+	}
+	saveErr := saver.Save(ctx, cid)
+	if saveErr == nil {
+		s.recordSaved(entry, true)
+		s.endSleep(entry, true)
+		return nil
+	}
+	saveErr = fmt.Errorf("save the closed session: %w", saveErr)
+	if err := s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid); err != nil {
+		s.mu.Lock()
+		entry.paused = false
+		s.mu.Unlock()
+		saveErr = errors.Join(saveErr, fmt.Errorf("freeze it again: %w", err))
+	}
+	return errors.Join(saveErr, s.unmarkAsleep(entry))
+}
+
+// saveRecoveredAsleep finishes the save of a VM a server restart caught
+// falling asleep, and stops it when that fails. Caller holds
+// entry.lifecycleMu.
+func (s *Scheduler) saveRecoveredAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
+	err := saver.Save(ctx, cid)
+	if err == nil {
+		s.recordSaved(entry, true)
+		return nil
+	}
+	return errors.Join(fmt.Errorf("save the session the restart caught falling asleep: %w", err), s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace))
+}

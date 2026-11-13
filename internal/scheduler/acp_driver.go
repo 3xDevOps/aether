@@ -412,8 +412,9 @@ const (
 	// openContinue restores the session in a container that replaced the
 	// run's, on another account; the move sends it its continuation.
 	openContinue
-	// openWake restores the session in a container a sleep stopped, and
-	// fails rather than start a conversation the member did not have.
+	// openWake takes up the session in a container a sleep stopped or
+	// saved, and fails rather than start a conversation the member did not
+	// have.
 	openWake
 )
 
@@ -444,10 +445,11 @@ func (d *acpDriver) openRestored(ctx context.Context, entry *supervised, how acp
 	return d.open(ctx, entry, how)
 }
 
-// open runs under the run's op lock. openRestore with no live session first
-// reattaches to the keeper an earlier server process left running and adopts
-// its session; every other open, or a failed reattach, stops that keeper and
-// starts the adapter under a new one.
+// open runs under the run's op lock. openRestore and openWake with no live
+// session first reattach to the keeper an earlier server process, or the
+// VM a wake restored, left running and adopt its session; every other open,
+// or a failed reattach, stops that keeper and starts the adapter under a new
+// one.
 func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) error {
 	if err := d.stopAdapterLocked(ctx, entry.runID); err != nil {
 		slog.Warn("scheduler: stop the previous ACP server", "run", entry.runID, "error", err)
@@ -507,7 +509,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	var exec, bridge runtime.ManagedExec
 	var keeper *acpkeeper.Client
 	var adopt *acphost.Adoption
-	if how == openRestore && kept {
+	if (how == openRestore || how == openWake) && kept {
 		exec, keeper, bridge, err = d.reattach(ctx, entry, managed, cid)
 		if err == nil {
 			state := keeper.State()
@@ -518,7 +520,11 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			d.record(entry, func() { entry.keeperDelivered, entry.keeperAdopted = state.Delivered, true })
 		} else {
 			slog.Warn("scheduler: reattach to the agent's keeper", "run", entry.runID, "error", err)
-			d.notice(entry.runID, "warning", "Agent restarted", "Aether could not reattach to the agent after the server restarted, so it restarted the agent and restored its session: "+err.Error())
+			after := "the server restarted"
+			if how == openWake {
+				after = "the session woke"
+			}
+			d.notice(entry.runID, "warning", "Agent restarted", "Aether could not reattach to the agent after "+after+", so it restarted the agent and restored its session: "+err.Error())
 		}
 	}
 	stderr := &tailBuffer{max: acpStderrTail}

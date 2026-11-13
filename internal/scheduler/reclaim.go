@@ -42,6 +42,21 @@ func (s *Scheduler) reclaimDiskLocked(ctx context.Context, keep domain.MemberID)
 		return !ok || !short || ctx.Err() != nil
 	}
 
+	for _, entry := range s.savedByAge() {
+		note, err := s.dropSavedState(ctx, entry)
+		if err != nil {
+			slog.Warn("scheduler: disk reclaim: drop a saved session state", "run", entry.runID, "error", err)
+			continue
+		}
+		if note == "" {
+			continue
+		}
+		s.publishTimeline(ctx, entry.workspaceID, entry.runID, "", events.TimelineNote, note)
+		if recovered("saved session state") {
+			return
+		}
+	}
+
 	for _, entry := range s.closedRetainedByAge() {
 		removed, err := s.reclaimRetained(ctx, entry)
 		if err != nil {
@@ -120,6 +135,46 @@ func (s *Scheduler) reclaimLevel(ctx context.Context) (free uint64, short, ok bo
 		free = lowShort
 	}
 	return free, short, true
+}
+
+// savedByAge returns the runs asleep in a saved VM, the longest asleep
+// first. A wake holds its run's lifecycle lock while its capacity
+// reservation runs reclaim, so a run being woken is left out.
+func (s *Scheduler) savedByAge() []*supervised {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var entries []*supervised
+	for _, entry := range s.runs {
+		if _, saving := s.saver(entry.containerID); saving && entry.asleepSaved && !entry.sleeping && entry.waking == nil {
+			entries = append(entries, entry)
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].asleepSince.Before(entries[j].asleepSince) })
+	return entries
+}
+
+// dropSavedState stops entry's saved VM, which deletes its memory and keeps
+// its disks, if it is still asleep and no wake is under way, and returns the
+// timeline note that says what its next wake does.
+func (s *Scheduler) dropSavedState(ctx context.Context, entry *supervised) (string, error) {
+	entry.lifecycleMu.Lock()
+	defer entry.lifecycleMu.Unlock()
+	s.mu.Lock()
+	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero() && entry.asleepSaved && entry.waking == nil
+	cid := entry.containerID
+	s.mu.Unlock()
+	if !asleep {
+		return "", nil
+	}
+	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil {
+		return "", err
+	}
+	s.recordSaved(entry, false)
+	const dropped = "Deleted this sleeping session's saved memory because disk space was low"
+	if reason := s.coldStartRefusal(ctx, entry); reason != "" {
+		return dropped + ", so it cannot wake: " + reason, nil
+	}
+	return dropped + "; it starts again from its disk when it next wakes, and restores its conversation", nil
 }
 
 // closedRetainedByAge returns closed runs that still hold a paused container,

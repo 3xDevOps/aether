@@ -80,8 +80,9 @@ type MemoryEvents struct {
 // state to disk and ends it, then later restores it with every process
 // where it was. A container that was saved and not restored is stopped:
 // Inspect reports it exited and Wait returns; Stop or Start discards the
-// saved state.
+// saved state. Saves reports whether a container can be saved at all.
 type SaveRuntime interface {
+	Saves(ID) bool
 	Save(context.Context, ID) error
 	Restore(context.Context, ID) error
 }

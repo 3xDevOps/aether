@@ -356,6 +356,11 @@ func (r *Runtime) ContainerStats(ctx context.Context) ([]runtime.ContainerStat, 
 	return append(stats, vms...), errors.Join(dockerErr, vmErr)
 }
 
+func (r *Runtime) Saves(id runtime.ID) bool {
+	_, ok := vmKey(id)
+	return ok
+}
+
 func (r *Runtime) Save(ctx context.Context, id runtime.ID) error {
 	key, ok := vmKey(id)
 	if !ok {

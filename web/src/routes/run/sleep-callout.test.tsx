@@ -44,6 +44,12 @@ describe('SleepCallout', () => {
     expect(container.textContent).toBe('')
   })
 
+  it('says a saved session keeps its processes', () => {
+    render(<SleepCallout run={record({ asleep_since: since, asleep_saved: true })} />)
+    expect(screen.getByText(/Its processes, terminals and conversation come back where they were/)).toBeDefined()
+    expect(screen.queryByText(/running processes are not/)).toBeNull()
+  })
+
   it('shows a wake in progress without offering another', () => {
     render(<SleepCallout run={record({ asleep_since: since, waking: true })} />)
     expect(screen.getByText('Waking…')).toBeDefined()
