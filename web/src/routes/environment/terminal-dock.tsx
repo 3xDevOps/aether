@@ -65,7 +65,9 @@ interface StructuralReplayState {
 interface TerminalDockProps {
   client?: Api
   openOnMount?: boolean
-  /** A line to type into the main tab after its first attach. */
+  /** Give an interactive setup command a shell that cannot be occupied by another app. */
+  newTabOnMount?: boolean
+  /** A line to type into the active tab after its first attach. */
   initialLine?: string
   /** Embedded intrinsic sections use the viewport cap; fixed flex layouts opt into 'parent'. */
   containment?: DockContainment
@@ -75,6 +77,7 @@ interface TerminalDockProps {
 export function TerminalDock({
   client = api,
   openOnMount = false,
+  newTabOnMount = false,
   initialLine,
   containment = 'viewport',
   header,
@@ -101,6 +104,7 @@ export function TerminalDock({
   const [resetting, setResetting] = useState(false)
   const [savedConfirmation, setSavedConfirmation] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
+  const [newTabUnavailable, setNewTabUnavailable] = useState(false)
   const [statusAttempt, setStatusAttempt] = useState(0)
   const [attachedTab, setAttachedTab] = useState<string | null>(null)
   const [replaying, setReplaying] = useState(false)
@@ -257,6 +261,7 @@ export function TerminalDock({
   // Once only: re-running on every `collapsed` change would undo the member's
   // own press of the collapse chevron on the same tick.
   const expandedOnMount = useRef(false)
+  const newTabOpened = useRef(false)
   useEffect(() => {
     if (!openOnMount || expandedOnMount.current) return
     expandedOnMount.current = true
@@ -265,18 +270,23 @@ export function TerminalDock({
 
   useEffect(() => {
     if (!openOnMount) return
-    if (!dock.tabs.includes('main')) {
+    if (newTabOnMount) {
+      if (dock.status === null && !dock.statusError) return
+      if (newTabOpened.current) return
+      newTabOpened.current = true
+      if (!openTab()) setNewTabUnavailable(true)
+    } else if (!dock.tabs.includes('main')) {
       openTab()
     } else if (dock.activeTab !== 'main') {
       selectTab('main')
     }
-  }, [dock.activeTab, dock.tabs, openOnMount, openTab, selectTab])
+  }, [dock.activeTab, dock.status, dock.statusError, dock.tabs, newTabOnMount, openOnMount, openTab, selectTab])
 
   useEffect(() => {
-    if (!openOnMount || !initialLine || hasEnvTerminalLineSent('main', initialLine)) return
-    sendLine('main', initialLine)
-    markEnvTerminalLineSent('main', initialLine)
-  }, [initialLine, openOnMount, sendLine])
+    if (!openOnMount || !initialLine || !activeTab || newTabUnavailable || hasEnvTerminalLineSent(activeTab, initialLine)) return
+    sendLine(activeTab, initialLine)
+    markEnvTerminalLineSent(activeTab, initialLine)
+  }, [activeTab, initialLine, newTabUnavailable, openOnMount, sendLine])
 
   useEffect(() => {
     if (!activeTab || !terminal) return
@@ -534,6 +544,9 @@ export function TerminalDock({
         persistentActions={inRow ? actions : undefined}
       >
         <div className="flex h-full min-h-0 flex-col overflow-hidden">
+          {newTabUnavailable && (
+            <FailureCallout error="Environment terminal has six tabs open. Close a tab, then reopen agent setup to start a fresh sign-in terminal." />
+          )}
           {hint && !header && (
             <p className="shrink-0 border-b border-seam bg-chrome px-3 py-1 text-ui-sm text-muted">{hint}</p>
           )}

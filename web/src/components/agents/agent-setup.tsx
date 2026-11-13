@@ -175,7 +175,7 @@ export function AgentSetup({
                   Log in once: <Code>{login.command}</Code> is typed into your environment terminal. {login.hint}
                 </p>
               )}
-              <TerminalDock client={client} openOnMount initialLine={canInstall ? login?.command : typedInstall} />
+              <TerminalDock client={client} openOnMount newTabOnMount initialLine={canInstall ? login?.command : typedInstall} />
             </>
           ) : (
             <>

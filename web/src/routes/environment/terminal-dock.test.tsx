@@ -803,6 +803,20 @@ describe('environment terminal dock', () => {
     expect(useStore.getState().envTerminal.collapsed).toBe(true)
   })
 
+  it('starts an interactive setup command in a fresh tab', async () => {
+    vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
+    useStore.setState({ envTerminal: initialEnvTerminal })
+    render(<TerminalDock openOnMount newTabOnMount initialLine="codex login --device-auth" />)
+
+    await waitFor(() => {
+      expect(useStore.getState().envTerminal.activeTab).toBe('t2')
+      expect(api.terminalSocket).toHaveBeenCalledWith('t2')
+    })
+    act(() => attach.handlers?.onAttached(true, standardGeometry))
+
+    await waitFor(() => expect(attach.send).toHaveBeenCalledWith('codex login --device-auth\n'))
+  })
+
   it('opens the dock when a collapsed strip is asked for a tab', async () => {
     vi.mocked(api.terminalStatus).mockResolvedValue({ running: true, tabs: ['main'] })
     useStore.setState({ envTerminal: initialEnvTerminal })

@@ -6079,8 +6079,9 @@ else `default_mode`.
 **Install and log in** calls `agent.install` with `enhanced` set when Enhanced
 is chosen and shows the answer: the log tail in an **Install output**
 disclosure, open when `error` is set, and **Install failed** with the error.
-Once the agent is installed it mounts an Environment dock with the agent's
-login command typed. A gateway without `agent.install` types the
+Once the agent is installed it mounts an Environment dock in a fresh terminal
+tab with the agent's login command typed, so an unfinished interactive login
+cannot consume another agent's command. A gateway without `agent.install` types the
 install command there instead, and one without a terminal socket prints the
 `aether terminal` commands. **Check** re-reads `agent.list` and lists
 **Installed**, **Enhanced installed** and **Login found** or **No login
