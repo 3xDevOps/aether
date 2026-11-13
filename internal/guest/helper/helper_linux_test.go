@@ -165,8 +165,10 @@ func TestTerminalProcess(t *testing.T) {
 	if _, err := a.Stdin().Write([]byte("\n")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, a.Stdout(), "30 100")
-	waitFor(t, a.Stdout(), "term xterm")
+	// One read can carry both lines, and waitFor drops what follows its match.
+	if seen := waitFor(t, a.Stdout(), "term xterm"); !strings.Contains(seen[:strings.Index(seen, "term xterm")], "30 100") {
+		t.Fatalf("no resized size before the term line: %q", seen)
+	}
 	if err := p.CloseStdin(ctx); err == nil {
 		t.Fatal("a terminal process must have no input to close")
 	}
@@ -175,8 +177,8 @@ func TestTerminalProcess(t *testing.T) {
 	}
 }
 
-// waitFor reads r until it has printed want.
-func waitFor(t *testing.T, r io.Reader, want string) {
+// waitFor reads r until it has printed want and returns what it read.
+func waitFor(t *testing.T, r io.Reader, want string) string {
 	t.Helper()
 	var seen bytes.Buffer
 	buf := make([]byte, 4096)
@@ -187,6 +189,7 @@ func waitFor(t *testing.T, r io.Reader, want string) {
 			t.Fatalf("waiting for %q: read %q, then %v", want, seen.String(), err)
 		}
 	}
+	return seen.String()
 }
 
 // A server restart is a new client: it finds the process by ID and reads
