@@ -8,7 +8,7 @@ import { Callout } from '@/components/ui/callout'
 import { Skeleton } from '@/components/ui/skeleton'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
-import { useRefuseStrayFileDrops } from '@/lib/file-drag'
+import { useFileDrop, useRefuseStrayFileDrops } from '@/lib/file-drag'
 import { useDelayed } from '@/lib/hooks'
 import { memberName } from '@/lib/member-name'
 import { backgroundReason, liveStateOf, runLabel, stateTone } from '@/lib/status'
@@ -19,6 +19,7 @@ import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { ChangesBar } from '@/routes/run/changes-bar'
 import { CompletionPrompt } from '@/routes/run/completion-prompt'
 import { Composer } from '@/routes/run/composer'
+import { DropOverlay } from '@/routes/run/composer-dropzone'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
 import { SessionFailureCallout } from '@/routes/run/session-failure'
@@ -407,9 +408,22 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
       className="max-md:max-h-[40dvh]"
     />
   )
+  const [dropStatus, setDropStatus] = useState<{ limit: number; blocked?: string }>({ limit: 0, blocked: 'Files cannot be attached now' })
+  const droppedUpload = useRef<(files: File[]) => Promise<void>>(async () => {})
+  const reportDropStatus = useCallback((status: { limit: number; blocked?: string; upload?: (files: File[]) => Promise<void> }) => {
+    if (status.upload) droppedUpload.current = status.upload
+    setDropStatus((current) => current.limit === status.limit && current.blocked === status.blocked
+      ? current
+      : { limit: status.limit, blocked: status.blocked })
+  }, [])
+  const drop = useFileDrop({
+    limit: dropStatus.limit,
+    onFiles: (files) => void droppedUpload.current(files),
+  })
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col" {...drop.handlers}>
+      {drop.count !== null && <DropOverlay count={drop.count} refused={drop.refused} blocked={dropStatus.blocked} limit={dropStatus.limit} />}
       {session?.truncatedBefore && (
         <div className={cn(sessionColumn, 'shrink-0 pt-2')}>
           <Callout tone="needs-you" role="status">
@@ -511,7 +525,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
       {!notesWide && <NotesStrip run={run} room={room} className={cn(sessionColumn, 'pb-2')} />}
       <ChangesBar run={run} />
       <CompletionPrompt run={run} className={cn(sessionColumn, 'pb-2')} />
-      <Composer run={run} agent={agent} room={room} textarea={textarea} autoFocus={focusComposer} onFocusChange={onComposing} dock={dock || undefined} onEscape={() => viewport.current?.focus()} />
+      <Composer run={run} agent={agent} room={room} textarea={textarea} autoFocus={focusComposer} onFocusChange={onComposing} dock={dock || undefined} onEscape={() => viewport.current?.focus()} onDropStatus={reportDropStatus} />
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</span>
     </div>
   )

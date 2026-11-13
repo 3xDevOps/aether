@@ -3525,11 +3525,14 @@ the same rows; closing it with files attached returns focus to the field unless 
 coarse pointer skips the popover: **+** opens the chooser directly and the
 chips carry the progress.
 
-Dragging files over the box covers it with a dashed veil (accent only while the drop would be accepted) reading "Drop
-to attach n files"; it ignores text and link drags, takes no pointer events so
-the field keeps its caret, and reads "At most n files fit", "Uploading…" or
-"At most 8 files" when the drop would be refused (the cursor then shows no
-drop). `useFileDrop` in `web/src/lib/file-drag.ts` counts the files in the drag (not the link or markup it carries) and the enter and leave
+Dragging files over the Chat pane attaches them; the pane covers with a dashed
+veil reading "Drop to attach n files". The pane is the conversation and
+composer area, below the session header and beside neither the sidebar nor
+Details. The composer also keeps its own drop target. Both share the composer's
+current capacity and disabled state, ignore text and link drags, and take no
+pointer events. A refused drop shows the current limit or reason (the cursor
+then shows no drop). `useFileDrop` in
+`web/src/lib/file-drag.ts` counts the files in the drag (not the link or markup it carries) and the enter and leave
 events so a child never ends the drag early, and stops them so a drag over the
 popover's zone does not also drive the box around it. Folders are not walked:
 a dropped folder fails as a file with the browser's own read error. The Session
