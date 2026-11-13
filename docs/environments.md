@@ -368,9 +368,9 @@ What changes:
 - Each VM has its own address in `10.200.0.0/16` and a tap device
   `aethervm<n>`. It reaches the server host, and the internet only through
   the host's default-route interfaces and the DNS servers it was given. It
-  reaches no other VM, no Docker container and no cloud metadata service
-  (`169.254.169.254`), nothing over IPv6, and cannot send from another
-  address. Nothing outside starts a connection into it.
+  reaches no other VM, no Docker container, neither cloud metadata address
+  (`169.254.169.254`, `100.100.100.200`) and nothing over IPv6, and cannot
+  send from another address. Nothing outside starts a connection into it.
 - A session with [egress control](#egress-control) gets the tap
   `aethervme<n>`, no DNS servers, and reaches only the egress proxy at
   `10.200.0.1:3128`. That address is on the dummy link `aether-vmproxy`; the
@@ -381,8 +381,9 @@ What changes:
   and VM boot; `sudo nft list table inet aether_vm` shows them live. One
   `iptables` rule at the top of `FORWARD` lets what the table allows, marked
   `0x1000000`, past a `DROP` policy such as Docker's, which drops all
-  traffic VMs send through the host while the table is gone. A change of
-  default route applies when the next VM boots.
+  traffic VMs send through the host while the table is gone; what they send
+  to the host itself is then unfiltered. A change of default route applies
+  when the next VM boots.
 - Not yet supported, refused at launch with an error naming the work item:
   the development browser beside a session.
 - Close or kill every session that runs in a VM before you set

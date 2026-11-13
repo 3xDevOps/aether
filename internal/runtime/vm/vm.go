@@ -170,11 +170,10 @@ func (r *Runtime) EgressGateway(ctx context.Context, _ bool) (netip.Addr, error)
 	return proxyAddr, nil
 }
 
-func (r *Runtime) EgressCreationKey(ctx context.Context, ip netip.Addr) (string, error) {
-	if vmSubnet.Contains(ip) {
-		return r.vms.egressKey(ip)
-	}
-	return r.Docker.EgressCreationKey(ctx, ip)
+// EgressCreationKey answers only for VMs: Docker's egress containers have
+// no route to the VMs' proxy address.
+func (r *Runtime) EgressCreationKey(_ context.Context, ip netip.Addr) (string, error) {
+	return r.vms.egressKey(ip)
 }
 
 func (r *Runtime) Commit(ctx context.Context, id runtime.ID, tag string, labels map[string]string) error {

@@ -151,7 +151,7 @@ table inet {{.Table}} {
 		type filter hook prerouting priority raw; policy accept;
 		iifname "{{.Taps}}*" meta nfproto ipv6 drop
 		iifname "{{.Taps}}*" fib saddr . iif oif missing drop
-		iifname "{{.Taps}}*" ip daddr 169.254.169.254 drop
+		iifname "{{.Taps}}*" ip daddr { 169.254.169.254, 100.100.100.200 } drop
 	}
 	chain input {
 		type filter hook input priority filter; policy accept;
@@ -229,8 +229,8 @@ func (e *engine) ensureNetwork(ctx context.Context) error {
 	// A FORWARD policy of DROP, as Docker and ufw set, would drop what the
 	// table lets through; without the table it drops all VM traffic.
 	rule := []string{"FORWARD", "-m", "mark", "--mark", fmt.Sprintf("%#x/%#x", allowedMark, allowedMark), "-j", "ACCEPT"}
-	if e.run(ctx, "iptables", append([]string{"-t", "filter", "-C"}, rule...)...) != nil {
-		if err = e.run(ctx, "iptables", append([]string{"-t", "filter", "-I"}, rule...)...); err != nil {
+	if e.run(ctx, "iptables", append([]string{"-w", "-t", "filter", "-C"}, rule...)...) != nil {
+		if err = e.run(ctx, "iptables", append([]string{"-w", "-t", "filter", "-I"}, rule...)...); err != nil {
 			return err
 		}
 	}

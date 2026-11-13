@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -104,7 +105,7 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 			linked = true
 		case strings.Contains(call, " -C FORWARD ") && !inserted[strings.Replace(call, " -C ", " -I ", 1)]:
 			return errors.New("Bad rule")
-		case strings.HasPrefix(call, "iptables -t filter -I FORWARD -m mark --mark 0x1000000/0x1000000 -j ACCEPT"):
+		case strings.HasPrefix(call, "iptables -w -t filter -I FORWARD -m mark --mark 0x1000000/0x1000000 -j ACCEPT"):
 			inserted[call] = true
 		}
 		return nil
@@ -122,11 +123,28 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 		}
 		return n
 	}
-	if count("ip link add aether-vmproxy") != 1 || count("iptables -t filter -I FORWARD") != 1 || count("nft -f "+filepath.Join(e.root, firewallFile)) != 2 {
+	if count("ip link add aether-vmproxy") != 1 || count("iptables -w -t filter -I FORWARD") != 1 || count("nft -f "+filepath.Join(e.root, firewallFile)) != 2 {
 		t.Errorf("calls:\n%s", strings.Join(calls, "\n"))
 	}
 	if count("ip addr replace 10.200.0.1/32 dev aether-vmproxy") != 2 {
 		t.Errorf("the proxy address is not kept on its link:\n%s", strings.Join(calls, "\n"))
+	}
+	rules, err := os.ReadFile(filepath.Join(e.root, firewallFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`iifname "aethervm*" meta nfproto ipv6 drop`,
+		`iifname "aethervm*" fib saddr . iif oif missing drop`,
+		`iifname "aethervm*" ip daddr { 169.254.169.254, 100.100.100.200 } drop`,
+		`iifname "aethervme*" ip daddr 10.200.0.1 tcp dport 3128 accept`,
+		`iifname "aethervme*" reject with icmpx admin-prohibited`,
+		`oifname "aethervm*" ct state established,related meta mark set meta mark | 0x1000000 accept`,
+		`oifname "aethervm*" drop`,
+	} {
+		if !strings.Contains(string(rules), want) {
+			t.Errorf("the firewall lacks %q:\n%s", want, rules)
+		}
 	}
 }
 

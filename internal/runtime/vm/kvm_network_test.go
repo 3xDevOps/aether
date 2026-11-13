@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -58,19 +59,23 @@ func TestKVMNetProbe(t *testing.T) {
 		status, _ := bufio.NewReader(c).ReadString('\n')
 		fmt.Println("status:", strings.TrimSpace(status))
 	case "udp":
-		// IP_FREEBIND sends from an address the guest does not hold.
+		// IP_TRANSPARENT lets root send from an address the guest does not hold.
 		d := net.Dialer{LocalAddr: &net.UDPAddr{IP: net.ParseIP(args[1])}, Control: func(_, _ string, rc syscall.RawConn) error {
 			var optErr error
-			if err := rc.Control(func(fd uintptr) { optErr = unix.SetsockoptInt(int(fd), unix.SOL_IP, unix.IP_FREEBIND, 1) }); err != nil {
+			if err := rc.Control(func(fd uintptr) { optErr = unix.SetsockoptInt(int(fd), unix.SOL_IP, unix.IP_TRANSPARENT, 1) }); err != nil {
 				return err
 			}
 			return optErr
 		}}
 		c, err := d.Dial("udp", args[2])
-		if err != nil {
-			t.Fatal(err)
+		if err == nil {
+			_, err = c.Write([]byte(args[1]))
 		}
-		_, _ = c.Write([]byte(args[1]))
+		if err != nil {
+			fmt.Println("error:", err)
+			return
+		}
+		fmt.Println("sent: from", args[1])
 	}
 }
 
@@ -132,7 +137,7 @@ func probeVM(t *testing.T, e *engine, key string, egressOnly bool) string {
 
 func probe(t *testing.T, e *engine, key, args string) string {
 	t.Helper()
-	out, _ := vmRun(t, e, key, "AETHER_VM_TEST_PROBE='"+args+"' "+probePath+" -test.run '^TestKVMNetProbe$' | grep -E '^(connected|error|status):'")
+	out, _ := vmRun(t, e, key, "AETHER_VM_TEST_PROBE='"+args+"' "+probePath+" -test.run '^TestKVMNetProbe$' | grep -E '^(connected|error|status|sent):'")
 	return strings.TrimSpace(out)
 }
 
@@ -165,6 +170,13 @@ func docker(t *testing.T, args ...string) string {
 // server in either; and a new engine rebuilds the firewall.
 func TestKVMNetwork(t *testing.T) {
 	e := kvmEngine(t)
+	if links, err := net.Interfaces(); err == nil {
+		for _, l := range links {
+			if strings.HasPrefix(l.Name, tapPrefix) {
+				t.Fatalf("VM tap %s is up: this test replaces the host's VM firewall, so it needs a host where no other VM runs", l.Name)
+			}
+		}
+	}
 	t.Cleanup(func() {
 		_ = exec.Command("nft", "delete", "table", "inet", firewallTable).Run()
 		_ = exec.Command("ip", "link", "del", proxyLink).Run()
@@ -221,14 +233,20 @@ func TestKVMNetwork(t *testing.T) {
 		}
 	}
 	expect("the host reaches the Docker container", dial(containerIP+":8080"), true)
-	t.Logf("the host reaches the metadata service: %s", dial("169.254.169.254:80"))
+	targets := map[string]string{"another VM": b + ":8080", "a VM with egress control": c + ":8080", "a Docker container": containerIP + ":8080"}
+	egressTargets := map[string]string{"the internet": "1.1.1.1:443", "another VM": a + ":8080", "the host": hostPort}
+	for _, dns := range hostDNS() {
+		egressTargets["the DNS server "+dns.String()] = dns.String() + ":53"
+	}
+	if got := dial("169.254.169.254:80"); strings.HasPrefix(got, "connected:") {
+		targets["the metadata service"], egressTargets["the metadata service"] = "169.254.169.254:80", "169.254.169.254:80"
+	} else {
+		t.Logf("no metadata service answers this host (%s): its checks are left out", got)
+	}
 
 	expect("an open VM reaches the internet", probe(t, e, "run-vmnet-a", "dial example.com:80"), true)
 	expect("an open VM reaches the host", probe(t, e, "run-vmnet-a", "dial "+hostPort), true)
-	for what, target := range map[string]string{
-		"another VM": b + ":8080", "a VM with egress control": c + ":8080", "a Docker container": containerIP + ":8080",
-		"the metadata service": "169.254.169.254:80",
-	} {
+	for what, target := range targets {
 		expect("an open VM reaches "+what, probe(t, e, "run-vmnet-a", "dial "+target), false)
 	}
 	rec, err := e.load("run-vmnet-a")
@@ -252,13 +270,8 @@ func TestKVMNetwork(t *testing.T) {
 	}
 
 	for _, key := range []string{"run-vmnet-c", "run-vmnet-d"} {
-		for what, target := range map[string]string{
-			"the internet": "1.1.1.1:443", "another VM": a + ":8080", "the host": hostPort, "the metadata service": "169.254.169.254:80",
-		} {
+		for what, target := range egressTargets {
 			expect(key+" with egress control reaches "+what, probe(t, e, key, "dial "+target), false)
-		}
-		if out, _ := vmRun(t, e, key, "getent hosts example.com || echo unresolved"); !strings.Contains(out, "unresolved") {
-			t.Errorf("%s with egress control resolved a name: %s", key, out)
 		}
 	}
 	if got = probe(t, e, "run-vmnet-c", "connect "+proxyAddr.String()+":3128 example.com:443"); !strings.Contains(got, " 200 ") {
@@ -270,16 +283,29 @@ func TestKVMNetwork(t *testing.T) {
 	}
 	t.Logf("run-vmnet-d through the proxy: %s", got)
 
-	_ = probe(t, e, "run-vmnet-a", "udp "+c+" "+proxyAddr.String()+":18081")
-	_ = probe(t, e, "run-vmnet-a", "udp "+a+" "+proxyAddr.String()+":18081")
-	_ = hostUDP.SetReadDeadline(time.Now().Add(3 * time.Second))
-	buf := make([]byte, 64)
-	if n, from, readErr := hostUDP.ReadFrom(buf); readErr != nil {
-		t.Errorf("the host got no datagram from run-vmnet-a's own address: %v", readErr)
-	} else if !strings.HasPrefix(from.String(), a+":") {
-		t.Errorf("run-vmnet-a sent as %s and the host took it from %s", buf[:n], from)
+	// sources sends a datagram as each address from run-vmnet-a and returns
+	// the sources the host took them from.
+	sources := func(as ...string) []string {
+		for _, from := range as {
+			if sent := probe(t, e, "run-vmnet-a", "udp "+from+" "+proxyAddr.String()+":18081"); !strings.HasPrefix(sent, "sent:") {
+				t.Fatalf("run-vmnet-a cannot send as %s: %q", from, sent)
+			}
+		}
+		var took []string
+		buf := make([]byte, 64)
+		_ = hostUDP.SetReadDeadline(time.Now().Add(2 * time.Second))
+		for {
+			_, from, readErr := hostUDP.ReadFrom(buf)
+			if readErr != nil {
+				return took
+			}
+			took = append(took, from.(*net.UDPAddr).IP.String())
+		}
+	}
+	if took := sources(c, a); !slices.Equal(took, []string{a}) {
+		t.Errorf("run-vmnet-a sent as %s and as itself; the host took datagrams from %v", c, took)
 	} else {
-		t.Logf("the host took the datagram run-vmnet-a sent as itself, from %s, and not the one it sent as %s", from, c)
+		t.Logf("the host took only the datagram run-vmnet-a sent as itself, not the one it sent as %s", c)
 	}
 
 	got = docker(t, "run", "--rm", "-v", self+":"+probePath+":ro", "-e", "AETHER_VM_TEST_PROBE=dial "+b+":8080",
@@ -305,6 +331,19 @@ func TestKVMNetwork(t *testing.T) {
 		expect("without the firewall an open VM reaches the internet", probe(t, e, "run-vmnet-a", "dial 1.1.1.1:443"), false)
 	} else {
 		t.Log("FORWARD does not drop by default or another rule accepts VM traffic: fail-closed not checked")
+	}
+	// The kernel's own source check, the larger of all and the tap's, is
+	// loose on Ubuntu; only a strict one would drop the spoofed datagram
+	// without the table.
+	check := "0"
+	for _, conf := range []string{"all", tap.Name} {
+		value, _ := os.ReadFile("/proc/sys/net/ipv4/conf/" + conf + "/rp_filter")
+		check = max(check, strings.TrimSpace(string(value)))
+	}
+	if check != "1" {
+		if took := sources(c); !slices.Equal(took, []string{c}) {
+			t.Errorf("without the firewall the host took datagrams sent as %s from %v, so the spoof check above proves nothing", c, took)
+		}
 	}
 	restarted := &Runtime{vms: kvmEngine(t)}
 	for range 2 {
