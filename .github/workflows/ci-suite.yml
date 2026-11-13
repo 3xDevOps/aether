@@ -245,8 +245,8 @@ jobs:
   # hosted x86-64 runner, which exposes /dev/kvm through nested
   # virtualization. The merge queue runs them only when the change can affect
   # them (ci-classify-areas.sh vm); the nightly run always does. The guest
-  # kernel takes six minutes to build, so it builds only when its inputs
-  # change: the cache is keyed by their hash and written on main. The static
+  # kernel takes up to six minutes to build, so it builds only when its
+  # inputs change: the cache is keyed by their hash and written on main. The static
   # test binaries reuse most of the native compiler cache, so this job saves
   # none of its own.
   kvm:

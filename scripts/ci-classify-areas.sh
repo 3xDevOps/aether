@@ -13,12 +13,12 @@
 # itself, which names the keys; any other path is outside it. vm covers
 # what make test-kvm builds, boots or runs: the VM packages, the guest
 # kernel, the terminal code the helper runs in the guest, the runtime
-# helpers the VM engine shares with Docker, the
-# dependencies and the VM files other packages name vm*.go or *_vm.go; any
-# other path is outside it, so the nightly run alone catches a change to
-# the job or its make targets. false only when at least one path is present and every path is in
-# the unrelated set for the mode. Empty input prints true. Blank lines are
-# ignored. For web and go, a path in neither set prints true.
+# helpers the VM engine shares with Docker, the dependencies and the VM
+# files other packages name vm*.go or *_vm.go; any other path is outside
+# it, so the nightly run alone catches a change to the job or its make
+# targets. false only when at least one path is present and every path is
+# in the unrelated set for the mode. Empty input prints true. Blank lines
+# are ignored. For web and go, a path in neither set prints true.
 set -eu
 
 if [ "$#" -ne 1 ]; then

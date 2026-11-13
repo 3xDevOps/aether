@@ -949,20 +949,20 @@ A pull request that changes only `docs/**` or root-level `*.md` files runs
 
 VM code outside the VM packages goes in files named for the `vm` mode, so the
 merge queue still runs `kvm` for it. A change to the `kvm` job or the make
-targets it runs is left to the nightly run; `make lint` builds the VM tests
-on every pull request. The merge queue and a push classify the
-files GitHub's compare lists for the change; past its 300-file limit, or when
-the lookup fails, `kvm` runs. The guest kernel takes six minutes to build, so
-`kvm` restores it from a cache keyed by a hash of `images/kernel/` and the
-`make kernel` recipe, and builds it only on a miss; runs on `main` save it.
+targets it runs is left to the nightly run; `make lint` builds the VM tests on
+every pull request. The merge queue and a push classify the files GitHub's
+compare lists for the change; past its 300-file limit, or when the lookup
+fails, `kvm` runs. The guest kernel takes up to six minutes to build, so `kvm`
+restores it from a cache keyed by a hash of `images/kernel/` and the `make
+kernel` recipe, and builds it only on a miss; runs on `main` save it.
 
-The classifier runs from the pull request's (or merge group's) base
-revision, so a pull request cannot change its own classification, and a renamed file counts by its old
-path as well as its new one. A failed classification runs both. A skipped job
-reports as skipped, not failed. A newer push cancels a pull request's run
-(`cancel-in-progress` for `pull_request` only); `main` pushes and merge queue
-runs, whose concurrency groups are unique per commit, always run to
-completion.
+The classifier runs from the pull request's (or merge group's) base revision,
+so a pull request cannot change its own classification, and a renamed file
+counts by its old path as well as its new one. A failed classification runs
+both. A skipped job reports as skipped, not failed. A newer push cancels a
+pull request's run (`cancel-in-progress` for `pull_request` only); `main`
+pushes and merge queue runs, whose concurrency groups are unique per commit,
+always run to completion.
 
 To run the edge image jobs on a pull request branch, with write access to the repository:
 
