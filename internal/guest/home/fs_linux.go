@@ -381,6 +381,6 @@ func (f *file) Flush(context.Context) syscall.Errno { return 0 }
 
 func (f *file) Release(ctx context.Context) syscall.Errno {
 	req := &guestpb.HomeHandleRequest{Handle: f.handle}
-	_, _ = call(context.WithoutCancel(ctx), func(ctx context.Context) (*guestpb.HomeErrnoReply, error) { return f.fsys.api.Release(ctx, req) })
-	return 0
+	_, errno := call(context.WithoutCancel(ctx), func(ctx context.Context) (*guestpb.HomeErrnoReply, error) { return f.fsys.api.Release(ctx, req) })
+	return errno
 }
