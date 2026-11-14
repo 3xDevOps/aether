@@ -206,3 +206,33 @@ func TestClosedSessionsBrowserIsRemovedWithItsVMPausedAgain(t *testing.T) {
 		t.Errorf("helper calls = %v", got)
 	}
 }
+
+// A frozen session's VM keeps running for its git service: its browser
+// goes without its vCPUs being resumed or paused.
+func TestFrozenSessionsBrowserIsRemovedWithoutHaltingItsVM(t *testing.T) {
+	h := newHarness(t)
+	h.browserSession()
+	r := &Runtime{vms: h.engine}
+	id, err := r.CreateBrowser(t.Context(), browserSpec(t, "run-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := h.engine.load("run-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Frozen = true
+	if err = h.engine.store(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Destroy(t.Context(), id); err != nil {
+		t.Fatalf("remove the browser of a frozen session = %v", err)
+	}
+	vmm := h.units.vmm("run-a")
+	if calls := vmm.called(); vmm.state != "Running" || slices.Contains(calls, "vm.resume") || slices.Contains(calls, "vm.pause") {
+		t.Errorf("the VM is %s after %v; want it left running", vmm.state, calls)
+	}
+}

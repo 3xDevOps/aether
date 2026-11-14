@@ -214,7 +214,7 @@ func (e *engine) stopCompanion(ctx context.Context, key string) (err error) {
 	if err != nil {
 		return err
 	}
-	if e.paused(ctx, key) {
+	if e.halted(ctx, key) {
 		api := newCHAPI(e.path(key, apiSocket))
 		if err = api.resume(ctx); err != nil {
 			return fmt.Errorf("vm runtime: resume VM %s to remove its browser: %w", key, err)
