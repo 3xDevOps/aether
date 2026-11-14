@@ -382,9 +382,10 @@ What changes:
   the host's default-route interfaces and the DNS servers it was given. It
   reaches no other VM, no Docker container, nothing in the link-local range
   `169.254.0.0/16` (which holds the cloud metadata, credential and resolver
-  endpoints), not the `100.100.100.200` metadata address, and nothing over
-  IPv6, and cannot send from another address. A DNS server it was given stays
-  reachable on port 53 even when it is a link-local address. Nothing outside
+  endpoints), not the `100.100.100.200` or `168.63.129.16` metadata
+  addresses, and nothing over IPv6, and cannot send from another address. A
+  DNS server it was given stays reachable on port 53 even when it is a
+  link-local address. Nothing outside
   starts a connection into it.
 - A session with [egress control](#egress-control) gets the tap
   `aethervme<n>`, no DNS servers, and reaches only the egress proxy at

@@ -137,7 +137,7 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 		`iifname "aethervm*" meta nfproto ipv6 drop`,
 		`iifname "aethervm*" fib saddr . iif oif missing drop`,
 		`meta l4proto { tcp, udp } th dport 53 accept`,
-		`iifname "aethervm*" ip daddr { 169.254.0.0/16, 100.100.100.200 } drop`,
+		`iifname "aethervm*" ip daddr { 169.254.0.0/16, 100.100.100.200, 168.63.129.16 } drop`,
 		`iifname "aethervme*" ct state established,related meta mark set meta mark | 0x1000000 accept`,
 		`iifname "aethervme*" ip daddr 10.200.0.1 tcp dport 3128 meta mark set meta mark | 0x1000000 accept`,
 		`iifname "aethervme*" reject with icmpx admin-prohibited`,
@@ -150,7 +150,7 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 	}
 	// The DNS exception must come before the link-local drop; after it, a
 	// resolver inside the blocked ranges would be cut off.
-	if accept, drop := strings.Index(string(rules), "th dport 53 accept"), strings.Index(string(rules), "169.254.0.0/16, 100.100.100.200 } drop"); accept < 0 || drop < 0 || accept > drop {
+	if accept, drop := strings.Index(string(rules), "th dport 53 accept"), strings.Index(string(rules), "169.254.0.0/16, 100.100.100.200, 168.63.129.16 } drop"); accept < 0 || drop < 0 || accept > drop {
 		t.Errorf("the DNS exception must precede the link-local drop (accept=%d, drop=%d):\n%s", accept, drop, rules)
 	}
 }

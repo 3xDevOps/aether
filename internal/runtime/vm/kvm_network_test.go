@@ -271,6 +271,12 @@ func TestKVMNetwork(t *testing.T) {
 	for what, target := range targets {
 		expect("an open VM reaches "+what, probe(t, e, "run-vmnet-a", "dial "+target), false)
 	}
+	// The DNS exception must keep every configured resolver reachable on 53,
+	// including one at a link-local address the drop above would otherwise
+	// catch (for example 169.254.169.254 on GCP, 168.63.129.16 on Azure).
+	for _, dns := range hostDNS() {
+		expect("an open VM reaches its DNS resolver "+dns.String(), probe(t, e, "run-vmnet-a", "dial "+dns.String()+":53"), true)
+	}
 	rec, err := e.load("run-vmnet-a")
 	if err != nil {
 		t.Fatal(err)
