@@ -148,6 +148,11 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 			t.Errorf("the firewall lacks %q:\n%s", want, rules)
 		}
 	}
+	// The DNS exception must come before the link-local drop; after it, a
+	// resolver inside the blocked ranges would be cut off.
+	if accept, drop := strings.Index(string(rules), "th dport 53 accept"), strings.Index(string(rules), "169.254.0.0/16, 100.64.0.0/10 } drop"); accept < 0 || drop < 0 || accept > drop {
+		t.Errorf("the DNS exception must precede the link-local drop (accept=%d, drop=%d):\n%s", accept, drop, rules)
+	}
 }
 
 func TestRouteUplinksAreTheDefaultRoutes(t *testing.T) {
