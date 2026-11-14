@@ -165,8 +165,13 @@ func bindShare(target string, s share) error {
 // startVirtiofsd leaves virtiofsd as a child that outlives the exec into
 // Cloud Hypervisor; the unit stops it with the VM.
 func startVirtiofsd(socket, root string) error {
+	// --modcaps drops virtiofsd's CAP_MKNOD and CAP_SETFCAP so a guest cannot
+	// create a host device node or a file-capability xattr through the share.
+	// It cannot strip set-user-ID bits; a nosuid data dir covers those, as
+	// under Docker (docs/security.md).
 	cmd := exec.Command(virtiofsd, "--socket-path="+socket, "--shared-dir="+root,
-		"--announce-submounts", "--xattr", "--inode-file-handles=prefer", "--sandbox=namespace")
+		"--announce-submounts", "--xattr", "--modcaps=-mknod:-setfcap",
+		"--inode-file-handles=prefer", "--sandbox=namespace")
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("vm monitor: start virtiofsd: %w", err)

@@ -191,6 +191,7 @@ func serve() error {
 	}
 	record(guest.RootStep, switchRoot())
 	record("mount system filesystems", mountSystem())
+	record("harden the kernel", harden())
 	cmdline, err := os.ReadFile("/proc/cmdline")
 	record("read the kernel command line", err)
 	cfg, err := guest.ParseCmdline(string(cmdline))

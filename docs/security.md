@@ -58,7 +58,11 @@ with its own kernel instead
 ([Sessions in virtual machines](environments.md#sessions-in-virtual-machines)
 has its network rules). Cloud Hypervisor and the host services a VM uses,
 such as its [file service](vm-guest.md#the-file-service) and `virtiofsd`, run
-as root on the host, so a flaw in any of them reaches the host. The bullets below on Docker, Sysbox and networks
+as root on the host, so a flaw in any of them reaches the host. The guest
+kernel is [hardened](vm-guest.md#kernel-hardening) to keep an unprivileged
+agent from reaching root inside the VM without the sudo gate, and the one
+remaining `virtiofsd` share (a checkout not yet on a VM disk) cannot carry a
+device node or a file-capability binary to the host. The bullets below on Docker, Sysbox and networks
 describe Docker mode; what a session is given, after them, applies to both.
 
 - Agents run as uid `1000`, or as an image's own non-root user. What they may
@@ -1088,8 +1092,24 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 ## Limits
 
 - Containers share the host kernel. A kernel or Docker escape reaches the
-  host. A session VM has its own kernel; a flaw in Cloud Hypervisor or a host
-  service the VM uses reaches the host.
+  host. A session VM has its own kernel, [hardened](vm-guest.md#kernel-hardening)
+  against an unprivileged agent; a flaw in Cloud Hypervisor or a host service
+  the VM uses reaches the host.
+- A session VM leaves an unprivileged agent two in-VM escalation surfaces by
+  design. Unprivileged user namespaces stay on because the in-VM development
+  browser's Chromium sandbox needs them; through one the agent reaches
+  `nf_tables`. The agents themselves do not need them - they run as uid 1000
+  with the VM as their boundary, and nested Docker runs its daemon as root -
+  so a seccomp filter on the agent process tree could deny the agent
+  `CLONE_NEWUSER` while the browser keeps it, a tightening left to the owner.
+  `perf_event_open` likewise stays available to the unprivileged. Both are
+  bounded by the VM.
+- Root in a session VM (a Root-tier session, a Default session with Docker, or
+  a Default session whose `sudo` was approved) can move a process out of the
+  `/session` cgroup and so evade the close-time freeze, the session process
+  limit and the kill when the main process exits. This is accepted: it is
+  already root in its own throwaway VM, and the VM, not the cgroup, is what
+  keeps it off the host and out of other sessions.
 - Outbound traffic is limited only for sessions of a workspace with egress
   control on. Other sessions and environment terminals
   reach the internet, your network and ports the server host listens on.
