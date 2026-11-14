@@ -26,7 +26,8 @@ test('an idle session falls asleep, shows since when, and Wake brings it back', 
   await expect(answer).toBeVisible({ timeout: 60_000 })
 
   await expect.poll(async () => (await read()).asleep_since, { timeout: 60_000 }).toBeTruthy()
-  const callout = page.locator('[data-slot="callout"]').filter({ hasText: 'Asleep since' })
+  // The Terminal view stays mounted, hidden, with its own copy of the callout.
+  const callout = page.locator('[data-slot="callout"]').filter({ hasText: 'Asleep since', visible: true })
   await expect(callout).toBeVisible()
   await expect(callout.getByRole('button', { name: 'Wake' })).toBeEnabled()
   for (const [name, width] of [['desktop', 1440], ['430', 430], ['360', 360]] as const) {
@@ -46,7 +47,7 @@ test('an idle session falls asleep, shows since when, and Wake brings it back', 
   // Idle again, it falls asleep again, and Wake brings it back.
   await expect.poll(async () => (await read()).asleep_since, { timeout: 60_000 }).toBeTruthy()
   await callout.getByRole('button', { name: 'Wake' }).click()
-  await expect(page.locator('[data-slot="callout"]').filter({ hasText: 'Waking…' })).toBeVisible()
+  await expect(page.locator('[data-slot="callout"]').filter({ hasText: 'Waking…', visible: true })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('waking-desktop.png'), animations: 'disabled' })
   await expect.poll(async () => (await read()).asleep_since === undefined || undefined, { timeout: 60_000 }).toBe(true)
 })
