@@ -136,7 +136,8 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 	for _, want := range []string{
 		`iifname "aethervm*" meta nfproto ipv6 drop`,
 		`iifname "aethervm*" fib saddr . iif oif missing drop`,
-		`iifname "aethervm*" ip daddr { 169.254.169.254, 100.100.100.200 } drop`,
+		`meta l4proto { tcp, udp } th dport 53 accept`,
+		`iifname "aethervm*" ip daddr { 169.254.0.0/16, 100.64.0.0/10 } drop`,
 		`iifname "aethervme*" ct state established,related meta mark set meta mark | 0x1000000 accept`,
 		`iifname "aethervme*" ip daddr 10.200.0.1 tcp dport 3128 meta mark set meta mark | 0x1000000 accept`,
 		`iifname "aethervme*" reject with icmpx admin-prohibited`,

@@ -253,6 +253,18 @@ func TestKVMNetwork(t *testing.T) {
 	} else {
 		t.Logf("no metadata service answers this host (%s): its checks are left out", got)
 	}
+	// 169.254.169.253 is the AWS VPC DNS resolver: a link-local address other
+	// than the metadata IPs that an open VM must not reach, unless it is the
+	// host's own configured resolver (then it stays reachable on port 53).
+	resolverIsDNS := false
+	for _, dns := range hostDNS() {
+		resolverIsDNS = resolverIsDNS || dns.String() == "169.254.169.253"
+	}
+	if got := dial("169.254.169.253:53"); strings.HasPrefix(got, "connected:") && !resolverIsDNS {
+		targets["the VPC DNS resolver"], egressTargets["the VPC DNS resolver"] = "169.254.169.253:53", "169.254.169.253:53"
+	} else {
+		t.Logf("169.254.169.253 is not a reachable non-resolver link-local target here: %s", got)
+	}
 
 	expect("an open VM reaches the internet", probe(t, e, "run-vmnet-a", "dial example.com:80"), true)
 	expect("an open VM reaches the host", probe(t, e, "run-vmnet-a", "dial "+hostPort), true)

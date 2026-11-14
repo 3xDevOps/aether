@@ -144,6 +144,14 @@ func (e *engine) egressKey(ip netip.Addr) (string, error) {
 // hold whatever other tables accept; an accept here only passes the packet
 // on to them. Its input and forward chains run just before iptables', whose
 // INPUT and FORWARD take only what they marked.
+//
+// Prerouting drops all of 169.254.0.0/16 and 100.64.0.0/10 from open taps,
+// not just the two metadata addresses: those ranges carry cloud metadata,
+// credential and resolver endpoints (IMDS, the AWS VPC DNS at
+// 169.254.169.253, ECS task credentials) that a VM has no business reaching,
+// and the egress proxy already refuses them for egress-controlled VMs. The
+// configured DNS resolvers stay reachable on port 53, since a host may run
+// one at a link-local address.
 var firewall = template.Must(template.New("firewall").Parse(`table inet {{.Table}}
 delete table inet {{.Table}}
 table inet {{.Table}} {
@@ -151,7 +159,10 @@ table inet {{.Table}} {
 		type filter hook prerouting priority raw; policy accept;
 		iifname "{{.Taps}}*" meta nfproto ipv6 drop
 		iifname "{{.Taps}}*" fib saddr . iif oif missing drop
-		iifname "{{.Taps}}*" ip daddr { 169.254.169.254, 100.100.100.200 } drop
+{{- if .DNS}}
+		iifname "{{.Taps}}*" ip daddr { {{range $i, $a := .DNS}}{{if $i}}, {{end}}{{$a}}{{end}} } meta l4proto { tcp, udp } th dport 53 accept
+{{- end}}
+		iifname "{{.Taps}}*" ip daddr { 169.254.0.0/16, 100.64.0.0/10 } drop
 	}
 	chain input {
 		type filter hook input priority filter - 1; policy accept;
