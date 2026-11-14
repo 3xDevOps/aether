@@ -30,7 +30,7 @@ const (
 	rootCopy    = "root-copy.img"
 	browserDisk = "browser.img"
 	dataDisk    = "data.img"
-	cacheDisk   = "cache.qcow2"
+	cacheDisk   = "cache.img"
 	// stateDiskFile is the session's state disk, in the directory its state
 	// mounts name.
 	stateDiskFile = "disk.img"

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/vmimage"
 )
 
 const (
@@ -17,10 +19,10 @@ const (
 	freezeCallTimeout = time.Minute
 )
 
-// commit saves the VM's root disk as a new base disk tagged ref. A running
-// VM's root filesystem is frozen only while its copy-on-write layer is
-// copied, so the copy is whole and every process keeps running; the base is
-// built from the copy afterwards.
+// commit saves a copy of the VM's root disk as a new base disk tagged ref. A
+// running VM's root filesystem is frozen only while the disk is copied, so
+// the copy is whole and every process keeps running; the base is built from
+// the copy afterwards.
 func (e *engine) commit(ctx context.Context, key, ref string, labels map[string]string) error {
 	unlock := e.lock(key)
 	defer unlock()
@@ -32,15 +34,17 @@ func (e *engine) commit(ctx context.Context, key, ref string, labels map[string]
 	if err != nil {
 		return err
 	}
-	disk := rec.Root.Path
+	disk := vmimage.Disk{Path: e.path(key, rootCopy), Format: rec.Root.Format}
+	defer func() { _ = os.Remove(disk.Path) }()
 	if up {
-		disk = e.path(key, rootCopy)
-		defer func() { _ = os.Remove(disk) }()
-		if err = e.copyRoot(ctx, rec, disk); err != nil {
-			return fmt.Errorf("vm runtime: save VM %s: %w", key, err)
-		}
+		err = e.copyRoot(ctx, rec, disk.Path)
+	} else {
+		err = e.copyDisk(ctx, rec.Root.Path, disk.Path)
 	}
-	if _, err = e.cfg.Images.SaveBase(ctx, disk, ref, labels); err != nil {
+	if err != nil {
+		return fmt.Errorf("vm runtime: save VM %s: %w", key, err)
+	}
+	if _, err = e.cfg.Images.SaveBase(ctx, disk, rec.Base, ref, labels); err != nil {
 		return fmt.Errorf("vm runtime: save VM %s as %s: %w", key, ref, err)
 	}
 	return nil
@@ -75,16 +79,22 @@ func (e *engine) copyRoot(ctx context.Context, rec *record, dst string) (err err
 	if err != nil {
 		return err
 	}
-	if err = os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
 	copyCtx, cancel := context.WithTimeout(ctx, freezeTimeout)
 	defer cancel()
-	err = e.run(copyCtx, "cp", "--reflink=auto", "--sparse=always", "--", rec.Root.Path, dst)
+	err = e.copyDisk(copyCtx, rec.Root.Path, dst)
 	if err != nil && ctx.Err() == nil && copyCtx.Err() != nil {
 		return errTooSlow
 	}
 	return err
+}
+
+// copyDisk replaces dst with a copy of the disk image src, cloned where the
+// filesystem can.
+func (e *engine) copyDisk(ctx context.Context, src, dst string) error {
+	if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return e.run(ctx, "cp", "--reflink=auto", "--sparse=always", "--", src, dst)
 }
 
 var errTooSlow = fmt.Errorf("the copy took longer than the %s the root filesystem stays frozen; save again", freezeTimeout)

@@ -7,14 +7,10 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/guest/home"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
-
-// promoteTimeout bounds one cache promotion, which runs in the background.
-const promoteTimeout = 30 * time.Minute
 
 // checkouts lists a spec's checkout and extra worktrees, in Docker's order.
 func checkouts(spec runtime.Spec) []runtime.Mount {
@@ -61,15 +57,15 @@ func cachePool(m runtime.Mount) string {
 // stop or a deletion while stopped or saved, its pool's newest, so the
 // member's next session starts from it. A save alone never promotes, and a
 // disk that may lack the guest's last writes never does. It holds the key's
-// lock only for a copy, a clone where the filesystem can, and converts in
-// the background. An Isolated session's cache, an overlay in a container,
+// lock only for a copy, a clone where the filesystem can, and publishes the
+// copy in the background. An Isolated session's cache, an overlay in a container,
 // never goes back.
 func (e *engine) promoteCache(ctx context.Context, rec *record) {
 	m, ok := cacheMount(rec.Mounts)
 	if !ok || !rec.CacheRan || !rec.CacheSynced || m.Overlay != "" {
 		return
 	}
-	snapshot, err := e.cfg.Images.SnapshotCache(ctx, rec.Cache.Path)
+	snapshot, err := e.cfg.Images.SnapshotCache(ctx, rec.Cache)
 	if err != nil {
 		slog.Warn("vm runtime: copy the cache of a stopped VM", "vm", rec.Key, "error", err)
 		return
@@ -79,9 +75,7 @@ func (e *engine) promoteCache(ctx context.Context, rec *record) {
 		slog.Warn("vm runtime: record the cache promotion", "vm", rec.Key, "error", err)
 	}
 	e.promotions.Go(func() {
-		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), promoteTimeout)
-		defer cancel()
-		if err := e.cfg.Images.PromoteCache(bg, cachePool(m), snapshot); err != nil {
+		if err := e.cfg.Images.PromoteCache(cachePool(m), snapshot); err != nil {
 			slog.Warn("vm runtime: promote the cache of a stopped VM", "vm", rec.Key, "error", err)
 		}
 	})

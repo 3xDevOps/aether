@@ -90,6 +90,19 @@ func mkfs(ctx context.Context, path string, size int64, label, srcDir string, ex
 	return run(ctx, "mkfs.ext4", args...)
 }
 
+// copyDisk copies the disk image src to a new file dst as bytes, sharing
+// blocks where the filesystem can and keeping holes. dst is writable even
+// when src, a base, is not.
+func copyDisk(ctx context.Context, src, dst string) error {
+	if err := run(ctx, "cp", "--reflink=auto", "--sparse=always", "--", src, dst); err != nil {
+		return err
+	}
+	if err := os.Chmod(dst, 0o600); err != nil {
+		return fmt.Errorf("vmimage: copy %s: %w", src, err)
+	}
+	return nil
+}
+
 func run(ctx context.Context, name string, args ...string) error {
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, name, args...)

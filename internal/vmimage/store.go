@@ -6,7 +6,6 @@ package vmimage
 import (
 	"context"
 	"crypto/rand"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -178,21 +177,18 @@ func (s *Store) LookupBase(ref string) (Base, error) {
 	return s.load(id)
 }
 
-// NewRootDisk creates a qcow2 root disk at path over base, replacing any
-// disk already there. Its backing file is a hard link to the base disk named
-// path.<base id>.base, so the base stays until the link is deleted with the
-// session's files; path must be on the store's filesystem. A failed rebuild
-// leaves the previous root disk and its base as they were.
-func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (disk Disk, err error) {
-	path, err = filepath.Abs(path)
+// NewRootDisk creates a root disk at path made from base, replacing any disk
+// already there: a qcow2 disk over base, or a raw copy of a base a session
+// wrote, which no qcow2 disk ever backs onto. Either way path keeps a hard
+// link to base named path.<base id>.base, so the base stays for the next
+// rebuild until the link is deleted with the session's files; path must be
+// on the store's filesystem. A failed rebuild leaves the previous root disk
+// and its base as they were.
+func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (Disk, error) {
+	path, err := filepath.Abs(path)
 	if err != nil {
 		return Disk{}, fmt.Errorf("vmimage: root disk: %w", err)
 	}
-	defer func() {
-		if pruneErr := prunePins(path); err == nil && pruneErr != nil {
-			err = pruneErr
-		}
-	}()
 	pin := rootPin(path, base.ID)
 	if err = s.pin(base.Path, pin); err != nil {
 		return Disk{}, err
@@ -201,25 +197,32 @@ func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (disk D
 	if err = removeIfExists(tmp); err != nil {
 		return Disk{}, err
 	}
-	if err = run(ctx, "qemu-img", "create", "-q", "-f", "qcow2", "-F", "raw", "-b", pin, tmp); err != nil {
-		return Disk{}, err
+	disk := Disk{Path: path, Format: FormatQcow2}
+	if base.sessionWritten() {
+		disk.Format = FormatRaw
+		err = copyDisk(ctx, pin, tmp)
+	} else {
+		err = run(ctx, "qemu-img", "create", "-q", "-f", "qcow2", "-F", "raw", "-b", pin, tmp)
+	}
+	if err != nil {
+		return Disk{}, errors.Join(err, removeIfExists(tmp))
 	}
 	if err = os.Rename(tmp, path); err != nil {
 		return Disk{}, fmt.Errorf("vmimage: root disk %s: %w", path, err)
 	}
-	return Disk{Path: path, Format: FormatQcow2}, nil
+	return disk, prunePins(path, pin)
 }
 
-// rootPin is the hard link to base id that the disk at path backs onto.
+// sessionWritten reports whether a session wrote base's blocks, as it did a
+// saved base's, first bytes included. The server builds every other base
+// with mkfs.ext4, which leaves the first 1024 bytes zero.
+func (b Base) sessionWritten() bool { return strings.HasPrefix(b.ID, localPrefix) }
+
+// rootPin is the hard link to base id that the disk at path is made from.
 func rootPin(path, id string) string { return path + "." + dirName(id) + ".base" }
 
-// prunePins removes the base links next to the root disk at path that it
-// does not back onto.
-func prunePins(path string) error {
-	keep, err := backingFile(path)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
+// prunePins removes the base links next to the root disk at path but keep.
+func prunePins(path, keep string) error {
 	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil {
 		return fmt.Errorf("vmimage: root disk %s: %w", path, err)
@@ -234,31 +237,6 @@ func prunePins(path string) error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-// backingFile reads the backing file name from a qcow2 header.
-func backingFile(disk string) (string, error) {
-	f, err := os.Open(disk)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }()
-	var hdr [20]byte
-	if _, err := io.ReadFull(f, hdr[:]); err != nil {
-		return "", fmt.Errorf("vmimage: read %s: %w", disk, err)
-	}
-	if string(hdr[:4]) != "QFI\xfb" {
-		return "", fmt.Errorf("vmimage: %s is not a qcow2 disk", disk)
-	}
-	offset, size := binary.BigEndian.Uint64(hdr[8:16]), binary.BigEndian.Uint32(hdr[16:20])
-	if offset == 0 || size == 0 || size > 1023 {
-		return "", fmt.Errorf("vmimage: %s has no backing file", disk)
-	}
-	name := make([]byte, size)
-	if _, err := f.ReadAt(name, int64(offset)); err != nil {
-		return "", fmt.Errorf("vmimage: read %s: %w", disk, err)
-	}
-	return string(name), nil
 }
 
 // NewDataDisk creates an empty ext4 data disk of size bytes at path, labelled
@@ -280,27 +258,31 @@ func (s *Store) NewDataDisk(ctx context.Context, path string, size int64) (Disk,
 	return Disk{Path: path, Format: FormatRaw}, nil
 }
 
-// SaveBase saves a root disk as a new base disk tagged ref. The base keeps
-// the image configuration of the base the root disk was made from, with
-// labels replacing those of the same keys. The VM must be stopped.
-func (s *Store) SaveBase(ctx context.Context, rootDisk, ref string, labels map[string]string) (Base, error) {
-	pin, err := backingFile(rootDisk)
-	if err != nil {
-		return Base{}, err
-	}
-	parent, err := s.baseOf(pin)
-	if err != nil {
-		return Base{}, err
-	}
+// SaveBase saves disk, a copy of a root disk made from base, as a new base
+// disk tagged ref, and takes the copy: a raw one moves into the store, and a
+// qcow2 one is read over base, never over the backing file its header names.
+// The new base keeps base's image configuration, with labels replacing those
+// of the same keys.
+func (s *Store) SaveBase(ctx context.Context, disk Disk, base Base, ref string, labels map[string]string) (Base, error) {
 	work, err := os.MkdirTemp(s.tmpDir(), "save-")
 	if err != nil {
-		return Base{}, fmt.Errorf("vmimage: save %s: %w", rootDisk, err)
+		return Base{}, fmt.Errorf("vmimage: save %s: %w", disk.Path, err)
 	}
 	defer func() { _ = os.RemoveAll(work) }()
-	if err = run(ctx, "qemu-img", "convert", "-f", "qcow2", "-O", "raw", rootDisk, filepath.Join(work, "disk.raw")); err != nil {
-		return Base{}, err
+	saved := filepath.Join(work, "disk.raw")
+	switch disk.Format {
+	case FormatRaw:
+		if err = os.Rename(disk.Path, saved); err != nil {
+			return Base{}, fmt.Errorf("vmimage: save %s: %w", disk.Path, err)
+		}
+	case FormatQcow2:
+		if err = run(ctx, "qemu-img", "convert", "-q", "-O", "raw", "--image-opts", qcow2Over(disk.Path, base.Path), saved); err != nil {
+			return Base{}, err
+		}
+	default:
+		return Base{}, fmt.Errorf("vmimage: save %s: unknown disk format %q", disk.Path, disk.Format)
 	}
-	cfg := parent.Config
+	cfg := base.Config
 	cfg.Labels = maps.Clone(cfg.Labels)
 	if cfg.Labels == nil && len(labels) > 0 {
 		cfg.Labels = map[string]string{}
@@ -311,6 +293,14 @@ func (s *Store) SaveBase(ctx context.Context, rootDisk, ref string, labels map[s
 		return Base{}, err
 	}
 	return s.commit(work, record{ID: id, Config: cfg}, ref)
+}
+
+// qcow2Over names, as qemu-img --image-opts, the qcow2 disk at path over the
+// raw backing file backing.
+func qcow2Over(path, backing string) string {
+	escape := strings.NewReplacer(",", ",,").Replace
+	return "driver=qcow2,file.driver=file,file.filename=" + escape(path) +
+		",backing.driver=raw,backing.file.driver=file,backing.file.filename=" + escape(backing)
 }
 
 // Tag points target at the base source is tagged to.
@@ -449,25 +439,6 @@ func (s *Store) pinLocked(target, link string) error {
 	return nil
 }
 
-// baseOf finds the base disk that pin is a hard link of.
-func (s *Store) baseOf(pin string) (Base, error) {
-	want, err := os.Stat(pin)
-	if err != nil {
-		return Base{}, fmt.Errorf("vmimage: base disk of root disk: %w", err)
-	}
-	entries, err := os.ReadDir(s.basesDir())
-	if err != nil {
-		return Base{}, fmt.Errorf("vmimage: base disk of root disk: %w", err)
-	}
-	for _, e := range entries {
-		info, err := os.Stat(filepath.Join(s.basesDir(), e.Name(), "disk.raw"))
-		if err == nil && os.SameFile(info, want) {
-			return s.loadDir(e.Name())
-		}
-	}
-	return Base{}, fmt.Errorf("vmimage: %s is not linked to a base disk in %s", pin, s.basesDir())
-}
-
 // commit moves a finished work directory holding disk.raw into the bases
 // and tags it ref, under the store lock so a sweep cannot remove it untagged.
 func (s *Store) commit(work string, rec record, ref string) (Base, error) {
@@ -561,12 +532,15 @@ func (s *Store) tagsPath() string    { return filepath.Join(s.dir, "tags.json") 
 
 func dirName(id string) string { return strings.ReplaceAll(id, ":", "-") }
 
+// localPrefix starts the ID of every base a session wrote.
+const localPrefix = "local:"
+
 func newLocalID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("vmimage: new base id: %w", err)
 	}
-	return "local:" + hex.EncodeToString(b), nil
+	return localPrefix + hex.EncodeToString(b), nil
 }
 
 func sameFile(a, b string) bool {

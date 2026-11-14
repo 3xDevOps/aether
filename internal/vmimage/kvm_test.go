@@ -121,7 +121,7 @@ func TestKVMStandardImageRunsDocker(t *testing.T) {
 		t.Log(strings.TrimSpace(line))
 		pass = pass || strings.Contains(line, "VMINIT: PASS")
 		if strings.Contains(line, "VMINIT: dockerd ready") {
-			if _, saveErr := s.SaveBase(ctx, root.Path, "aether/kvm-test:running", nil); saveErr == nil {
+			if _, saveErr := s.SaveBase(ctx, root, base, "aether/kvm-test:running", nil); saveErr == nil {
 				t.Error("SaveBase saved the root disk of a running VM")
 			} else {
 				t.Logf("SaveBase while the VM runs: %v", saveErr)
@@ -137,7 +137,7 @@ func TestKVMStandardImageRunsDocker(t *testing.T) {
 	}
 
 	start = time.Now()
-	saved, err := s.SaveBase(ctx, root.Path, "aether/kvm-test:1", map[string]string{"aether.test": "1"})
+	saved, err := s.SaveBase(ctx, root, base, "aether/kvm-test:1", map[string]string{"aether.test": "1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,10 +146,12 @@ func TestKVMStandardImageRunsDocker(t *testing.T) {
 
 func diskArg(d Disk, serial string) string {
 	arg := fmt.Sprintf("path=%s,image_type=%s,serial=%s", d.Path, d.Format, serial)
-	switch {
-	case d.Format == FormatQcow2:
+	if d.Format == FormatQcow2 {
 		arg += ",backing_files=on"
-	case serial == "helper":
+	} else {
+		arg += ",backing_files=off"
+	}
+	if serial == "helper" {
 		arg += ",readonly=on"
 	}
 	return arg

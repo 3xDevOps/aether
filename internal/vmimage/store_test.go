@@ -213,6 +213,25 @@ func nlink(t *testing.T, path string) int {
 	return int(info.Sys().(*syscall.Stat_t).Nlink)
 }
 
+type imageInfo struct {
+	Format      string `json:"format"`
+	VirtualSize int64  `json:"virtual-size"`
+	Backing     string `json:"full-backing-filename"`
+}
+
+func qemuInfo(t *testing.T, path string) imageInfo {
+	t.Helper()
+	out, err := exec.Command("qemu-img", "info", "-f", "qcow2", "--output=json", path).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info imageInfo
+	if err = json.Unmarshal(out, &info); err != nil {
+		t.Fatal(err)
+	}
+	return info
+}
+
 func TestStoreBaseRootSaveSweep(t *testing.T) {
 	needTools(t, "mkfs.ext4", "debugfs", "qemu-img", "qemu-io")
 	ctx := context.Background()
@@ -285,7 +304,7 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	}
 
 	runDir := t.TempDir()
-	rootPath := filepath.Join(runDir, "root.qcow2")
+	rootPath := filepath.Join(runDir, "root.img")
 	root, err := s.NewRootDisk(ctx, base, rootPath)
 	if err != nil {
 		t.Fatal(err)
@@ -293,18 +312,7 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if root != (Disk{Path: rootPath, Format: FormatQcow2}) {
 		t.Errorf("root disk = %+v", root)
 	}
-	var info struct {
-		Format      string `json:"format"`
-		VirtualSize int64  `json:"virtual-size"`
-		Backing     string `json:"full-backing-filename"`
-	}
-	out, err := exec.Command("qemu-img", "info", "--output=json", rootPath).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = json.Unmarshal(out, &info); err != nil {
-		t.Fatal(err)
-	}
+	info := qemuInfo(t, rootPath)
 	basePin := rootPath + "." + dirName(base.ID) + ".base"
 	if info.Format != "qcow2" || info.VirtualSize != rootSize || info.Backing != basePin {
 		t.Errorf("qemu-img info = %+v", info)
@@ -322,14 +330,19 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 
 	// Writes to the root disk reach the saved base; ext4 leaves its first
 	// 1024 bytes unused.
-	if out, ioErr := exec.Command("qemu-io", "-c", "write -P 0xab 0 512", rootPath).CombinedOutput(); ioErr != nil {
+	header := bytes.Repeat([]byte{0xab}, 512)
+	if out, ioErr := exec.Command("qemu-io", "-f", "qcow2", "-c", "write -P 0xab 0 512", rootPath).CombinedOutput(); ioErr != nil {
 		t.Fatalf("qemu-io: %v: %s", ioErr, out)
 	}
-	saved, err := s.SaveBase(ctx, rootPath, "aether/member-x:1", map[string]string{"kept": "replaced", "aether.saved": "1"})
+	rootCopy := filepath.Join(runDir, "root-copy.img")
+	if err = copyDisk(ctx, rootPath, rootCopy); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.SaveBase(ctx, Disk{Path: rootCopy, Format: FormatQcow2}, base, "aether/member-x:1", map[string]string{"kept": "replaced", "aether.saved": "1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(saved.ID, "local:") || saved.Path == base.Path {
+	if !strings.HasPrefix(saved.ID, "local:") || saved.Path == base.Path || !saved.sessionWritten() || base.sessionWritten() {
 		t.Errorf("saved base = %+v", saved)
 	}
 	if got := saved.Config.Labels; got["kept"] != "replaced" || got["aether.saved"] != "1" || got["org.example"] != "base" {
@@ -341,15 +354,8 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if saved.Config.User != "1000:1000" || saved.Config.WorkingDir != "/workspace" {
 		t.Errorf("saved config = %+v", saved.Config)
 	}
-	head := make([]byte, 512)
-	f, err := os.Open(saved.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = io.ReadFull(f, head)
-	_ = f.Close()
-	if err != nil || !bytes.Equal(head, bytes.Repeat([]byte{0xab}, 512)) {
-		t.Errorf("saved base does not carry the root disk's write: %x, %v", head[:8], err)
+	if got := head(t, saved.Path, len(header)); !bytes.Equal(got, header) {
+		t.Errorf("saved base starts %q, want the session's bytes %q", got, header)
 	}
 	if got := debugfs(t, saved.Path, "cat /etc/hostname"); got != "upper" {
 		t.Errorf("saved /etc/hostname = %q", got)
@@ -357,25 +363,40 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if looked, lookErr := s.LookupBase("aether/member-x:1"); lookErr != nil || looked.ID != saved.ID {
 		t.Errorf("LookupBase(saved) = %+v, %v", looked, lookErr)
 	}
-
-	// A failed rebuild onto another base keeps the old pairing; a successful
-	// one drops the old base's link.
+	// No root disk backs onto a saved base: each is a copy of it.
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	if _, err = s.NewRootDisk(cancelled, saved, rootPath); err == nil {
 		t.Fatal("NewRootDisk with a cancelled context succeeded")
 	}
-	if got, readErr := backingFile(rootPath); readErr != nil || got != basePin {
-		t.Errorf("after a failed rebuild the root disk backs onto %q, %v; want %q", got, readErr, basePin)
+	if info := qemuInfo(t, rootPath); info.Format != "qcow2" || info.Backing != basePin || nlink(t, base.Path) != 2 {
+		t.Errorf("after a failed rebuild the root disk is %+v and the base has %d links; want it over %s", info, nlink(t, base.Path), basePin)
 	}
-	if nlink(t, base.Path) != 2 || nlink(t, saved.Path) != 1 {
-		t.Errorf("after a failed rebuild: base has %d links, saved %d; want 2 and 1", nlink(t, base.Path), nlink(t, saved.Path))
-	}
-	if _, err = s.NewRootDisk(ctx, saved, rootPath); err != nil {
+	root, err = s.NewRootDisk(ctx, saved, rootPath)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if root.Format != FormatRaw || !bytes.Equal(head(t, rootPath, len(header)), header) || sameFile(rootPath, saved.Path) {
+		t.Errorf("root disk over the saved base = %+v, starting %q; want a raw copy", root, head(t, rootPath, len(header)))
+	}
 	if nlink(t, base.Path) != 1 || nlink(t, saved.Path) != 2 {
-		t.Errorf("after a rebuild onto the saved base: base has %d links, saved %d; want 1 and 2", nlink(t, base.Path), nlink(t, saved.Path))
+		t.Errorf("after a rebuild onto the saved base: base has %d links, saved %d; want 1 and 2, the saved base pinned for the next rebuild", nlink(t, base.Path), nlink(t, saved.Path))
+	}
+	if err = os.WriteFile(rootCopy, []byte("raw root"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := s.SaveBase(ctx, Disk{Path: rootCopy, Format: FormatRaw}, saved, "aether/member-z:1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(moved.Path); string(data) != "raw root" {
+		t.Errorf("a raw copy saved as %q", data)
+	}
+	if _, err = os.Stat(rootCopy); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("SaveBase left the raw copy it took: %v", err)
+	}
+	if err = s.Untag("aether/member-z:1"); err != nil {
+		t.Fatal(err)
 	}
 
 	if err := s.Tag("aether/member-x:1", "aether/member-x:2"); err != nil {

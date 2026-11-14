@@ -106,10 +106,11 @@ func (c *copyStep) run(_ context.Context, name string, args ...string) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	vmm := c.h.units.vmm("terminal-m1")
-	vmm.mu.Lock()
-	c.state = vmm.state
-	vmm.mu.Unlock()
+	if vmm := c.h.units.vmm("terminal-m1"); vmm != nil {
+		vmm.mu.Lock()
+		c.state = vmm.state
+		vmm.mu.Unlock()
+	}
 	c.freezes = c.h.guest("terminal-m1").frozen()
 	if c.fail {
 		return errors.New("cp: No space left on device")
@@ -146,10 +147,11 @@ func TestCommitCopiesTheRootDiskWhileFrozen(t *testing.T) {
 		t.Fatalf("saves = %+v", h.images.saves)
 	}
 	save := h.images.saves[0]
-	if save.disk != h.engine.path("terminal-m1", rootCopy) || save.copied != "installed" || save.ref != "aether/pending-member-m1:b" || save.labels["aether.previous-image"] != "aether/member-m1:a" {
+	want := vmimage.Disk{Path: h.engine.path("terminal-m1", rootCopy), Format: vmimage.FormatQcow2}
+	if save.disk != want || save.base.ID != "sha256:b" || save.copied != "installed" || save.ref != "aether/pending-member-m1:b" || save.labels["aether.previous-image"] != "aether/member-m1:a" {
 		t.Errorf("save = %+v", save)
 	}
-	if _, err := os.Stat(save.disk); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(save.disk.Path); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the copy was left behind: %v", err)
 	}
 }
@@ -214,11 +216,15 @@ func TestCommitRefusesAPausedVMAndSavesAStoppedOne(t *testing.T) {
 	if err := h.engine.stop(t.Context(), "terminal-m1", time.Second); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(h.engine.path("terminal-m1", rootDisk), []byte("stopped"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.engine.run = (&copyStep{h: h}).run
 	if err := h.engine.commit(t.Context(), "terminal-m1", "aether/pending-member-m1:b", nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(h.images.saves) != 1 || h.images.saves[0].disk != h.engine.path("terminal-m1", rootDisk) {
-		t.Errorf("saves = %+v", h.images.saves)
+	if len(h.images.saves) != 1 || h.images.saves[0].disk.Path != h.engine.path("terminal-m1", rootCopy) || h.images.saves[0].copied != "stopped" {
+		t.Errorf("saves = %+v; want a copy of the stopped root disk, which SaveBase takes", h.images.saves)
 	}
 }
 
