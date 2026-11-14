@@ -258,7 +258,6 @@ func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts
 		KeepRoot: opts.KeepRoot, Lifetime: opts.Lifetime, OwnedDirs: opts.OwnedDirs, Serves: opts.Serves,
 	}
 	if opts.Browser {
-		rec.WantsBrowser = true
 		if err = e.attachBrowser(ctx, rec); err != nil {
 			return "", err
 		}
@@ -345,7 +344,7 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 	// A cold start ends any companion and takes the current browser image's
 	// disk, which a server update or the first build may have brought.
 	rec.Companion = nil
-	if rec.WantsBrowser && rec.BrowserImage != e.cfg.BrowserImage {
+	if rec.session() && rec.BrowserImage != e.cfg.BrowserImage {
 		if err = e.attachBrowser(ctx, rec); err != nil {
 			return err
 		}

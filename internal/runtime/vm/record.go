@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/vmimage"
@@ -88,9 +89,8 @@ type record struct {
 	OwnedDirs []string       `json:"owned_dirs,omitempty"`
 	Serves    []guest.Socket `json:"serves,omitempty"`
 	// Browser is the development browser's disk, attached read-only; empty
-	// while its image was not built yet. A VM that WantsBrowser takes the
-	// current image's at every cold start.
-	WantsBrowser bool         `json:"wants_browser,omitempty"`
+	// while its image was not built yet. A session VM takes the current
+	// image's at every cold start.
 	Browser      vmimage.Disk `json:"browser"`
 	BrowserImage string       `json:"browser_image,omitempty"`
 	BrowserEnv   []string     `json:"browser_env,omitempty"`
@@ -117,6 +117,12 @@ type record struct {
 	Exited   bool      `json:"exited,omitempty"`
 	ExitCode int       `json:"exit_code,omitempty"`
 	ExitedAt time.Time `json:"exited_at,omitzero"`
+}
+
+// session reports whether the VM runs a session, which carries its run ID,
+// the VM's key, in AETHER_RUN_ID, as isSession matches its spec.
+func (r *record) session() bool {
+	return runtime.EnvValue(r.Env, coordtransport.RunIDEnv) == r.Key
 }
 
 func (e *engine) dir(key string) string { return filepath.Join(e.root, key) }

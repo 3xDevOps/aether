@@ -67,10 +67,13 @@ func TestSessionVMBootsWithTheBrowsersDiskAndSocket(t *testing.T) {
 		t.Errorf("a running VM's companion of the image it booted with = %v", err)
 	}
 
+	// A session VM from before the browser came to VMs has none yet.
+	h.createStarted("run-c", sessionSpec("run-c"))
+
 	h.images.mu.Lock()
 	h.images.tagLocked(newer, vmimage.Base{ID: "sha256:browser2", Path: "/images/browser2.raw"})
 	h.images.mu.Unlock()
-	for _, key := range []string{"run-a", "run-b"} {
+	for _, key := range []string{"run-a", "run-b", "run-c"} {
 		if err := h.engine.stop(t.Context(), key, 0); err != nil {
 			t.Fatal(err)
 		}
