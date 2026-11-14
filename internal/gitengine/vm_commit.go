@@ -175,9 +175,10 @@ func (e *Engine) vmFetchBranch(ctx context.Context, repo, branch string, into do
 // vmEvidenceTree is the tree evidence of a checkout in a VM retains: staged
 // now while the VM runs, or the tree the session's last commit recorded
 // while it does not, which nothing can have changed since. Without such a
-// commit it fails, so cleanup keeps the checkout. The caller must not hold
-// the run's snapshot lock: the VM's watch may hold its own while it waits
-// on the server.
+// commit it fails, so cleanup keeps the checkout. The caller must hold no
+// engine-wide mutex, because it reaches into the guest, and no per-run
+// snapshot lock, because lastSnapshotTree takes that lock and the guest's own
+// diff watch holds it while awaiting the server ack that needs it.
 func (e *Engine) vmEvidenceTree(ctx context.Context, run domain.RunID, meta runMeta, store string) (string, error) {
 	g, err := e.vmGit(ctx, run)
 	if errors.Is(err, guest.ErrVMNotRunning) {

@@ -423,7 +423,10 @@ whose recursive expansion is enormous cannot burn a CPU core. The store
 borrows the workspace repository's objects, which hold the fork point. A moved HEAD is published by fetching it from that store into
 the workspace repository, as for a checkout on the server's disk. While the
 VM is not running, the session's patch is its last recorded snapshot, also on
-a server switched back to `session-runtime docker`.
+a server switched back to `session-runtime docker`. The server never calls
+into a VM while holding a lock another session needs: a slow or stalled reply
+holds up only its own run's snapshot, commit and evidence, never every
+workspace's.
 
 The final commit is built on the server, so the member's signing key never
 enters the VM. The VM stages the checkout; the server copies the tree,

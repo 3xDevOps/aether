@@ -440,6 +440,11 @@ func TestParseEvidenceDiffStatsBoundsOutputAndFacts(t *testing.T) {
 	}
 }
 
+// cancellationGate reports ctx cancellation only after CaptureEvidence's first
+// Err check, and without a real cancel so in-flight git is never killed (a
+// killed git returns "signal: killed", not context.Canceled). Err blocks on
+// release the first time so the test can line up the writer wait before the
+// capture proceeds past it.
 type cancellationGate struct {
 	context.Context
 	first   chan struct{}
@@ -459,6 +464,13 @@ func (c *cancellationGate) Err() error {
 
 func TestEvidenceCaptureHonorsCancellationWhileWaitingForWriter(t *testing.T) {
 	e := newUnitEngine(t)
+	seedEvidenceWorkspace(t, e, "ws-cancel")
+	if _, _, err := e.CreateRunCheckout(context.Background(), "ws-cancel", "run-cancel", "main", "capture", ""); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the writer; once the capture is past its entry check (first), free
+	// it so the capture acquires the writer, where its next Err check reports
+	// the cancellation. The capture must return it, not retain evidence.
 	e.fileWriteMu.Lock()
 	ctx := &cancellationGate{
 		Context: context.Background(),
@@ -467,7 +479,7 @@ func TestEvidenceCaptureHonorsCancellationWhileWaitingForWriter(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := e.CaptureEvidence(ctx, "run", "packet")
+		_, err := e.CaptureEvidence(ctx, "run-cancel", "packet")
 		done <- err
 	}()
 	<-ctx.first

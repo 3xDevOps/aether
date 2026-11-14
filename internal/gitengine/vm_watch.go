@@ -346,28 +346,35 @@ func (e *Engine) publishVMHead(ctx context.Context, run domain.RunID, meta runMe
 	if err != nil {
 		return err
 	}
-	// The branch is staged in the run's store, which the watch and
-	// PublishRunBranch share.
-	lock := e.snapshotLock(run)
-	lock.Lock()
-	defer lock.Unlock()
 	store, err := e.vmStore(ctx, run, meta)
 	if err != nil {
 		return err
 	}
 	ref := "refs/heads/" + meta.Branch
-	before, _ := e.git(ctx, repo, "rev-parse", "--verify", "--quiet", ref)
-	if err = e.fetchVMObjects(ctx, run, store, []string{head}, []string{meta.Base, before}, maxVMHistoryBytes); err != nil {
+	have, _ := e.git(ctx, repo, "rev-parse", "--verify", "--quiet", ref)
+	// The receive reaches into the guest, so it runs before the run's snapshot
+	// lock, which the run's own Close and evidence capture wait on; its own
+	// idle timeout bounds a stalled VM.
+	if err = e.fetchVMObjects(ctx, run, store, []string{head}, []string{meta.Base, have}, maxVMHistoryBytes); err != nil {
 		return err
 	}
 	if kind := e.objectType(ctx, store, head); kind != "commit" {
 		return fmt.Errorf("%w: session %s reported a %s as its HEAD", ErrInvalidObjectID, run, kind)
 	}
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
+	before, _ := e.git(ctx, repo, "rev-parse", "--verify", "--quiet", ref)
+	if before != have && before != head && e.isAncestor(ctx, store, head, before) {
+		// The branch advanced to a descendant of this head while we fetched,
+		// so a publish that started later has already landed; do not move it
+		// back. A branch still at the tip we read (before == have) is an
+		// intentional move to publish, an older-commit reset included.
+		return nil
+	}
 	if _, err = e.git(ctx, store, "update-ref", ref, head); err != nil {
 		return fmt.Errorf("gitengine: stage checkout HEAD %s: %w", head, err)
 	}
-	// The fetch re-indexes the guest's commits into the workspace repo, so it
-	// carries the same allocation and thread limits as the store receive.
 	if err = e.gitReceive(ctx, repo, "fetch", "--quiet", store, "+"+ref+":"+ref); err != nil {
 		return fmt.Errorf("gitengine: publish session branch %s: %w", run, err)
 	}
