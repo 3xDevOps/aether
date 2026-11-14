@@ -286,39 +286,6 @@ func (e *Engine) isAncestor(ctx context.Context, store, ancestor, commit string)
 	return err == nil
 }
 
-// checkTreeBounds is checkSnapshotBounds for a tree in a store with no
-// checkout beside it.
-func (e *Engine) checkTreeBounds(ctx context.Context, store, tree string, limit uint64, limitErr error) error {
-	listingLimit := int(limit) + (1 << 20)
-	listing, over, err := e.gitBareBounded(ctx, store, listingLimit, "ls-tree", "-r", "-l", "-z", tree, "--")
-	if err != nil {
-		return err
-	}
-	if over {
-		return fmt.Errorf("%w: snapshot listing exceeds %d bytes", limitErr, listingLimit)
-	}
-	var total uint64
-	for record := range strings.SplitSeq(listing, "\x00") {
-		tab := strings.IndexByte(record, '\t')
-		if tab < 0 {
-			continue
-		}
-		fields := strings.Fields(record[:tab])
-		if len(fields) != 4 || fields[1] != "blob" {
-			continue
-		}
-		var size uint64
-		if _, scanErr := fmt.Sscan(fields[3], &size); scanErr != nil {
-			return fmt.Errorf("gitengine: parse snapshot size %q: %w", fields[3], scanErr)
-		}
-		if size > limit-total {
-			return fmt.Errorf("%w: retained Git input exceeds %d bytes", limitErr, limit)
-		}
-		total += size
-	}
-	return nil
-}
-
 var vmSnapshotErrors = map[string]bool{
 	"Snapshot history unavailable; current change statistics remain live.":               true,
 	"Snapshot history unavailable: visible input exceeds 128 MiB or free disk headroom.": true,
@@ -399,7 +366,9 @@ func (e *Engine) publishVMHead(ctx context.Context, run domain.RunID, meta runMe
 	if _, err = e.git(ctx, store, "update-ref", ref, head); err != nil {
 		return fmt.Errorf("gitengine: stage checkout HEAD %s: %w", head, err)
 	}
-	if _, err = e.git(ctx, repo, "fetch", "--quiet", store, "+"+ref+":"+ref); err != nil {
+	// The fetch re-indexes the guest's commits into the workspace repo, so it
+	// carries the same allocation and thread limits as the store receive.
+	if err = e.gitReceive(ctx, repo, "fetch", "--quiet", store, "+"+ref+":"+ref); err != nil {
 		return fmt.Errorf("gitengine: publish session branch %s: %w", run, err)
 	}
 	after, err := e.git(ctx, repo, "rev-parse", "--verify", ref)

@@ -236,6 +236,103 @@ func (e *Engine) checkSnapshotBounds(ctx context.Context, checkout, index, tree 
 	return nil
 }
 
+// checkTreeBounds is checkSnapshotBounds for a tree the guest named in a store
+// with no checkout beside it. It sums the blob sizes in a streamed
+// `ls-tree -r -t -l -z` listing and stops git the moment the total passes
+// limit or the raw listing passes a bound above it, so a tree whose recursive
+// expansion is huge (few objects, deep fan-out) fails fast. -t prints every
+// subtree it descends into, so even a bomb of empty folders that holds no blob
+// still drives the listing past the bound.
+func (e *Engine) checkTreeBounds(ctx context.Context, store, tree string, limit uint64, limitErr error) error {
+	if !validObjectID(tree) {
+		return ErrInvalidObjectID
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	w := &treeBoundWriter{limit: limit, listingLimit: limit + (1 << 20), limitErr: limitErr, cancel: cancel}
+	cmd := exec.CommandContext(ctx, e.cfg.GitPath, "-C", store, "-c", "safe.directory=*", "-c", "core.quotePath=false",
+		"ls-tree", "-r", "-t", "-l", "-z", tree, "--")
+	cmd.Env = e.gitEnv()
+	cmd.Stdout = w
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	if w.err != nil {
+		return w.err
+	}
+	if runErr != nil {
+		return fmt.Errorf("gitengine: list snapshot input: %w: %s", runErr, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// treeBoundWriter parses a streamed NUL-delimited ls-tree listing and cancels
+// its command once a bound is exceeded. git then exits on the cancelled
+// context rather than finishing the (possibly enormous) listing.
+type treeBoundWriter struct {
+	limit        uint64
+	listingLimit uint64
+	limitErr     error
+	cancel       context.CancelFunc
+	seen         uint64
+	total        uint64
+	rest         []byte
+	err          error
+}
+
+func (w *treeBoundWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return len(p), nil
+	}
+	if w.seen += uint64(len(p)); w.seen > w.listingLimit {
+		w.fail(fmt.Errorf("%w: snapshot listing exceeds %d bytes", w.limitErr, w.listingLimit))
+		return len(p), nil
+	}
+	data := p
+	if len(w.rest) > 0 {
+		data = append(w.rest, p...)
+	}
+	for {
+		i := bytes.IndexByte(data, 0)
+		if i < 0 {
+			break
+		}
+		if err := w.record(data[:i]); err != nil {
+			w.fail(err)
+			return len(p), nil
+		}
+		data = data[i+1:]
+	}
+	w.rest = append(w.rest[:0], data...)
+	return len(p), nil
+}
+
+// record adds one listing entry's blob size to the running total.
+func (w *treeBoundWriter) record(rec []byte) error {
+	tab := bytes.IndexByte(rec, '\t')
+	if tab < 0 {
+		return nil
+	}
+	fields := strings.Fields(string(rec[:tab]))
+	if len(fields) != 4 || fields[1] != "blob" {
+		return nil
+	}
+	size, err := strconv.ParseUint(fields[3], 10, 64)
+	if err != nil {
+		return fmt.Errorf("gitengine: parse snapshot size %q: %w", fields[3], err)
+	}
+	if size > w.limit-w.total {
+		return fmt.Errorf("%w: retained Git input exceeds %d bytes", w.limitErr, w.limit)
+	}
+	w.total += size
+	return nil
+}
+
+func (w *treeBoundWriter) fail(err error) {
+	w.err = err
+	w.cancel()
+}
+
 // writeSnapshotTree stages the whole checkout into the run's snapshot store
 // and writes the resulting tree, returning its object id. Every caller uses
 // the same per-run lock so the persistent scratch index and its lock cannot

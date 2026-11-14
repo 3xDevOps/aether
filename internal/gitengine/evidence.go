@@ -167,7 +167,9 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 	if err := ctx.Err(); err != nil {
 		return EvidenceRevision{}, err
 	}
-	if _, err := e.git(ctx, repo, "fetch", "--quiet", "--no-tags", staging, ref+":"+ref); err != nil {
+	// The staged tree came from the VM, so the fetch that copies it into the
+	// workspace repo carries the guest-receive limits too.
+	if err := e.gitReceive(ctx, repo, "fetch", "--quiet", "--no-tags", staging, ref+":"+ref); err != nil {
 		// A concurrent server process may have won the same idempotency key.
 		if existing, found, refErr := e.evidenceRefCommit(ctx, repo, ref); refErr == nil && found {
 			return e.readEvidenceRevision(ctx, repo, meta.Workspace, existing)

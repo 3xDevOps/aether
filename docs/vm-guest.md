@@ -409,11 +409,18 @@ port
 The server treats every reply as data from the session. It copies a
 snapshot's tree and HEAD into the session's `<run-id>.diffsnap/` store with
 `git index-pack --strict`, which checks each object and that every object one
-names is in the pack or the store, and refuses a pack over 128 MiB. It then
+names is in the pack or the store, and refuses a pack over 128 MiB. That
+limit bounds the compressed bytes, not what they expand to. So every git
+command that indexes a VM's objects - this receive, a published HEAD's, and
+evidence - runs single-threaded under a fixed 512 MiB allocation limit, git's
+large-file threshold. A few pack bytes that claim a larger object fail that
+one command instead of exhausting host memory, while a legitimate large file,
+which git streams rather than allocates, still indexes. The server then
 records the snapshot only when the tree is a tree within the snapshot's
 128 MiB bound, HEAD is a commit, and the base lies between the fork point and
-HEAD. The store borrows the workspace repository's objects, which hold the
-fork point. A moved HEAD is published by fetching it from that store into
+HEAD. The bound check stops as soon as the listing passes the bound, so a tree
+whose recursive expansion is enormous cannot burn a CPU core. The store
+borrows the workspace repository's objects, which hold the fork point. A moved HEAD is published by fetching it from that store into
 the workspace repository, as for a checkout on the server's disk. While the
 VM is not running, the session's patch is its last recorded snapshot, also on
 a server switched back to `session-runtime docker`.
