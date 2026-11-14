@@ -85,12 +85,7 @@ test('clicking the outer gutters closes the viewer while zoomed frame clicks do 
 test('the viewer hides its title and closes from its close button or beside a fitted picture', async () => {
   const dialog = await open('Image 1 of 2')
   const close = within(dialog).getByRole('button', { name: 'Close' })
-  const next = await within(dialog).findByRole('button', { name: 'Next image' })
   expect(dialog.querySelector('[data-slot="dialog-title"]')?.className).toContain('sr-only')
-  expect(close.className).toContain('size-11')
-  expect(close.className).toContain('bg-raised')
-  expect(next.className).toContain('coarse:opacity-100')
-  expect(within(dialog).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Next image', 'Close'])
   fireEvent.click(close)
   expect(screen.queryByRole('dialog')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Open image 1 of 2 full size' }))
@@ -98,17 +93,6 @@ test('the viewer hides its title and closes from its close button or beside a fi
   expect(screen.queryByRole('dialog')).toBeNull()
 })
 
-test('pointer buttons step through loaded images in both directions', async () => {
-  const dialog = await open('Image 1 of 3', three)
-  fireEvent.click(await within(dialog).findByRole('button', { name: 'Next image' }))
-  const middle = await screen.findByRole('dialog', { name: 'Image 2 of 3' })
-  expect(within(middle).getByRole('button', { name: 'Previous image' })).toBeDefined()
-  fireEvent.click(within(middle).getByRole('button', { name: 'Next image' }))
-  const last = await screen.findByRole('dialog', { name: 'Image 3 of 3' })
-  expect(within(last).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Previous image', 'Close'])
-  fireEvent.click(within(last).getByRole('button', { name: 'Previous image' }))
-  expect(await screen.findByRole('dialog', { name: 'Image 2 of 3' })).toBeDefined()
-})
 
 test('Command or Control with plus, minus and zero zoom in steps from the fitted size, and back to fit', async () => {
   const dialog = await open('Image 1 of 2')
@@ -138,22 +122,16 @@ test('a trackpad pinch, a ctrl wheel, zooms the image and keeps the page from zo
   frameOf(dialog).dispatchEvent(pinch)
   expect(pinch.defaultPrevented).toBe(true)
   await waitFor(() => expect(width(dialog)).not.toBe(''))
-  const scroll = new WheelEvent('wheel', { deltaY: -50, bubbles: true, cancelable: true })
+  const scroll = new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true })
   frameOf(dialog).dispatchEvent(scroll)
-  expect(scroll.defaultPrevented).toBe(false)
-})
-
-test('a trackpad pinch over gallery controls zooms the image and keeps the page from zooming', async () => {
-  const dialog = await open('Image 2 of 3', three)
-  load(dialog, [2400, 1400])
-  for (const name of ['Previous image', 'Next image']) {
-    const control = within(dialog).getByRole('button', { name })
-    const pinch = new WheelEvent('wheel', { deltaY: -50, ctrlKey: true, bubbles: true, cancelable: true })
-    control.dispatchEvent(pinch)
-    expect(pinch.defaultPrevented).toBe(true)
-  }
+  expect(scroll.defaultPrevented).toBe(true)
+  await waitFor(() => expect(width(dialog)).toBe('800px'))
+  frameOf(dialog).dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }))
+  expect(width(dialog)).toBe('800px')
+  frameOf(dialog).dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true }))
   await waitFor(() => expect(zoomOf(dialog)).toBeGreaterThan(1))
 })
+
 
 test('spreading two fingers zooms the image', async () => {
   const dialog = await open('Image 1 of 2')
@@ -315,10 +293,10 @@ test('a Safari gesture during a two-finger touch pinch does not zoom a second ti
 test('a Safari trackpad gesture zooms by its scale', async () => {
   const dialog = await open('Image 1 of 2')
   load(dialog, [2400, 1400])
-  const next = within(dialog).getByRole('button', { name: 'Next image' })
-  next.dispatchEvent(Object.assign(new Event('gesturestart', { cancelable: true }), { scale: 1 }))
+  const frame = frameOf(dialog)
+  frame.dispatchEvent(Object.assign(new Event('gesturestart', { cancelable: true }), { scale: 1 }))
   const change = Object.assign(new Event('gesturechange', { cancelable: true }), { scale: 1.5, clientX: 400, clientY: 300 })
-  next.dispatchEvent(change)
+  frame.dispatchEvent(change)
   expect(change.defaultPrevented).toBe(true)
   await waitFor(() => expect(zoomOf(dialog)).toBeCloseTo(1.5))
 })

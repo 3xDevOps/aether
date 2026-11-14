@@ -1,7 +1,7 @@
 import type * as React from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, File as FileIcon, X } from '@/components/icons'
+import { File as FileIcon, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
@@ -14,12 +14,10 @@ const maxScale = 4
 const keyStep = 1.25
 const viewerBounds = 'h-[min(80dvh,calc(100dvh_-_var(--top-bar-height)_-_var(--safe-top)_-_1rem))] w-[min(80vw,calc(100vw_-_2rem))]'
 
-function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, keys, refocus, onStep, onClose }: {
+function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClose }: {
   url: string
   name: string
   gallery: boolean
-  canStepBack: boolean
-  canStepForward: boolean
   zoomed: React.RefObject<boolean>
   keys: React.RefObject<((event: React.KeyboardEvent) => void) | undefined>
   refocus: boolean
@@ -30,7 +28,6 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
   const [scale, setScale] = useState<number>()
   const pending = useRef<number>(undefined)
   const [natural, setNatural] = useState<{ width: number; height: number }>()
-  const [shortImage, setShortImage] = useState(false)
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 })
   const viewer = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
@@ -95,10 +92,10 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
     let gesture = 1
     const isZoomSurface = (event: Event) => {
       const target = event.target
-      return target instanceof Element && (frame.current?.contains(target) || target.closest('[data-image-gallery-control]'))
+      return target instanceof Element && frame.current?.contains(target)
     }
     const wheel = (event: WheelEvent) => {
-      if (!event.ctrlKey || !isZoomSurface(event)) return
+      if (!isZoomSurface(event)) return
       event.preventDefault()
       // A mouse wheel notch reports about 100; a trackpad pinch many small deltas.
       zoomRef.current(Math.exp(-Math.max(-25, Math.min(25, event.deltaY)) * 0.01), event.clientX, event.clientY)
@@ -136,7 +133,6 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
       const width = el.clientWidth
       const height = el.clientHeight
       setFrameSize((size) => size.width === width && size.height === height ? size : { width, height })
-      setShortImage(natural.height * Math.min(width / natural.width, height / natural.height) < 144)
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -157,8 +153,7 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
       className={cn(
         'rounded-composer border border-seam',
         'group-focus-visible:outline-2 group-focus-visible:-outline-offset-2 group-focus-visible:outline-focus group-focus-visible:transition-none',
-        scale === undefined ? 'max-h-full max-w-full' : 'max-w-none shrink-0 cursor-zoom-out',
-        scale === undefined && 'cursor-zoom-in',
+        scale === undefined ? 'max-h-full max-w-full' : 'max-w-none shrink-0',
       )}
       style={natural ? {
         width: natural.width * (scale ?? fitScale()),
@@ -190,7 +185,7 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
   return (
     <div
       ref={viewer}
-      className="contents group/viewer"
+      className="contents"
       onTouchStart={(event) => {
         const [a, b] = [event.touches[0], event.touches[1]]
         pinch.current = event.touches.length === 2 && a && b
@@ -223,7 +218,7 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
         aria-label={`${name}, ${scale === undefined ? 'fitted' : `zoomed to ${Math.round(scale * 100)}%`}`}
         data-image-viewer-frame
         className={cn(
-          'group col-start-1 row-start-2 mx-auto mb-4 flex min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control outline-none',
+          'group col-start-1 row-start-1 m-auto flex min-h-0 touch-pan-x touch-pan-y overflow-auto rounded-control outline-none',
           viewerBounds,
           scale !== undefined && 'focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-focus',
         )}
@@ -242,26 +237,13 @@ function ImageViewer({ url, name, gallery, canStepBack, canStepForward, zoomed, 
       >
         <div className={scale === undefined ? 'flex size-full items-center justify-center' : 'm-auto shrink-0'}>{image}</div>
       </div>
-      {gallery && (
-        <div className={cn('pointer-events-none relative z-10 col-start-1 row-start-2 mx-auto mb-4', viewerBounds)}>
-          {canStepBack && (
-            <Button variant="secondary" size="icon" label="Previous image" data-image-gallery-control className={cn('pointer-events-auto absolute left-2 size-11 -translate-y-1/2 rounded-full opacity-0 transition-opacity group-hover/viewer:opacity-100 group-focus-within/viewer:opacity-100 coarse:opacity-100 motion-reduce:transition-none', shortImage ? 'top-[calc(50%_-_4rem)]' : 'top-1/2')} onClick={() => onStep(-1)}>
-              <ChevronLeft className="size-5" />
-            </Button>
-          )}
-          {canStepForward && (
-            <Button variant="secondary" size="icon" label="Next image" data-image-gallery-control className={cn('pointer-events-auto absolute right-2 size-11 -translate-y-1/2 rounded-full opacity-0 transition-opacity group-hover/viewer:opacity-100 group-focus-within/viewer:opacity-100 coarse:opacity-100 motion-reduce:transition-none', shortImage ? 'top-[calc(50%_-_4rem)]' : 'top-1/2')} onClick={() => onStep(1)}>
-              <ChevronRight className="size-5" />
-            </Button>
-          )}
-        </div>
-      )}
-      <div className="row-start-1 flex min-h-[calc(var(--top-bar-height)_+_var(--safe-top))] items-center justify-end px-2 pt-[var(--safe-top)]">
+      <div className="absolute right-4 top-[calc(var(--safe-top)_+_1rem)] flex items-center gap-3">
+        {gallery && <span aria-hidden className="rounded-control bg-chrome px-3 py-2 text-ui-sm text-muted">{name} · ← →</span>}
         <DialogTitle className="sr-only">{name}</DialogTitle>
         <DialogDescription className="sr-only">
           {[
-            'Pinch, or press Command or Control with plus, minus or zero, to zoom.',
-            gallery && 'Use the Previous image and Next image buttons, arrow keys, or a horizontal swipe to see the other images.',
+            'Scroll, pinch, or press Command or Control with plus, minus or zero, to zoom.',
+            gallery && 'Use the arrow keys or a horizontal swipe to see the other images.',
           ].filter(Boolean).join(' ')}
         </DialogDescription>
         <DialogPrimitive.Close asChild>
@@ -322,7 +304,7 @@ function MessageImage({ runID, messageID, index, name, onURL, onOpen }: MessageI
         <>
           {!loaded && <span role="status" className="absolute p-3 text-ui-sm text-muted">Loading {name.toLowerCase()}…</span>}
           {url && (
-            <Button type="button" variant="quiet" aria-label={`Open ${name.toLowerCase()} full size`} className={cn('size-full cursor-zoom-in coarse:h-full', focusRingInset)} onClick={onOpen}>
+            <Button type="button" variant="quiet" aria-label={`Open ${name.toLowerCase()} full size`} className={cn('size-full cursor-default coarse:h-full', focusRingInset)} onClick={onOpen}>
               <img
                 src={url}
                 alt={name}
@@ -364,7 +346,6 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
   const shown = openID === undefined ? -1 : ids.indexOf(openID)
   const url = openID === undefined ? undefined : urls[openID]
   const viewable = ids.filter((id) => urls[id])
-  const shownInGallery = viewable.indexOf(openID ?? '')
   const step = (by: 1 | -1) => {
     const next = ids.slice(by > 0 ? shown + 1 : 0, by > 0 ? undefined : shown).filter((id) => urls[id])
     const id = by > 0 ? next[0] : next.at(-1)
@@ -372,7 +353,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
   }
 
   return (
-    <div ref={list} className="mt-2 flex flex-wrap items-start gap-2" aria-label="Attachments">
+    <div ref={list} className="mt-2 flex max-w-80 flex-wrap items-start justify-center gap-2" aria-label="Attachments">
       {images.map((image, position) => {
         const id = ids[position]!
         return (
@@ -400,7 +381,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
         <DialogContent
           showCloseButton={false}
           overlayClassName="bg-scrim-strong"
-          className="inset-0 h-dvh max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[calc(var(--top-bar-height)_+_var(--safe-top))_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-0 bg-transparent p-0 shadow-none max-md:inset-0 max-md:h-dvh max-md:max-h-none max-md:w-auto max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:p-0"
+          className="inset-0 h-dvh max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-0 bg-transparent p-0 shadow-none max-md:inset-0 max-md:h-dvh max-md:max-h-none max-md:w-auto max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:p-0"
           onKeyDown={(event) => {
             keys.current?.(event)
             if (event.defaultPrevented) return
@@ -425,7 +406,7 @@ export function MessageAttachments({ runID, images = [], files = [] }: { runID: 
           }}
         >
           {url && openID && (
-            <ImageViewer key={openID} url={url} name={name(shown)} gallery={viewable.length > 1} canStepBack={shownInGallery > 0} canStepForward={shownInGallery >= 0 && shownInGallery < viewable.length - 1} zoomed={zoomed} keys={keys} refocus={refocus.current} onStep={step} onClose={() => setOpenID(undefined)} />
+            <ImageViewer key={openID} url={url} name={name(shown)} gallery={viewable.length > 1} zoomed={zoomed} keys={keys} refocus={refocus.current} onStep={step} onClose={() => setOpenID(undefined)} />
           )}
         </DialogContent>
       </Dialog>
