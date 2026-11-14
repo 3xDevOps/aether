@@ -101,11 +101,12 @@ func TestTheDiskGuardPausesTheSessionsFillingALowDisk(t *testing.T) {
 	}
 
 	check(50<<30, nil, 0)
+	check(5<<30, nil, 0) // the first check below the floor takes the baseline
 	check(5<<30, map[domain.RunID]int64{c: 4 << 10}, 20<<30)
 	if got := paused(); slices.Contains(got, true) {
-		t.Fatalf("below the floor with only a terminal filling it, paused = %v; want no bystander paused", got)
+		t.Fatalf("a growing terminal and a 4 KiB session below the floor paused %v; want no session paused", got)
 	}
-	check(5<<30, map[domain.RunID]int64{a: 3 << 30, b: 1 << 30, c: 4 << 10}, 0)
+	check(5<<30, map[domain.RunID]int64{a: 3 << 30, b: 1 << 30}, 0)
 	if got := paused(); !got[0] || !got[1] || got[2] {
 		t.Fatalf("below the floor, paused = %v; want both sessions that grew, not the one that grew 4 KiB", got)
 	}
@@ -140,12 +141,56 @@ func TestTheDiskGuardPausesTheSessionsFillingALowDisk(t *testing.T) {
 
 	// Filling the disk again soon after the guard resumed it leaves a to
 	// its member.
+	check(5<<30, nil, 0) // baseline again
 	check(5<<30, map[domain.RunID]int64{a: 1 << 30}, 0)
+	notes(diskReheldNote, 1)
 	check(20<<30, nil, 0)
 	if !e.sched.Paused(a) {
 		t.Fatal("a session held again soon after its resume was resumed by the guard")
 	}
-	notes(diskReheldNote, 1)
+}
+
+func TestTheDiskGuardCatchesASlowWriterOverSeveralChecks(t *testing.T) {
+	t.Parallel()
+	var dr *diskRuntime
+	var mu sync.Mutex
+	free := uint64(50 << 30)
+	e, _ := newACPEnv(t, func(cfg *Config) {
+		dr = &diskRuntime{acpRuntime: cfg.Runtime.(*acpRuntime), use: map[runtime.ID]int64{}, held: map[runtime.ID]bool{}}
+		cfg.Runtime = dr
+		cfg.MinFreeBytes = 10 << 30
+		cfg.filesystemCapacity = func(string) (disk.Usage, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			return disk.Usage{TotalBytes: 100 << 30, FreeBytes: free}, nil
+		}
+	})
+	run := e.launchACP(t, "say pong").ID
+	waitItems(t, e.sched, run, "the turn", turnEnded("end_turn", 1))
+	cid := e.cid(t, run)
+	grow := func(freeBytes uint64, by int64) {
+		mu.Lock()
+		free = freeBytes
+		mu.Unlock()
+		dr.mu.Lock()
+		dr.use[cid] += by
+		dr.mu.Unlock()
+		e.sched.guardVMDisks(t.Context())
+	}
+	grow(50<<30, 0)
+	// Below the floor, 30 MiB a check: under the 64 MiB one-check threshold,
+	// but the guard measures against the baseline it took on entry, so it
+	// pauses the session once its total growth reaches 64 MiB.
+	grow(5<<30, 0) // baseline
+	grow(5<<30, 30<<20)
+	grow(5<<30, 30<<20)
+	if e.sched.Paused(run) {
+		t.Fatalf("a session paused after growing only 60 MiB since the baseline")
+	}
+	grow(5<<30, 30<<20)
+	if !e.sched.Paused(run) {
+		t.Fatal("a session that grew 90 MiB since the baseline was never paused")
+	}
 }
 
 func TestTheDiskGuardResumesEvenWhenItCannotMeasureVMDisks(t *testing.T) {
@@ -172,6 +217,7 @@ func TestTheDiskGuardResumesEvenWhenItCannotMeasureVMDisks(t *testing.T) {
 	mu.Lock()
 	free = 5 << 30
 	mu.Unlock()
+	e.sched.guardVMDisks(t.Context()) // enters low, takes the baseline
 	dr.mu.Lock()
 	dr.use[e.cid(t, run)] += 1 << 30
 	dr.mu.Unlock()

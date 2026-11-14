@@ -221,10 +221,12 @@ type Scheduler struct {
 	pressureSkipLog      sync.Once
 	capacityReservations uint64
 
-	// vmDiskMu serializes the disk guard's checks; vmDiskUse is each VM's
-	// disk use at the last one.
-	vmDiskMu  sync.Mutex
-	vmDiskUse map[runtime.ID]int64
+	// vmDiskMu serializes the disk guard's checks. vmDiskBase is each VM's
+	// disk use when the filesystem first fell below the reserve, held while
+	// vmDiskLow until it recovers.
+	vmDiskMu   sync.Mutex
+	vmDiskLow  bool
+	vmDiskBase map[runtime.ID]int64
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised

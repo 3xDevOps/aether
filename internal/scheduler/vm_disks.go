@@ -47,7 +47,10 @@ func (s *Scheduler) watchVMDisks(ctx context.Context) {
 
 // guardVMDisks keeps session VMs, whose sparse disks grow as their guests
 // write, from filling the data filesystem. Only a session whose disks grew
-// is ever paused, and only the guard's own pauses are resumed.
+// is ever paused, and only the guard's own pauses are resumed. The baseline
+// it measures growth against is taken when the filesystem first falls below
+// the reserve and kept until it recovers, so a session filling the disk
+// slowly is caught once it has grown enough in total, not only in one check.
 func (s *Scheduler) guardVMDisks(ctx context.Context) {
 	vms, ok := s.cfg.Runtime.(runtime.DiskUseRuntime)
 	if !ok {
@@ -55,29 +58,33 @@ func (s *Scheduler) guardVMDisks(ctx context.Context) {
 	}
 	s.vmDiskMu.Lock()
 	defer s.vmDiskMu.Unlock()
-	if s.cfg.MinFreeBytes < 0 {
-		s.releaseHeldVMs(ctx)
-		return
-	}
 	data, err := s.dataFilesystem()
 	if err != nil {
 		slog.Warn("scheduler: disk guard: measure the data filesystem", "error", err)
 		return
 	}
 	floor := diskReserve(data.TotalBytes, s.cfg.MinFreeBytes)
-	if data.FreeBytes >= floor+reclaimHeadroom || floor+reclaimHeadroom >= data.TotalBytes {
+	recovered := s.cfg.MinFreeBytes < 0 || data.FreeBytes >= floor+reclaimHeadroom || floor+reclaimHeadroom >= data.TotalBytes
+	if recovered {
 		s.releaseHeldVMs(ctx)
+		s.vmDiskLow, s.vmDiskBase = false, nil
+		return
+	}
+	if data.FreeBytes >= floor {
+		// Between the reserve and its headroom: hold the baseline, neither
+		// pause nor resume, so the two thresholds do not flap.
+		return
 	}
 	use, err := vms.DiskUse(ctx)
 	if err != nil {
 		slog.Warn("scheduler: disk guard: measure VM disks", "error", err)
 		return
 	}
-	last := s.vmDiskUse
-	s.vmDiskUse = use
-	if data.FreeBytes < floor {
-		s.holdGrowingVMs(ctx, vms, use, last)
+	if !s.vmDiskLow {
+		s.vmDiskLow, s.vmDiskBase = true, use
+		return
 	}
+	s.holdGrowingVMs(ctx, vms, use, s.vmDiskBase)
 }
 
 func (s *Scheduler) holdGrowingVMs(ctx context.Context, vms runtime.DiskUseRuntime, use, last map[runtime.ID]int64) {
@@ -135,6 +142,9 @@ func (s *Scheduler) holdForDisk(ctx context.Context, vms runtime.DiskUseRuntime,
 	}
 }
 
+// releaseHeldVMs resumes the sessions the guard paused. One a member closed,
+// woke or already resumed is no longer the guard's to resume: its hold is
+// just dropped, so the guard never fights the member or retries forever.
 func (s *Scheduler) releaseHeldVMs(ctx context.Context) {
 	s.mu.Lock()
 	var held []*supervised
@@ -145,6 +155,13 @@ func (s *Scheduler) releaseHeldVMs(ctx context.Context) {
 	}
 	s.mu.Unlock()
 	for _, e := range held {
+		s.mu.Lock()
+		resumable := e.paused && !e.retained && e.asleepSince.IsZero() && !e.finalizing && !e.status.Terminal()
+		s.mu.Unlock()
+		if !resumable {
+			s.setDiskHeld(e, false)
+			continue
+		}
 		if err := s.Resume(ctx, e.runID, ""); err != nil {
 			slog.Warn("scheduler: disk guard: resume a session", "run", e.runID, "error", err)
 			continue
@@ -153,5 +170,21 @@ func (s *Scheduler) releaseHeldVMs(ctx context.Context) {
 		e.diskReleasedAt = time.Now()
 		s.mu.Unlock()
 		s.publishTimeline(ctx, e.workspaceID, e.runID, "", events.TimelineNote, diskReleasedNote)
+	}
+}
+
+// setDiskHeld records whether the guard holds a session, persisting it so a
+// restart does not forget, or resume, a hold.
+func (s *Scheduler) setDiskHeld(e *supervised, held bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e.diskHeld == held {
+		return
+	}
+	e.diskHeld = held
+	if s.runs[e.runID] == e {
+		if err := s.writeSidecar(e.sidecar()); err != nil {
+			slog.Warn("scheduler: disk guard: persist the hold", "run", e.runID, "error", err)
+		}
 	}
 }

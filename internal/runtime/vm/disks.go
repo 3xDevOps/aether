@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"syscall"
 
@@ -47,12 +48,14 @@ func (e *engine) diskUse() (map[runtime.ID]int64, error) {
 	}
 	use := make(map[runtime.ID]int64, len(keys))
 	for _, key := range keys {
+		// One VM the server cannot read is skipped, not left to blind the
+		// disk guard to every other VM.
 		rec, err := e.load(key)
-		if errors.Is(err, runtime.ErrNotFound) {
-			continue
-		}
 		if err != nil {
-			return nil, err
+			if !errors.Is(err, runtime.ErrNotFound) {
+				slog.Warn("vm runtime: disk use: read VM record", "vm", key, "error", err)
+			}
+			continue
 		}
 		paths := []string{rec.Root.Path, rec.Data.Path, rec.Cache.Path, rec.State.Path}
 		for _, c := range rec.CheckoutDisks {
@@ -64,11 +67,11 @@ func (e *engine) diskUse() (map[runtime.ID]int64, error) {
 				continue
 			}
 			info, err := os.Stat(p)
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
 			if err != nil {
-				return nil, err
+				if !errors.Is(err, fs.ErrNotExist) {
+					slog.Warn("vm runtime: disk use: measure disk", "vm", key, "disk", p, "error", err)
+				}
+				continue
 			}
 			n += info.Sys().(*syscall.Stat_t).Blocks * 512
 		}
