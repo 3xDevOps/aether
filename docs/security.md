@@ -1096,10 +1096,14 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
   against an unprivileged agent; a flaw in Cloud Hypervisor or a host service
   the VM uses reaches the host.
 - A session VM leaves an unprivileged agent two in-VM escalation surfaces by
-  design: unprivileged user namespaces stay on for the browser's Chromium
-  sandbox, and through one the agent reaches `nf_tables`; and
-  `perf_event_open` stays available. Both are bounded by the VM, and closing
-  either needs a seccomp filter on the agent tree, not a sysctl.
+  design. Unprivileged user namespaces stay on because the in-VM development
+  browser's Chromium sandbox needs them; through one the agent reaches
+  `nf_tables`. The agents themselves do not need them - they run as uid 1000
+  with the VM as their boundary, and nested Docker runs its daemon as root -
+  so a seccomp filter on the agent process tree could deny the agent
+  `CLONE_NEWUSER` while the browser keeps it, a tightening left to the owner.
+  `perf_event_open` likewise stays available to the unprivileged. Both are
+  bounded by the VM.
 - Root in a session VM (a Root-tier session, a Default session with Docker, or
   a Default session whose `sudo` was approved) can move a process out of the
   `/session` cgroup and so evade the close-time freeze, the session process
