@@ -89,7 +89,9 @@ manifest, noting the release in `vmlinux.release` beside it. Nothing is
 replaced until every download has checked out. A `vm-kernel` set to another
 path, or a development build, keeps the kernel already there. With
 `session-runtime vm` the server manages `/usr/local/bin/cloud-hypervisor`:
-replace it, and the next start puts the pinned one back.
+replace it, and the next start puts the pinned one back. `install` leaves
+Sysbox out: sessions and environment terminals run their own Docker daemon in
+their VM.
 
 On AWS:
 
@@ -433,9 +435,10 @@ tunnel ([networking.md](networking.md#the-first-admin)).
 
 For automation, `aether-server install` writes the same files from flags,
 such as `--edge-url https://edge.onaether.dev --edge-access approved-devices`.
-It installs Sysbox unless you pass `--sysbox=false`, turns the edge on only
-with `--edge-url`, and issues no claim code. With Tailscale on the host, the
-first tailnet login becomes the super admin unless you pass `--tailnet-require-key`.
+It installs Sysbox unless you pass `--sysbox=false` or
+`--session-runtime vm`, turns the edge on only with `--edge-url`, and issues
+no claim code. With Tailscale on the host, the first tailnet login becomes the
+super admin unless you pass `--tailnet-require-key`.
 With the edge on, install also prints the edge, policy and server id. It
 prints one `warning:` line naming what the host lacks (git, ssh-keygen, a
 running systemd, or the memory and disk above), without failing, and ends on
