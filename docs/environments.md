@@ -351,7 +351,8 @@ What changes:
   The unit is sandboxed ([security.md](security.md#the-agent-container)): a
   tmpfs hides the data directory and only the VM's own paths are bound back.
   Its disks and logs are in `<data dir>/vm/<run id>/`: `monitor.log` holds the
-  VM monitor's output and `console.log` the guest kernel's.
+  VM monitor's output and `console.log` the guest's serial console, at most
+  1 MiB, with the 1 MiB before it in `console.log.1`.
 - The VM gets the CPU limit rounded up to whole vCPUs, held to the exact
   limit by the unit's `CPUQuota`, and the memory limit as its memory; the
   unit's `MemoryMax` allows 512 MiB more for the VM monitor and the file

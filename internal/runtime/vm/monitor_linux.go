@@ -39,10 +39,13 @@ func Monitor(args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{apiSocket, vsockSocket, fsSocket, eventsFile, homeSocket} {
+	for _, name := range []string{apiSocket, vsockSocket, fsSocket, eventsFile, homeSocket, consolePipe} {
 		if err = os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("vm monitor: remove stale %s: %w", name, err)
 		}
+	}
+	if err = drainConsole(dir); err != nil {
+		return err
 	}
 	if len(l.Shares) > 0 {
 		root := filepath.Join(dir, shareDir)
@@ -93,6 +96,39 @@ func runHypervisor(args []string, served <-chan error) error {
 		}
 		return err
 	}
+}
+
+// drainConsole makes the FIFO Cloud Hypervisor writes the serial console
+// to, and copies what arrives into console.log. Output the host cannot
+// write is dropped rather than left to stall the guest.
+func drainConsole(dir string) error {
+	pipe := filepath.Join(dir, consolePipe)
+	if err := unix.Mkfifo(pipe, 0o600); err != nil {
+		return fmt.Errorf("vm monitor: make %s: %w", pipe, err)
+	}
+	// Open for writing too, so the FIFO never reaches end of file while
+	// Cloud Hypervisor has it closed.
+	fifo, err := os.OpenFile(pipe, os.O_RDWR, 0)
+	if err != nil {
+		return fmt.Errorf("vm monitor: %w", err)
+	}
+	log, err := openConsoleLog(filepath.Join(dir, consoleLog))
+	if err != nil {
+		return errors.Join(err, fifo.Close())
+	}
+	go func() {
+		buf := make([]byte, 32<<10)
+		for {
+			n, err := fifo.Read(buf)
+			if n > 0 {
+				_, _ = log.Write(buf[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return nil
 }
 
 // composeShare mounts a small tmpfs at root and binds every share at
