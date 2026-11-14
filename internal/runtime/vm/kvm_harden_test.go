@@ -14,9 +14,9 @@ import (
 
 // TestKVMGuestKernelIsHardened checks the boot-time kernel settings that
 // keep a Default-tier uid-1000 agent from escalating in the VM: unprivileged
-// BPF is off and locked, io_uring is gone, kernel pointers and dmesg are
-// hidden, perf is denied to the unprivileged, and ptrace is scoped. The
-// values come from images/kernel/config-x86_64 and the helper's harden().
+// BPF is off and latched, io_uring is gone, kernel pointers and dmesg are
+// hidden, and ptrace is scoped. The values come from
+// images/kernel/config-x86_64 and the helper's harden().
 func TestKVMGuestKernelIsHardened(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-harden-sysctls"
@@ -33,26 +33,21 @@ func TestKVMGuestKernelIsHardened(t *testing.T) {
 	if err := e.start(t.Context(), key); err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []string{"kptr_restrict", "dmesg_restrict", "perf_event_paranoid", "yama/ptrace_scope", "io_uring_disabled", "unprivileged_bpf_disabled"} {
-		want := map[string]string{
-			"kptr_restrict": "2", "dmesg_restrict": "1", "perf_event_paranoid": "3",
-			"yama/ptrace_scope": "1", "io_uring_disabled": "2", "unprivileged_bpf_disabled": "1",
-		}[s]
+	for s, want := range map[string]string{
+		"kptr_restrict": "2", "dmesg_restrict": "1", "yama/ptrace_scope": "1",
+		"io_uring_disabled": "2", "unprivileged_bpf_disabled": "1",
+	} {
 		if out, _ := vmRun(t, e, key, "cat /proc/sys/kernel/"+s); strings.TrimSpace(out) != want {
 			t.Errorf("kernel.%s is %q, want %q", s, strings.TrimSpace(out), want)
 		}
 	}
-	// kptr_restrict=2 hides every kernel pointer, so a symbol the agent
-	// could use to defeat KASLR reads as zero even here.
-	if out, _ := vmRun(t, e, key, "grep ' commit_creds$' /proc/kallsyms"); !strings.Contains(out, "0000000000000000") {
-		t.Errorf("kallsyms exposes a kernel pointer: %q", out)
-	}
 }
 
-// TestKVMShareKeepsDeviceNodesOffTheHost checks M3: a guest that is root in
-// its own VM cannot land a device node on the host through a virtio-fs
-// checkout share, and the share is mounted nosuid,nodev inside the guest so
-// a set-user-ID binary there is inert.
+// TestKVMShareKeepsDeviceNodesOffTheHost checks what root in its own VM
+// still cannot do: land a device node on the host through a virtio-fs
+// checkout share (virtiofsd has no CAP_MKNOD), and read a kernel pointer
+// (kptr_restrict=2 zeroes /proc/kallsyms for root too). The share is also
+// mounted nosuid,nodev inside the guest.
 func TestKVMShareKeepsDeviceNodesOffTheHost(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-harden-share"
@@ -92,5 +87,10 @@ func TestKVMShareKeepsDeviceNodesOffTheHost(t *testing.T) {
 	}
 	if fi, statErr := os.Lstat(filepath.Join(checkout, "charnode")); statErr == nil && fi.Mode()&os.ModeDevice != 0 {
 		t.Errorf("the guest landed a %s device node on the host", fi.Mode())
+	}
+	// kptr_restrict=2 hides kernel pointers from everyone; root here reads a
+	// zero address, where without it root would see the real one.
+	if out, _ := vmRun(t, e, key, "grep ' commit_creds$' /proc/kallsyms"); !strings.Contains(out, "0000000000000000") {
+		t.Errorf("kallsyms exposes a kernel pointer to VM root: %q", out)
 	}
 }

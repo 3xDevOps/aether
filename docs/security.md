@@ -1092,13 +1092,20 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 ## Limits
 
 - Containers share the host kernel. A kernel or Docker escape reaches the
-  host. A session VM has its own kernel; a flaw in Cloud Hypervisor or a host
-  service the VM uses reaches the host.
-- Root in a session VM (a Root-tier session, or a Default session with Docker)
-  can move a process out of the `/session` cgroup and so evade the close-time
-  freeze, the session process limit and the kill when the main process exits.
-  This is accepted: it is already root in its own throwaway VM, and the VM, not
-  the cgroup, is what keeps it off the host and out of other sessions.
+  host. A session VM has its own kernel, [hardened](vm-guest.md#kernel-hardening)
+  against an unprivileged agent; a flaw in Cloud Hypervisor or a host service
+  the VM uses reaches the host.
+- A session VM leaves an unprivileged agent two in-VM escalation surfaces by
+  design: unprivileged user namespaces stay on for the browser's Chromium
+  sandbox, and through one the agent reaches `nf_tables`; and
+  `perf_event_open` stays available. Both are bounded by the VM, and closing
+  either needs a seccomp filter on the agent tree, not a sysctl.
+- Root in a session VM (a Root-tier session, a Default session with Docker, or
+  a Default session whose `sudo` was approved) can move a process out of the
+  `/session` cgroup and so evade the close-time freeze, the session process
+  limit and the kill when the main process exits. This is accepted: it is
+  already root in its own throwaway VM, and the VM, not the cgroup, is what
+  keeps it off the host and out of other sessions.
 - Outbound traffic is limited only for sessions of a workspace with egress
   control on. Other sessions and environment terminals
   reach the internet, your network and ports the server host listens on.

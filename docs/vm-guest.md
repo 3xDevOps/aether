@@ -49,28 +49,38 @@ without the gate, in two places.
 The kernel config (`images/kernel/config-x86_64`) turns unprivileged BPF off
 (`CONFIG_BPF_UNPRIV_DEFAULT_OFF` starts `unprivileged_bpf_disabled` at 2),
 restricts `dmesg` to root, builds in YAMA, and zeroes freshly allocated
-memory and hardens the copy-to/from-user and SLUB-freelist paths. It also
-builds the kernel relocatable with `RANDOMIZE_BASE`, but Cloud Hypervisor
-boots the uncompressed `vmlinux` through PVH, which does not run the
-decompressor that performs the relocation, so the kernel base is not
-randomized today; KASLR takes effect only if the kernel is booted as a
-bzImage.
+memory and hardens the copy-to/from-user and SLUB-freelist paths. KASLR is
+not built in: Cloud Hypervisor boots the uncompressed `vmlinux` through PVH,
+which does not run the decompressor that would relocate the kernel, so
+`RANDOMIZE_BASE` has no effect; it belongs with a future bzImage boot.
 
-The helper writes the rest at boot, since they have no compile-time default:
+The helper writes the rest at boot, since they have no compile-time default,
+each a cold-boot step - a VM saved before an upgrade keeps its old settings
+on wake until its next cold start:
 `kernel.unprivileged_bpf_disabled=1` (latches unprivileged BPF off, so not
-even root in the VM can set it back to 0), `kernel.kptr_restrict=2` (every
-kernel pointer in `/proc` reads as zero, for all users),
-`kernel.yama.ptrace_scope=1` (a process may ptrace only its own descendants),
-`kernel.io_uring_disabled=2` (io_uring is off for everyone; the harnesses
-fall back when `io_uring_setup` returns `ENOSYS`), and
-`kernel.perf_event_paranoid=3`. A missing one, where the kernel lacks the
-feature, is skipped; any other failure is reported as a `boot_error`.
+even root in the VM can set it back to 0, unlike the config's 2),
+`kernel.kptr_restrict=2` (every kernel pointer in `/proc`, such as
+`/proc/kallsyms`, reads as zero for all users, hiding module and heap
+addresses from any in-VM reader), `kernel.yama.ptrace_scope=1` (a process may
+ptrace only its own descendants), and `kernel.io_uring_disabled=2` (io_uring
+is off for everyone; `io_uring_setup` returns `EPERM`, which the harnesses
+fall back from). A missing one, where the kernel lacks the feature, is
+skipped; any other failure is reported as a `boot_error`.
 
-Root in the VM, which a Root-tier or nested-Docker session has, is still root
-in its own VM: it can relax these at runtime where the kernel allows it (not
-unprivileged BPF, which is locked), and escape the session cgroup
-([Checkouts](#checkouts)). The VM, not these settings, is what isolates it
-from the host and from other sessions.
+Two surfaces stay open by design. Unprivileged user namespaces remain on,
+because the in-VM browser's Chromium sandbox needs them; through one a process
+gains `CAP_NET_ADMIN` over a fresh network namespace and can reach `nf_tables`,
+the largest remaining uid-1000-to-root path. And `perf_event_open` stays
+available to the unprivileged (the upstream `perf_event_paranoid` has no level
+that denies it outright); closing either would need a seccomp filter on the
+agent's process tree, a design decision left to the owner.
+
+Root in the VM, which a Root-tier session, a nested-Docker session, or a
+Default session whose `sudo` was approved has, is still root in its own VM: it
+can relax these at runtime where the kernel allows it (not unprivileged BPF,
+which is latched), and escape the session cgroup ([Checkouts](#checkouts)).
+The VM, not these settings, is what isolates it from the host and from other
+sessions.
 
 ## Kernel command line
 
