@@ -590,18 +590,19 @@ With `session-runtime vm` the companion runs inside the session's VM instead
 ([The development browser](vm-guest.md#the-development-browser)): from the
 browser image's read-only disk, as the root of its own mount namespace, as UID
 `65533` (`65532` for a session that runs as `65533`), never the session's own,
-with `no-new-privileges`, its own IPC namespace and cgroup (the same memory and
-512-process caps), a `/proc` that hides other users' processes, a seccomp
-filter that refuses vsock sockets, so it cannot reach the coordination or
-signing sockets forwarded into the VM, and Chromium's sandbox on. It does not
-get the container's seccomp profile. This keeps its files, its memory and its
-control socket out of reach of the session's unprivileged processes. It is no
-boundary against root in the VM: a session with **Root access**, and every VM
-session with Docker inside, since Docker gives root in its containers and so in
-the VM, can read the browser's profile and cookies, watch what is typed into
-it, and talk to or replace the companion, whose screenshots, captures and page
-state the server then takes from a process the session controls. In Docker mode
-the companion was a separate container that root in the session could not
+with `no-new-privileges`, its own IPC namespace and a cgroup inside the
+session's (the same memory and 512-process caps), a `/proc` that hides other
+users' processes, a seccomp filter that refuses vsock sockets and io_uring,
+which can make them too, so it cannot reach the coordination or signing
+sockets forwarded into the VM, and Chromium's sandbox on. It does not get the
+container's seccomp profile. This keeps its files, its memory and its control
+socket out of reach of the session's unprivileged processes. It is no boundary
+against root in the VM: a session with **Root access**, and every VM session
+with Docker inside, since Docker gives root in its containers and so in the
+VM, can read the browser's profile and cookies, watch what is typed into it,
+and talk to or replace the companion, whose screenshots, captures and page
+state the server then takes from a process the session controls. In Docker
+mode the companion was a separate container that root in the session could not
 reach.
 
 Page content is not protected: cookies, tokens, customer data, console output,

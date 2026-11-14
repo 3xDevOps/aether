@@ -163,14 +163,15 @@ the session cgroup, its memory and processes also count toward the session's
 reserve. It runs in new mount and IPC namespaces: the helper binary, still
 root, makes the root its own with `pivot_root` and detaches the VM's, then
 becomes the process's user without new privileges, installs a seccomp filter
-that fails `socket` and `socketpair` of `AF_VSOCK` (vsock is not namespaced,
-and the VM's forwarded host sockets are on it), and executes the program. A
-`chroot` would keep Chromium from making the user namespaces its sandbox
-needs. One companion runs at a time; a `START` of the one that runs, under the
-same process ID, succeeds. `PAUSE` and `RESUME` freeze and thaw the cgroup;
-`STOP` kills everything in it and unmounts its `/tmp`, `/dev/shm` and control
-directory, so their memory goes back. `Stats` leaves the browser cgroup's
-out-of-memory kills out of the session's.
+that fails `socket` and `socketpair` of `AF_VSOCK` and `io_uring_setup`, whose
+rings can make sockets too (vsock is not namespaced, and the VM's forwarded
+host sockets are on it), and executes the program. A `chroot` would keep
+Chromium from making the user namespaces its sandbox needs. One companion runs
+at a time; a `START` of the one that runs, under the same process ID,
+succeeds. `PAUSE` and `RESUME` freeze and thaw the cgroup; `STOP` kills
+everything in it and unmounts its `/tmp`, `/dev/shm` and control directory, so
+their memory goes back. `Stats` leaves the browser cgroup's out-of-memory
+kills out of the session's.
 
 ## Sessions and processes
 

@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestDenyVsockFailsOnlyVsockSockets(t *testing.T) {
+func TestDenyVsockFailsOnlyVsockSocketsAndIOURing(t *testing.T) {
 	if os.Getenv("AETHER_DENY_VSOCK_CHILD") != "" {
 		runtime.LockOSThread()
 		if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
@@ -27,13 +27,14 @@ func TestDenyVsockFailsOnlyVsockSockets(t *testing.T) {
 		if unixErr == nil {
 			_ = unix.Close(fd)
 		}
-		fmt.Printf("vsock=%v pair=%v unix=%v\n", errors.Is(vsockErr, unix.EPERM), errors.Is(pairErr, unix.EPERM), unixErr == nil)
+		_, _, ringErr := unix.Syscall(unix.SYS_IO_URING_SETUP, 1, 0, 0)
+		fmt.Printf("vsock=%v pair=%v unix=%v ring=%v\n", errors.Is(vsockErr, unix.EPERM), errors.Is(pairErr, unix.EPERM), unixErr == nil, ringErr == unix.ENOSYS)
 		return
 	}
-	cmd := exec.Command(os.Args[0], "-test.run", "^TestDenyVsockFailsOnlyVsockSockets$")
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestDenyVsockFailsOnlyVsockSocketsAndIOURing$")
 	cmd.Env = append(os.Environ(), "AETHER_DENY_VSOCK_CHILD=1")
 	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(out), "vsock=true pair=true unix=true") {
+	if err != nil || !strings.Contains(string(out), "vsock=true pair=true unix=true ring=true") {
 		t.Fatalf("filtered child: %v\n%s", err, out)
 	}
 }
