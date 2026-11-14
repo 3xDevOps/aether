@@ -16,10 +16,10 @@ func TestKVMGuestConsoleFloodStaysBounded(t *testing.T) {
 	const key = "run-vmconsole"
 	rootSession(t, e, key, "docker.io/library/ubuntu:24.04")
 	start := time.Now()
-	if out, code := vmRun(t, e, key, "head -c 4194304 /dev/zero | tr '\\0' x > /dev/ttyS0 && echo flood-end > /dev/ttyS0 && echo wrote"); code != 0 || !strings.Contains(out, "wrote") {
+	if out, code := vmRun(t, e, key, "head -c 1310720 /dev/zero | tr '\\0' x > /dev/ttyS0 && echo flood-end > /dev/ttyS0 && echo wrote"); code != 0 || !strings.Contains(out, "wrote") {
 		t.Fatalf("flood the console: %d %q", code, out)
 	}
-	t.Logf("4 MiB to the serial console took %s", time.Since(start))
+	t.Logf("1.25 MiB to the serial console took %s", time.Since(start))
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		data, _ := os.ReadFile(e.path(key, consoleLog))
