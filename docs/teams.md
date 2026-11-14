@@ -714,7 +714,7 @@ with a login, or an API key the agent signs in with in that mode:
 `ANTHROPIC_API_KEY` for Claude, `CODEX_API_KEY` for a Background Codex run
 ([per-agent setup](harnesses.md#per-agent-setup)). An account the session already used is
 never tried again: your own, or a shared one whose login the server confirmed
-in the session's container. A shared account whose login never reached the
+in the session's sandbox. A shared account whose login never reached the
 container spent none of its quota, so it stays a candidate. A session that cannot
 move parks or fails with a reason that says why
 ([Usage limit mid-session](failure-handling.md#usage-limit-mid-session)).

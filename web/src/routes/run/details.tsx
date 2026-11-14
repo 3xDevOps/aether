@@ -190,9 +190,9 @@ function Facts({ run, agent, agentName, inset }: { run: RunRecord; agent: AgentT
             ? <span className="flex flex-wrap gap-2">{status.watchers.map((id) => <Person key={id} id={id} />)}</span>
             : 'Nobody else'}
         </Row>
-        <Row label="Container">{container(run)}</Row>
+        <Row label="Sandbox">{container(run)}</Row>
         {containerBytes !== undefined && (
-          <Row label="Container size">{formatBytes(containerBytes)} <span className="text-muted">outside the mounted home, checkout and cache</span></Row>
+          <Row label="Sandbox size">{formatBytes(containerBytes)} <span className="text-muted">outside the mounted home, checkout and cache</span></Row>
         )}
         {run.archived_at && <Row label="Archived"><RelativeTime at={run.archived_at} /></Row>}
         {run.reason && <Row label="Last reason">{plainReason(run.reason)}</Row>}

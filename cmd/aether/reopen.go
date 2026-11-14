@@ -9,7 +9,7 @@ import (
 func init() {
 	register(command{
 		name:    "reopen",
-		short:   "reopen a finished session that still keeps its container",
+		short:   "reopen a finished session that still keeps its sandbox",
 		usage:   "aether reopen <session-id>",
 		example: "aether reopen run-d6ay38tj8j",
 		run:     runReopen,

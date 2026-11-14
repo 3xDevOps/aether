@@ -590,7 +590,7 @@ which no other app can hold and which grants nothing.
 - On the server: the server's administrator owns the data directory and can
   delete a session, a member home, or the whole directory
   ([install.md](install.md#uninstalling)). `aether member remove` removes
-  your environment container, deletes your member record and erases your
+  your environment, deletes your member record and erases your
   member home. It refuses while anything still points at you - a session you
   launched, a schedule you own, or an agent profile you pushed - so an
   administrator deletes those first; what a session wrote stays in the data

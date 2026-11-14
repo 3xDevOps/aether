@@ -249,7 +249,7 @@ can be delivered again. Supplying the token on the
 next read acknowledges exactly that batch while fetching the next batch, and
 the result carries `"acked": true`; a stale or unknown token acknowledges
 nothing and omits `acked`. An empty inbox has no token. Tokens are durable across server restarts while the
-session's container and coordination data are retained.
+session's sandbox and coordination data are retained.
 
 The batch is frozen until acknowledged. New arrivals can increase `status`
 unread counts or native observer IDs without changing the current inbox batch.
@@ -470,7 +470,7 @@ addressed to the session. A session snapshot's
 acknowledged, and `oldest_unacked_at` is when the oldest of it was sent.
 
 Mail stays as history until its session is explicitly deleted, including through
-workspace deletion. When a session's container is released, mail it never
+workspace deletion. When a session's sandbox is released, mail it never
 acknowledged is retired: it stops counting toward the 100-message inbox cap
 and is never delivered, but still lists, without `acked_at`.
 
@@ -1225,7 +1225,7 @@ context. It can orchestrate its own subagents. Quick or tightly coupled work
 stays with the session, and more sessions are not faster by default.
 `aether-internal skill subsessions` gives agents these criteria, the steps, the
 task format and the account rules. The caller is its **parent**. A subsession
-is an ordinary session with its own container, checkout and branch, owned by the
+is an ordinary session with its own sandbox, checkout and branch, owned by the
 parent's owner, and it appears under its parent in the dashboard. Subsessions
 are on by default and go one level deep: a subsession cannot start subsessions, and
 `subsession start` from one is refused with `session <id> is itself a subsession of
@@ -1597,7 +1597,7 @@ The session's dashboard view, transcript, Changes and Captures remain available;
 retention does not grant live input or wake authority. Explicit Kill, Delete,
 and subsession cancellation still destroy the
 container; a negative TTL requests immediate cleanup. Recovery rebinds
-`coord3.sock` for retained sessions. When a session's container is destroyed,
+`coord3.sock` for retained sessions. When a session's sandbox is destroyed,
 Aether releases the coordination directory and retires the session's unread mail
 after any required evidence capture has completed; the messages stay listed
 until the session is deleted. With `--conflict-coordination=false`, sessions

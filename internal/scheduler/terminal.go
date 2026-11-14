@@ -645,7 +645,7 @@ func terminalOwnershipConflict(member domain.MemberID, other *credentialUserRese
 	if user == "" {
 		user = "root"
 	}
-	return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
+	return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent sandboxes for the same member must share one uid:gid mapping",
 		member, other.holder(), other.user, user)
 }
 

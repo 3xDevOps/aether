@@ -4,11 +4,12 @@ What Aether isolates, what it leaves exposed, and who can see or act on what.
 Read it before you run Aether for other people or let someone join your
 server.
 
-The Aether server runs on your Linux host and starts every agent in a Docker
-container. A member is a person admitted to the server. Each member has a home
-directory on the server and an environment, a long-lived container where they
-install and sign in to agent CLIs. A session is one agent task in its own
-container, with the launching member's home mounted into it. A workspace is a
+The Aether server runs on your Linux host and starts every agent in a sandbox:
+a Docker container, or with `session-runtime vm` a virtual machine. A member is
+a person admitted to the server. Each member has a home directory on the server
+and an environment, a long-lived sandbox where they install and sign in to
+agent CLIs. A session is one agent task in its own sandbox, with the launching
+member's home mounted into it. A workspace is a
 repository and its sessions. [Concepts](README.md#concepts) has the full glossary.
 
 ## Report a vulnerability
@@ -21,7 +22,7 @@ credentials out of the report.
 
 | Surface | What it protects | What it does not protect |
 | --- | --- | --- |
-| [Session container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Sessions and environments cannot connect to each other. Agents run unprivileged. | It is not a VM. A session can read and change everything mounted into it: your home, the checkout and the workspace secrets. |
+| [Session sandbox](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Sessions and environments cannot connect to each other. Agents run unprivileged. | A container shares the host's kernel. A session can read and change everything mounted into it: your home, the checkout and the workspace secrets. |
 | [Permission tiers](#permission-tiers) | A Default session's `sudo` waits for its owner or an admin of its workspace. Isolated keeps every change outside the checkout inside the session. | Root access runs sudo without asking. Docker inside a Default session gives root in the container without asking. |
 | [Egress control](environments.md#egress-control) | Off by default. When on, a workspace's sessions reach only its listed hosts, through the server's proxy, and never a private, loopback or metadata address. | An allowed host receives whatever the agent sends: with `github.com` allowed, the launcher's gh token can push anywhere it can write. Sessions still reach the server host. |
 | [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own sessions. | Every session you launch can read and replace your agent logins and gh token, and sign with your commit signing key. |
@@ -29,11 +30,11 @@ credentials out of the report.
 | [Account sharing](#account-sharing) | A recipient's session gets your agent login, not your home. | The recipient's session can copy, overwrite or log out your login. A copied refresh token outlives a revoke. An `omp` share is as broad as sharing your home. |
 | [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Sessions sign through an agent and cannot copy the key. | Any of your sessions can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
 | [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every session of the workspace reads them, and anyone who can launch or message a session can make it print one. |
-| [Assistant](#the-assistant) | Its own container, home and sign-in, which your sessions and account share recipients cannot see or change. Launching, messaging and stopping sessions and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click, and an approval rule removes it for one kind of action. |
+| [Assistant](#the-assistant) | Its own sandbox, home and sign-in, which your sessions and account share recipients cannot see or change. Launching, messaging and stopping sessions and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click, and an approval rule removes it for one kind of action. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the session. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the session can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
 | [Dashboard gateways](#the-dashboard-gateways) | `aether gui` listens on loopback with a per-process token. The server's dashboard is tailnet-only HTTPS with per-request identity. | Any process on the server host that connects to the host's own tailnet address is served as the node's owner. |
-| [Dictation](#dictation) | The speech-to-text engine runs in a container with no network, no capabilities and a memory cap, reachable only through a `0600` Unix socket. Only approved members call it, never connectors, one clip at a time. Audio stays in memory. | The engine and model are third-party binaries, checked only against pinned SHA-256 sums. |
+| [Dictation](#dictation) | The speech-to-text engine runs in a sandbox with no network and a memory cap, as an unprivileged user, reachable only through a Unix socket in a `0700` directory. Only approved members call it, never connectors, one clip at a time. Audio stays in memory. | The engine and model are third-party binaries, checked only against pinned SHA-256 sums. |
 | [Push notifications](#push-notifications) | The server posts only to public HTTPS endpoints, and the payload is encrypted to your browser. | A notice shows run text (title and reason) on your device. |
 | [Agent configuration and Files](#agent-configuration-and-files) | `aether config push` skips credential files and leaves out files with secrets. Files will not show a known credential file. | Files acts on your whole home. A credential under an unrecognized name is not locked. |
 | [SSH into a session and port forwarding](#ssh-into-a-session) | Same admission as a session shell. Forwards reach only the session's own loopback. | Sessions are not recorded. Attaching an editor lets the session's agent reach your computer through the editor. |
@@ -50,11 +51,19 @@ credentials out of the report.
 ## The agent container
 
 The container is the only isolation boundary. It is not a VM: every session
-shares the host's kernel, and Aether builds no second sandbox inside it.
+shares the host's kernel, and Aether builds no second boundary inside it.
+
+With `session-runtime vm`, the boundary is a Cloud Hypervisor virtual machine
+with its own kernel instead
+([Sessions in virtual machines](environments.md#sessions-in-virtual-machines)
+has its network rules). Cloud Hypervisor and the host services a VM uses,
+such as its [file service](vm-guest.md#the-file-service) and `virtiofsd`, run
+as root on the host, so a flaw in any of them reaches the host. The bullets below on Docker, Sysbox and networks
+describe Docker mode; what a session is given, after them, applies to both.
 
 - Agents run as uid `1000`, or as an image's own non-root user. What they may
   do as root depends on the session's [permission tier](#permission-tiers).
-  Treat root in a session as able to do anything the container can reach.
+  Treat root in a session as able to do anything its sandbox can reach.
 - A session is never `--privileged` and never gets the host Docker socket. With
   [Sysbox](environments.md#docker-inside-sessions) installed, runs and
   environments get their own Docker daemon, and root in the container maps to
@@ -73,11 +82,11 @@ shares the host's kernel, and Aether builds no second sandbox inside it.
   checkouts to the agent's user. An unprivileged server runs every container
   as its own uid and gid, the only owner it can hand files to.
 
-What a session container is given decides what it can do:
+What a session sandbox is given decides what it can do:
 
 ```mermaid
 flowchart LR
-  home["Launcher's home on the server"] -- "read-write as $HOME" --> run["Session container (agent is uid 1000)"]
+  home["Launcher's home on the server"] -- "read-write as $HOME" --> run["Session sandbox (agent is uid 1000)"]
   checkout["Session checkout"] -- "mounted at /workspace" --> run
   secrets["Workspace variables and secrets"] -- "environment variables" --> run
   coord["Session's coordination socket"] -- "mounted" --> run
@@ -203,7 +212,7 @@ is the agent's: read it before you allow it.
   session may deny it. Anyone else gets `run.input.respond: permission denied:
   allowing a command to run as root requires the session's owner or an admin`.
 - Allowed, the command runs once as root (with `-u <user>`, as that user) in
-  the session's container, with the same arguments, the shim's working directory,
+  the session's sandbox, with the same arguments, the shim's working directory,
   the container's environment with sudo's fixed `PATH`
   (`/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`, never the
   agent-writable `~/.local/bin`) and up to 1 MiB of piped standard input. A
@@ -234,7 +243,7 @@ existed. Enforcement is on the server; the dashboard only mirrors it.
 
 In a workspace they reach, the default role, collaborator, can view, steer (type
 into the terminal, message, approve, pause) and kill every other member's
-session. A viewer can only watch ([roles](teams.md#roles)). A session's container mounts its launcher's home,
+session. A viewer can only watch ([roles](teams.md#roles)). A session's sandbox mounts its launcher's home,
 so steering someone's session acts with their home, gh login and signing key. A
 handoff (`aether handoff`) changes the owner but not the home.
 
@@ -462,7 +471,7 @@ someone who can run code in the workspace.
 - Plain variables and the setup script are readable by every member, so keep
   credentials out of them. A variable marked secret later stays in old
   database backups: change its value too.
-- Every new session container gets the secrets as
+- Every new session sandbox gets the secrets as
   environment variables, readable by every process in it and by anyone with
   Docker access on the host (`docker inspect`). Anyone who can launch or
   message a session in the workspace can make it print a secret into the
@@ -475,7 +484,7 @@ someone who can run code in the workspace.
 
 ## The assistant
 
-The [assistant](assistant.md) is an agent that runs in a container of its own
+The [assistant](assistant.md) is an agent that runs in a sandbox of its own
 per member, driven from the dashboard. Its Aether tools act as you, with your
 permissions, and it uses the account you signed it in to.
 
@@ -549,7 +558,7 @@ permissions, and it uses the account you signed it in to.
   not limit the task or message: a steered assistant can launch any task
   with the agent a rule covers, or send any message to your own sessions in
   its workspace. Rules never expire; revoke one you no longer use.
-- Its shell and file tools never ask, inside its own container.
+- Its shell and file tools never ask, inside its own sandbox.
 - Transcripts it reads can carry injected instructions. With auto-approve off
   and no rules, a steered assistant still needs your click. With it on, a
   steered assistant can launch, message and stop your sessions; with a rule,
@@ -566,7 +575,7 @@ including approving the assistant's cards.
 
 A session can have development terminals, a shared app browser (a headless Chromium
 companion container) and captures of both. All need permission to steer the session,
-reads included. A terminal runs in the live session container with the session owner's
+reads included. A terminal runs in the live session sandbox with the session owner's
 home and credentials. Taking control of a terminal or the browser only decides
 whose input goes in; other processes keep running. A human can take control from
 an agent, never the reverse.
@@ -732,7 +741,7 @@ environment and every session you launch.
 ## SSH into a session
 
 `ssh <session-id>.aether` ([terminal.md](terminal.md#ssh-and-editors)) gives you
-a shell, file transfer and port forwarding inside a session's container.
+a shell, file transfer and port forwarding inside a session's sandbox.
 
 - Admission is the session shell's: membership, permission to steer the session, and a
   `running` or `needs-attention` session that is not paused. It is checked again
@@ -745,7 +754,7 @@ a shell, file transfer and port forwarding inside a session's container.
   64 forwards.
 - Processes you start stop when the session ends. For a paused session the stop
   waits for resume, and a server restart in between forgets it, leaving them
-  running. Only **Free container…** on a finished session is certain to end them.
+  running. Only **Free sandbox…** on a finished session is certain to end them.
 - Your `ssh` must be OpenSSH 9.6 or a build patched for CVE-2023-51385. Older
   clients can run a command on your computer when they open a crafted
   `*.aether` host name, for example from a git submodule URL.
@@ -1060,7 +1069,8 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 ## Limits
 
 - Containers share the host kernel. A kernel or Docker escape reaches the
-  host.
+  host. A session VM has its own kernel; a flaw in Cloud Hypervisor or a host
+  service the VM uses reaches the host.
 - Outbound traffic is limited only for sessions of a workspace with egress
   control on. Other sessions and environment terminals
   reach the internet, your network and ports the server host listens on.

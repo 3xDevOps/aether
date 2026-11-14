@@ -519,7 +519,7 @@ describe('run details', () => {
     })
     open()
     const facts = within((await details()).getByRole('region', { name: 'Details' }))
-    expect(facts.getByText('Container size').nextElementSibling?.textContent).toBe('3.0 GB outside the mounted home, checkout and cache')
+    expect(facts.getByText('Sandbox size').nextElementSibling?.textContent).toBe('3.0 GB outside the mounted home, checkout and cache')
   })
 
   it('lists a teammate question among the notes', async () => {

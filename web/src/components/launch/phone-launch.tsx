@@ -70,7 +70,7 @@ export function PhoneLaunchSheet({
       <DialogContent {...returnFocus} variant="bottom" className="grid-rows-[auto_minmax(0,1fr)_auto_auto] gap-3 overflow-hidden">
         <div className="flex flex-col gap-0.5 pr-10">
           <DialogTitle>New session</DialogTitle>
-          <DialogDescription className="sr-only">Starts an agent in its own container on the workspace&apos;s base branch.</DialogDescription>
+          <DialogDescription className="sr-only">Starts an agent in its own sandbox on the workspace&apos;s base branch.</DialogDescription>
         </div>
         <form id="launch-form" className="-mx-1 flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto px-1 py-1 [&>*]:shrink-0" onSubmit={(event) => { event.preventDefault(); onSubmit() }}>
           <TaskField mode={mode} task={task} onTask={onTask} autoFocus shared={shared} brief disabled={disabled} />

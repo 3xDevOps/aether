@@ -53,9 +53,9 @@ func envSave() error {
 func envReset(yes, interactive bool, in io.Reader, out io.Writer) error {
 	if !yes {
 		if !interactive {
-			return errors.New("--yes is required because aether env reset destroys your Environment's container, unsaved changes and saved image: aether env reset --yes")
+			return errors.New("--yes is required because aether env reset destroys your Environment's sandbox, unsaved changes and saved image: aether env reset --yes")
 		}
-		_, _ = fmt.Fprint(out, "This destroys your Environment's container, unsaved changes and saved image. Your home stays. Reset? [y/N]: ")
+		_, _ = fmt.Fprint(out, "This destroys your Environment's sandbox, unsaved changes and saved image. Your home stays. Reset? [y/N]: ")
 		if !yesAnswer(bufio.NewReader(in)) {
 			return errors.New("aether env reset: nothing was reset")
 		}

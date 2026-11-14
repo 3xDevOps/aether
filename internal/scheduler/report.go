@@ -85,7 +85,7 @@ func (s *Scheduler) applyAgentReportIf(ctx context.Context, run domain.RunID, re
 	defer s.mu.Unlock()
 	entry := s.runs[run]
 	if entry == nil {
-		return nil, fmt.Errorf("scheduler: agent status report for %s: the session has no live container", run)
+		return nil, fmt.Errorf("scheduler: agent status report for %s: the session has no live sandbox", run)
 	}
 	if current != nil && !current(entry) {
 		return nil, nil

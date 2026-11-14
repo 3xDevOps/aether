@@ -312,15 +312,15 @@ export function ReleaseFinishedConfirm({
         <DialogHeader>
           <DialogTitle>
             {n === 0
-              ? 'No finished sessions keep a container'
-              : `Free the retained containers of ${n} finished ${n === 1 ? 'session' : 'sessions'}?`}
+              ? 'No finished sessions keep a sandbox'
+              : `Free the retained sandboxes of ${n} finished ${n === 1 ? 'session' : 'sessions'}?`}
           </DialogTitle>
           <DialogDescription>
             {n === 0 ? (
-              'This acts on finished sessions you may act on that still keep their container.'
+              'This acts on finished sessions you may act on that still keep their sandbox.'
             ) : (
               <>
-                Their retained containers will be removed and the sessions cannot be reopened.
+                Their retained sandboxes will be removed and the sessions cannot be reopened.
                 Checkouts, homes and repositories follow their existing retention rules;
                 history is kept until explicit deletion. This does not archive the sessions.
               </>

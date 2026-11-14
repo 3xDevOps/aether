@@ -250,9 +250,9 @@ test('release confirms, keeps the run, and shows the real gateway error', async 
   vi.mocked(api.runRelease).mockRejectedValueOnce(refusal('evidence is still pending'))
   vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'merged', reason: 'closed; retained container' }))
   render(<RunActions run={record} />)
-  await selectMore('Free container…')
-  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Free container' }))
-  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Freed container failed: evidence is still pending'))
+  await selectMore('Free sandbox…')
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Free sandbox' }))
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Freed sandbox failed: evidence is still pending'))
   expect(api.runArchive).not.toHaveBeenCalled()
   expect(useStore.getState().runs[record.id].reason).toBe('closed; retained container')
 })
@@ -336,7 +336,7 @@ const verbs: {
   { name: 'Resume session', method: 'runResume', done: 'Resumed', over: { paused: true }, read: (s) => s.pausedRuns.run_1, from: true, to: false },
   { name: 'Kill session', confirm: 'Kill session', slow: true, method: 'runKill', done: 'Killed', over: { paused: false }, read: (s) => runOne(s).status, from: 'running', to: 'abandoned' },
   {
-    name: 'Free container…', confirm: 'Free container', slow: true, method: 'runRelease', done: 'Freed container',
+    name: 'Free sandbox…', confirm: 'Free sandbox', slow: true, method: 'runRelease', done: 'Freed sandbox',
     over: { run: { status: 'merged', container_retained_until: '2030-01-01T00:00:00Z' } },
     read: (s) => runOne(s).container_retained_until, from: '2030-01-01T00:00:00Z', to: undefined,
   },

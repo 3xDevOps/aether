@@ -1,7 +1,7 @@
 # Integrating an unsupported agent
 
 This guide connects an agent CLI that Aether does not ship to Aether's durable
-mailbox. A **session** is one agent that Aether launches in a container for one task.
+mailbox. A **session** is one agent that Aether launches in a sandbox (a container or virtual machine) for one task.
 Other sessions and people send it messages, which Aether stores until the agent reads
 them. Read [Agents](harnesses.md#custom-and-unlisted-agents) first to register
 the CLI as a custom agent. For a shipped agent, you do not need this guide.

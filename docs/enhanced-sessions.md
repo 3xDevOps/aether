@@ -96,7 +96,7 @@ driven over ACP fails rather than run at the default. An effort you pick later
 from the composer menu becomes the session's recorded effort and survives a reopen
 and a switch to Standard, like the model.
 
-The session's container is the same as a Standard session's, with the same image, home,
+The session's sandbox is the same as a Standard session's, with the same image, home,
 retention, Pause and Close. The agent's ACP server runs beside a login shell,
 and the **Terminal** tab is that shell: use it to log the agent in or inspect
 the checkout ([terminal.md](terminal.md)).
@@ -302,7 +302,7 @@ retries a waiting prompt at least every 30 seconds.
 
 ## Restarts and failures
 
-The agent's ACP server runs under a keeper: a process in the session container,
+The agent's ACP server runs under a keeper: a process in the session sandbox,
 started from the staged server binary as `aether-internal acp-keeper`, that
 owns the adapter's stdin and stdout and serves them on a socket in
 `/run/aether-acp/`. The server attaches to the keeper with a short-lived
@@ -352,7 +352,7 @@ second server on the same data directory or root in the container can do, the
 server logs **Agent connection taken over** and restores the conversation the
 same way.
 
-A session container keeps the server binary it was created with. A session
+A session sandbox keeps the server binary it was created with. A session
 whose container a server without keepers created runs its adapter without
 one, and every restart restores its conversation as above until the container
 is recreated. **Reopen**, **Retry Enhanced**, Pause and resume reuse the
@@ -391,8 +391,8 @@ enhanced turn failed: ... Authentication required ...; a restart did not help. S
 The first is a login file that cannot sign the agent in; the notice quotes
 what it lacks. The second is a refusal the file does not explain, which a
 restart fixes when only the agent's copy of the login was stale. The third is
-a second refusal within 5 minutes: either this container's copy of the login
-is stale, which a new session's container does not share, or the login is
+a second refusal within 5 minutes: either this sandbox's copy of the login
+is stale, which a new session's sandbox does not share, or the login is
 signed out. The owner named is the owner of the account the session runs on.
 A refusal after the login file changed restarts the agent once more inside
 those 5 minutes, so a message sent after signing in reaches an agent that has

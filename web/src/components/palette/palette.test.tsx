@@ -943,7 +943,7 @@ describe('command palette', () => {
       capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
     })
     open()
-    fireEvent.click(await screen.findByText('Free retained containers…'))
+    fireEvent.click(await screen.findByText('Free retained sandboxes…'))
     expect(api.runRelease).not.toHaveBeenCalled()
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Free 1' }))
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(archived.id))
@@ -957,10 +957,10 @@ describe('command palette', () => {
       capabilities: { gateway: 'remote', methods: ['run.release'], ws: [] },
     })
     open()
-    fireEvent.click(await screen.findByText('Free container…'))
+    fireEvent.click(await screen.findByText('Free sandbox…'))
     const dialog = within(await screen.findByRole('alertdialog'))
     expect(api.runRelease).not.toHaveBeenCalled()
-    fireEvent.click(dialog.getByRole('button', { name: 'Free container' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Free sandbox' }))
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(active.id))
   })
 })

@@ -5,7 +5,7 @@ connection drops, and what you do next, for whoever runs the server and for
 members who find a session in an unexpected state. Terms such as environment,
 Enhanced mode and subsession are defined in [Concepts](README.md#concepts).
 
-A session is one agent working on one task in its own container on the server.
+A session is one agent working on one task in its own sandbox on the server.
 While it is live its status is `running` or `needs-attention`; when it ends it
 is `completed`, `failed`, `interrupted`, `merged` or `abandoned`. The reason
 shown beside the status says why it is there.
@@ -14,7 +14,7 @@ shown beside the status says why it is there.
 
 | When | What you see | What Aether does | What you do |
 | --- | --- | --- | --- |
-| The server restarts or is killed, and session containers survive | Sessions keep their status. | Reattaches to every live container. An Enhanced agent keeps running under its keeper, and the new server adopts its conversation, turn and open requests ([Restarts and failures](enhanced-sessions.md#restarts-and-failures)). A kill accepted before the crash is issued again. | Nothing. When the keeper is gone, the conversation is restored in a fresh process and a turn that was cut off parks with `turn interrupted`: send a message to continue. |
+| The server restarts or is killed, and session sandboxes survive | Sessions keep their status. | Reattaches to every live sandbox. An Enhanced agent keeps running under its keeper, and the new server adopts its conversation, turn and open requests ([Restarts and failures](enhanced-sessions.md#restarts-and-failures)). A kill accepted before the crash is issued again. | Nothing. When the keeper is gone, the conversation is restored in a fresh process and a turn that was cut off parks with `turn interrupted`: send a message to continue. |
 | The host reboots, or Docker restarts without `live-restore` | Live sessions read `interrupted` with `server restarted: container exited <code>` (or `server restarted` when the container is gone). | Commits the partial work as `wip: <task>`, publishes the session branch and keeps the checkout. | Pull the branch (`aether pull <session-id>`) or start a new session. An interrupted session cannot be reopened. |
 | A server update is interrupted, or the new version cannot boot | `aether server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
@@ -241,7 +241,7 @@ poll and before refusing a launch, in this order, until it is back above:
    session can no longer be reopened, and its branch and history are kept`.
 2. Checkouts of every finished session, whatever their age. Skipped when
    `--checkout-ttl` is negative.
-3. Other members' stopped environment containers. Anything they installed and
+3. Other members' stopped environments. Anything they installed and
    did not save with `aether env save` is lost; their homes are kept.
 4. Caches and unused standard and browser images.
 5. Leftover scratch directories.
@@ -260,7 +260,7 @@ is still there. To free space yourself:
 2. Delete sessions you no longer need with **Delete run** or `aether delete
    <session-id>`. That removes the checkout, transcript and records; the
    published branch, the timeline and the cost totals stay.
-3. Free retained containers with **Free retained containers…** (admins).
+3. Free retained sandboxes with **Free retained sandboxes…** (admins).
 4. Retry the launch.
 
 | What grows | What frees it |
@@ -320,7 +320,7 @@ parse refuses launches with `scheduler: host capacity unavailable`, like the
 other probes.
 
 To recover, close or kill sessions. A closed session's paused container still
-holds its memory; **Free container…** releases it. An idle Enhanced Claude
+holds its memory; **Free sandbox…** releases it. An idle Enhanced Claude
 Code session, open or closed, frees its memory on its own after
 `--run-sleep-after` ([Idle sleep](#idle-sleep)). Running work is never
 stopped to make room.
@@ -471,7 +471,7 @@ mirror is failing.
 ## Enhanced sessions
 
 An [Enhanced session](enhanced-sessions.md) talks to its agent through a separate
-process in the session container. When that process fails, the container and its
+process in the session sandbox. When that process fails, the container and its
 login shell stay up.
 
 | Failure | What you see | What you do |
@@ -483,7 +483,7 @@ login shell stay up.
 | `run.launch` answers `<owner>'s <agent> login is signed out: <problem>. Sign in, then launch again: dashboard Agents page, or aether agent login <agent>` | The login file on the account cannot sign the agent in. Nothing was created. | The account's owner signs in, then launch again. A workspace variable that signs the agent in, such as `ANTHROPIC_API_KEY`, lets the launch through ([harnesses.md](harnesses.md#use-an-api-key)). |
 | Root in one of your sessions took your shared home, for example a package install that ran `systemd-tmpfiles` | **Home restored** with the owner and mode Aether found, before the agent starts again. If restoring fails: **Disconnected**, `enhanced session failed: the agent cannot read its home: ...`. | Send the refused message again. Run `sudo chown "$(id -u):$(id -g)" "$HOME" && sudo chmod u+rwx "$HOME"` in the session's **Terminal** tab, which runs as the session's user, when restoring failed, or when the agent stays connected while its tools fail with `permission denied` or exit status 127, which no restore covers. After a failed restore, press **Retry Enhanced**. |
 | The server restarts mid-turn | The turn keeps running in the adopted conversation; a message queued behind it is sent again unless the agent already had it. | Nothing. |
-| The server restarts and cannot reattach to the agent's keeper, or the session's container predates keepers | **Agent restarted** with the reason, then **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `aether-internal terminal` terminals keep running. | Send a message to continue. |
+| The server restarts and cannot reattach to the agent's keeper, or the session's sandbox predates keepers | **Agent restarted** with the reason, then **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `aether-internal terminal` terminals keep running. | Send a message to continue. |
 | You cancel a turn or press Stop | **Waiting**, `turn cancelled`. | Send a message when you want it to go on. |
 | A Claude background task never ends | `running`, `working in background: <n> tasks`. | Press Stop. |
 | The old session cannot be restored | A new session starts; the item log says why. | Repeat context the agent lost. |
@@ -505,7 +505,7 @@ move, interactive sessions park as **Needs you**, a Background session fails, an
 | Reason | Meaning |
 | --- | --- |
 | `Usage limit reached on <owner>'s account; no other account is shared to fall back on` | No other account is shared with the launcher, or with the member whose home the session mounts, or listed in its `--fallback` order. Ask a teammate to share theirs, or wait for the limit to reset. |
-| `Usage limit reached on <owner>'s account; no fallback has usage left` | Every other account was read as exhausted or was already used by this session: the launcher's own, or a shared one whose login the server confirmed in the session's container. Wait for the limit to reset, or ask a teammate to share theirs. |
+| `Usage limit reached on <owner>'s account; no fallback has usage left` | Every other account was read as exhausted or was already used by this session: the launcher's own, or a shared one whose login the server confirmed in the session's sandbox. Wait for the limit to reset, or ask a teammate to share theirs. |
 | `Usage limit reached on <owner>'s account; no account that may have usage left can run <agent> here` | Accounts with usage left, or whose usage could not be read, cannot launch the agent: their owner is not signed in to it, the agent is not installed for them, or the share no longer covers the session's home. |
 | `Usage limit reached on <owner>'s account; Aether cannot read <agent>'s usage, so its sessions do not move to another account` | Only `claude` and `codex` sessions move ([harnesses.md](harnesses.md#usage-limit-signals)). Wait for the limit to reset, or relaunch on another account. |
 | `Usage limit reached on <owner>'s account; fallback is off for this session` | The session was launched with `--no-fallback`. |
@@ -638,7 +638,7 @@ changes the idle time the same way. There is no dashboard setting.
 | **Close** (`aether close <session-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory, until an Enhanced Claude Code session's container is stopped after `--run-sleep-after` ([Idle sleep](#idle-sleep)). | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `aether reopen <session-id>`. The deadline is cleared while the session is live; the next close sets a new 7 days. |
 | A Background session finishes | Removed at once. | Kept for `--checkout-ttl` (72 hours) after the session ends. | No. |
 | **Kill run** (`aether kill <session-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the session ends. | No. |
-| **Free container…** | Removed. History stays. | Kept until `--checkout-ttl` after the session ended. | No. |
+| **Free sandbox…** | Removed. History stays. | Kept until `--checkout-ttl` after the session ended. | No. |
 | **Delete run** (`aether delete <session-id>`) | Removed. | Removed with the transcript and records. | No. |
 
 Every row removes the session's browser companion, the Chromium container

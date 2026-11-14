@@ -42,7 +42,7 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 		return live, err
 	}
 	if run.Status.Terminal() {
-		return live, fmt.Errorf("%w: the session is %s and its container is gone", ErrNoLiveEnvironment, run.Status)
+		return live, fmt.Errorf("%w: the session is %s and its sandbox is gone", ErrNoLiveEnvironment, run.Status)
 	}
 	if run.Status != domain.RunRunning && run.Status != domain.RunNeedsAttention {
 		return live, fmt.Errorf("%w: the session is %s", ErrNoLiveEnvironment, run.Status)
@@ -56,14 +56,14 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 			return live, err
 		}
 		if sc.RunID != string(id) || sc.ContainerID == "" || sc.KillRequested || sc.ExitObserved || sc.DestroyPending || sc.Retained || (sc.Paused && !allowPaused) {
-			return live, fmt.Errorf("%w: the recorded container is stopping, gone or paused", ErrNoLiveEnvironment)
+			return live, fmt.Errorf("%w: the recorded sandbox is stopping, gone or paused", ErrNoLiveEnvironment)
 		}
 		found, err := s.cfg.Runtime.FindByCreationKey(ctx, string(id))
 		if err != nil {
 			return live, err
 		}
 		if found != runtime.ID(sc.ContainerID) {
-			return live, errors.New("recorded session container identity mismatch")
+			return live, errors.New("recorded session sandbox identity mismatch")
 		}
 		live = LiveRun{Run: *run, ContainerID: found, Workdir: s.cfg.WorktreeMount, User: sc.RunUser}
 		if sc.Home != "" {
@@ -78,7 +78,7 @@ func (s *Scheduler) ResolveLiveRun(ctx context.Context, id domain.RunID, allowPa
 	}
 	if e.containerID == "" || e.killRequested || e.finalizing || e.destroyPending || e.retained || (e.paused && !allowPaused) {
 		s.mu.Unlock()
-		return live, fmt.Errorf("%w: the container is stopping, gone or paused", ErrNoLiveEnvironment)
+		return live, fmt.Errorf("%w: the sandbox is stopping, gone or paused", ErrNoLiveEnvironment)
 	}
 	if e.status != run.Status {
 		s.mu.Unlock()

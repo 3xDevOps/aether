@@ -284,7 +284,7 @@ function confirmLine(active: number): string {
     return 'No sessions are active right now. Attached terminals reconnect on their own.'
   }
   const runs = active === 1 ? '1 session is' : `${active} sessions are`
-  return `${runs} active right now. They keep running: the server reattaches to their containers when it comes back, and attached terminals reconnect on their own.`
+  return `${runs} active right now. They keep running: the server reattaches to their sandboxes when it comes back, and attached terminals reconnect on their own.`
 }
 
 function manualCommands(status: ServerUpdateStatus | null): string[] {
@@ -426,7 +426,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
             <CollapsibleContent>
               <p className="mt-1.5 leading-5">
                 Updating replaces the server binaries and restarts the server. Sessions
-                keep going - the server reattaches to their containers when it comes
+                keep going - the server reattaches to their sandboxes when it comes
                 back - and attached terminals reconnect on their own. Clients update
                 after the server.
               </p>

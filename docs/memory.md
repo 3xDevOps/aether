@@ -3,7 +3,7 @@
 Team memory is a shared list of short notes about a workspace: decisions,
 conventions, gotchas and preferences. Every session in the workspace can search
 and add notes, whatever agent it uses. A **workspace** is one repository on the
-server, and a **session** is one agent working on a task in its own container
+server, and a **session** is one agent working on a task in its own sandbox
 (see the [glossary](README.md#concepts)).
 
 Notes live in the server's database and are searched with SQLite full-text

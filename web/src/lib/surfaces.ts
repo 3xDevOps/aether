@@ -41,7 +41,7 @@ export function surfaces(cap: Capability): Surface[] {
   if (cap.hasMethod('files.tree') || cap.hasMethod('home.tree'))
     list.push({ name: 'files', label: 'Files', Icon: FolderTree, place: 'nav' })
   if (cap.hasWS('terminal'))
-    list.push({ name: 'environment', label: 'Environment', Icon: SquareTerminal, place: 'nav', keywords: 'terminal shell console container' })
+    list.push({ name: 'environment', label: 'Environment', Icon: SquareTerminal, place: 'nav', keywords: 'terminal shell console container sandbox' })
   if (cap.hasMethod('agent.list'))
     list.push({ name: 'agents', label: 'Agents', Icon: Bot, place: 'nav', keywords: 'Agent config files configuration' })
   if (cap.hasMethod('template.save'))

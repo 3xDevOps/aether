@@ -5,7 +5,7 @@
 request, time spent, tokens and cost. The server computes the numbers from its
 own database, and nothing is sent anywhere else.
 
-A **session** is one agent working on one task in its own container.
+A **session** is one agent working on one task in its own sandbox.
 
 ## What the page shows
 
@@ -111,15 +111,15 @@ it. The Activity tab is the 7-day history above; System is live.
   `Live · every 5s`, `Paused while this tab is hidden`, or the error of the
   last failed poll; the last data stays on screen, dimmed.
 - **Tiles.** CPU busy (user, system, I/O wait and steal), memory used,
-  the data filesystem, network, running containers, and pressure when the
+  the data filesystem, network, running sandboxes, and pressure when the
   kernel reports it. Pressure is the share of the last 10 seconds some task
   waited for CPU, memory or I/O.
 - **Resources by session.** A donut of CPU or memory use. Each of up to five
-  containers using at least 2% of the host gets a slice; the rest are one
+  sandboxes using at least 2% of the host gets a slice; the rest are one
   **Other sessions** slice. **Everything else** is host use outside the listed
-  containers: the Aether server, Docker, host processes and containers you
+  sandboxes: the Aether server, Docker, host processes and sandboxes you
   cannot see. Click a slice or its legend entry to filter the ranked list to
-  it; click again or **Show all** to clear. The list ranks every container
+  it; click again or **Show all** to clear. The list ranks every sandbox
   by use, with its limit, **near limit** from 80% of that limit, **throttled**
   when CPU is capped, and a 15-minute trend. A session's browser is its own row,
   with its own limits. A row opens its session, or your own Environment.
@@ -128,11 +128,12 @@ it. The Activity tab is the 7-day history above; System is live.
   container writable layers and, for admins, the largest storage owners.
 
 The server reads host figures from `/proc` and `/sys` every 5 seconds and
-keeps one hour. Container figures come from Docker's per-container stats and
-are sampled only while someone has the System tab open. Admins see every
-container; members see their own, and the rest counts toward **Everything
-else**. The tab reads `This server does not report system stats. Update the
-server to see them.` when the server is too old.
+keeps one hour. Sandbox figures come from Docker's per-container stats, and
+from inside each VM with `session-runtime vm`, and are sampled only while
+someone has the System tab open. Admins see every sandbox; members see their
+own, and the rest counts toward **Everything else**. The tab reads `This server
+does not report system stats. Update the server to see them.` when the server
+is too old.
 
 ## Limits
 

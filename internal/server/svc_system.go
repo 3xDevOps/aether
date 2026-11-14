@@ -105,7 +105,7 @@ func (r *systemReader) owner(ctx context.Context, key string) (sysstats.Owner, e
 		return sysstats.Owner{}, nil
 	}
 	if err != nil {
-		return sysstats.Owner{}, fmt.Errorf("container owner lookup failed for %q: %w", key, err)
+		return sysstats.Owner{}, fmt.Errorf("sandbox owner lookup failed for %q: %w", key, err)
 	}
 	return sysstats.Owner{
 		Kind: "run", ID: string(run.ID), MemberID: string(run.MemberID),

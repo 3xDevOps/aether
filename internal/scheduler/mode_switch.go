@@ -94,7 +94,7 @@ func (s *Scheduler) SwitchMode(ctx context.Context, run domain.RunID, actor doma
 	entry := s.runs[run]
 	s.mu.Unlock()
 	if entry == nil {
-		return fmt.Errorf("%w: the session has no live container", ErrInvalidTransition)
+		return fmt.Errorf("%w: the session has no live sandbox", ErrInvalidTransition)
 	}
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
@@ -152,7 +152,7 @@ func (s *Scheduler) switchableLocked(entry *supervised, mode domain.LaunchMode) 
 	switch {
 	case s.runs[entry.runID] != entry || entry.containerID == "" || entry.retained || entry.destroyPending ||
 		entry.finalizing || entry.exitObserved || entry.killRequested:
-		return fmt.Errorf("%w: the session's container is not live", ErrInvalidTransition)
+		return fmt.Errorf("%w: the session's sandbox is not live", ErrInvalidTransition)
 	case entry.status != domain.RunRunning && entry.status != domain.RunNeedsAttention:
 		return fmt.Errorf("%w: the session is %s", ErrInvalidTransition, entry.status)
 	case entry.paused:
