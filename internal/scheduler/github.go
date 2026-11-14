@@ -433,12 +433,14 @@ func (s *Scheduler) githubCLIRemedy(m *domain.Member, running, path string) (mem
 // across the update, and the pin is what has to move. A tag naming one
 // release never moves in a registry either, so repulling it changes
 // nothing; every other reference is repulled where the server can see it.
+// Session VMs boot from the VM image store, which fetches a reference once
+// and never again, so on such a server only a new reference reaches them.
 func (s *Scheduler) standardImageRemedy() string {
 	ref := s.cfg.StandardImage
 	switch {
 	case ref == s.cfg.DefaultStandardImage && releaseTagged(ref):
 		return "aether server update"
-	case releaseTagged(ref) || strings.Contains(ref, "@"):
+	case releaseTagged(ref) || strings.Contains(ref, "@") || s.sessionVMs():
 		// config set rewrites the options file; the running server keeps
 		// the old flag until it is restarted.
 		return "sudo aether-server config set standard-image <a newer image> && sudo systemctl restart aether-server"

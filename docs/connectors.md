@@ -598,7 +598,7 @@ passes both to `run.pr.create`, so neither changes after you approve; the branch
 must be pushed. When GitHub's answer is lost but the pull request is found
 afterwards, the result is that pull request. `aether_pr_status` and
 `aether_pr_merge` take the same `repo` as `aether_session_changes`. Once a finished
-session's container is gone, `aether_pr_status` still reports its recorded pull
+session's sandbox is gone, `aether_pr_status` still reports its recorded pull
 request's checks and reviews, read from GitHub, without merge state or
 comments: its result sets `comments_unavailable` and its summary says
 `comments unavailable` instead of a count. When only the reviews read fails,

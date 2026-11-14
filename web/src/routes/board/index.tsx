@@ -250,7 +250,7 @@ function FinishedMenu() {
       </MenuTrigger>
       <MenuContent align="end">
         {canArchive && <MenuItem onSelect={() => openDialog('clear-done')}>Archive finished sessions…</MenuItem>}
-        {canFree && <MenuItem onSelect={() => openDialog('release-finished')}>Free retained containers…</MenuItem>}
+        {canFree && <MenuItem onSelect={() => openDialog('release-finished')}>Free retained sandboxes…</MenuItem>}
       </MenuContent>
     </Menu>
   )

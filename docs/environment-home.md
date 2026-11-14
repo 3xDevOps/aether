@@ -33,7 +33,7 @@ The home survives every stop, save, reset and server restart:
   (`~/.vscode-server`, `~/.cursor-server`, `~/.zed_server`), so it downloads
   once ([terminal.md](terminal.md#editors)).
 
-Files outside the home live in the environment container. They survive a stop
+Files outside the home live in the environment. They survive a stop
 until **Reset to standard**, and reach sessions only after **Save environment**
 ([environments.md](environments.md#save-the-environment)).
 
@@ -200,7 +200,7 @@ Three kinds of environment can lack a usable `gh`:
   it with 2.81.0 or newer.
 
 After either image fix, run `aether terminal stop` and open the terminal
-again, because a container keeps the image it started from.
+again, because your environment keeps the image it started from.
 
 ## Upload and edit configuration
 

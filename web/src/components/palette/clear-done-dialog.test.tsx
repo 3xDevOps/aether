@@ -194,7 +194,7 @@ describe('release confirmation dialog', () => {
   it('says so when no finished run keeps its container', () => {
     useStore.setState({ paletteDialog: 'release-finished' })
     render(<ReleaseFinishedDialog />)
-    expect(screen.getByText('No finished sessions keep a container')).toBeDefined()
+    expect(screen.getByText('No finished sessions keep a sandbox')).toBeDefined()
     expect(screen.queryByText(/cannot be reopened/)).toBeNull()
     expect(screen.queryByRole('button', { name: /Free/ })).toBeNull()
     fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])

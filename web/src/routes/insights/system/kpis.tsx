@@ -54,9 +54,9 @@ export function Kpis({ stats, samples, disk }: { stats: SystemStats; samples: Sy
       >
         Physical interfaces
       </StatTile>
-      <StatTile role="group" label="Containers" value={stats.containersAt === 0 ? '—' : `${stats.containers.length} running`}>
+      <StatTile role="group" label="Sandboxes" value={stats.containersAt === 0 ? '—' : `${stats.containers.length} running`}>
         {stats.containersAt === 0
-          ? 'Measuring containers…'
+          ? 'Measuring sandboxes…'
           : [
               `${runs} ${runs === 1 ? 'session' : 'sessions'}`,
               browsers > 0 && `${browsers} ${browsers === 1 ? 'browser' : 'browsers'}`,

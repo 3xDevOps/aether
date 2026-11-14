@@ -57,7 +57,7 @@ func (s *Scheduler) saveTerminalUpload(ctx context.Context, actor domain.MemberI
 		}
 		s.mu.Unlock()
 		if entry == nil {
-			return "", errors.New("scheduler: upload target session has no live container")
+			return "", errors.New("scheduler: upload target session has no live sandbox")
 		}
 		if home == "" {
 			return "", errors.New("scheduler: upload target session has no captured HOME")
@@ -91,7 +91,7 @@ func (s *Scheduler) saveTerminalUpload(ctx context.Context, actor domain.MemberI
 		return "", fmt.Errorf("scheduler: persist terminal upload: %w", err)
 	}
 	if stillLive != nil && !stillLive() {
-		return "", errors.New("scheduler: upload target container changed while saving")
+		return "", errors.New("scheduler: upload target sandbox changed while saving")
 	}
 	return path.Join(home, relative), nil
 }

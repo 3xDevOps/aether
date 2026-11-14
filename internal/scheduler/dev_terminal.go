@@ -682,7 +682,7 @@ func (s *Scheduler) MarkDevelopmentContainerEnded(ctx context.Context, run domai
 		terminal.ContainerEnded = true
 		if !terminal.State.Exited || terminal.State.ExitCode == nil {
 			terminal.State = runtime.ExecState{Exited: true}
-			terminal.Unavailable = "session container exited; command exit status unavailable"
+			terminal.Unavailable = "session sandbox exited; command exit status unavailable"
 		}
 	}
 	return s.persistRunTerminalsLocked(run, set)

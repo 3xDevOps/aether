@@ -1652,7 +1652,7 @@ describe('onboarding wizard', () => {
     await toFirstRunStep()
 
     const step = await screen.findByRole('region', { name: 'First session' })
-    expect(step.textContent).toContain('A session is one agent working on its own branch in its own container')
+    expect(step.textContent).toContain('A session is one agent working on its own branch in its own sandbox')
     // The launch dialog's own fields, not a copy.
     expect(within(step).getByRole('radiogroup', { name: 'Agent' })).toBeDefined()
     fireEvent.click(within(step).getByRole('radio', { name: /^Claude Code/ }))

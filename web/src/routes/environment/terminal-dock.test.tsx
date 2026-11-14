@@ -713,13 +713,13 @@ describe('environment terminal dock', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
 
     expect(await screen.findByRole('status')).toBeDefined()
-    expect(screen.getByText('Starting your environment container')).toBeDefined()
+    expect(screen.getByText('Starting your environment')).toBeDefined()
     await waitFor(() => expect(attach.handlers).not.toBeNull())
 
     act(() => attach.handlers?.onAttached(true, standardGeometry))
 
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
-    expect(screen.queryByText('Starting your environment container')).toBeNull()
+    expect(screen.queryByText('Starting your environment')).toBeNull()
   })
 
   it('does not claim a container start when reattaching to a running one', async () => {
@@ -736,7 +736,7 @@ describe('environment terminal dock', () => {
     // A second tab runs another shell in the container that is already up.
     fireEvent.click(screen.getByRole('button', { name: 'Add terminal tab' }))
     expect(await screen.findByText('Connecting to your environment')).toBeDefined()
-    expect(screen.queryByText('Starting your environment container')).toBeNull()
+    expect(screen.queryByText('Starting your environment')).toBeNull()
     act(() => {
       attach.handlers?.onAttached(true, standardGeometry)
       attach.handlers?.onReplayStart?.(0, true)
@@ -746,7 +746,7 @@ describe('environment terminal dock', () => {
     // And neither does switching back to the first tab.
     fireEvent.click(screen.getByRole('tab', { name: 'main' }))
     expect(await screen.findByText('Connecting to your environment')).toBeDefined()
-    expect(screen.queryByText('Starting your environment container')).toBeNull()
+    expect(screen.queryByText('Starting your environment')).toBeNull()
   })
 
   it('replaces the starting indicator with the real start failure', async () => {
@@ -755,7 +755,7 @@ describe('environment terminal dock', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open' }))
 
     expect(
-      await screen.findByText('Starting your environment container'),
+      await screen.findByText('Starting your environment'),
     ).toBeDefined()
     await waitFor(() => expect(attach.handlers).not.toBeNull())
     act(() => attach.handlers?.onRefused('start environment: no space left on device'))
@@ -763,7 +763,7 @@ describe('environment terminal dock', () => {
     expect(
       await screen.findByText('start environment: no space left on device'),
     ).toBeDefined()
-    expect(screen.queryByText('Starting your environment container')).toBeNull()
+    expect(screen.queryByText('Starting your environment')).toBeNull()
   })
 
   it('shows an attach refusal with open tabs and clears it after attaching', async () => {

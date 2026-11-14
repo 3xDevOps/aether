@@ -305,7 +305,7 @@ func TestMergeRefusals(t *testing.T) {
 	e.runs.retentions = map[domain.RunID]scheduler.RetentionInfo{run.ID: {RetainedUntil: &until}}
 	e.runs.mu.Unlock()
 	wantRefusal(t, tc.Call(protocol.MethodMemberMergePreview, protocol.MemberMergePreviewParams{Code: code}, nil),
-		"finished sessions "+string(run.ID)+" still keep their containers")
+		"finished sessions "+string(run.ID)+" still keep their sandboxes")
 	e.runs.mu.Lock()
 	e.runs.retentions = nil
 	e.runs.mu.Unlock()

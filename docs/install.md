@@ -8,7 +8,8 @@ in the [glossary](README.md#concepts).
 ## What gets installed where
 
 Aether has two parts. The server, `aether-server`, runs on one Linux machine:
-it keeps your repositories and runs each agent in its own Docker container. A
+it keeps your repositories and runs each agent in its own Docker container or
+[virtual machine](#hosts-for-vm-sessions). A
 client is any machine you work from: the `aether` CLI, the desktop app and the
 Android app all connect to that server.
 
@@ -37,7 +38,8 @@ flowchart LR
 - Linux; a headless server is fine. Windows and macOS run only clients.
 - Docker Engine, running
   ([install Docker Engine](https://docs.docker.com/engine/install/)). Every session
-  and member environment is a container. The snap package does not work: the
+  and member environment is a container, unless they run in
+  [VMs](#hosts-for-vm-sessions). The snap package does not work: the
   `aether-server` unit requires `docker.service`. Sharing an agent account
   between members ([teams.md](teams.md#agent-accounts)) needs Docker Engine
   26.0 or newer; `docker version --format '{{.Server.Version}}'` prints yours.

@@ -88,7 +88,7 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <p className="text-ui">
-        The assistant runs Claude Code or Codex in a container of its own, with a sign-in of its own. Sign in to one to start.
+        The assistant runs Claude Code or Codex in a sandbox of its own, with a sign-in of its own. Sign in to one to start.
       </p>
       {autoError && <Callout tone="failed" role="alert">{autoError}</Callout>}
       <ul aria-label="Agents" className="flex flex-col gap-3">

@@ -500,7 +500,7 @@ func (s *Scheduler) Pause(ctx context.Context, run domain.RunID, actor domain.Me
 	entry := s.runs[run]
 	s.mu.Unlock()
 	if entry == nil {
-		return fmt.Errorf("%w: session has no live container", ErrInvalidTransition)
+		return fmt.Errorf("%w: session has no live sandbox", ErrInvalidTransition)
 	}
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
@@ -548,7 +548,7 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 	asleep := entry != nil && !entry.asleepSince.IsZero() && !entry.retained
 	s.mu.Unlock()
 	if entry == nil {
-		return fmt.Errorf("%w: session has no live container", ErrInvalidTransition)
+		return fmt.Errorf("%w: session has no live sandbox", ErrInvalidTransition)
 	}
 	if asleep {
 		return s.WakeRun(ctx, run, actor)

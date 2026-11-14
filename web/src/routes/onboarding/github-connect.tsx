@@ -190,7 +190,7 @@ export function GitHubConnect({
           <p className="text-ui leading-6 text-muted">
             {checkFailed
               ? 'This is the login the check would have made sure your terminal could run; nothing has been typed into it.'
-              : 'gh asks you to press Enter to open the browser, then reports that it could not open one; that is expected inside a container: press Enter, ignore the failure, and open the printed URL yourself with the one-time code. Then return here.'}
+              : 'gh asks you to press Enter to open the browser, then reports that it could not open one; that is expected on the server: press Enter, ignore the failure, and open the printed URL yourself with the one-time code. Then return here.'}
           </p>
           <code className="block min-w-0 overflow-x-auto whitespace-pre-wrap border border-seam/70 bg-chrome px-3 py-2 font-code text-ui-sm">
             {githubLoginCommand}
@@ -272,7 +272,7 @@ function GitHubCliRemedy({ probe }: { probe: GitHubProbeResult }) {
             ? `That file is in your own Environment home, so it comes first on PATH and survives every image. Remove it and the image's own gh takes over, or replace it with ${probe.minimum} or newer. In the terminal below:`
             : savedIsTheProblem
               ? `Install a current gh in the terminal below and press Save environment, or press Reset to standard - which removes your saved ${probe.saved_image}. From your own machine that reset is:`
-              : `${probe.admin_remedy ? 'Then reopen' : 'Reopen'} your Environment with Stop environment below and open it again, because a container keeps the image it started from. From your own machine that is:`}
+              : `${probe.admin_remedy ? 'Then reopen' : 'Reopen'} your Environment with Stop environment below and open it again, because your environment keeps the image it started from. From your own machine that is:`}
         </p>
       )}
       {probe.remedy && <CopyableCommand command={probe.remedy} />}

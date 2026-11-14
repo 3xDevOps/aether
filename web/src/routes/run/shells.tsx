@@ -396,7 +396,7 @@ export function TerminalTabs({ shells, agent }: { shells: RunShells; agent: bool
             variant="ghost"
             size="sm"
             aria-label="New shell"
-            hint={shells.atLimit ? limitReason : 'Open a shell in this session’s container'}
+            hint={shells.atLimit ? limitReason : 'Open a shell in this session’s sandbox'}
             aria-disabled={!shells.canAdd || undefined}
             onClick={() => {
               if (shells.canAdd) void shells.open()

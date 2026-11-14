@@ -871,7 +871,7 @@ func (s *Scheduler) ContainerAddr(ctx context.Context, run domain.RunID) (string
 	entry := s.runs[run]
 	if entry == nil {
 		s.mu.Unlock()
-		return "", errors.New("session has no live container")
+		return "", errors.New("session has no live sandbox")
 	}
 	containerID := entry.containerID
 	s.mu.Unlock()

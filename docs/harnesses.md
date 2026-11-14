@@ -343,7 +343,7 @@ the server's environment signs in Background sessions only. Codex ignores
 key** comes filled in with it. Codex reads no base-URL variable; for a gateway,
 set `openai_base_url` in `~/.codex/config.toml`.
 
-A Standard Codex run starts `codex app-server` in the session's container and
+A Standard Codex run starts `codex app-server` in the session's sandbox and
 attaches the Codex terminal to it with `codex --remote`. Aether follows the same
 session through that app-server: Codex reports the start and end of each turn,
 and mail and your messages from the dashboard or `aether message` arrive as a
@@ -474,7 +474,7 @@ Google Cloud application default credentials, set `AGY_ADC_AUTH=true`.
 
 Antigravity has no Enhanced mode, and an Enhanced launch is refused. `agy` has no
 ACP command, and Google's separate `antigravity-acp` package cannot finish its
-Google sign-in inside a session container.
+Google sign-in inside a session sandbox.
 
 ### Install hooks by hand
 

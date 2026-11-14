@@ -27,7 +27,7 @@ func TestDispatchHelp(t *testing.T) {
 			t.Errorf("help missing %q:\n%s", name, out)
 		}
 	}
-	if !strings.Contains(out, "reopen a finished session that still keeps its container") {
+	if !strings.Contains(out, "reopen a finished session that still keeps its sandbox") {
 		t.Errorf("relaunch help = %q, want the kept-container wording", out)
 	}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")

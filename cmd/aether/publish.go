@@ -74,7 +74,7 @@ func publish(c *protocol.Client, w, notes io.Writer, runID, repoName string) err
 		return err
 	}
 	if !domain.RunStatus(r.Status).Live() {
-		return fmt.Errorf("session %s is %s and publishing needs its container. A session closed or reported within the last 7 days keeps it: aether reopen %s, then aether publish %s. An interrupted session, or one that failed without reporting, cannot be reopened. Either way aether pull %s fetches the branch", r.ID, r.Status, r.ID, r.ID, r.ID)
+		return fmt.Errorf("session %s is %s and publishing needs its sandbox. A session closed or reported within the last 7 days keeps it: aether reopen %s, then aether publish %s. An interrupted session, or one that failed without reporting, cannot be reopened. Either way aether pull %s fetches the branch", r.ID, r.Status, r.ID, r.ID, r.ID)
 	}
 	var list protocol.WorkspaceListResult
 	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {

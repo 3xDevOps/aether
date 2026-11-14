@@ -519,20 +519,20 @@ describe('Finished footer', () => {
     expect(api.runArchive).toHaveBeenCalledWith(merged.id, true)
   })
 
-  it('offers Free retained containers to admins only', async () => {
+  it('offers Free retained sandboxes to admins only', async () => {
     const retained = run({ ...merged, reason: 'closed; retained container' })
     seed([run({ ...retained, member_id: bob.id })], { self: bob })
     const { unmount } = renderBoard()
     await userEvent.click(screen.getByRole('button', { name: 'More finished-session actions' }))
     expect(await screen.findByRole('menuitem', { name: 'Archive finished sessions…' })).toBeDefined()
-    expect(screen.queryByRole('menuitem', { name: 'Free retained containers…' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Free retained sandboxes…' })).toBeNull()
     await userEvent.keyboard('{Escape}')
     unmount()
 
     seed([retained])
     renderBoard()
     await userEvent.click(screen.getByRole('button', { name: 'More finished-session actions' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Free retained containers…' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Free retained sandboxes…' }))
     fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Free 1' }))
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(retained.id))
   })
@@ -672,7 +672,7 @@ describe('empty board', () => {
     seed([])
     renderBoard()
 
-    expect(await screen.findByText('A session is one agent working on its own branch in its own container.')).toBeDefined()
+    expect(await screen.findByText('A session is one agent working on its own branch in its own sandbox, a container or virtual machine on the server.')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'New session' }))
     expect(useStore.getState().paletteDialog).toBe('launch')
   })

@@ -98,7 +98,7 @@ onboarding and workspace management on hosted gateways.
 ### Forwarding a port
 
 A forward opens a port on `127.0.0.1` of the machine it is started on and
-carries each connection to the same port in a session's container, or in your
+carries each connection to the same port in a session's sandbox, or in your
 environment's. It needs the caller's machine, so the CLI and the local gateway
 can start one and the server gateway cannot:
 
@@ -422,7 +422,7 @@ in the session's network namespace, lowest first:
 name, absent when the session's user cannot see the owner. A port bound more than
 once is listed once, by its widest binding: every interface before one
 address before loopback. The server reads the list with one `/bin/sh` exec in
-the session container, which needs `grep` and `ls` there, so the session must be live
+the session sandbox, which needs `grep` and `ls` there, so the session must be live
 and not paused. Session agents cannot call it; they are inside that namespace.
 
 Cancellation and authority revocation stop source work and close download
@@ -747,8 +747,8 @@ checkout, transcript and session record under their existing retention rules.
 A session whose container was released cannot be reopened. A session that has become active is
 rejected with `-32002`; repeating a successful release is a no-op. Evidence
 capture or runtime cleanup errors are returned without claiming release.
-The dashboard offers this as **Free container…** on one session and, for the
-selected workspace including archived sessions, **Free retained containers…**.
+The dashboard offers this as **Free sandbox…** on one session and, for the
+selected workspace including archived sessions, **Free retained sandboxes…**.
 
 `run.delete` uses the same `Kill` capability as `run.kill` and accepts the
 same `{"run_id":"..."}` params. For a live session it stops the container and
@@ -1107,7 +1107,7 @@ sets an origin) as the head, into the session's base branch on the workspace's
 GitHub source, or on the head repository without one. A checkout with no GitHub
 push remote answers `error` saying to pass `target`, and one on a detached HEAD
 answers `error` saying to pass both. `run.pr.status` returns the `expected` and
-`target` it used, to pass to `run.pr.create`. Once a finished session's container is
+`target` it used, to pass to `run.pr.create`. Once a finished session's sandbox is
 gone, both report the pull request the session last recorded (`number`, `url`,
 `state`). `run.pr.feedback` then reads the pull request, its checks and its
 reviews from GitHub in one read, with the GitHub login of the session's home, as
@@ -1271,12 +1271,12 @@ anything.
 
 ### Session branch and pull request methods
 
-These session native `git` and `gh` in a live session's container, as the session's
+These session native `git` and `gh` in a live session's sandbox, as the session's
 account, like the other `run.git.*` and `run.pr.*` methods. `run.git.log`
 needs view; `run.pr.merge` needs push and steering, re-checked before every
-command. A session whose container is gone fails with `-32002`
+command. A session whose sandbox is gone fails with `-32002`
 (`scheduler: the session has no live environment: the session is completed and its
-container is gone`). A failed `git`
+sandbox is gone`). A failed `git`
 or `gh` command is not an RPC error: the result carries `error` and the
 command's `output` (`exit_code`, `stdout`, `stderr`, `truncated`) verbatim.
 
@@ -2882,7 +2882,7 @@ keystrokes.
 #### Session shell tabs
 
 `GET /ws/attach/<run_id>?shell=<tab>` opens a writable shell tab inside the
-session container instead of attaching to the agent process. A shell tab always
+session sandbox instead of attaching to the agent process. A shell tab always
 requires **steer** permission and ignores the `write` value in the header;
 there is no read-only shell mode. Tab names must match
 `^[a-z0-9-]{1,32}$`, and at most four shells started by people can run in a
@@ -2891,7 +2891,7 @@ The shell starts in `/workspace`. When it exits, the socket closes normally
 with **1000** and the tab name is free to reopen with a fresh shell.
 Closing the socket only detaches: the shell keeps running, still counts
 toward that limit, and reconnecting the same tab name reattaches to
-it. Every shell ends with the session's container. An unsuccessful initial TUI
+it. Every shell ends with the session's sandbox. An unsuccessful initial TUI
 agent exit returns the session to a login shell, so another installed agent
 can use the same session checkout. A session shell can only be opened while the
 container is live; finished sessions expose their recorded terminal output but do
@@ -3017,7 +3017,7 @@ ends when the sign-in exits; there is no replay of an earlier sign-in.
 
 1. Client sends one text header with `cols` and `rows`, and `follow` where
    it means the same as it does for an attach. The gateway ensures the
-   member's environment container and the requested shell.
+   member's environment and the requested shell.
 2. The gateway answers
    `{"ok":true,"tab":"main","cols":120,"rows":40,"replay":4096}` with
    the session's live geometry or a JSON error followed by a close. For a

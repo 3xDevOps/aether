@@ -225,7 +225,10 @@ func TestReattachAfterClientRestart(t *testing.T) {
 func TestLosslessOutput(t *testing.T) {
 	_, client := startHelper(t)
 	ctx := testContext(t)
-	const size = 4 * outputLimit
+	// More than the helper keeps unread plus the biggest pipe an
+	// unprivileged writer can ask for: uutils head, Ubuntu 26.04's,
+	// enlarges its stdout pipe to 1 MiB.
+	const size = outputLimit + 4<<20
 	p := spawn(t, client, guest.ProcessSpec{ID: "lossless", Argv: []string{"head", "-c", fmt.Sprint(size), "/dev/zero"}, Lossless: true})
 	time.Sleep(200 * time.Millisecond)
 	if state, err := p.Status(ctx); err != nil || state.Exited {

@@ -151,7 +151,7 @@ func TestDevelopmentOnAFinishedRunSaysTheEnvironmentIsGone(t *testing.T) {
 	c.exitNow(0)
 	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	_, err := e.sched.CallDevelopment(t.Context(), run.ID, control.Principal{Kind: control.PrincipalMember, MemberID: e.member.ID}, protocol.MethodDevBrowserStatus, json.RawMessage(`{"run_id":"`+string(run.ID)+`"}`), func() error { return nil })
-	if !errors.Is(err, ErrNoLiveEnvironment) || err.Error() != "scheduler: the session has no live environment: the session is completed and its container is gone" {
+	if !errors.Is(err, ErrNoLiveEnvironment) || err.Error() != "scheduler: the session has no live environment: the session is completed and its sandbox is gone" {
 		t.Fatalf("browser status on a finished session: %v", err)
 	}
 }

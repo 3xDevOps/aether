@@ -318,7 +318,7 @@ export function LaunchDialog({ open = true }: { open?: boolean }) {
       >
         <DialogHeader>
           <DialogTitle>New session</DialogTitle>
-          <DialogDescription>Starts an agent in its own container on the workspace's base branch.</DialogDescription>
+          <DialogDescription className="text-pretty">Starts an agent in its own sandbox on the workspace's base branch.</DialogDescription>
         </DialogHeader>
         <form
           id="launch-form"

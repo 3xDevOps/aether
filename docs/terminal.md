@@ -1,14 +1,14 @@
 # Terminals
 
 Aether shows three kinds of terminal in the dashboard. A session is one agent
-working on one task in its own container; other terms are in the
+working on one task in its own sandbox; other terms are in the
 [glossary](README.md#concepts).
 
 | Terminal | What it is |
 | --- | --- |
 | **Environment** | Your own persistent shell on the server, with your home mounted at `$HOME` ([environments.md](environments.md)) |
 | A session's **Terminal** view | The agent's own terminal in a Standard session |
-| Session shells | Extra shells in a session's container |
+| Session shells | Extra shells in a session's sandbox |
 
 You can also reach a session over SSH from your own editor.
 
@@ -23,11 +23,11 @@ aether terminal stop
 
 In the dashboard, select **Environment** in the header (under **More
 navigation** on a narrow screen), or press `g` then `e`. The first open reads
-**Starting your environment container** until the shell attaches, and shows the
+**Starting your environment** until the shell attaches, and shows the
 server's error if the start fails. **Add terminal tab** (`+`) opens another tab,
 up to six. Closing a tab only detaches it. A shell that exits closes its tab.
-When the `main` shell exits, the container stops, and opening the environment
-starts the same container again.
+When the `main` shell exits, the environment stops, and opening it starts the
+same sandbox again.
 
 **Stop environment…** stops the container and every tab process. Your home,
 saved image and unsaved changes remain. Saving, resetting and installing tools
@@ -175,7 +175,7 @@ are stored under `$HOME/.aether/terminal-images/` and
 
 ## Session shells
 
-A session shell is an extra shell in the session's container, started by a person or by
+A session shell is an extra shell in the session's sandbox, started by a person or by
 the agent. **+ Shell** in the Terminal toolbar opens one as a tab after
 **Agent** and gives you control. Shells are named **Shell 1**, **Shell 2** and
 keep their number until they end. A shell the agent started carries the agent's
@@ -245,7 +245,7 @@ the server your CLI is linked to. Without the config, `aether ssh [ssh options]
 > link or submodule URL as a command on your computer. See
 > [security.md](security.md#ssh-into-a-session).
 
-| You run | In the session's container |
+| You run | In the session's sandbox |
 | --- | --- |
 | `ssh <host>` | A login shell in `/workspace` |
 | `ssh <host> <command>` | The command through `bash -c` (or `sh -c`), output and exit status unchanged |
@@ -300,7 +300,7 @@ by UNKNOWN port 65535`:
 | `aether: ssh into <session-id>: session not found` | Check the id and the server you are linked to. |
 | `... permission denied: session is protected: only its owner or an admin may steer` | Ask the owner or an admin. |
 | `... permission denied: member <member-id> has not shared their account with you` | The session uses that member's agent account. |
-| `... scheduler: the session has no live environment: the session is paused` | Resume the session. A finished session says its container is gone. |
+| `... scheduler: the session has no live environment: the session is paused` | Resume the session. A finished session says its sandbox is gone. |
 | `... you already have 8 SSH connections open to session <session-id>, the most one member takes` | Close one of yours. |
 | `... session <session-id> already has 16 SSH connections open, the most one session takes` | Close one, or ask a teammate to. |
 | `aether: "<host>" does not name a session: a session id holds only lowercase letters, digits and hyphens` | Use `<run-id>.aether`. |
@@ -361,7 +361,7 @@ On a phone:
   again. Swipe to reach the parts of a grid wider than the screen at the
   size you chose.
 - **An Enhanced session's Terminal tab** shows a shell that is already
-  running in the session's container. If none is, it says "No agent
+  running in the session's sandbox. If none is, it says "No agent
   terminal" and offers **Open shell**; viewing the tab starts nothing.
   With four shells running, it says so under the button.
 - To copy, choose **Tools → Copy screen**.
@@ -418,13 +418,13 @@ back. If it cannot continue where the screen left off, you get the current
 screen instead. A finished session opens from its final screen and stays read-only
 unless you reopen the session.
 
-The environment container survives a server restart or update, and unsaved
+The environment survives a server restart or update, and unsaved
 changes stay. A session keeps the Aether helper it was created with, so SSH
 features added by a later server need a new session.
 
 Session shells, and terminals the agent starts with `aether-internal terminal
 start`, survive a server restart or update too. Each runs under a keeper: an
-`aether-internal acp-keeper term` process in the session container, started as
+`aether-internal acp-keeper term` process in the session sandbox, started as
 root from the staged server binary, that owns the shell's PTY, starts the
 shell as the session's user and keeps the newest 1 MiB of its output. The server
 attaches to it through a short-lived `aether-internal acp-keeper attach` exec
