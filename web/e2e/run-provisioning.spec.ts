@@ -84,7 +84,7 @@ test('a run opened while its container starts says so', async ({ page, aether })
   // The container is still being built, so the tab says that rather than
   // attaching to a session that cannot exist yet and painting the gateway's
   // refusal as a dead terminal.
-  await expect(page.getByText("Starting the session's container")).toBeVisible()
+  await expect(page.getByText("Starting the session's sandbox")).toBeVisible()
   // And it is the only thing said: a connection state, the gateway's "no
   // session for run" refusal with its Retry, and "This run is not running"
   // all render in the same row, and each would be a second sentence pulling
@@ -99,7 +99,7 @@ test('a run opened while its container starts says so', async ({ page, aether })
   holding = false
   for (const message of held.splice(0)) gateway.toPage?.(message)
 
-  await expect(page.getByText("Starting the session's container")).toBeHidden()
+  await expect(page.getByText("Starting the session's sandbox")).toBeHidden()
   await expect(page.locator('.xterm-rows:not([data-aether-frozen-view] *)')).toContainText('agent-ready', {
     timeout: 3 * 60 * 1000,
   })
