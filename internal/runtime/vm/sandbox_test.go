@@ -43,28 +43,34 @@ func TestVMUnitsWriteOnlyTheirOwnPathsAndKeepFewCapabilities(t *testing.T) {
 	}
 	offline := h.units.last().properties
 
+	dataDir := filepath.Dir(h.engine.root)
 	for _, props := range [][]string{session, offline} {
 		for _, want := range []string{
 			"NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes", "ProtectKernelTunables=yes",
-			"DevicePolicy=closed", "DeviceAllow=/dev/kvm rw", "RestrictAddressFamilies=AF_UNIX AF_INET",
+			"ProtectControlGroups=yes", "DevicePolicy=closed", "DeviceAllow=/dev/kvm rw",
+			"RestrictAddressFamilies=AF_UNIX AF_INET", "TemporaryFileSystem=" + dataDir + ":ro",
 		} {
 			if !slices.Contains(props, want) {
 				t.Errorf("unit properties %v lack %s", props, want)
 			}
 		}
 	}
-	quoted := func(paths ...string) []string {
-		var out []string
-		for _, p := range paths {
-			out = append(out, `"-`+p+`"`)
+	// Writable binds reveal the VM's directory, its state disk and its
+	// writable shares; the read-only login is revealed read-only; the data
+	// dir at large stays hidden.
+	writable := property(session, "BindPaths")
+	for _, want := range []string{`"-` + h.engine.dir("run-a") + `"`, `"-` + filepath.Join(state, stateDiskFile) + `"`, `"-` + home + `"`} {
+		if !slices.Contains(writable, want) {
+			t.Errorf("a session's unit writes %v, want it to include %s", writable, want)
 		}
-		return out
 	}
-	want := quoted(h.engine.dir("run-a"), filepath.Join(state, stateDiskFile), spec.WorktreeHostPath, home)
-	if got := property(session, "ReadWritePaths"); !slices.Equal(got, want) {
-		t.Errorf("a session's unit writes %v, want %v: its own directory, state disk and writable shares", got, want)
+	if readonly := property(session, "BindReadOnlyPaths"); !slices.Contains(readonly, `"-`+login+`"`) {
+		t.Errorf("a session's read-only binds %v lack the login %s", readonly, login)
 	}
-	if got := property(offline, "ReadWritePaths"); !slices.Equal(got, quoted(h.engine.dir("check-a"))) {
+	if slices.Contains(writable, `"-`+login+`"`) {
+		t.Errorf("the read-only login %s is writable to the unit: %v", login, writable)
+	}
+	if got := property(offline, "BindPaths"); !slices.Equal(got, []string{`"-` + h.engine.dir("check-a") + `"`}) {
 		t.Errorf("an offline VM without shares writes %v, want only its directory", got)
 	}
 	caps := func(props []string) []string {

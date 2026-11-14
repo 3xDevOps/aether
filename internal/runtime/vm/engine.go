@@ -452,7 +452,7 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	if rec.Net != offline {
 		args = append(args, "--net", "id=net0,"+chNetArg(rec.Net, rec.Egress))
 	}
-	l := launch{Args: args, Shares: p.shares, Home: p.homeConfig(rec.User)}
+	l := launch{Args: args, Shares: p.shares, Home: p.homeConfig(rec.User), Reveal: revealPaths(e.dir(rec.Key), kernel, rec, p)}
 	if len(p.shares) > 0 {
 		l.Args = append(l.Args, "--fs", "tag="+guest.ShareTag+",socket="+e.path(rec.Key, fsSocket))
 	}
@@ -536,7 +536,7 @@ func (e *engine) launch(ctx context.Context, rec *record, l launch) error {
 	if rec.Lifetime > 0 {
 		properties = append(properties, fmt.Sprintf("RuntimeMaxSec=%d", int(rec.Lifetime.Seconds())))
 	}
-	properties = append(properties, sandbox(e.dir(rec.Key), rec, l)...)
+	properties = append(properties, sandbox(filepath.Dir(e.root), rec, l)...)
 	argv := append(append([]string{}, e.cfg.Monitor...), e.dir(rec.Key))
 	if err := e.units.Start(ctx, unitName(rec.Key), argv, properties); err != nil {
 		return err

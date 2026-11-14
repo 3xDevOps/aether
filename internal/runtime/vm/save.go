@@ -152,7 +152,7 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 		return err
 	}
 	dir := e.path(key, snapshotDir)
-	l := launch{Home: booted.Home, Args: []string{
+	l := launch{Home: booted.Home, Reveal: booted.Reveal, Args: []string{
 		"--api-socket", "path=" + e.path(key, apiSocket), "--event-monitor", "path=" + e.path(key, eventsFile),
 		"--restore", "source_url=file://" + dir,
 	}}

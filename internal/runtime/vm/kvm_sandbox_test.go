@@ -84,7 +84,7 @@ func TestKVMUnitSandboxHoldsAgainstRootInIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := []string{"--quiet", "--wait", "--pipe", "--collect", "--unit=aether-vm-sandbox-probe"}
-	for _, p := range sandbox(e.dir(key), rec, booted) {
+	for _, p := range sandbox(filepath.Dir(e.root), rec, booted) {
 		args = append(args, "--property="+p)
 	}
 	source, err := exec.Command("findmnt", "-no", "SOURCE", "-T", e.root).Output()
@@ -92,11 +92,28 @@ func TestKVMUnitSandboxHoldsAgainstRootInIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	disk, _, _ := strings.Cut(strings.TrimSpace(string(source)), "[")
+	// The database and another VM's file, both under the data directory the
+	// unit hides.
+	db := filepath.Join(filepath.Dir(e.root), "aether.db")
+	if err = os.WriteFile(db, []byte("secret database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(db) })
+	other := e.path("run-vmother", "root.img")
+	if err = os.MkdirAll(filepath.Dir(other), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(other)) })
+	if err = os.WriteFile(other, []byte("another VM"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	probe := `disk=` + disk + `
 cat /proc/sys/kernel/core_uses_pid > /proc/sys/kernel/core_uses_pid 2>/dev/null && echo sysctl-written
 head -c 1 "$disk" >/dev/null 2>&1 && echo disk-opened
 ip link show >/dev/null 2>&1 && echo netlink-used
 ls -A /root | grep -q . && echo root-seen
+cat ` + db + ` 2>/dev/null && echo database-read
+cat ` + other + ` 2>/dev/null && echo other-vm-read
 touch ` + filepath.Join(e.root, "escape") + ` 2>/dev/null && echo outside-written
 touch ` + e.path(key, "inside") + ` && echo own-dir-written
 echo probe-done`
@@ -105,7 +122,7 @@ echo probe-done`
 	if err != nil || !strings.Contains(got, "probe-done") || !strings.Contains(got, "own-dir-written") {
 		t.Fatalf("probe unit: %v: %s", err, got)
 	}
-	for _, escaped := range []string{"sysctl-written", "disk-opened", "netlink-used", "root-seen", "outside-written"} {
+	for _, escaped := range []string{"sysctl-written", "disk-opened", "netlink-used", "root-seen", "database-read", "other-vm-read", "outside-written"} {
 		if strings.Contains(got, escaped) {
 			t.Errorf("root in a unit with the VM's sandbox got %s:\n%s", escaped, got)
 		}
