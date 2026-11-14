@@ -1,9 +1,6 @@
 package vm
 
 import (
-	"errors"
-	"fmt"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -96,12 +93,12 @@ func backingPins(dir string, rec *record) []string {
 // sandbox confines a VM's unit: a tmpfs hides the whole data directory, so
 // the database and every other VM's files are gone, and only the host paths
 // this VM needs are bound back, writable only where it writes. The unit
-// sees no home directory, gains no privilege by exec, cannot touch the
-// kernel, control groups, clock or any device but /dev/kvm and /dev/net/tun,
-// and keeps only the capabilities its processes use. Cloud Hypervisor makes
-// the VM's tap, which takes CAP_NET_ADMIN; without netlink it cannot touch
-// the host's firewall or routes through it.
-func sandbox(dataDir string, rec *record, l launch) []string {
+// gains no privilege by exec, cannot touch the kernel, control groups, clock
+// or any device but /dev/kvm and /dev/net/tun, and keeps only the
+// capabilities its processes use. Cloud Hypervisor makes the VM's tap, which
+// takes CAP_NET_ADMIN; without netlink it cannot touch the host's firewall
+// or routes through it.
+func sandbox(dataDir, monitor string, rec *record, l launch) []string {
 	caps := slices.Clone(fileCaps)
 	if len(l.Shares) > 0 {
 		caps = append(caps, shareCaps...)
@@ -110,13 +107,21 @@ func sandbox(dataDir string, rec *record, l launch) []string {
 		caps = append(caps, "CAP_NET_ADMIN")
 	}
 	props := []string{
-		"NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes",
+		"NoNewPrivileges=yes", "ProtectSystem=strict",
 		"ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectKernelLogs=yes",
 		"ProtectControlGroups=yes", "ProtectClock=yes",
 		"DevicePolicy=closed", "DeviceAllow=/dev/kvm rw", "DeviceAllow=/dev/net/tun rw",
 		"RestrictAddressFamilies=AF_UNIX AF_INET",
 		"TemporaryFileSystem=" + dataDir + ":ro",
 		"CapabilityBoundingSet=" + strings.Join(caps, " "),
+	}
+	// ProtectHome hides the host's home directories from a monitor escape,
+	// but it hides them past every bind, so it is left off when the data
+	// directory, the monitor binary systemd execs, or anything the VM needs
+	// lives under one (a server run from a home directory); the
+	// data-directory tmpfs still hides Aether's own data either way.
+	if hideHome(dataDir, monitor, l.Reveal) {
+		props = append(props, "ProtectHome=yes")
 	}
 	// A path that is gone is skipped rather than failing the unit, as the
 	// file service reports a missing share to the guest. Sorted so the unit
@@ -131,31 +136,26 @@ func sandbox(dataDir string, rec *record, l launch) []string {
 	return props
 }
 
-// checkVisible fails for a path the VM units need that ProtectHome hides,
-// as spelled or where its links lead.
-func checkVisible(what, path string) error {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("vm runtime: %s %s: %w", what, path, err)
+// hideHome reports whether ProtectHome=yes is safe: no path the VM needs,
+// nor the data directory a tmpfs covers, sits under a directory it hides,
+// since a bind cannot reveal one that does.
+func hideHome(dataDir, monitor string, reveal map[string]bool) bool {
+	if underHidden(dataDir) || underHidden(monitor) {
+		return false
 	}
-	if err = visible(what, path, abs); err != nil {
-		return err
-	}
-	resolved, err := filepath.EvalSymlinks(abs)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("vm runtime: %s %s: %w", what, path, err)
-	}
-	return visible(what, path, resolved)
-}
-
-func visible(what, path, p string) error {
-	for _, hidden := range hiddenDirs {
-		if p == hidden || strings.HasPrefix(p, hidden+"/") {
-			return fmt.Errorf("vm runtime: the %s %s is under %s, which every VM's unit hides (ProtectHome=yes); move it out", what, path, hidden)
+	for path := range reveal {
+		if underHidden(path) {
+			return false
 		}
 	}
-	return nil
+	return true
+}
+
+func underHidden(path string) bool {
+	for _, hidden := range hiddenDirs {
+		if path == hidden || strings.HasPrefix(path, hidden+"/") {
+			return true
+		}
+	}
+	return false
 }

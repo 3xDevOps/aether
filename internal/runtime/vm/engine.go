@@ -390,9 +390,6 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		return launch{}, err
 	}
 	kernel, err := e.cfg.Images.Kernel()
-	if err == nil {
-		err = checkVisible("guest kernel", kernel)
-	}
 	if err != nil {
 		return launch{}, fmt.Errorf("vm runtime: guest kernel: %w", err)
 	}
@@ -538,7 +535,7 @@ func (e *engine) launch(ctx context.Context, rec *record, l launch) error {
 	if rec.Lifetime > 0 {
 		properties = append(properties, fmt.Sprintf("RuntimeMaxSec=%d", int(rec.Lifetime.Seconds())))
 	}
-	properties = append(properties, sandbox(filepath.Dir(e.root), rec, l)...)
+	properties = append(properties, sandbox(filepath.Dir(e.root), e.cfg.Monitor[0], rec, l)...)
 	argv := append(append([]string{}, e.cfg.Monitor...), e.dir(rec.Key))
 	if err := e.units.Start(ctx, unitName(rec.Key), argv, properties); err != nil {
 		return err

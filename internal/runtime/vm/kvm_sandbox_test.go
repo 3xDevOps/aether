@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -84,7 +85,7 @@ func TestKVMUnitSandboxHoldsAgainstRootInIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := []string{"--quiet", "--wait", "--pipe", "--collect", "--unit=aether-vm-sandbox-probe"}
-	for _, p := range sandbox(filepath.Dir(e.root), rec, booted) {
+	for _, p := range sandbox(filepath.Dir(e.root), e.cfg.Monitor[0], rec, booted) {
 		args = append(args, "--property="+p)
 	}
 	source, err := exec.Command("findmnt", "-no", "SOURCE", "-T", e.root).Output()
@@ -130,10 +131,16 @@ echo probe-done`
 	if err != nil || !strings.Contains(got, "probe-done") || !strings.Contains(got, "own-dir-written") {
 		t.Fatalf("probe unit: %v: %s", err, got)
 	}
-	for _, escaped := range []string{
-		"sysctl-written", "disk-opened", "netlink-used", "root-seen", "database-read",
+	forbidden := []string{
+		"sysctl-written", "disk-opened", "netlink-used", "database-read",
 		"other-vm-read", "outside-written", "base-written", "record-written", "launch-written",
-	} {
+	}
+	// Reading the host's home directories is only blocked when ProtectHome is
+	// on, which it is unless the data directory is itself under one.
+	if slices.Contains(args, "--property=ProtectHome=yes") {
+		forbidden = append(forbidden, "root-seen")
+	}
+	for _, escaped := range forbidden {
 		if strings.Contains(got, escaped) {
 			t.Errorf("root in a unit with the VM's sandbox got %s:\n%s", escaped, got)
 		}

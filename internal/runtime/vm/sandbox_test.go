@@ -83,6 +83,9 @@ func TestVMUnitsWriteOnlyTheirOwnPathsAndKeepFewCapabilities(t *testing.T) {
 	if got := property(offline, "BindPaths"); !slices.Contains(got, `"-`+h.engine.dir("check-a")+`"`) {
 		t.Errorf("an offline VM writes %v, want its directory", got)
 	}
+	if !slices.Contains(session, "ProtectHome=yes") {
+		t.Errorf("a VM whose data directory is outside the home directories lacks ProtectHome=yes: %v", session)
+	}
 	caps := func(props []string) []string {
 		return strings.Fields(strings.Join(property(props, "CapabilityBoundingSet"), " "))
 	}
@@ -92,18 +95,33 @@ func TestVMUnitsWriteOnlyTheirOwnPathsAndKeepFewCapabilities(t *testing.T) {
 	if got := caps(offline); !slices.Equal(got, fileCaps) {
 		t.Errorf("an offline VM without shares keeps %v, want %v", got, fileCaps)
 	}
+}
 
-	linked := filepath.Join(t.TempDir(), "data")
-	if err := os.Symlink("/root", linked); err != nil {
-		t.Fatal(err)
+// TestVMUnitDropsProtectHomeWhenItWouldHideWhatTheVMNeeds checks that a data
+// directory or a revealed path under a home directory, where ProtectHome
+// would hide it past every bind, drops ProtectHome while the data-directory
+// tmpfs and the binds stay.
+func TestVMUnitDropsProtectHomeWhenItWouldHideWhatTheVMNeeds(t *testing.T) {
+	rec := &record{Net: offline}
+	under := sandbox("/home/runner/work/data", "/usr/local/bin/aether-server", rec, launch{Reveal: map[string]bool{"/home/runner/work/data/vm/run-a": true}})
+	if slices.Contains(under, "ProtectHome=yes") {
+		t.Errorf("a data directory under /home kept ProtectHome=yes: %v", under)
 	}
-	cfg := Config{Docker: &runtime.Docker{}, Images: h.images, Helper: "/usr/local/bin/aether-server"}
-	for _, c := range []struct{ dataDir, monitor string }{
-		{"/root/aether", "/usr/local/bin/aether-server"}, {"/var/lib/aether", "/home/me/aether-server"}, {linked, "/usr/local/bin/aether-server"},
-	} {
-		cfg.DataDir, cfg.Monitor = c.dataDir, []string{c.monitor, MonitorCommand}
-		if _, err := New(cfg); err == nil || !strings.Contains(err.Error(), "ProtectHome=yes") {
-			t.Errorf("New with data directory %s and monitor %s = %v, want the hidden path refused", c.dataDir, c.monitor, err)
+	for _, want := range []string{"TemporaryFileSystem=/home/runner/work/data:ro", `BindPaths="-/home/runner/work/data/vm/run-a"`} {
+		if !slices.Contains(under, want) {
+			t.Errorf("unit %v lacks %s; the tmpfs and binds must stay", under, want)
 		}
+	}
+	out := sandbox("/var/lib/aether", "/usr/local/bin/aether-server", rec, launch{Reveal: map[string]bool{"/root/.ssh": false}})
+	if slices.Contains(out, "ProtectHome=yes") {
+		t.Errorf("a revealed path under /root kept ProtectHome=yes: %v", out)
+	}
+	home := sandbox("/var/lib/aether", "/home/me/aether-server", rec, launch{Reveal: map[string]bool{"/var/lib/aether/vm/run-a": true}})
+	if slices.Contains(home, "ProtectHome=yes") {
+		t.Errorf("a monitor binary under /home kept ProtectHome=yes: %v", home)
+	}
+	ok := sandbox("/var/lib/aether", "/usr/local/bin/aether-server", rec, launch{Reveal: map[string]bool{"/var/lib/aether/vm/run-a": true}})
+	if !slices.Contains(ok, "ProtectHome=yes") {
+		t.Errorf("a data directory, monitor and reveals outside the home directories lack ProtectHome=yes: %v", ok)
 	}
 }

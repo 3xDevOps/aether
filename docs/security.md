@@ -65,12 +65,15 @@ remaining `virtiofsd` share (a checkout not yet on a VM disk) cannot carry a
 device node or a file-capability binary to the host. Their systemd unit
 limits what a flaw in them reaches:
 
-- `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`,
-  `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`,
-  `ProtectKernelLogs=yes`, `ProtectControlGroups=yes` and `ProtectClock=yes`.
-  It opens no device but `/dev/kvm`, `/dev/net/tun` and the standard pseudo
-  devices (`DevicePolicy=closed`), and has no netlink
-  (`RestrictAddressFamilies=AF_UNIX AF_INET`).
+- `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectKernelTunables=yes`,
+  `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`,
+  `ProtectControlGroups=yes` and `ProtectClock=yes`. It opens no device but
+  `/dev/kvm`, `/dev/net/tun` and the standard pseudo devices
+  (`DevicePolicy=closed`), and has no netlink
+  (`RestrictAddressFamilies=AF_UNIX AF_INET`). It also gets `ProtectHome=yes`,
+  which hides `/home`, `/root` and `/run/user`, unless the data directory or
+  the guest kernel lives under one of those (a server run from a home
+  directory), since that setting hides a path past every bind.
 - A tmpfs hides the whole data directory, so the database and every other
   VM's disks and files are gone from the unit. Only the paths this VM needs
   are bound back, writable only where it writes: its own directory, its state
