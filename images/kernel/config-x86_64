@@ -146,8 +146,9 @@ CONFIG_SECCOMP_FILTER=y
 CONFIG_BPF_SYSCALL=y
 CONFIG_BPF_JIT=y
 # A Default-tier agent runs as uid 1000; unprivileged BPF is a large
-# local-privilege-escalation surface it must not have. The default-off
-# option also locks the sysctl, so it cannot be turned back on in the VM.
+# local-privilege-escalation surface it must not have. This starts the
+# sysctl at 2 (off); the helper latches it to 1 at boot so not even root in
+# the VM can re-enable it.
 CONFIG_BPF_UNPRIV_DEFAULT_OFF=y
 # YAMA gates ptrace to a process's own descendants (the helper sets
 # ptrace_scope at boot), and dmesg is restricted to root by default so the

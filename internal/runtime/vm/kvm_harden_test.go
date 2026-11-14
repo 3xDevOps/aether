@@ -36,7 +36,7 @@ func TestKVMGuestKernelIsHardened(t *testing.T) {
 	for _, s := range []string{"kptr_restrict", "dmesg_restrict", "perf_event_paranoid", "yama/ptrace_scope", "io_uring_disabled", "unprivileged_bpf_disabled"} {
 		want := map[string]string{
 			"kptr_restrict": "2", "dmesg_restrict": "1", "perf_event_paranoid": "3",
-			"yama/ptrace_scope": "1", "io_uring_disabled": "2", "unprivileged_bpf_disabled": "2",
+			"yama/ptrace_scope": "1", "io_uring_disabled": "2", "unprivileged_bpf_disabled": "1",
 		}[s]
 		if out, _ := vmRun(t, e, key, "cat /proc/sys/kernel/"+s); strings.TrimSpace(out) != want {
 			t.Errorf("kernel.%s is %q, want %q", s, strings.TrimSpace(out), want)
@@ -63,8 +63,11 @@ func TestKVMShareKeepsDeviceNodesOffTheHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(src) })
+	// The session runs as root (User ""), the "root in its own VM" case the
+	// finding is about, so vmRun's exec is root too: a device node it creates
+	// must be refused by virtiofsd, not just by the unprivileged user.
 	spec := runtime.Spec{
-		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, User: "1000:1000",
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: key,
 		Command:  []string{"/bin/sh", "-c", "echo up; exec sleep infinity"},
 		Env:      map[string]string{"AETHER_RUN_ID": key, "HOME": "/root"},
 		CPULimit: 1, MemoryLimitBytes: 512 << 20, PidsLimit: 256,
@@ -76,11 +79,14 @@ func TestKVMShareKeepsDeviceNodesOffTheHost(t *testing.T) {
 	if err := e.start(t.Context(), key); err != nil {
 		t.Fatal(err)
 	}
+	if out, _ := vmRun(t, e, key, "id -u"); strings.TrimSpace(out) != "0" {
+		t.Fatalf("the guest exec is not root: %q", out)
+	}
 	if out, _ := vmRun(t, e, key, "grep ' /workspace ' /proc/self/mountinfo"); !strings.Contains(out, "nosuid") || !strings.Contains(out, "nodev") {
 		t.Errorf("the checkout share is not nosuid,nodev: %q", out)
 	}
-	// vmRun execs as root in the VM; creating a device node must still fail,
-	// since virtiofsd has no CAP_MKNOD, so the node never reaches the host.
+	// virtiofsd has no CAP_MKNOD, so even root in the VM cannot land a device
+	// node on the host through the share.
 	if out, code := vmRun(t, e, key, "mknod /workspace/charnode c 1 3 2>&1"); code == 0 {
 		t.Errorf("mknod in the share succeeded, want a failure: %q", out)
 	}

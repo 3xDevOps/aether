@@ -47,19 +47,22 @@ The guest kernel shrinks the surface that user has to reach root in the VM
 without the gate, in two places.
 
 The kernel config (`images/kernel/config-x86_64`) turns unprivileged BPF off
-and locks it (`CONFIG_BPF_UNPRIV_DEFAULT_OFF`), restricts `dmesg` to root,
-builds in YAMA, and zeroes freshly allocated memory and hardens the
-copy-to/from-user and SLUB-freelist paths. It also builds the kernel
-relocatable with `RANDOMIZE_BASE`, but Cloud Hypervisor boots the
-uncompressed `vmlinux` through PVH, which does not run the decompressor that
-performs the relocation, so the kernel base is not randomized today; KASLR
-takes effect only if the kernel is booted as a bzImage.
+(`CONFIG_BPF_UNPRIV_DEFAULT_OFF` starts `unprivileged_bpf_disabled` at 2),
+restricts `dmesg` to root, builds in YAMA, and zeroes freshly allocated
+memory and hardens the copy-to/from-user and SLUB-freelist paths. It also
+builds the kernel relocatable with `RANDOMIZE_BASE`, but Cloud Hypervisor
+boots the uncompressed `vmlinux` through PVH, which does not run the
+decompressor that performs the relocation, so the kernel base is not
+randomized today; KASLR takes effect only if the kernel is booted as a
+bzImage.
 
 The helper writes the rest at boot, since they have no compile-time default:
-`kernel.kptr_restrict=2` (every kernel pointer in `/proc` reads as zero, for
-all users), `kernel.yama.ptrace_scope=1` (a process may ptrace only its own
-descendants), `kernel.io_uring_disabled=2` (io_uring is off for everyone; the
-harnesses fall back when `io_uring_setup` returns `ENOSYS`), and
+`kernel.unprivileged_bpf_disabled=1` (latches unprivileged BPF off, so not
+even root in the VM can set it back to 0), `kernel.kptr_restrict=2` (every
+kernel pointer in `/proc` reads as zero, for all users),
+`kernel.yama.ptrace_scope=1` (a process may ptrace only its own descendants),
+`kernel.io_uring_disabled=2` (io_uring is off for everyone; the harnesses
+fall back when `io_uring_setup` returns `ENOSYS`), and
 `kernel.perf_event_paranoid=3`. A missing one, where the kernel lacks the
 feature, is skipped; any other failure is reported as a `boot_error`.
 
