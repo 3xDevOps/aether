@@ -1,7 +1,9 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -62,15 +64,22 @@ func sandbox(dir string, rec *record, l launch) []string {
 	return props
 }
 
-// checkVisible fails for a path the VM units need that ProtectHome hides.
+// checkVisible fails for a path the VM units need that ProtectHome hides,
+// as spelled or where its links lead.
 func checkVisible(what, path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("vm runtime: %s %s: %w", what, path, err)
 	}
-	for _, hidden := range hiddenDirs {
-		if abs == hidden || strings.HasPrefix(abs, hidden+"/") {
-			return fmt.Errorf("vm runtime: the %s %s is under %s, which every VM's unit hides (ProtectHome=yes); move it out", what, path, hidden)
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("vm runtime: %s %s: %w", what, path, err)
+	}
+	for _, p := range []string{abs, resolved} {
+		for _, hidden := range hiddenDirs {
+			if p == hidden || strings.HasPrefix(p, hidden+"/") {
+				return fmt.Errorf("vm runtime: the %s %s is under %s, which every VM's unit hides (ProtectHome=yes); move it out", what, path, hidden)
+			}
 		}
 	}
 	return nil

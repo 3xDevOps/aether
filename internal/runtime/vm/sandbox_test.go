@@ -74,8 +74,14 @@ func TestVMUnitsWriteOnlyTheirOwnPathsAndKeepFewCapabilities(t *testing.T) {
 		t.Errorf("an offline VM without shares keeps %v, want %v", got, fileCaps)
 	}
 
+	linked := filepath.Join(t.TempDir(), "data")
+	if err := os.Symlink("/root", linked); err != nil {
+		t.Fatal(err)
+	}
 	cfg := Config{Docker: &runtime.Docker{}, Images: h.images, Helper: "/usr/local/bin/aether-server"}
-	for _, c := range []struct{ dataDir, monitor string }{{"/root/aether", "/usr/local/bin/aether-server"}, {"/var/lib/aether", "/home/me/aether-server"}} {
+	for _, c := range []struct{ dataDir, monitor string }{
+		{"/root/aether", "/usr/local/bin/aether-server"}, {"/var/lib/aether", "/home/me/aether-server"}, {linked, "/usr/local/bin/aether-server"},
+	} {
 		cfg.DataDir, cfg.Monitor = c.dataDir, []string{c.monitor, MonitorCommand}
 		if _, err := New(cfg); err == nil || !strings.Contains(err.Error(), "ProtectHome=yes") {
 			t.Errorf("New with data directory %s and monitor %s = %v, want the hidden path refused", c.dataDir, c.monitor, err)
