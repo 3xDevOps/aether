@@ -69,6 +69,8 @@ func (w *agentWakeups) pending(now time.Time) bool {
 	return w.at.After(now) || len(w.crons) > 0
 }
 
+var wakeupTools = map[string]bool{"ScheduleWakeup": true, "CronCreate": true, "CronDelete": true}
+
 // scanAgentWakeups reads the wakeups the log records since its last reset,
 // replaying its tool calls oldest first, as a delete must follow its job.
 func scanAgentWakeups(log *Log) (agentWakeups, error) {
@@ -94,7 +96,7 @@ func scanAgentWakeups(log *Log) (agentWakeups, error) {
 				replay()
 				return w, nil
 			}
-			if it.Kind == KindToolCall {
+			if it.Kind == KindToolCall && wakeupTools[it.ToolCall.ToolName] {
 				calls = append(calls, it)
 			}
 		}
