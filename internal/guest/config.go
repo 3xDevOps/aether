@@ -30,6 +30,10 @@ const (
 	// RootStep is the boot step that mounts the root disk; a boot error
 	// that starts with it is the image's.
 	RootStep = "switch to the root disk"
+	// BrowserSocket is the development browser's control socket in a
+	// session VM, which the helper serves to the host on BrowserPort.
+	BrowserSocket = "/run/aether-guest/browser/control/browser.sock"
+	BrowserPort   = 2001
 	// SetupOutputLimit matches the Docker runtime's: how much of a failed
 	// setup script's output Boot returns, from the end, where it failed.
 	SetupOutputLimit = 16 << 10

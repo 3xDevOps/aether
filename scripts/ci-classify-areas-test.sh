@@ -92,6 +92,7 @@ internal/edge/proto: reached only through coordtransport
 internal/secretscan: reached only through coordtransport
 internal/events: data types; the gitengine and guest helper unit tests cover how the guest uses them
 internal/overlay: the server side of live sync; only the unit tests of the guest helper use it, without a VM
+internal/browser: the client of the browser companion, the same over Docker and VMs; the VM engine only relays its socket
 '
 cd "$script_dir/.."
 kvm_files=$(grep -rl --include='*_test.go' -E '^//go:build .*kvm' internal)

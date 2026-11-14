@@ -47,25 +47,30 @@ var (
 // Config names what a VM is built from. Monitor is the command that runs
 // Monitor inside each VM's systemd unit: the server binary and its
 // vm-monitor subcommand.
+// BrowserImage is the development browser's image, whose disk every session
+// VM gets.
 type Config struct {
-	Docker  *runtime.Docker
-	DataDir string
-	Images  Images
-	Monitor []string
-	Helper  string
+	Docker       *runtime.Docker
+	DataDir      string
+	Images       Images
+	Monitor      []string
+	Helper       string
+	BrowserImage string
 	// CheckoutDisks, when set, puts the session checkouts it knows on disks
 	// of their own instead of sharing them from the server.
 	CheckoutDisks CheckoutDisks
 }
 
-// New returns a Runtime that keeps its VMs under DataDir/vm.
+// New returns a Runtime that keeps its VMs under DataDir/vm, and starts
+// building the browser's disk.
 func New(cfg Config) (*Runtime, error) {
 	if cfg.Docker == nil || cfg.Images == nil || len(cfg.Monitor) == 0 || cfg.Helper == "" {
 		return nil, errors.New("vm runtime: Docker, the image store, the monitor command and the helper binary are required")
 	}
-	r := &Runtime{Docker: cfg.Docker, vms: newEngine(cfg, systemdUnits{}, dialHelper)}
-	go r.vms.lingering(context.Background())
-	return r, nil
+	e := newEngine(cfg, systemdUnits{}, dialHelper)
+	go e.lingering(context.Background())
+	e.warmBrowser()
+	return &Runtime{Docker: cfg.Docker, vms: e}, nil
 }
 
 // kinds are the containers besides sessions that run in VMs, by the prefix
@@ -109,7 +114,7 @@ func vmFor(spec runtime.Spec) (string, options, bool) {
 	if name, opts, ok := kindVM(spec.CreationKey); ok {
 		return name, opts, true
 	}
-	return spec.CreationKey, options{}, isSession(spec)
+	return spec.CreationKey, options{Browser: true}, isSession(spec)
 }
 
 func vmKey(id runtime.ID) (string, bool) {
@@ -169,6 +174,9 @@ func memberKind(key string, members []string) bool {
 }
 
 func (r *Runtime) Start(ctx context.Context, id runtime.ID) error {
+	if key, ok := browserKey(id); ok {
+		return r.vms.startBrowser(ctx, key)
+	}
 	if key, ok := vmKey(id); ok {
 		return r.vms.startKept(ctx, key)
 	}
@@ -176,6 +184,9 @@ func (r *Runtime) Start(ctx context.Context, id runtime.ID) error {
 }
 
 func (r *Runtime) Pause(ctx context.Context, id runtime.ID) error {
+	if key, ok := browserKey(id); ok {
+		return r.vms.pauseBrowser(ctx, key, true)
+	}
 	if key, ok := vmKey(id); ok {
 		return r.vms.pause(ctx, key)
 	}
@@ -183,6 +194,9 @@ func (r *Runtime) Pause(ctx context.Context, id runtime.ID) error {
 }
 
 func (r *Runtime) Resume(ctx context.Context, id runtime.ID) error {
+	if key, ok := browserKey(id); ok {
+		return r.vms.pauseBrowser(ctx, key, false)
+	}
 	if key, ok := vmKey(id); ok {
 		return r.vms.resume(ctx, key)
 	}
@@ -199,6 +213,9 @@ func (r *Runtime) Stop(ctx context.Context, id runtime.ID, grace time.Duration) 
 func (r *Runtime) Destroy(ctx context.Context, id runtime.ID) error {
 	if _, ok := r.stopped.Load(id); ok {
 		return nil
+	}
+	if key, ok := browserKey(id); ok {
+		return r.vms.destroyBrowser(ctx, key)
 	}
 	if key, ok := vmKey(id); ok {
 		return r.vms.destroy(ctx, key)
@@ -253,6 +270,9 @@ func (r *Runtime) Inspect(ctx context.Context, id runtime.ID) (runtime.Container
 func (r *Runtime) FindByCreationKey(ctx context.Context, key string) (runtime.ID, error) {
 	if name, _, ok := kindVM(key); ok {
 		return r.vms.find(name)
+	}
+	if id, err := r.vms.findBrowser(key); !errors.Is(err, runtime.ErrNotFound) {
+		return id, err
 	}
 	id, err := r.vms.find(key)
 	if !errors.Is(err, runtime.ErrNotFound) {
@@ -329,10 +349,17 @@ func (r *Runtime) ExecAttached(ctx context.Context, id runtime.ID, spec runtime.
 }
 
 func (r *Runtime) CreateBrowser(ctx context.Context, spec runtime.BrowserSpec) (runtime.ID, error) {
-	if _, ok := vmKey(spec.RunContainer); ok {
-		return "", errors.New("vm runtime: the development browser cannot run beside a session VM until work item 9 moves it into the VM")
+	if key, ok := vmKey(spec.RunContainer); ok {
+		return r.vms.createBrowser(ctx, key, spec)
 	}
 	return r.Docker.CreateBrowser(ctx, spec)
+}
+
+func (r *Runtime) InspectBrowser(ctx context.Context, id runtime.ID) (runtime.BrowserInfo, error) {
+	if key, ok := browserKey(id); ok {
+		return r.vms.inspectBrowser(ctx, key)
+	}
+	return r.Docker.InspectBrowser(ctx, id)
 }
 
 func (r *Runtime) Capacity(ctx context.Context) (runtime.HostCapacity, error) {

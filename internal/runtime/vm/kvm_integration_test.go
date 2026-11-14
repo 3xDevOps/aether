@@ -8,7 +8,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +23,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/3xDevOps/Aether/internal/browser"
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/vmimage"
@@ -917,5 +920,230 @@ func TestKVMDictationVM(t *testing.T) {
 	}
 	if err != nil || st.Running || !st.OOMKilled {
 		t.Errorf("state of an engine whose child ran out of memory = %+v, %v", st, err)
+	}
+}
+
+// kvmBrowserImage is a published companion image; the KVM host pulls it.
+const kvmBrowserImage = "ghcr.io/3xdevops/aether-browser:v0.8.7-beta.14"
+
+// TestKVMServeHTTPNow is the page TestKVMBrowserInTheSessionVM opens: a dev
+// server on the session VM's loopback.
+func TestKVMServeHTTPNow(t *testing.T) {
+	if os.Getenv("AETHER_VM_TEST_HTTP") == "" {
+		t.Skip("runs inside a guest only")
+	}
+	t.Fatal(http.ListenAndServe("127.0.0.1:8080", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "<!doctype html><title>i9 page</title><p>served in the session VM</p>")
+	})))
+}
+
+// TestKVMBrowserInTheSessionVM runs the published browser companion inside
+// a session VM, from the browser's disk, opens the session's own dev server
+// in it, and checks its confinement.
+func TestKVMBrowserInTheSessionVM(t *testing.T) {
+	e := kvmEngine(t)
+	e.cfg.BrowserImage = kvmBrowserImage
+	start := time.Now()
+	if _, err := e.cfg.Images.BaseDisk(t.Context(), kvmBrowserImage); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("the browser's disk took %s", time.Since(start))
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "run-i9-browser"
+	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, User: "1000:1000",
+		Command: []string{"/bin/sh", "-c", "exec sleep infinity"}, Env: map[string]string{"AETHER_RUN_ID": key, "HOME": "/root"},
+		CPULimit: 2, MemoryLimitBytes: 2 << 30,
+		Mounts: []runtime.Mount{
+			{HostPath: self, ContainerPath: "/opt/aether-vmtest", ReadOnly: true},
+			{HostPath: os.Getenv("AETHER_VM_TEST_SERVER"), ContainerPath: "/usr/local/bin/aether-internal", ReadOnly: true},
+		},
+	}
+	if _, err = e.create(t.Context(), key, spec, options{Offline: true, Browser: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.start(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	vmRun(t, e, key, "AETHER_VM_TEST_HTTP=1 setsid /opt/aether-vmtest -test.run '^TestKVMServeHTTPNow$' </dev/null >/dev/null 2>&1 &")
+	control := filepath.Join(e.root, "..", "browser-control")
+	if err = os.MkdirAll(control, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(control) })
+	open := func(label string) *browser.Client {
+		t.Helper()
+		bspec := runtime.BrowserSpec{
+			RunContainer: runtime.ID(idPrefix + key), Image: kvmBrowserImage, CreationKey: "browser-i9" + label, Name: "browser-i9" + label,
+			ControlHostPath: control, CPULimit: 1, MemoryLimitBytes: 1 << 30,
+		}
+		if _, createErr := e.createBrowser(t.Context(), key, bspec); createErr != nil {
+			t.Fatal(createErr)
+		}
+		began := time.Now()
+		if startErr := e.startBrowser(t.Context(), key); startErr != nil {
+			t.Fatal(startErr)
+		}
+		client := browser.NewClient(filepath.Join(control, "browser.sock"))
+		var health browser.Health
+		var healthErr error
+		for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+			if health, healthErr = client.Health(t.Context()); healthErr == nil {
+				break
+			}
+		}
+		if healthErr != nil || health.CreationKey != bspec.CreationKey {
+			t.Fatalf("the companion's health = %+v, %v\n%s", health, healthErr, e.logTail(key))
+		}
+		t.Logf("%s companion answered %s after start", label, time.Since(began))
+		return client
+	}
+	client := open("a")
+	res, err := client.Do(t.Context(), browser.Request{Operation: "open", URL: "http://127.0.0.1:8080/"})
+	if err != nil || res.Page == nil || res.Page.Title != "i9 page" {
+		t.Fatalf("open the session's dev server = %+v, %v", res.Page, err)
+	}
+	var out strings.Builder
+	check := `for p in /proc/[0-9]*; do grep -q server.mjs $p/cmdline 2>/dev/null && grep -E '^(Uid|NoNewPrivs|Seccomp):' $p/status; done | sort -u
+cat /sys/fs/cgroup/session/browser/memory.max /sys/fs/cgroup/session/browser/pids.max
+touch /run/aether-guest/browser/root/x 2>&1 | grep -o 'Read-only file system'`
+	if _, err = e.execAttached(t.Context(), key, runtime.AttachedExec{Argv: []string{"/bin/sh", "-c", check}, User: "0:0", Stdout: &out, Stderr: &out}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Uid:\t65533", "NoNewPrivs:\t1", "Seccomp:\t2", "1073741824", "512", "Read-only file system"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("confinement check lacks %q:\n%s", want, out.String())
+		}
+	}
+	if got, _ := vmRun(t, e, key, "ls /run/aether-guest 2>&1; for p in /proc/[0-9]*; do grep -q server.mjs $p/cmdline 2>/dev/null && cat $p/environ 2>&1 | head -c 60; done"); strings.Contains(got, "AETHER_BROWSER_CREATION_KEY") || !strings.Contains(got, "Permission denied") {
+		t.Errorf("the session's user reaches the companion: %q", got)
+	}
+	if err = e.pauseBrowser(t.Context(), key, true); err != nil {
+		t.Fatal(err)
+	}
+	if info, _ := e.inspectBrowser(t.Context(), key); info.State != "paused" {
+		t.Errorf("state after pause = %s", info.State)
+	}
+	if err = e.pauseBrowser(t.Context(), key, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.Health(t.Context()); err != nil {
+		t.Errorf("health after resume: %v", err)
+	}
+	shmem := func() int {
+		t.Helper()
+		var out strings.Builder
+		if _, execErr := e.execAttached(t.Context(), key, runtime.AttachedExec{Argv: []string{"/bin/sh", "-c", "sync; awk '/^Shmem:/{print $2}' /proc/meminfo"}, User: "0:0", Stdout: &out, Stderr: &out}); execErr != nil {
+			t.Fatal(execErr)
+		}
+		kb, _ := strconv.Atoi(strings.TrimSpace(out.String()))
+		return kb
+	}
+	var fill strings.Builder
+	if _, err = e.execAttached(t.Context(), key, runtime.AttachedExec{Argv: []string{"/bin/sh", "-c", "head -c 200000000 /dev/zero > /run/aether-guest/browser/root/tmp/fill"}, User: "0:0", Stdout: &fill, Stderr: &fill}); err != nil {
+		t.Fatalf("fill the companion's /tmp: %v %s", err, fill.String())
+	}
+	held := shmem()
+	// Removed from a paused VM, as when a closed session sleeps: the VM runs
+	// just long enough for the helper to kill the companion.
+	if err = e.pause(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.destroyBrowser(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	if !e.paused(t.Context(), key) {
+		t.Error("removing the browser left a paused VM running")
+	}
+	if err = e.resume(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	if freed := held - shmem(); freed < 190000 {
+		t.Errorf("a stopped browser gave back %d KiB of the %d KiB tmpfs it held", freed, held)
+	}
+	client.Close()
+	client = open("b")
+	if res, err = client.Do(t.Context(), browser.Request{Operation: "open", URL: "http://127.0.0.1:8080/"}); err != nil || res.Page == nil || res.Page.Title != "i9 page" {
+		t.Fatalf("a second companion opens = %+v, %v", res.Page, err)
+	}
+	client.Close()
+}
+
+// TestKVMBrowserPagesSurviveASave saves and restores a session VM whose
+// browser has a page open: the companion, its process and its page come
+// back as they were. The VM has no shares, which a save refuses.
+func TestKVMBrowserPagesSurviveASave(t *testing.T) {
+	e := kvmEngine(t)
+	e.cfg.BrowserImage = kvmBrowserImage
+	if _, err := e.cfg.Images.BaseDisk(t.Context(), kvmBrowserImage); err != nil {
+		t.Fatal(err)
+	}
+	key := "run-i9-browser-save"
+	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, User: "1000:1000",
+		Command: []string{"/bin/sh", "-c", "exec sleep infinity"}, Env: map[string]string{"AETHER_RUN_ID": key, "HOME": "/root"},
+		CPULimit: 2, MemoryLimitBytes: 2 << 30,
+	}
+	if _, err := e.create(t.Context(), key, spec, options{Offline: true, Browser: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.start(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	control := filepath.Join(e.root, "..", "browser-control-save")
+	if err := os.MkdirAll(control, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(control) })
+	if _, err := e.createBrowser(t.Context(), key, runtime.BrowserSpec{
+		RunContainer: runtime.ID(idPrefix + key), Image: kvmBrowserImage, CreationKey: "browser-i9save", Name: "browser-i9save",
+		ControlHostPath: control, CPULimit: 1, MemoryLimitBytes: 1 << 30,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.startBrowser(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	client := browser.NewClient(filepath.Join(control, "browser.sock"))
+	defer client.Close()
+	health := func() browser.Health {
+		t.Helper()
+		var h browser.Health
+		var err error
+		for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
+			if h, err = client.Health(t.Context()); err == nil {
+				return h
+			}
+		}
+		t.Fatalf("the companion does not answer: %v", err)
+		return h
+	}
+	before := health()
+	opened, err := client.Do(t.Context(), browser.Request{Operation: "open", URL: "about:blank"})
+	if err != nil || opened.Page == nil {
+		t.Fatalf("open = %+v, %v", opened, err)
+	}
+	start := time.Now()
+	if err = e.save(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("save took %s", time.Since(start))
+	start = time.Now()
+	if err = e.restore(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("restore took %s", time.Since(start))
+	after := health()
+	if after.ProcessID != before.ProcessID || after.SessionID != before.SessionID {
+		t.Errorf("the companion changed across the save: %+v vs %+v", before, after)
+	}
+	pages, err := client.Do(t.Context(), browser.Request{Operation: "pages", SessionID: after.SessionID})
+	if err != nil || !slices.ContainsFunc(pages.Pages, func(p browser.Page) bool { return p.PageID == opened.Page.PageID }) {
+		t.Errorf("pages after the restore = %+v, %v", pages.Pages, err)
 	}
 }

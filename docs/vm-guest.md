@@ -146,6 +146,33 @@ the connection closed. `guest.DialServed` does the host's side and waits for
 the byte, so a server can tell a socket that is up from one that is not.
 The dictation engine's VM serves its engine's socket this way.
 
+## The development browser
+
+A session VM boots with the browser image's disk, serial `browser`, read-only,
+and serves the companion's control socket
+`/run/aether-guest/browser/control/browser.sock` to the host on vsock port
+2001. `Browser` drives the companion. `START` mounts the disk once per boot
+under an overlay whose only write is the `/aether-control` mountpoint, makes
+that read-only, and mounts `/proc` (other users' processes hidden), a
+read-only `/sys` and a `/dev` with only `null`, `zero`, `full`, `random`,
+`urandom` and `tty`. Every start gets a fresh `/tmp` (512 MiB), `/dev/shm` and
+control directory, and runs the program in the cgroup `session/browser`, with
+the request's memory cap, no swap, 512 processes and its CPU cap. Being inside
+the session cgroup, its memory and processes also count toward the session's
+`memory.max` and `pids.max`, so the two together never take the helper's
+reserve. It runs in new mount and IPC namespaces: the helper binary, still
+root, makes the root its own with `pivot_root` and detaches the VM's, then
+becomes the process's user without new privileges, installs a seccomp filter
+that fails `socket` and `socketpair` of `AF_VSOCK` and `io_uring_setup`, whose
+rings can make sockets too (vsock is not namespaced, and the VM's forwarded
+host sockets are on it), and executes the program. A `chroot` would keep
+Chromium from making the user namespaces its sandbox needs. One companion runs
+at a time; a `START` of the one that runs, under the same process ID,
+succeeds. `PAUSE` and `RESUME` freeze and thaw the cgroup; `STOP` kills
+everything in it and unmounts its `/tmp`, `/dev/shm` and control directory, so
+their memory goes back. `Stats` leaves the browser cgroup's out-of-memory
+kills out of the session's.
+
 ## Sessions and processes
 
 `Boot` starts the session the way Docker starts a container, each step only

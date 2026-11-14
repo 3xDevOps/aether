@@ -31,7 +31,8 @@ type service struct {
 	setClock  func(time.Time) error
 	freezer   *freezer
 	// freezing holds the FreezeSession call that runs.
-	freezing chan struct{}
+	freezing  chan struct{}
+	companion *browser
 
 	bootOnce  sync.Once
 	bootDone  chan struct{}

@@ -34,6 +34,10 @@ service Guest {
   rpc FreezeSession(FreezeSessionRequest) returns (FreezeSessionReply);
   // Sync writes every filesystem's dirty data to its disk.
   rpc Sync(SyncRequest) returns (SyncReply);
+  // Browser starts, pauses, resumes or stops the development browser's
+  // companion, which runs from the disk with serial "browser" in a root,
+  // cgroup and IPC namespace of its own.
+  rpc Browser(BrowserRequest) returns (BrowserReply);
 }
 
 message InfoRequest {}
@@ -214,3 +218,22 @@ message FreezeSessionReply {}
 message SyncRequest {}
 
 message SyncReply {}
+
+message BrowserRequest {
+  enum Action {
+    START = 0;
+    PAUSE = 1;
+    RESUME = 2;
+    STOP = 3;
+  }
+  Action action = 1;
+  // process is what START runs: a program path in the browser's root and a
+  // numeric user. Only one companion runs at a time.
+  Process process = 2;
+  uint64 memory_bytes = 3;
+  // cpu_millis caps CPU in thousandths of a core; 0 is unlimited.
+  uint32 cpu_millis = 4;
+  uint64 shm_bytes = 5;
+}
+
+message BrowserReply {}

@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -51,9 +50,6 @@ func TestVMForRoutesEachKindToItsOwnVM(t *testing.T) {
 	}
 }
 
-// dockerOnly takes IDs that only Docker ever hands out.
-var dockerOnly = []string{"InspectBrowser"}
-
 // TestEveryContainerMethodIsRouted fails when Docker gains a method that
 // takes a container, unless Runtime routes it or it is listed above: a
 // promoted method would hand a VM's ID to Docker.
@@ -89,7 +85,7 @@ func TestEveryContainerMethodIsRouted(t *testing.T) {
 	for i := range docker.NumMethod() {
 		m := docker.Method(i)
 		for j := 1; j < m.Type.NumIn(); j++ {
-			if container[m.Type.In(j)] && !declared[m.Name] && !slices.Contains(dockerOnly, m.Name) {
+			if container[m.Type.In(j)] && !declared[m.Name] {
 				t.Errorf("Runtime does not route %s, which takes a %s", m.Name, m.Type.In(j))
 			}
 		}
