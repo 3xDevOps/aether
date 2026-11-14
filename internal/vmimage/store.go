@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -178,8 +179,8 @@ func (s *Store) LookupBase(ref string) (Base, error) {
 }
 
 // NewRootDisk creates a root disk at path made from base, replacing any disk
-// already there: a qcow2 disk over base, or a raw copy of a base a session
-// wrote, which no qcow2 disk ever backs onto. Either way path keeps a hard
+// already there: a qcow2 disk over a base the server built, or a raw copy of
+// any other, which no qcow2 disk ever backs onto. Either way path keeps a hard
 // link to base named path.<base id>.base, so the base stays for the next
 // rebuild until the link is deleted with the session's files; path must be
 // on the store's filesystem. A failed rebuild leaves the previous root disk
@@ -197,12 +198,12 @@ func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (Disk, 
 	if err = removeIfExists(tmp); err != nil {
 		return Disk{}, err
 	}
-	disk := Disk{Path: path, Format: FormatQcow2}
-	if base.sessionWritten() {
-		disk.Format = FormatRaw
-		err = copyDisk(ctx, pin, tmp)
+	disk := Disk{Path: path, Format: FormatRaw}
+	if base.serverBuilt() {
+		disk.Format = FormatQcow2
+		err = newOverlay(ctx, pin, tmp)
 	} else {
-		err = run(ctx, "qemu-img", "create", "-q", "-f", "qcow2", "-F", "raw", "-b", pin, tmp)
+		err = copyDisk(ctx, pin, tmp)
 	}
 	if err != nil {
 		return Disk{}, errors.Join(err, removeIfExists(tmp))
@@ -213,10 +214,22 @@ func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (Disk, 
 	return disk, prunePins(path, pin)
 }
 
-// sessionWritten reports whether a session wrote base's blocks, as it did a
-// saved base's, first bytes included. The server builds every other base
-// with mkfs.ext4, which leaves the first 1024 bytes zero.
-func (b Base) sessionWritten() bool { return strings.HasPrefix(b.ID, localPrefix) }
+// serverBuilt reports whether the server wrote every byte of base with
+// mkfs.ext4, which leaves the first 1024 bytes zero: an image's base or a
+// prepared checkout. A session wrote a saved base's, first bytes included.
+func (b Base) serverBuilt() bool {
+	return strings.HasPrefix(b.ID, "sha256:") || strings.HasPrefix(b.ID, preparedPrefix)
+}
+
+// newOverlay creates a qcow2 disk at path over the raw disk backing. The
+// header names backing and its format; -u keeps qemu-img from opening it.
+func newOverlay(ctx context.Context, backing, path string) error {
+	info, err := os.Stat(backing)
+	if err != nil {
+		return fmt.Errorf("vmimage: overlay over %s: %w", backing, err)
+	}
+	return run(ctx, "qemu-img", "create", "-q", "-f", "qcow2", "-F", "raw", "-b", backing, "-u", path, strconv.FormatInt(info.Size(), 10))
+}
 
 // rootPin is the hard link to base id that the disk at path is made from.
 func rootPin(path, id string) string { return path + "." + dirName(id) + ".base" }
@@ -532,8 +545,12 @@ func (s *Store) tagsPath() string    { return filepath.Join(s.dir, "tags.json") 
 
 func dirName(id string) string { return strings.ReplaceAll(id, ":", "-") }
 
-// localPrefix starts the ID of every base a session wrote.
-const localPrefix = "local:"
+// localPrefix starts the ID of every base a session wrote, preparedPrefix
+// that of every prepared checkout.
+const (
+	localPrefix    = "local:"
+	preparedPrefix = "prepared:"
+)
 
 func newLocalID() (string, error) {
 	b := make([]byte, 16)

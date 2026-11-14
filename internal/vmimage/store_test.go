@@ -342,7 +342,7 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(saved.ID, "local:") || saved.Path == base.Path || !saved.sessionWritten() || base.sessionWritten() {
+	if !strings.HasPrefix(saved.ID, "local:") || saved.Path == base.Path || saved.serverBuilt() || !base.serverBuilt() {
 		t.Errorf("saved base = %+v", saved)
 	}
 	if got := saved.Config.Labels; got["kept"] != "replaced" || got["aether.saved"] != "1" || got["org.example"] != "base" {
