@@ -145,13 +145,15 @@ func (e *engine) egressKey(ip netip.Addr) (string, error) {
 // on to them. Its input and forward chains run just before iptables', whose
 // INPUT and FORWARD take only what they marked.
 //
-// Prerouting drops all of 169.254.0.0/16 and 100.64.0.0/10 from open taps,
-// not just the two metadata addresses: those ranges carry cloud metadata,
-// credential and resolver endpoints (IMDS, the AWS VPC DNS at
-// 169.254.169.253, ECS task credentials) that a VM has no business reaching,
-// and the egress proxy already refuses them for egress-controlled VMs. The
-// configured DNS resolvers stay reachable on port 53, since a host may run
-// one at a link-local address.
+// Prerouting drops the whole link-local range 169.254.0.0/16 from open taps,
+// not just the two metadata IPs: it carries cloud metadata, credential and
+// resolver endpoints (IMDS, the AWS VPC DNS at 169.254.169.253, ECS task
+// credentials) that a VM has no business reaching, and nothing Aether needs
+// (the gateway and proxy are in 10.200.0.0/16). The shared-address range
+// 100.64.0.0/10 is not dropped whole, because it is also Tailscale's and a
+// session may legitimately reach a tailnet service; only its known metadata
+// address (Alibaba's 100.100.100.200) is. The configured DNS resolvers stay
+// reachable on port 53, since a host may run one at a link-local address.
 var firewall = template.Must(template.New("firewall").Parse(`table inet {{.Table}}
 delete table inet {{.Table}}
 table inet {{.Table}} {
@@ -162,7 +164,7 @@ table inet {{.Table}} {
 {{- if .DNS}}
 		iifname "{{.Taps}}*" ip daddr { {{range $i, $a := .DNS}}{{if $i}}, {{end}}{{$a}}{{end}} } meta l4proto { tcp, udp } th dport 53 accept
 {{- end}}
-		iifname "{{.Taps}}*" ip daddr { 169.254.0.0/16, 100.64.0.0/10 } drop
+		iifname "{{.Taps}}*" ip daddr { 169.254.0.0/16, 100.100.100.200 } drop
 	}
 	chain input {
 		type filter hook input priority filter - 1; policy accept;
