@@ -23,20 +23,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Guest_Info_FullMethodName     = "/aether.guest.v1.Guest/Info"
-	Guest_Boot_FullMethodName     = "/aether.guest.v1.Guest/Boot"
-	Guest_Spawn_FullMethodName    = "/aether.guest.v1.Guest/Spawn"
-	Guest_Read_FullMethodName     = "/aether.guest.v1.Guest/Read"
-	Guest_Write_FullMethodName    = "/aether.guest.v1.Guest/Write"
-	Guest_Resize_FullMethodName   = "/aether.guest.v1.Guest/Resize"
-	Guest_Signal_FullMethodName   = "/aether.guest.v1.Guest/Signal"
-	Guest_Status_FullMethodName   = "/aether.guest.v1.Guest/Status"
-	Guest_Stats_FullMethodName    = "/aether.guest.v1.Guest/Stats"
-	Guest_SetClock_FullMethodName = "/aether.guest.v1.Guest/SetClock"
-	Guest_PowerOff_FullMethodName = "/aether.guest.v1.Guest/PowerOff"
-	Guest_Freeze_FullMethodName   = "/aether.guest.v1.Guest/Freeze"
-	Guest_Thaw_FullMethodName     = "/aether.guest.v1.Guest/Thaw"
-	Guest_Sync_FullMethodName     = "/aether.guest.v1.Guest/Sync"
+	Guest_Info_FullMethodName          = "/aether.guest.v1.Guest/Info"
+	Guest_Boot_FullMethodName          = "/aether.guest.v1.Guest/Boot"
+	Guest_Spawn_FullMethodName         = "/aether.guest.v1.Guest/Spawn"
+	Guest_Read_FullMethodName          = "/aether.guest.v1.Guest/Read"
+	Guest_Write_FullMethodName         = "/aether.guest.v1.Guest/Write"
+	Guest_Resize_FullMethodName        = "/aether.guest.v1.Guest/Resize"
+	Guest_Signal_FullMethodName        = "/aether.guest.v1.Guest/Signal"
+	Guest_Status_FullMethodName        = "/aether.guest.v1.Guest/Status"
+	Guest_Stats_FullMethodName         = "/aether.guest.v1.Guest/Stats"
+	Guest_SetClock_FullMethodName      = "/aether.guest.v1.Guest/SetClock"
+	Guest_PowerOff_FullMethodName      = "/aether.guest.v1.Guest/PowerOff"
+	Guest_Freeze_FullMethodName        = "/aether.guest.v1.Guest/Freeze"
+	Guest_Thaw_FullMethodName          = "/aether.guest.v1.Guest/Thaw"
+	Guest_FreezeSession_FullMethodName = "/aether.guest.v1.Guest/FreezeSession"
+	Guest_Sync_FullMethodName          = "/aether.guest.v1.Guest/Sync"
 )
 
 // GuestClient is the client API for Guest service.
@@ -63,6 +64,10 @@ type GuestClient interface {
 	// Freeze while frozen moves the deadline.
 	Freeze(ctx context.Context, in *FreezeRequest, opts ...grpc.CallOption) (*FreezeReply, error)
 	Thaw(ctx context.Context, in *ThawRequest, opts ...grpc.CallOption) (*ThawReply, error)
+	// FreezeSession freezes or thaws every process of the session, as
+	// Docker's pause does a container's, and returns once the kernel reports
+	// the state. The helper and its git service run outside the session.
+	FreezeSession(ctx context.Context, in *FreezeSessionRequest, opts ...grpc.CallOption) (*FreezeSessionReply, error)
 	// Sync writes every filesystem's dirty data to its disk, then drops the
 	// page cache, before a save.
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (*SyncReply, error)
@@ -206,6 +211,16 @@ func (c *guestClient) Thaw(ctx context.Context, in *ThawRequest, opts ...grpc.Ca
 	return out, nil
 }
 
+func (c *guestClient) FreezeSession(ctx context.Context, in *FreezeSessionRequest, opts ...grpc.CallOption) (*FreezeSessionReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FreezeSessionReply)
+	err := c.cc.Invoke(ctx, Guest_FreezeSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *guestClient) Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (*SyncReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SyncReply)
@@ -240,6 +255,10 @@ type GuestServer interface {
 	// Freeze while frozen moves the deadline.
 	Freeze(context.Context, *FreezeRequest) (*FreezeReply, error)
 	Thaw(context.Context, *ThawRequest) (*ThawReply, error)
+	// FreezeSession freezes or thaws every process of the session, as
+	// Docker's pause does a container's, and returns once the kernel reports
+	// the state. The helper and its git service run outside the session.
+	FreezeSession(context.Context, *FreezeSessionRequest) (*FreezeSessionReply, error)
 	// Sync writes every filesystem's dirty data to its disk, then drops the
 	// page cache, before a save.
 	Sync(context.Context, *SyncRequest) (*SyncReply, error)
@@ -291,6 +310,9 @@ func (UnimplementedGuestServer) Freeze(context.Context, *FreezeRequest) (*Freeze
 }
 func (UnimplementedGuestServer) Thaw(context.Context, *ThawRequest) (*ThawReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Thaw not implemented")
+}
+func (UnimplementedGuestServer) FreezeSession(context.Context, *FreezeSessionRequest) (*FreezeSessionReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method FreezeSession not implemented")
 }
 func (UnimplementedGuestServer) Sync(context.Context, *SyncRequest) (*SyncReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Sync not implemented")
@@ -550,6 +572,24 @@ func _Guest_Thaw_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Guest_FreezeSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FreezeSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GuestServer).FreezeSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Guest_FreezeSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GuestServer).FreezeSession(ctx, req.(*FreezeSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Guest_Sync_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SyncRequest)
 	if err := dec(in); err != nil {
@@ -626,6 +666,10 @@ var Guest_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Thaw",
 			Handler:    _Guest_Thaw_Handler,
+		},
+		{
+			MethodName: "FreezeSession",
+			Handler:    _Guest_FreezeSession_Handler,
 		},
 		{
 			MethodName: "Sync",

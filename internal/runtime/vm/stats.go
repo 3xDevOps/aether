@@ -31,7 +31,7 @@ func (e *engine) memoryEvents(ctx context.Context, key string) (runtime.MemoryEv
 	if up, upErr := e.running(ctx, key); upErr != nil || !up || rec.Exited {
 		return runtime.MemoryEvents{}, errors.Join(upErr, fmt.Errorf("vm runtime: VM %s is not running: %w", key, fs.ErrNotExist))
 	}
-	if e.paused(ctx, key) {
+	if e.halted(ctx, key) {
 		e.mu.Lock()
 		events, known := e.events[key]
 		e.mu.Unlock()
@@ -55,7 +55,18 @@ func (e *engine) memoryEvents(ctx context.Context, key string) (runtime.MemoryEv
 	return events, nil
 }
 
+// paused reports a VM whose session cannot run: its vCPUs are stopped or
+// Pause froze its processes.
 func (e *engine) paused(ctx context.Context, key string) bool {
+	if rec, err := e.load(key); err == nil && rec.Frozen {
+		return true
+	}
+	return e.halted(ctx, key)
+}
+
+// halted reports a VM whose vCPUs are stopped, so its guest answers
+// nothing.
+func (e *engine) halted(ctx context.Context, key string) bool {
 	state, err := newCHAPI(e.path(key, apiSocket)).state(ctx)
 	return err == nil && state == "Paused"
 }
@@ -94,7 +105,7 @@ func (e *engine) sample(ctx context.Context, key string) (*runtime.ContainerStat
 	if err != nil {
 		return nil, err
 	}
-	if up, upErr := e.running(ctx, key); upErr != nil || !up || e.paused(ctx, key) {
+	if up, upErr := e.running(ctx, key); upErr != nil || !up || e.halted(ctx, key) {
 		return nil, upErr
 	}
 	h, err := e.helper(key)

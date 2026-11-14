@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/vmimage"
 )
@@ -81,8 +82,10 @@ type record struct {
 	Net    int  `json:"net"`
 	Egress bool `json:"egress,omitempty"`
 	// KeepRoot keeps the root disk across cold starts.
-	KeepRoot bool          `json:"keep_root,omitempty"`
-	Lifetime time.Duration `json:"lifetime,omitempty"`
+	KeepRoot  bool           `json:"keep_root,omitempty"`
+	Lifetime  time.Duration  `json:"lifetime,omitempty"`
+	OwnedDirs []string       `json:"owned_dirs,omitempty"`
+	Serves    []guest.Socket `json:"serves,omitempty"`
 	// Booted is set once a boot was launched: the next cold start builds a
 	// fresh root disk. Boots counts them, so a wait on one boot can tell it
 	// from the next.
@@ -91,6 +94,9 @@ type record struct {
 	// Saved means the snapshot directory holds the VM's state; the VM reads
 	// as exited until Restore.
 	Saved bool `json:"saved,omitempty"`
+	// Frozen means Pause froze the session's processes, which stay frozen
+	// through a save and restore until Resume or the next boot.
+	Frozen bool `json:"frozen,omitempty"`
 	// CacheRan means the VM ran on its cache disk since the disk last
 	// became its pool's newest cache. CacheSynced means the disk holds every
 	// write the guest made: the VM powered off cleanly, or was saved after

@@ -31,6 +31,8 @@ type service struct {
 	setClock  func(time.Time) error
 	reclaim   func()
 	freezer   *freezer
+	// freezing holds the FreezeSession call that runs.
+	freezing chan struct{}
 
 	bootOnce  sync.Once
 	bootDone  chan struct{}
@@ -39,7 +41,7 @@ type service struct {
 }
 
 func newService(procs *processes, cgroup *sessionCgroup, bootID, bootError string) *service {
-	return &service{procs: procs, cgroup: cgroup, bootID: bootID, bootError: bootError, bootDone: make(chan struct{})}
+	return &service{procs: procs, cgroup: cgroup, bootID: bootID, bootError: bootError, bootDone: make(chan struct{}), freezing: make(chan struct{}, 1)}
 }
 
 // newServer bounds requests and drops a server whose connection died
@@ -253,7 +255,7 @@ func rpcError(err error) error {
 		return status.Error(codes.OutOfRange, err.Error())
 	case errors.Is(err, errInvalid):
 		return status.Error(codes.InvalidArgument, err.Error())
-	case errors.Is(err, errExited), errors.Is(err, errNoInput), errors.Is(err, errNoTerm), errors.Is(err, syscall.EPIPE), errors.Is(err, os.ErrClosed):
+	case errors.Is(err, errExited), errors.Is(err, errPaused), errors.Is(err, errNoInput), errors.Is(err, errNoTerm), errors.Is(err, syscall.EPIPE), errors.Is(err, os.ErrClosed):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, os.ErrDeadlineExceeded):
 		return status.Error(codes.DeadlineExceeded, err.Error())

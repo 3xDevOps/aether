@@ -3,12 +3,16 @@ package helper
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/guest/guestpb"
 )
@@ -70,6 +74,40 @@ func (c *sessionCgroup) setLimit(limit int64) error {
 	}
 	c.limit.Store(max(limit, 0))
 	return nil
+}
+
+// freeze sets the session's cgroup.freeze and waits until cgroup.events
+// reports it: the kernel freezes and thaws processes asynchronously, and a
+// task in a killable wait, such as a slow home request, holds a freeze up.
+// A freeze that does not complete is thawed back, as runc does, so a failed
+// pause leaves the session running.
+func (c *sessionCgroup) freeze(ctx context.Context, frozen bool) error {
+	value := "0"
+	if frozen {
+		value = "1"
+	}
+	control := filepath.Join(c.dir, "cgroup.freeze")
+	if err := os.WriteFile(control, []byte(value), 0); err != nil {
+		return err
+	}
+	for {
+		events, err := os.ReadFile(filepath.Join(c.dir, "cgroup.events"))
+		if err == nil && slices.Contains(strings.Split(string(events), "\n"), "frozen "+value) {
+			return nil
+		}
+		if err == nil {
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+			case <-time.After(10 * time.Millisecond):
+				continue
+			}
+		}
+		if frozen {
+			err = errors.Join(err, os.WriteFile(control, []byte("0"), 0))
+		}
+		return err
+	}
 }
 
 // readStats counts the whole VM, which is the session: memory in use is

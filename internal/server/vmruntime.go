@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,9 @@ const DefaultVMKernel = "/usr/local/lib/aether/vmlinux"
 // checkouts live on disks of their own, which checkouts makes. members are
 // this server's: their containers left in Docker are stopped.
 func newVMRuntime(ctx context.Context, dataDir, kernel string, members []string, docker *runtime.Docker, checkouts vm.CheckoutDisks) (*vm.Runtime, *vmimage.Store, error) {
+	if os.Geteuid() != 0 {
+		return nil, nil, errors.New("server: session-runtime vm needs the server to run as root: it starts each VM in a systemd unit and sets up its network")
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, nil, fmt.Errorf("server: find the server binary for session VMs: %w", err)

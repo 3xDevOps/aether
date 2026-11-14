@@ -346,6 +346,7 @@ func (p *fakePTY) setErr(err error) {
 
 type fakeRuns struct {
 	mu              sync.Mutex
+	held            []domain.RunID
 	loginProblem    string
 	err             error
 	addr            string
@@ -709,7 +710,12 @@ func (f *fakeRuns) Sleep(domain.RunID) scheduler.SleepState { return scheduler.S
 func (f *fakeRuns) WakeRun(context.Context, domain.RunID, domain.MemberID) error { return nil }
 func (f *fakeRuns) SettleSleep(context.Context, domain.RunID) error              { return nil }
 
-func (f *fakeRuns) HoldRunAwake(context.Context, domain.RunID) (func(), error) { return func() {}, nil }
+func (f *fakeRuns) HoldRunAwake(_ context.Context, run domain.RunID) (func(), error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.held = append(f.held, run)
+	return func() {}, nil
+}
 
 func (f *fakeRuns) NoteTyping(domain.RunID) {}
 

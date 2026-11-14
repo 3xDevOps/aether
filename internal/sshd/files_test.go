@@ -147,3 +147,23 @@ func TestFilesUploadWritesBytesIntoARunCheckout(t *testing.T) {
 		t.Errorf("files.write with a NUL byte = %+v, want invalid params", pe)
 	}
 }
+
+// vmFiles is a Files service whose run checkouts live in VMs.
+type vmFiles struct{ fakeFiles }
+
+func (*vmFiles) IsVMCheckout(domain.RunID) bool { return true }
+
+func TestFilesWriteToAVMCheckoutHoldsItsSessionAwake(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(c *Config) { c.Services.Files = &vmFiles{} })
+	if err := controlClient(t, e).Call(protocol.MethodFilesWrite, protocol.FilesWriteParams{
+		WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID), Path: "file.txt", Content: "edit",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	e.runs.mu.Lock()
+	defer e.runs.mu.Unlock()
+	if len(e.runs.held) != 1 || e.runs.held[0] != e.run.ID {
+		t.Fatalf("held awake %v, want the written run", e.runs.held)
+	}
+}

@@ -24,6 +24,9 @@ const (
 	// helperCallTimeout bounds one short call to the helper, whose client
 	// otherwise waits for a guest that may never answer again.
 	helperCallTimeout = 5 * time.Second
+	// sessionFreezeTimeout bounds freezing a session, which waits for every
+	// task to leave its killable waits.
+	sessionFreezeTimeout = 10 * time.Second
 	// lostExitCode reports a VM that ended without its helper reporting
 	// Main's exit: the host killed it, the guest crashed or the host
 	// rebooted.
@@ -94,6 +97,11 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 		if err = api.resume(ctx); err != nil {
 			return fmt.Errorf("vm runtime: resume before stop: %w", err)
 		}
+	}
+	if rec.Frozen {
+		// SIGKILL reaches a frozen session too, so a thaw that fails costs
+		// only the grace period.
+		_ = e.thawSession(ctx, rec)
 	}
 	if grace < 0 {
 		grace = defaultStopGrace
@@ -388,6 +396,7 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 	if _, err := os.Stat(e.dir(key)); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
+	e.stopRelay(key)
 	up, err := e.running(ctx, key)
 	if err != nil {
 		e.forgetHelper(key)
@@ -422,26 +431,85 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 	return nil
 }
 
-// pause stops the vCPUs; the guest keeps its memory, as a frozen container
-// does.
+// pause freezes the session's processes, as Docker's pause freezes a
+// container's, when the VM's checkouts live on its own disks: the git
+// service outside the session keeps serving them, so a close can commit a
+// paused session. Any other VM's vCPUs stop. The guest keeps its memory
+// either way.
 func (e *engine) pause(ctx context.Context, key string) error {
-	if _, err := e.requireRunning(ctx, key, "pause"); err != nil {
+	unlock := e.lock(key)
+	defer unlock()
+	rec, err := e.requireRunning(ctx, key, "pause")
+	if err != nil {
 		return err
 	}
-	if err := newCHAPI(e.path(key, apiSocket)).pause(ctx); err != nil {
+	if len(rec.CheckoutDisks) == 0 {
+		err = newCHAPI(e.path(key, apiSocket)).pause(ctx)
+	} else {
+		err = e.freezeSession(ctx, rec)
+	}
+	if err != nil {
 		return fmt.Errorf("vm runtime: pause VM %s: %w", key, err)
 	}
 	return nil
 }
 
 func (e *engine) resume(ctx context.Context, key string) error {
-	if _, err := e.requireRunning(ctx, key, "resume"); err != nil {
+	unlock := e.lock(key)
+	defer unlock()
+	rec, err := e.requireRunning(ctx, key, "resume")
+	if err != nil {
 		return err
 	}
-	if err := newCHAPI(e.path(key, apiSocket)).resume(ctx); err != nil {
+	// A frozen VM can also be halted, as after a failed save.
+	if !rec.Frozen || e.halted(ctx, key) {
+		err = newCHAPI(e.path(key, apiSocket)).resume(ctx)
+	}
+	if err == nil && rec.Frozen {
+		err = e.thawSession(ctx, rec)
+	}
+	if err != nil {
 		return fmt.Errorf("vm runtime: resume VM %s: %w", key, err)
 	}
 	return nil
+}
+
+// freezeSession records the freeze first, so a server that dies mid-call
+// reads the session as paused and Resume thaws it. A freeze that fails is
+// thawed back, as runc thaws a failed pause, so the session runs on; only a
+// thaw that fails too leaves it read as paused.
+func (e *engine) freezeSession(ctx context.Context, rec *record) error {
+	h, err := e.helper(rec.Key)
+	if err != nil {
+		return err
+	}
+	rec.Frozen = true
+	if err = e.store(rec); err != nil {
+		return err
+	}
+	freezeCtx, cancel := context.WithTimeout(ctx, sessionFreezeTimeout)
+	err = h.FreezeSession(freezeCtx, true)
+	cancel()
+	if err != nil {
+		return errors.Join(err, e.thawSession(context.WithoutCancel(ctx), rec))
+	}
+	return nil
+}
+
+// thawSession is bounded, so a guest that stopped answering cannot hold the
+// VM's lock. A helper that cannot freeze never froze the session.
+func (e *engine) thawSession(ctx context.Context, rec *record) error {
+	h, err := e.helper(rec.Key)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, helperCallTimeout)
+	defer cancel()
+	if err = h.FreezeSession(ctx, false); err != nil && !errors.Is(err, errors.ErrUnsupported) {
+		return err
+	}
+	rec.Frozen = false
+	return e.store(rec)
 }
 
 // inspect answers from the record and the unit, never from the guest.

@@ -97,8 +97,8 @@ func (r *Runtime) Git(ctx context.Context, run domain.RunID) (*guest.Git, error)
 	if err != nil {
 		return nil, err
 	}
-	// A paused guest answers nothing until it resumes.
-	if !up || rec.Saved || r.vms.paused(ctx, key) {
+	// A halted guest answers nothing until it resumes.
+	if !up || rec.Saved || r.vms.halted(ctx, key) {
 		return nil, fmt.Errorf("vm runtime: VM %s: %w", key, guest.ErrVMNotRunning)
 	}
 	return r.vms.gitClient(key)

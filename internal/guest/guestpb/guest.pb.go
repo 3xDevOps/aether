@@ -1574,6 +1574,86 @@ func (x *ThawReply) GetFrozen() bool {
 	return false
 }
 
+type FreezeSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Frozen        bool                   `protobuf:"varint,1,opt,name=frozen,proto3" json:"frozen,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FreezeSessionRequest) Reset() {
+	*x = FreezeSessionRequest{}
+	mi := &file_guest_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FreezeSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FreezeSessionRequest) ProtoMessage() {}
+
+func (x *FreezeSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_guest_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FreezeSessionRequest.ProtoReflect.Descriptor instead.
+func (*FreezeSessionRequest) Descriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *FreezeSessionRequest) GetFrozen() bool {
+	if x != nil {
+		return x.Frozen
+	}
+	return false
+}
+
+type FreezeSessionReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FreezeSessionReply) Reset() {
+	*x = FreezeSessionReply{}
+	mi := &file_guest_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FreezeSessionReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FreezeSessionReply) ProtoMessage() {}
+
+func (x *FreezeSessionReply) ProtoReflect() protoreflect.Message {
+	mi := &file_guest_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FreezeSessionReply.ProtoReflect.Descriptor instead.
+func (*FreezeSessionReply) Descriptor() ([]byte, []int) {
+	return file_guest_proto_rawDescGZIP(), []int{30}
+}
+
 type SyncRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1582,7 +1662,7 @@ type SyncRequest struct {
 
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
-	mi := &file_guest_proto_msgTypes[29]
+	mi := &file_guest_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1594,7 +1674,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_guest_proto_msgTypes[29]
+	mi := &file_guest_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1607,7 +1687,7 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_guest_proto_rawDescGZIP(), []int{29}
+	return file_guest_proto_rawDescGZIP(), []int{31}
 }
 
 type SyncReply struct {
@@ -1618,7 +1698,7 @@ type SyncReply struct {
 
 func (x *SyncReply) Reset() {
 	*x = SyncReply{}
-	mi := &file_guest_proto_msgTypes[30]
+	mi := &file_guest_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1630,7 +1710,7 @@ func (x *SyncReply) String() string {
 func (*SyncReply) ProtoMessage() {}
 
 func (x *SyncReply) ProtoReflect() protoreflect.Message {
-	mi := &file_guest_proto_msgTypes[30]
+	mi := &file_guest_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1643,7 +1723,7 @@ func (x *SyncReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncReply.ProtoReflect.Descriptor instead.
 func (*SyncReply) Descriptor() ([]byte, []int) {
-	return file_guest_proto_rawDescGZIP(), []int{30}
+	return file_guest_proto_rawDescGZIP(), []int{32}
 }
 
 var File_guest_proto protoreflect.FileDescriptor
@@ -1740,13 +1820,16 @@ const file_guest_proto_rawDesc = "" +
 	"\vThawRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"#\n" +
 	"\tThawReply\x12\x16\n" +
-	"\x06frozen\x18\x01 \x01(\bR\x06frozen\"\r\n" +
+	"\x06frozen\x18\x01 \x01(\bR\x06frozen\".\n" +
+	"\x14FreezeSessionRequest\x12\x16\n" +
+	"\x06frozen\x18\x01 \x01(\bR\x06frozen\"\x14\n" +
+	"\x12FreezeSessionReply\"\r\n" +
 	"\vSyncRequest\"\v\n" +
 	"\tSyncReply*F\n" +
 	"\x06Stream\x12\x16\n" +
 	"\x12STREAM_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rSTREAM_STDOUT\x10\x01\x12\x11\n" +
-	"\rSTREAM_STDERR\x10\x022\xdc\a\n" +
+	"\rSTREAM_STDERR\x10\x022\xb9\b\n" +
 	"\x05Guest\x12@\n" +
 	"\x04Info\x12\x1c.aether.guest.v1.InfoRequest\x1a\x1a.aether.guest.v1.InfoReply\x12@\n" +
 	"\x04Boot\x12\x1c.aether.guest.v1.BootRequest\x1a\x1a.aether.guest.v1.BootReply\x12C\n" +
@@ -1760,7 +1843,8 @@ const file_guest_proto_rawDesc = "" +
 	"\bSetClock\x12 .aether.guest.v1.SetClockRequest\x1a\x1e.aether.guest.v1.SetClockReply\x12L\n" +
 	"\bPowerOff\x12 .aether.guest.v1.PowerOffRequest\x1a\x1e.aether.guest.v1.PowerOffReply\x12F\n" +
 	"\x06Freeze\x12\x1e.aether.guest.v1.FreezeRequest\x1a\x1c.aether.guest.v1.FreezeReply\x12@\n" +
-	"\x04Thaw\x12\x1c.aether.guest.v1.ThawRequest\x1a\x1a.aether.guest.v1.ThawReply\x12@\n" +
+	"\x04Thaw\x12\x1c.aether.guest.v1.ThawRequest\x1a\x1a.aether.guest.v1.ThawReply\x12[\n" +
+	"\rFreezeSession\x12%.aether.guest.v1.FreezeSessionRequest\x1a#.aether.guest.v1.FreezeSessionReply\x12@\n" +
 	"\x04Sync\x12\x1c.aether.guest.v1.SyncRequest\x1a\x1a.aether.guest.v1.SyncReplyB3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
 
 var (
@@ -1776,40 +1860,42 @@ func file_guest_proto_rawDescGZIP() []byte {
 }
 
 var file_guest_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_guest_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_guest_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_guest_proto_goTypes = []any{
-	(Stream)(0),             // 0: aether.guest.v1.Stream
-	(*InfoRequest)(nil),     // 1: aether.guest.v1.InfoRequest
-	(*InfoReply)(nil),       // 2: aether.guest.v1.InfoReply
-	(*Size)(nil),            // 3: aether.guest.v1.Size
-	(*Process)(nil),         // 4: aether.guest.v1.Process
-	(*BootRequest)(nil),     // 5: aether.guest.v1.BootRequest
-	(*BootReply)(nil),       // 6: aether.guest.v1.BootReply
-	(*SpawnRequest)(nil),    // 7: aether.guest.v1.SpawnRequest
-	(*SpawnReply)(nil),      // 8: aether.guest.v1.SpawnReply
-	(*SpawnFailure)(nil),    // 9: aether.guest.v1.SpawnFailure
-	(*ReadRequest)(nil),     // 10: aether.guest.v1.ReadRequest
-	(*ReadReply)(nil),       // 11: aether.guest.v1.ReadReply
-	(*WriteRequest)(nil),    // 12: aether.guest.v1.WriteRequest
-	(*WriteReply)(nil),      // 13: aether.guest.v1.WriteReply
-	(*ResizeRequest)(nil),   // 14: aether.guest.v1.ResizeRequest
-	(*ResizeReply)(nil),     // 15: aether.guest.v1.ResizeReply
-	(*SignalRequest)(nil),   // 16: aether.guest.v1.SignalRequest
-	(*SignalReply)(nil),     // 17: aether.guest.v1.SignalReply
-	(*StatusRequest)(nil),   // 18: aether.guest.v1.StatusRequest
-	(*StatusReply)(nil),     // 19: aether.guest.v1.StatusReply
-	(*StatsRequest)(nil),    // 20: aether.guest.v1.StatsRequest
-	(*StatsReply)(nil),      // 21: aether.guest.v1.StatsReply
-	(*SetClockRequest)(nil), // 22: aether.guest.v1.SetClockRequest
-	(*SetClockReply)(nil),   // 23: aether.guest.v1.SetClockReply
-	(*PowerOffRequest)(nil), // 24: aether.guest.v1.PowerOffRequest
-	(*PowerOffReply)(nil),   // 25: aether.guest.v1.PowerOffReply
-	(*FreezeRequest)(nil),   // 26: aether.guest.v1.FreezeRequest
-	(*FreezeReply)(nil),     // 27: aether.guest.v1.FreezeReply
-	(*ThawRequest)(nil),     // 28: aether.guest.v1.ThawRequest
-	(*ThawReply)(nil),       // 29: aether.guest.v1.ThawReply
-	(*SyncRequest)(nil),     // 30: aether.guest.v1.SyncRequest
-	(*SyncReply)(nil),       // 31: aether.guest.v1.SyncReply
+	(Stream)(0),                  // 0: aether.guest.v1.Stream
+	(*InfoRequest)(nil),          // 1: aether.guest.v1.InfoRequest
+	(*InfoReply)(nil),            // 2: aether.guest.v1.InfoReply
+	(*Size)(nil),                 // 3: aether.guest.v1.Size
+	(*Process)(nil),              // 4: aether.guest.v1.Process
+	(*BootRequest)(nil),          // 5: aether.guest.v1.BootRequest
+	(*BootReply)(nil),            // 6: aether.guest.v1.BootReply
+	(*SpawnRequest)(nil),         // 7: aether.guest.v1.SpawnRequest
+	(*SpawnReply)(nil),           // 8: aether.guest.v1.SpawnReply
+	(*SpawnFailure)(nil),         // 9: aether.guest.v1.SpawnFailure
+	(*ReadRequest)(nil),          // 10: aether.guest.v1.ReadRequest
+	(*ReadReply)(nil),            // 11: aether.guest.v1.ReadReply
+	(*WriteRequest)(nil),         // 12: aether.guest.v1.WriteRequest
+	(*WriteReply)(nil),           // 13: aether.guest.v1.WriteReply
+	(*ResizeRequest)(nil),        // 14: aether.guest.v1.ResizeRequest
+	(*ResizeReply)(nil),          // 15: aether.guest.v1.ResizeReply
+	(*SignalRequest)(nil),        // 16: aether.guest.v1.SignalRequest
+	(*SignalReply)(nil),          // 17: aether.guest.v1.SignalReply
+	(*StatusRequest)(nil),        // 18: aether.guest.v1.StatusRequest
+	(*StatusReply)(nil),          // 19: aether.guest.v1.StatusReply
+	(*StatsRequest)(nil),         // 20: aether.guest.v1.StatsRequest
+	(*StatsReply)(nil),           // 21: aether.guest.v1.StatsReply
+	(*SetClockRequest)(nil),      // 22: aether.guest.v1.SetClockRequest
+	(*SetClockReply)(nil),        // 23: aether.guest.v1.SetClockReply
+	(*PowerOffRequest)(nil),      // 24: aether.guest.v1.PowerOffRequest
+	(*PowerOffReply)(nil),        // 25: aether.guest.v1.PowerOffReply
+	(*FreezeRequest)(nil),        // 26: aether.guest.v1.FreezeRequest
+	(*FreezeReply)(nil),          // 27: aether.guest.v1.FreezeReply
+	(*ThawRequest)(nil),          // 28: aether.guest.v1.ThawRequest
+	(*ThawReply)(nil),            // 29: aether.guest.v1.ThawReply
+	(*FreezeSessionRequest)(nil), // 30: aether.guest.v1.FreezeSessionRequest
+	(*FreezeSessionReply)(nil),   // 31: aether.guest.v1.FreezeSessionReply
+	(*SyncRequest)(nil),          // 32: aether.guest.v1.SyncRequest
+	(*SyncReply)(nil),            // 33: aether.guest.v1.SyncReply
 }
 var file_guest_proto_depIdxs = []int32{
 	3,  // 0: aether.guest.v1.Process.terminal:type_name -> aether.guest.v1.Size
@@ -1830,23 +1916,25 @@ var file_guest_proto_depIdxs = []int32{
 	24, // 15: aether.guest.v1.Guest.PowerOff:input_type -> aether.guest.v1.PowerOffRequest
 	26, // 16: aether.guest.v1.Guest.Freeze:input_type -> aether.guest.v1.FreezeRequest
 	28, // 17: aether.guest.v1.Guest.Thaw:input_type -> aether.guest.v1.ThawRequest
-	30, // 18: aether.guest.v1.Guest.Sync:input_type -> aether.guest.v1.SyncRequest
-	2,  // 19: aether.guest.v1.Guest.Info:output_type -> aether.guest.v1.InfoReply
-	6,  // 20: aether.guest.v1.Guest.Boot:output_type -> aether.guest.v1.BootReply
-	8,  // 21: aether.guest.v1.Guest.Spawn:output_type -> aether.guest.v1.SpawnReply
-	11, // 22: aether.guest.v1.Guest.Read:output_type -> aether.guest.v1.ReadReply
-	13, // 23: aether.guest.v1.Guest.Write:output_type -> aether.guest.v1.WriteReply
-	15, // 24: aether.guest.v1.Guest.Resize:output_type -> aether.guest.v1.ResizeReply
-	17, // 25: aether.guest.v1.Guest.Signal:output_type -> aether.guest.v1.SignalReply
-	19, // 26: aether.guest.v1.Guest.Status:output_type -> aether.guest.v1.StatusReply
-	21, // 27: aether.guest.v1.Guest.Stats:output_type -> aether.guest.v1.StatsReply
-	23, // 28: aether.guest.v1.Guest.SetClock:output_type -> aether.guest.v1.SetClockReply
-	25, // 29: aether.guest.v1.Guest.PowerOff:output_type -> aether.guest.v1.PowerOffReply
-	27, // 30: aether.guest.v1.Guest.Freeze:output_type -> aether.guest.v1.FreezeReply
-	29, // 31: aether.guest.v1.Guest.Thaw:output_type -> aether.guest.v1.ThawReply
-	31, // 32: aether.guest.v1.Guest.Sync:output_type -> aether.guest.v1.SyncReply
-	19, // [19:33] is the sub-list for method output_type
-	5,  // [5:19] is the sub-list for method input_type
+	30, // 18: aether.guest.v1.Guest.FreezeSession:input_type -> aether.guest.v1.FreezeSessionRequest
+	32, // 19: aether.guest.v1.Guest.Sync:input_type -> aether.guest.v1.SyncRequest
+	2,  // 20: aether.guest.v1.Guest.Info:output_type -> aether.guest.v1.InfoReply
+	6,  // 21: aether.guest.v1.Guest.Boot:output_type -> aether.guest.v1.BootReply
+	8,  // 22: aether.guest.v1.Guest.Spawn:output_type -> aether.guest.v1.SpawnReply
+	11, // 23: aether.guest.v1.Guest.Read:output_type -> aether.guest.v1.ReadReply
+	13, // 24: aether.guest.v1.Guest.Write:output_type -> aether.guest.v1.WriteReply
+	15, // 25: aether.guest.v1.Guest.Resize:output_type -> aether.guest.v1.ResizeReply
+	17, // 26: aether.guest.v1.Guest.Signal:output_type -> aether.guest.v1.SignalReply
+	19, // 27: aether.guest.v1.Guest.Status:output_type -> aether.guest.v1.StatusReply
+	21, // 28: aether.guest.v1.Guest.Stats:output_type -> aether.guest.v1.StatsReply
+	23, // 29: aether.guest.v1.Guest.SetClock:output_type -> aether.guest.v1.SetClockReply
+	25, // 30: aether.guest.v1.Guest.PowerOff:output_type -> aether.guest.v1.PowerOffReply
+	27, // 31: aether.guest.v1.Guest.Freeze:output_type -> aether.guest.v1.FreezeReply
+	29, // 32: aether.guest.v1.Guest.Thaw:output_type -> aether.guest.v1.ThawReply
+	31, // 33: aether.guest.v1.Guest.FreezeSession:output_type -> aether.guest.v1.FreezeSessionReply
+	33, // 34: aether.guest.v1.Guest.Sync:output_type -> aether.guest.v1.SyncReply
+	20, // [20:35] is the sub-list for method output_type
+	5,  // [5:20] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -1863,7 +1951,7 @@ func file_guest_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_guest_proto_rawDesc), len(file_guest_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   31,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

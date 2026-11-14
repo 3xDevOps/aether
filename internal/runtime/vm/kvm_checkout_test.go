@@ -240,6 +240,51 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 		t.Fatalf("the VM's children ref is %s, want %s", got, childHead)
 	}
 
+	// Pause freezes the session, not the VM: a writer in it stops, exec is
+	// refused, and git still serves the checkout, so a close can commit a
+	// paused session as it commits a paused container.
+	h.sh(t, key, "(while [ ! -e stop ]; do date +%s%N > tick; sleep 0.05; done) >/dev/null 2>&1 &")
+	tick := func() string {
+		t.Helper()
+		got, readErr := h.git.FilesRead(ctx, ws, run, "", "tick", 0)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		return string(got.Content)
+	}
+	if err = h.e.pause(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	frozen := tick()
+	time.Sleep(300 * time.Millisecond)
+	if now := tick(); now != frozen {
+		t.Fatalf("a paused session still writes: %q then %q", frozen, now)
+	}
+	if _, _, _, err = h.e.exec(ctx, key, []string{"true"}, "/"); err == nil {
+		t.Fatal("exec into a paused session was not refused")
+	}
+	if patch, err = h.git.RunPatch(ctx, run, gitengine.PatchRequest{}); err != nil || patch.Recorded || !strings.Contains(patch.Text, "+++ b/tick") {
+		t.Fatalf("patch of a paused session = %+v, %v", patch, err)
+	}
+	member := domain.GitIdentity{Name: "Member", Email: "member@localhost"}
+	pausedCommit, err := h.git.CommitAll(ctx, run, "wip: a task", member, nil)
+	if err != nil || pausedCommit == "" {
+		t.Fatalf("commit of a paused session = %q, %v", pausedCommit, err)
+	}
+	store := filepath.Join(filepath.Dir(h.repos), "checkouts", key+".diffsnap")
+	if got := hostGit(t, store, "show", pausedCommit+":tick"); got != strings.TrimSpace(frozen) || tick() != frozen {
+		t.Fatalf("the paused session's commit holds tick %q, the checkout %q; both should be %q", got, tick(), frozen)
+	}
+	head = pausedCommit
+	if err = h.e.resume(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if now := tick(); now == frozen {
+		t.Fatal("a resumed session does not write")
+	}
+	h.sh(t, key, "touch stop && sleep 0.3 && rm -f stop tick")
+
 	// Finalize's order: the main process exits, then the last snapshot, the
 	// commit, publication and evidence, then the VM goes.
 	h.sh(t, key, "echo after > after-commit.txt")
@@ -247,11 +292,9 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.git.StopDiffWatch(run)
-	store := filepath.Join(filepath.Dir(h.repos), "checkouts", key+".diffsnap")
 	if got := hostGit(t, store, "ls-tree", "--name-only", "refs/aether/published", "after-commit.txt"); got != "after-commit.txt" {
 		t.Fatalf("the last snapshot, taken after the main process exited, lacks the last file: %q", got)
 	}
-	member := domain.GitIdentity{Name: "Member", Email: "member@localhost"}
 	final, err := h.git.CommitAll(ctx, run, "aether: a task", member, nil)
 	if err != nil || final == "" {
 		t.Fatalf("final commit = %q, %v", final, err)
@@ -263,7 +306,7 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	if author := hostGit(t, repo, "log", "-1", "--format=%an <%ae>|%cn|%P", "refs/heads/"+branch); author != "Member <member@localhost>|Aether|"+head {
 		t.Fatalf("published final commit: %s", author)
 	}
-	if files := hostGit(t, repo, "show", "--name-only", "--format=", final); !strings.Contains(files, "after-commit.txt") || !strings.Contains(files, "uploads/blob.bin") {
+	if files := hostGit(t, repo, "ls-tree", "-r", "--name-only", final); !strings.Contains(files, "after-commit.txt") || !strings.Contains(files, "uploads/blob.bin") {
 		t.Fatalf("final commit holds %q", files)
 	}
 	revision, err := h.git.CaptureEvidence(ctx, run, "packet-"+prefix)
@@ -276,6 +319,18 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	patch, err = h.git.RunPatch(t.Context(), run, gitengine.PatchRequest{})
 	if err != nil || !patch.Recorded || !strings.Contains(patch.Text, "after-commit.txt") {
 		t.Fatalf("patch of an ended session = %+v, %v", patch, err)
+	}
+	if read, err = h.git.FilesRead(ctx, ws, run, "", "after-commit.txt", 0); err != nil || string(read.Content) != "after\n" {
+		t.Fatalf("files read of an ended session = %+v, %v", read, err)
+	}
+	if err := h.git.RemoveRunCheckout(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(store, "objects", "info", "alternates")); !os.IsNotExist(err) {
+		t.Fatalf("removed checkout's history still borrows the workspace's objects: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(h.repos), "checkouts", key, "disk.qcow2")); !os.IsNotExist(err) {
+		t.Fatalf("removed checkout's disk remains: %v", err)
 	}
 }
 

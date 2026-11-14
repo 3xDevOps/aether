@@ -53,6 +53,7 @@ x86 kernels cap the whole line at 2047 bytes, and `KernelArgs` fails past it.
 | `aether.mount=<volume>,<source>,<target>[,ro\|,overlay]` | Bind `<source>` of a volume at `<target>`, in command-line order. |
 | `aether.checkout=<serial>,<key>,<target>` | Mount the checkout disk with virtio serial `<serial>` for the git service under `<key>` and bind its checkout at `<target>`. |
 | `aether.sock=<port>,<path>` | Listen on `<path>` and relay each connection to vsock port `<port>` on the host. |
+| `aether.serve=<port>,<path>` | Listen on vsock port `<port>` for the host and relay each connection to `<path>` (below). |
 
 Paths are escaped per segment as in a URL, so a space or a comma in a path
 does not split an argument.
@@ -133,6 +134,17 @@ entry. The server re-creates that socket on every restart, and the guest
 then drops the bind; the helper watches the mount table and binds again. The first
 connection after that can be refused once, which the coordination client
 retries.
+
+## Served sockets
+
+The other way round, `aether.serve=<port>,<path>` makes the helper listen on
+vsock port `<port>` for the host, which reaches it through Cloud
+Hypervisor's vsock socket with `CONNECT <port>`, and relay each connection
+to the Unix socket `<path>` in the VM. Once that socket accepts, the helper
+sends one zero byte and then relays; a socket that is not there yet gets
+the connection closed. `guest.DialServed` does the host's side and waits for
+the byte, so a server can tell a socket that is up from one that is not.
+The dictation engine's VM serves its engine's socket this way.
 
 ## Sessions and processes
 
@@ -326,16 +338,33 @@ the commit has no bound on the checkout's size; its new objects, like a
 moved HEAD's, may take up to 4 GiB, and the server keeps 128 MiB of disk
 free. The server records the committed tree; while the VM does not run,
 evidence retains that tree, and without one capture fails and cleanup keeps
-the checkout's disk, since only the VM can read it. On Close, a checkout in
-a VM is committed before the VM pauses, as a paused VM runs no git. A subsession's branch reaches a parent in a
+the checkout's disk, since only the VM can read it. Pausing a VM whose
+checkouts live on its own disks freezes the session cgroup with the
+helper's `FreezeSession`, as Docker's pause freezes a container's, and
+leaves the VM running: the git service is outside the session, so Close
+pauses the session first and then commits it, as for a container, and the
+Files view of a paused session reads the live checkout. Exec into a paused
+session is refused. Root in the VM, which a sudo-tier session and nested
+Docker have, can move a process out of the session cgroup, and with it out
+of a pause, the session's process limit and the kill when the main process
+exits. A subsession's branch reaches a parent in a
 VM the same way: the server packs what the parent lacks and `Install` sets
 `refs/remotes/children/<id>`.
 
 A live overlay is pinned by the server as for a checkout on its disk, then
 relayed to the VM, whose endpoint pins the root to the checkout again, gives
 what it creates to the checkout's owner, and keeps its staging under
-`/run/aether-guest/data/git/mutagen`. Files and live
-sync need the VM to run.
+`/run/aether-guest/data/git/mutagen`. Live sync to a sleeping session wakes
+it and holds it awake while the overlay runs.
+
+While the VM does not run, because the session sleeps or ended, its Files
+view and diffs come from the last snapshot the server recorded: nothing can
+have changed the checkout since. A Files write or upload to a sleeping
+session wakes it first; one to an ended session, whose VM was removed,
+fails. Removing the checkout
+deletes its disk and first copies into the session's diff history what that
+history borrowed from the workspace repository, so the history outlives the
+workspace's own objects.
 
 ## Versions
 

@@ -320,8 +320,9 @@ thresholds and what to do.
 `vm`, each new session runs in its own [Cloud
 Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) virtual
 machine instead of a container, and so do each member's environment
-terminal, assistant and agent updater. The development browser stays on
-Docker.
+terminal, assistant and agent updater, and the
+[dictation](dictation.md#the-engine-container) engine. The development
+browser stays on Docker.
 This is work in progress; [the plan](plans/2026-11-13-microvm-sessions.md)
 lists what is still to come.
 
@@ -331,13 +332,15 @@ sudo aether-server vm install
 sudo systemctl restart aether-server
 ```
 
-The host needs `/dev/kvm` and systemd, besides Docker; `aether-server vm
-install` checks for KVM and installs the rest: Cloud Hypervisor, the tools
-VM disks and the VM firewall need, and the release's guest kernel at
-`/usr/local/lib/aether/vmlinux` (`--vm-kernel`, config key `vm-kernel`, names
-another path).
-[Hosts for VM sessions](install.md#hosts-for-vm-sessions) lists what it
-installs and which cloud instances work.
+The server must run as root: it starts each VM in a systemd unit and sets up
+its network, and it removes the files sessions leave behind itself rather than
+through a root container. The host needs `/dev/kvm` and systemd, besides
+Docker; `aether-server vm install` checks for KVM and installs the rest: Cloud
+Hypervisor, the tools VM disks and the VM firewall need, and the release's
+guest kernel at `/usr/local/lib/aether/vmlinux` (`--vm-kernel`, config key
+`vm-kernel`, names another path). [Hosts for VM
+sessions](install.md#hosts-for-vm-sessions) lists what it installs and which
+cloud instances work.
 
 What changes:
 

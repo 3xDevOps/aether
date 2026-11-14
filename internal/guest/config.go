@@ -74,6 +74,7 @@ type Config struct {
 	// Checkouts are mounted after Mounts.
 	Checkouts []CheckoutMount
 	Sockets   []Socket
+	Serves    []Socket
 }
 
 // Network configures the VM's one network interface.
@@ -105,7 +106,9 @@ type CheckoutMount struct {
 }
 
 // Socket makes the helper listen on Path in the VM and relay every
-// connection to vsock port Port on the host.
+// connection to vsock port Port on the host. As one of Config.Serves it is
+// the other way round: the helper listens on vsock port Port for the host
+// and relays each connection to the socket at Path in the VM.
 type Socket struct {
 	Port uint32
 	Path string
@@ -147,6 +150,9 @@ func (c Config) KernelArgs(base string) (string, error) {
 	}
 	for _, s := range c.Sockets {
 		args = append(args, "aether.sock="+strconv.FormatUint(uint64(s.Port), 10)+","+escapePath(s.Path))
+	}
+	for _, s := range c.Serves {
+		args = append(args, "aether.serve="+strconv.FormatUint(uint64(s.Port), 10)+","+escapePath(s.Path))
 	}
 	line := strings.TrimSpace(strings.Join(append(args, "--", "guest"), " "))
 	if len(line) > maxCmdline {
@@ -234,7 +240,7 @@ func (c *Config) parseArg(key, value string) error {
 			return err
 		}
 		c.Checkouts = append(c.Checkouts, CheckoutMount{Serial: fields[0], Key: fields[1], Target: target})
-	case "aether.sock":
+	case "aether.sock", "aether.serve":
 		if len(fields) != 2 {
 			return errors.New("want <port>,<path>")
 		}
@@ -246,7 +252,11 @@ func (c *Config) parseArg(key, value string) error {
 		if err != nil {
 			return err
 		}
-		c.Sockets = append(c.Sockets, Socket{Port: uint32(port), Path: p})
+		if key == "aether.sock" {
+			c.Sockets = append(c.Sockets, Socket{Port: uint32(port), Path: p})
+		} else {
+			c.Serves = append(c.Serves, Socket{Port: uint32(port), Path: p})
+		}
 	default:
 		return errors.New("unknown argument")
 	}
@@ -311,12 +321,18 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("checkout %d: target %q must be a clean absolute path below /", i, m.Target))
 		}
 	}
-	for i, s := range c.Sockets {
-		if s.Port == 0 || s.Port == APIPort {
-			errs = append(errs, fmt.Errorf("socket %d: port %d is reserved", i, s.Port))
-		}
-		if !cleanAbs(s.Path) || s.Path == "/" {
-			errs = append(errs, fmt.Errorf("socket %d: path %q must be a clean absolute path below /", i, s.Path))
+	for _, set := range []struct {
+		kind    string
+		sockets []Socket
+	}{{"socket", c.Sockets}, {"served socket", c.Serves}} {
+		kind := set.kind
+		for i, s := range set.sockets {
+			if s.Port == 0 || s.Port == APIPort {
+				errs = append(errs, fmt.Errorf("%s %d: port %d is reserved", kind, i, s.Port))
+			}
+			if !cleanAbs(s.Path) || s.Path == "/" {
+				errs = append(errs, fmt.Errorf("%s %d: path %q must be a clean absolute path below /", kind, i, s.Path))
+			}
 		}
 	}
 	if len(errs) > 0 {

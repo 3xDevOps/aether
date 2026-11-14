@@ -627,19 +627,72 @@ func TestStatsAndMemoryEventsComeFromTheHelper(t *testing.T) {
 	}
 }
 
-func TestAVMWithACheckoutDiskLingersAfterMainExits(t *testing.T) {
-	h := newHarness(t)
-	h.createStarted("run-a", sessionSpec("run-a"))
-	unlock := h.engine.lock("run-a")
-	rec, err := h.engine.load("run-a")
+// createWithCheckoutDisk starts session VM key with its checkout on a disk
+// of its own.
+func (h *harness) createWithCheckoutDisk(key string) *record {
+	h.t.Helper()
+	h.createStarted(key, sessionSpec(key))
+	unlock := h.engine.lock(key)
+	defer unlock()
+	rec, err := h.engine.load(key)
 	if err == nil {
 		rec.CheckoutDisks = []checkoutDisk{{Target: "/workspace"}}
 		err = h.engine.store(rec)
 	}
-	unlock()
 	if err != nil {
+		h.t.Fatal(err)
+	}
+	return rec
+}
+
+func TestPauseFreezesTheSessionOfAVMWithACheckoutDisk(t *testing.T) {
+	h := newHarness(t)
+	h.createWithCheckoutDisk("run-a")
+	g, vmm := h.guest("run-a"), h.units.vmm("run-a")
+	if err := h.engine.pause(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
 	}
+	if !g.isSessionFrozen() || slices.Contains(vmm.called(), "vm.pause") {
+		t.Fatalf("pause: session frozen %t, VM calls %v; want only the session frozen", g.isSessionFrozen(), vmm.called())
+	}
+	if _, _, _, err := h.engine.exec(t.Context(), "run-a", []string{"true"}, ""); err == nil || !strings.Contains(err.Error(), "paused") {
+		t.Errorf("exec in a paused session = %v", err)
+	}
+	if err := h.engine.resume(t.Context(), "run-a"); err != nil || g.isSessionFrozen() {
+		t.Fatalf("resume = %v, session frozen %t", err, g.isSessionFrozen())
+	}
+	if err := h.engine.pause(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.stop(t.Context(), "run-a", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if g.isSessionFrozen() {
+		t.Error("stop left the session frozen")
+	}
+}
+
+func TestAFailedSessionFreezeLeavesTheSessionRunning(t *testing.T) {
+	for _, cause := range []error{context.DeadlineExceeded, errors.ErrUnsupported} {
+		h := newHarness(t)
+		h.createWithCheckoutDisk("run-a")
+		g := h.guest("run-a")
+		g.sessionErr = cause
+		if err := h.engine.pause(t.Context(), "run-a"); !errors.Is(err, cause) {
+			t.Errorf("pause failing with %v = %v", cause, err)
+		}
+		if rec, err := h.engine.load("run-a"); err != nil || rec.Frozen || g.isSessionFrozen() {
+			t.Errorf("after a freeze that failed with %v: recorded frozen %t, session frozen %t, %v", cause, rec != nil && rec.Frozen, g.isSessionFrozen(), err)
+		}
+		if _, _, _, err := h.engine.exec(t.Context(), "run-a", []string{"true"}, ""); err != nil {
+			t.Errorf("exec after a freeze that failed with %v = %v", cause, err)
+		}
+	}
+}
+
+func TestAVMWithACheckoutDiskLingersAfterMainExits(t *testing.T) {
+	h := newHarness(t)
+	rec := h.createWithCheckoutDisk("run-a")
 	if err := h.engine.stop(t.Context(), "run-a", time.Second); err != nil {
 		t.Fatal(err)
 	}
