@@ -59,7 +59,7 @@ func TestKVMDiskUseFollowsWhatTheGuestKeeps(t *testing.T) {
 	if g := growth(); g <= 0 {
 		t.Errorf("a resumed writer grew the disks %d bytes in 2 s", g)
 	}
-	if out, code := vmRun(t, e, key, "pkill -f 'seq 200'; sleep 0.5; rm -f /tmp/grow /tmp/big /opt/big && sync && echo deleted"); code != 0 || !strings.Contains(out, "deleted") {
+	if out, code := vmRun(t, e, key, "pkill -f 'se[q] 200'; sleep 0.5; rm -f /tmp/grow /tmp/big /opt/big && sync && echo deleted"); code != 0 || !strings.Contains(out, "deleted") {
 		t.Fatalf("delete: %d %q", code, out)
 	}
 	deadline := time.Now().Add(30 * time.Second)
