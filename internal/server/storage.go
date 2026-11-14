@@ -213,6 +213,10 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 		case "vm-cache":
 			e.Reason = "Package cache new session VMs start from; rebuildable"
 		case "vm", "vm-state", "vm-db":
+			if strings.HasPrefix(e.Key, "dictation-") {
+				e.Reason = "Dictation engine VM disks; deleted after 10 minutes without a clip and when the server stops"
+				continue
+			}
 			if attributeMemberVM(ctx, d.Store, e) {
 				continue
 			}
