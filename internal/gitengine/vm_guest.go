@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,31 @@ func (e *Engine) CheckoutHead(ctx context.Context, key domain.RunID) (string, er
 // git service was down, without waiting for another change.
 func (e *Engine) WatchCheckout(ctx context.Context, workspace domain.WorkspaceID, key domain.RunID) error {
 	return e.startDiffWatch(ctx, workspace, key, true)
+}
+
+// ClearStaleLocks removes the lock files in key's snapshot store, for a
+// caller that knows no git still holds them: the git service at its start,
+// after the helper killed every git of the service before.
+func (e *Engine) ClearStaleLocks(key domain.RunID) error {
+	store, err := e.snapshotStorePath(key)
+	if err != nil {
+		return err
+	}
+	err = filepath.WalkDir(store, func(path string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case d.IsDir() && d.Name() == "objects":
+			return filepath.SkipDir
+		case !d.IsDir() && strings.HasSuffix(d.Name(), ".lock"):
+			return os.Remove(path)
+		}
+		return nil
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // FinishWatch takes the diff watch's last snapshot of key's checkout and

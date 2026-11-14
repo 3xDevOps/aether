@@ -419,7 +419,7 @@ func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return guest.Info{BootID: "b1", Protocol: 1, BootError: g.bootError}, nil
+	return guest.Info{BootID: "b1", Protocol: guest.Protocol, BootError: g.bootError}, nil
 }
 
 func (g *fakeHelper) Boot(ctx context.Context, spec guest.BootSpec) error {

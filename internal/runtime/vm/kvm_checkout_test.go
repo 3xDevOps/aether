@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -403,36 +404,45 @@ func TestKVMGitServiceBesideAFullSession(t *testing.T) {
 		committing <- commitErr
 	}()
 	time.Sleep(time.Second)
+	// The file is written while no service runs, so no watch sees it: the
+	// next service must record it without another change.
+	before := h.sh(t, key, "cat /sys/fs/cgroup/git/cgroup.procs")
 	service = h.sh(t, key, gitService)
-	killer, _, err := h.e.spawn(t.Context(), key, guest.ProcessSpec{ID: "kill", Argv: []string{"/bin/kill", "-9", service}, User: "0:0"})
+	killer, _, err := h.e.spawn(t.Context(), key, guest.ProcessSpec{
+		ID: "kill", Argv: []string{"/bin/sh", "-c", "kill -9 " + service + " && echo during > /workspace/during-kill.txt"}, User: "0:0",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if code, waitErr := killer.Wait(t.Context()); waitErr != nil || code != 0 {
 		t.Fatalf("kill the git service: %d, %v", code, waitErr)
 	}
-	t.Logf("a commit whose service was killed: %v", <-committing)
+	if commitErr := <-committing; commitErr == nil {
+		t.Error("the commit outlived the git service it ran in, so the kill missed it")
+	}
 	deadline := time.Now().Add(time.Minute)
-	for procs := ""; ; time.Sleep(200 * time.Millisecond) {
-		procs = h.sh(t, key, "cat /sys/fs/cgroup/git/cgroup.procs")
-		if procs != "" && procs != service && !strings.Contains(procs, "\n") {
+	for ; ; time.Sleep(200 * time.Millisecond) {
+		procs := h.sh(t, key, "cat /sys/fs/cgroup/git/cgroup.procs")
+		left := false
+		for _, pid := range strings.Fields(before) {
+			left = left || slices.Contains(strings.Fields(procs), pid)
+		}
+		next := h.sh(t, key, gitService)
+		if !left && next != "" && !strings.Contains(next, "\n") {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the git cgroup a minute after its service was killed holds %q, not one new service", procs)
+			t.Fatalf("a minute after the kill the git cgroup holds %q (before: %q), not one new service and none of what it started", procs, before)
 		}
 	}
-	// The new service picks the run's watch back up: its next change reaches
-	// the server's history, and a commit goes through.
-	h.sh(t, key, "echo after > after-kill.txt")
 	store := filepath.Join(filepath.Dir(h.repos), "checkouts", key+".diffsnap")
 	for deadline = time.Now().Add(3 * time.Minute); ; time.Sleep(time.Second) {
-		out, _ := exec.Command("git", "-C", store, "ls-tree", "--name-only", "refs/aether/published", "after-kill.txt").Output()
-		if strings.TrimSpace(string(out)) == "after-kill.txt" {
+		out, _ := exec.Command("git", "-C", store, "ls-tree", "--name-only", "refs/aether/published", "during-kill.txt").Output()
+		if strings.TrimSpace(string(out)) == "during-kill.txt" {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("no snapshot of the change made after the git service was killed reached the server")
+			t.Fatal("the file written while the git service was down never reached the server")
 		}
 	}
 	if commit, err = h.git.CommitAll(t.Context(), run, "aether: after", member, nil); err != nil || commit == "" {

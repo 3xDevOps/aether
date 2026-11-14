@@ -37,9 +37,8 @@ const sessionReserve = 48 << 20
 
 // gitReserve is kept from the session too when the VM has checkouts, for
 // the git service's anonymous memory, which its cgroup's cap does not keep
-// from the helper's reserve: it peaked at 58 to 68 MiB beside a full
-// session. A VM keeps at most a sixteenth of its memory for it, so a small
-// one does not give up most of its session.
+// from the helper's reserve; a VM keeps at most a sixteenth of its memory
+// for it.
 const gitReserve = 96 << 20
 
 // newSessionCgroup keeps the helper's reserve, and with git the git
@@ -80,23 +79,15 @@ func newSessionCgroup(root string, git bool) (*sessionCgroup, error) {
 // session, so the session's memory cap and a pause leave it alone.
 const gitCgroupDir = "/git"
 
-// gitMemoryMax caps the git service. A full snapshot of a 40,000-file
-// checkout with a 100 MiB file peaked at 558 MiB, mostly page cache, and
-// ran as fast under this cap with git's own limits; at 64 MiB the service
-// itself was killed.
 const gitMemoryMax = 256 << 20
 
-// newGitCgroup has an OOM kill take the whole group, so no git outlives the
-// service that started it.
 func newGitCgroup(root string) (*os.File, error) {
 	dir := filepath.Join(root, gitCgroupDir)
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		return nil, err
 	}
-	for name, value := range map[string]string{"memory.max": strconv.Itoa(gitMemoryMax), "memory.oom.group": "1"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0); err != nil {
-			return nil, fmt.Errorf("limit the git service's memory: %w", err)
-		}
+	if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte(strconv.Itoa(gitMemoryMax)), 0); err != nil {
+		return nil, fmt.Errorf("cap the git service's memory: %w", err)
 	}
 	return os.Open(dir)
 }

@@ -220,6 +220,9 @@ func newGitService(cfg gitengine.Config, mounts []guest.CheckoutMount) (*gitServ
 		if ws, wsErr := engine.CheckoutWorkspace(domain.RunID(m.Key)); wsErr == nil {
 			s.workspaces[m.Key] = ws
 		}
+		if err = engine.ClearStaleLocks(domain.RunID(m.Key)); err != nil {
+			return nil, fmt.Errorf("checkout %s: %w", m.Key, err)
+		}
 	}
 	return s, nil
 }

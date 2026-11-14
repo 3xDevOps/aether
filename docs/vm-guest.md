@@ -303,9 +303,9 @@ its own that PID 1 starts again whenever it ends, waiting up to 30 seconds
 after a start that did not last: PID 1 reaps every child it has, which would
 collect a git's exit before the engine's own wait. Its cgroup,
 `/sys/fs/cgroup/git`, sits beside the session, whose cap and pause leave it
-alone, and has a `memory.max` of 256 MiB and `memory.oom.group` set; when
-the service ends, the helper kills whatever is left in it before starting
-the next one, and the next one records what changed meanwhile once the
+alone, and has a `memory.max` of 256 MiB; an OOM there kills one git, and
+when the service itself ends, the helper kills whatever is left in it and
+clears the lock files a killed git leaves before starting the next one, and the next one records what changed meanwhile once the
 server reconnects. The service's Go heap aims at 64 MiB (`GOMEMLIMIT`), a
 file travels to and from it in chunks, and git runs with
 `core.bigFileThreshold=16m`, `pack.windowMemory=64m` and `pack.threads=1`.
