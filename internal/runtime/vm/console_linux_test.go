@@ -5,17 +5,18 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 // TestConsoleLogStaysBoundedWhateverTheGuestWrites feeds the drain as Cloud
-// Hypervisor does, through the FIFO it opens for writing with truncation.
+// Hypervisor does, through the FIFO it opens for writing with truncation,
+// and flushes it as the monitor does once Cloud Hypervisor exits.
 func TestConsoleLogStaysBoundedWhateverTheGuestWrites(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, consoleLog+".1"), []byte("an earlier boot"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := drainConsole(dir); err != nil {
+	flush, err := drainConsole(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
 	pipe, err := os.OpenFile(filepath.Join(dir, consolePipe), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
@@ -34,16 +35,9 @@ func TestConsoleLogStaysBoundedWhateverTheGuestWrites(t *testing.T) {
 	if err = pipe.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		data, _ := os.ReadFile(filepath.Join(dir, consoleLog))
-		if bytes.HasSuffix(data, []byte("last line\n")) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("console.log never got the last line; it holds %d bytes", len(data))
-		}
-		time.Sleep(10 * time.Millisecond)
+	flush()
+	if data, _ := os.ReadFile(filepath.Join(dir, consoleLog)); !bytes.HasSuffix(data, []byte("last line\n")) {
+		t.Fatalf("after the flush console.log ends %q, want the last line", data[max(0, len(data)-20):])
 	}
 	for _, name := range []string{consoleLog, consoleLog + ".1"} {
 		data, err := os.ReadFile(filepath.Join(dir, name))
