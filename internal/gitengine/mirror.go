@@ -531,7 +531,7 @@ func (e *Engine) fetchMirror(ctx context.Context, repo string, req MirrorRequest
 		return e.cfg.MirrorFetch(ctx, repo, req, incomingRef)
 	}
 	args := []string{"-C", repo, "-c", "safe.directory=*"}
-	env := gitEnv()
+	env := e.gitEnv()
 	if req.Auth == domain.MirrorAuthPublic || req.Auth == domain.MirrorAuthGitHub {
 		u, err := url.Parse(req.SourceURL)
 		if err != nil || u.Hostname() == "" {
@@ -783,7 +783,7 @@ func updateRefLine(ref, next, old string) string {
 func (e *Engine) runMirrorGit(ctx context.Context, repo, stdin string, args ...string) error {
 	argv := append([]string{"-C", repo, "-c", "safe.directory=*"}, args...)
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, argv...)
-	cmd.Env = gitEnv()
+	cmd.Env = e.gitEnv()
 	cmd.Stdin = strings.NewReader(stdin)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("update-ref: %w: %s", err, strings.TrimSpace(string(output)))

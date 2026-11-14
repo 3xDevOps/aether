@@ -408,7 +408,7 @@ func (e *Engine) recordWatchSnapshot(ctx context.Context, run domain.RunID, base
 			transaction += "update " + snapshotInflightUpstreamRef + " " + upstream + "\n"
 		}
 		transaction += "prepare\ncommit\n"
-		if _, pinErr := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); pinErr != nil {
+		if _, pinErr := e.gitInput(ctx, store, e.gitEnv(), []byte(transaction), "update-ref", "--stdin"); pinErr != nil {
 			return "", pinErr
 		}
 	}
@@ -435,7 +435,7 @@ func (e *Engine) recordWatchSnapshot(ctx context.Context, run domain.RunID, base
 	}
 	transaction += "update " + snapshotPublishedRef + " " + tree +
 		"\ndelete " + snapshotInflightParentRef + "\ndelete " + snapshotInflightTreeRef + "\nprepare\ncommit\n"
-	if _, acknowledgeErr := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); acknowledgeErr != nil {
+	if _, acknowledgeErr := e.gitInput(ctx, store, e.gitEnv(), []byte(transaction), "update-ref", "--stdin"); acknowledgeErr != nil {
 		return "", acknowledgeErr
 	}
 	if removeErr := os.Remove(filepath.Join(store, "history-gap")); removeErr != nil {

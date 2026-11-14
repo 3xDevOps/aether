@@ -23,7 +23,7 @@ import (
 // Protocol is the API version this build speaks. A helper reporting another
 // one, such as an older helper in a VM restored from a save, is refused with
 // ErrIncompatible: the session then needs a cold start.
-const Protocol = 1
+const Protocol = 2
 
 const (
 	// maxReply bounds every message the helper sends. Read replies, the

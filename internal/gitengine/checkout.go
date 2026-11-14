@@ -333,7 +333,7 @@ func (e *Engine) commitAll(ctx context.Context, run domain.RunID, message string
 	if err != nil {
 		return "", err
 	}
-	env := append(gitEnv(), "GIT_ATTR_SOURCE="+emptyTree)
+	env := append(e.gitEnv(), "GIT_ATTR_SOURCE="+emptyTree)
 	// core.fsmonitor in the checkout's config would be executed by commit;
 	// false disables it. Hooks likewise come from writable config.
 	neutral := []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false"}

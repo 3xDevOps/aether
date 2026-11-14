@@ -68,7 +68,7 @@ func (e *Engine) servePack(ctx context.Context, ws domain.WorkspaceID, service s
 		args = append(args, "-c", "receive.denyDeletes=true")
 	}
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, append(args, service, repo)...)
-	cmd.Env = gitEnv()
+	cmd.Env = e.gitEnv()
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.WaitDelay = packWaitDelay

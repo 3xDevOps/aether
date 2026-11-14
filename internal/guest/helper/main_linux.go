@@ -123,7 +123,7 @@ func serve() error {
 	record("mount volumes", mountVolumes(cfg.Mounts))
 	record("mount checkouts", mountCheckouts(cfg.Checkouts))
 	record("configure the network", configureNetwork(cfg))
-	cgroup, err := newSessionCgroup("/sys/fs/cgroup")
+	cgroup, err := newSessionCgroup("/sys/fs/cgroup", len(cfg.Checkouts) > 0)
 	record("create the session cgroup", err)
 	var procsDir *os.File
 	if cgroup != nil {
@@ -136,7 +136,11 @@ func serve() error {
 	}
 	go reapForever(procs)
 	if len(cfg.Checkouts) > 0 {
-		go superviseGit(procs)
+		gitCgroup, gitErr := newGitCgroup("/sys/fs/cgroup")
+		record("create the git service's cgroup", gitErr)
+		if gitErr == nil {
+			go superviseGit(procs, gitCgroup)
+		}
 	}
 	go forwardSignals(procs)
 	record("forward sockets", forwardSockets(cfg.Sockets))

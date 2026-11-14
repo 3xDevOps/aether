@@ -35,7 +35,7 @@ func mirrorImportSource(t *testing.T, e *Engine, commit bool) (string, string) {
 
 func mirrorImportTransport(ctx context.Context, repo string, req MirrorRequest, incoming string) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", repo, "fetch", "--no-tags", "--", req.SourceURL, "+refs/heads/"+req.Branch+":"+incoming)
-	cmd.Env = gitEnv()
+	cmd.Env = new(Engine).gitEnv()
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return &mirrorFetchFailure{err: err, output: string(output)}
 	}

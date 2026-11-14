@@ -301,7 +301,7 @@ func (e *Engine) snapshotPatch(ctx context.Context, store, from, to string, maxB
 	if err != nil {
 		return Patch{}, err
 	}
-	text, truncated, err := e.gitBareBoundedEnv(ctx, store, append(gitEnv(), "GIT_ATTR_SOURCE="+emptyTree), maxBytes,
+	text, truncated, err := e.gitBareBoundedEnv(ctx, store, append(e.gitEnv(), "GIT_ATTR_SOURCE="+emptyTree), maxBytes,
 		"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", from, to, "--")
 	if err != nil {
 		return Patch{}, err

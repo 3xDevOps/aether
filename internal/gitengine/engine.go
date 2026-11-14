@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +72,10 @@ type Config struct {
 	// VM, when set, puts every new session checkout on a disk of the
 	// session's VM instead of a server directory.
 	VM *VM
+	// GitConfig is git configuration, each "key=value", that every git the
+	// engine runs gets: the git service in a session VM bounds git's memory
+	// with it.
+	GitConfig []string
 	// Relay, when set, receives every snapshot and moved checkout HEAD in
 	// place of the bus and the workspace repository: inside a VM, where the
 	// git service runs this engine, the server publishes them.
@@ -443,7 +448,7 @@ func validateID(id string) error {
 // passes -c safe.directory=* to neutralize mixed-ownership checks on
 // container-written checkouts. dir may be empty. Returns trimmed stdout.
 func (e *Engine) git(ctx context.Context, dir string, args ...string) (string, error) {
-	return e.gitIn(ctx, dir, gitEnv(), args...)
+	return e.gitIn(ctx, dir, e.gitEnv(), args...)
 }
 
 // gitIn is git with the environment chosen by the caller, for operations
@@ -466,15 +471,16 @@ func (e *Engine) gitIn(ctx context.Context, dir string, env []string, args ...st
 }
 
 // gitEnv is the sanitized environment for every git invocation: PATH for
-// tool discovery, no user or system config, no inherited GIT_* variables.
+// tool discovery, no user or system config, no inherited GIT_* variables;
+// Config.GitConfig is the only configuration it adds.
 //
 // GIT_TERMINAL_PROMPT stops git itself from asking; the askpass pair stops
 // ssh-keygen from asking. A member home is agent-writable, so the signing
 // key CommitAll is handed can be a passphrase-protected one, and without
 // these the server blocks on /dev/tty forever whenever it was started from
 // a terminal.
-func gitEnv() []string {
-	return []string{
+func (e *Engine) gitEnv() []string {
+	return append([]string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.TempDir(),
 		"GIT_CONFIG_NOSYSTEM=1",
@@ -483,7 +489,22 @@ func gitEnv() []string {
 		"SSH_ASKPASS=/bin/false",
 		"SSH_ASKPASS_REQUIRE=force",
 		"LC_ALL=C",
+	}, ConfigEnv(e.cfg.GitConfig)...)
+}
+
+// ConfigEnv gives git the settings, each "key=value", through its
+// environment, as git -c does on a command line.
+func ConfigEnv(settings []string) []string {
+	if len(settings) == 0 {
+		return nil
 	}
+	env := []string{"GIT_CONFIG_COUNT=" + strconv.Itoa(len(settings))}
+	for i, setting := range settings {
+		key, value, _ := strings.Cut(setting, "=")
+		n := strconv.Itoa(i)
+		env = append(env, "GIT_CONFIG_KEY_"+n+"="+key, "GIT_CONFIG_VALUE_"+n+"="+value)
+	}
+	return env
 }
 
 // publishBranch emits git.branch for a run whose branch tip moved from

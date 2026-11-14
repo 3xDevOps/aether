@@ -74,10 +74,12 @@ type GitClient interface {
 	Install(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[InstallChunk, InstallReply], error)
 	// Tree, ReadFile, WriteFile and FileDiff are the Files view's calls on
 	// the checkout, as the server's engine answers them for a checkout on its
-	// own disk.
+	// own disk. A file travels in chunks, so neither end holds it in one
+	// message: ReadFile's first chunk carries the file's size, WriteFile's
+	// first chunk names the file.
 	Tree(ctx context.Context, in *TreeRequest, opts ...grpc.CallOption) (*TreeReply, error)
-	ReadFile(ctx context.Context, in *ReadFileRequest, opts ...grpc.CallOption) (*FileReply, error)
-	WriteFile(ctx context.Context, in *WriteFileRequest, opts ...grpc.CallOption) (*FileReply, error)
+	ReadFile(ctx context.Context, in *ReadFileRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[FileChunk], error)
+	WriteFile(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteFileChunk, WriteFileReply], error)
 	FileDiff(ctx context.Context, in *FileDiffRequest, opts ...grpc.CallOption) (*PatchReply, error)
 	// Sync serves a live overlay's endpoint at the checkout; the first chunk
 	// names the checkout and every chunk carries the overlay's stream.
@@ -197,25 +199,37 @@ func (c *gitClient) Tree(ctx context.Context, in *TreeRequest, opts ...grpc.Call
 	return out, nil
 }
 
-func (c *gitClient) ReadFile(ctx context.Context, in *ReadFileRequest, opts ...grpc.CallOption) (*FileReply, error) {
+func (c *gitClient) ReadFile(ctx context.Context, in *ReadFileRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[FileChunk], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(FileReply)
-	err := c.cc.Invoke(ctx, Git_ReadFile_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Git_ServiceDesc.Streams[3], Git_ReadFile_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[ReadFileRequest, FileChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
 
-func (c *gitClient) WriteFile(ctx context.Context, in *WriteFileRequest, opts ...grpc.CallOption) (*FileReply, error) {
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Git_ReadFileClient = grpc.ServerStreamingClient[FileChunk]
+
+func (c *gitClient) WriteFile(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[WriteFileChunk, WriteFileReply], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(FileReply)
-	err := c.cc.Invoke(ctx, Git_WriteFile_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Git_ServiceDesc.Streams[4], Git_WriteFile_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[WriteFileChunk, WriteFileReply]{ClientStream: stream}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Git_WriteFileClient = grpc.ClientStreamingClient[WriteFileChunk, WriteFileReply]
 
 func (c *gitClient) FileDiff(ctx context.Context, in *FileDiffRequest, opts ...grpc.CallOption) (*PatchReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -229,7 +243,7 @@ func (c *gitClient) FileDiff(ctx context.Context, in *FileDiffRequest, opts ...g
 
 func (c *gitClient) Sync(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SyncChunk, SyncChunk], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Git_ServiceDesc.Streams[3], Git_Sync_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Git_ServiceDesc.Streams[5], Git_Sync_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -276,10 +290,12 @@ type GitServer interface {
 	Install(grpc.ClientStreamingServer[InstallChunk, InstallReply]) error
 	// Tree, ReadFile, WriteFile and FileDiff are the Files view's calls on
 	// the checkout, as the server's engine answers them for a checkout on its
-	// own disk.
+	// own disk. A file travels in chunks, so neither end holds it in one
+	// message: ReadFile's first chunk carries the file's size, WriteFile's
+	// first chunk names the file.
 	Tree(context.Context, *TreeRequest) (*TreeReply, error)
-	ReadFile(context.Context, *ReadFileRequest) (*FileReply, error)
-	WriteFile(context.Context, *WriteFileRequest) (*FileReply, error)
+	ReadFile(*ReadFileRequest, grpc.ServerStreamingServer[FileChunk]) error
+	WriteFile(grpc.ClientStreamingServer[WriteFileChunk, WriteFileReply]) error
 	FileDiff(context.Context, *FileDiffRequest) (*PatchReply, error)
 	// Sync serves a live overlay's endpoint at the checkout; the first chunk
 	// names the checkout and every chunk carries the overlay's stream.
@@ -321,11 +337,11 @@ func (UnimplementedGitServer) Install(grpc.ClientStreamingServer[InstallChunk, I
 func (UnimplementedGitServer) Tree(context.Context, *TreeRequest) (*TreeReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Tree not implemented")
 }
-func (UnimplementedGitServer) ReadFile(context.Context, *ReadFileRequest) (*FileReply, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReadFile not implemented")
+func (UnimplementedGitServer) ReadFile(*ReadFileRequest, grpc.ServerStreamingServer[FileChunk]) error {
+	return status.Error(codes.Unimplemented, "method ReadFile not implemented")
 }
-func (UnimplementedGitServer) WriteFile(context.Context, *WriteFileRequest) (*FileReply, error) {
-	return nil, status.Error(codes.Unimplemented, "method WriteFile not implemented")
+func (UnimplementedGitServer) WriteFile(grpc.ClientStreamingServer[WriteFileChunk, WriteFileReply]) error {
+	return status.Error(codes.Unimplemented, "method WriteFile not implemented")
 }
 func (UnimplementedGitServer) FileDiff(context.Context, *FileDiffRequest) (*PatchReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method FileDiff not implemented")
@@ -487,41 +503,23 @@ func _Git_Tree_Handler(srv interface{}, ctx context.Context, dec func(interface{
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Git_ReadFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReadFileRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+func _Git_ReadFile_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ReadFileRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(GitServer).ReadFile(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Git_ReadFile_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GitServer).ReadFile(ctx, req.(*ReadFileRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(GitServer).ReadFile(m, &grpc.GenericServerStream[ReadFileRequest, FileChunk]{ServerStream: stream})
 }
 
-func _Git_WriteFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(WriteFileRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(GitServer).WriteFile(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Git_WriteFile_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GitServer).WriteFile(ctx, req.(*WriteFileRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Git_ReadFileServer = grpc.ServerStreamingServer[FileChunk]
+
+func _Git_WriteFile_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(GitServer).WriteFile(&grpc.GenericServerStream[WriteFileChunk, WriteFileReply]{ServerStream: stream})
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Git_WriteFileServer = grpc.ClientStreamingServer[WriteFileChunk, WriteFileReply]
 
 func _Git_FileDiff_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FileDiffRequest)
@@ -580,14 +578,6 @@ var Git_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Git_Tree_Handler,
 		},
 		{
-			MethodName: "ReadFile",
-			Handler:    _Git_ReadFile_Handler,
-		},
-		{
-			MethodName: "WriteFile",
-			Handler:    _Git_WriteFile_Handler,
-		},
-		{
 			MethodName: "FileDiff",
 			Handler:    _Git_FileDiff_Handler,
 		},
@@ -607,6 +597,16 @@ var Git_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Install",
 			Handler:       _Git_Install_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "ReadFile",
+			Handler:       _Git_ReadFile_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "WriteFile",
+			Handler:       _Git_WriteFile_Handler,
 			ClientStreams: true,
 		},
 		{

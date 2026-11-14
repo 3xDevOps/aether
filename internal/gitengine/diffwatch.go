@@ -109,7 +109,9 @@ type diffWatch struct {
 // watch registry (run -> workspace/branch), which outlives StopDiffWatch
 // and is what allows git.branch events to carry a workspace scope.
 // Idempotent while a watch is already active.
-func (e *Engine) startDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error {
+// startDiffWatch with catchUp takes a snapshot once the checkout is quiet,
+// even with no change seen.
+func (e *Engine) startDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, catchUp bool) error {
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {
 		return err
@@ -171,7 +173,7 @@ func (e *Engine) startDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	w.historyGap = !errors.Is(gapErr, os.ErrNotExist)
 	// A durable unacknowledged gap, or stats published against another base,
 	// needs a retry even in a quiet checkout.
-	w.dirty = w.historyGap || lastBase == ""
+	w.dirty = w.historyGap || lastBase == "" || catchUp
 	if w.dirty {
 		w.lastEvent = time.Now()
 	}

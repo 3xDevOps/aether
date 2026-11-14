@@ -238,7 +238,12 @@ The session cgroup's `pids.max` is the session's process limit from `Boot`.
 Its `memory.max` is the guest's `MemAvailable` when the helper starts, less
 48 MiB: what the kernel and the helper already hold, the free memory the
 kernel keeps back, and 48 MiB for the helper to grow stay outside the
-session. A session that filled the VM would leave the helper no memory to
+session. A VM with checkouts keeps up to 96 MiB more out of it, a
+sixteenth of its memory at most, for the [git service](#the-git-service)'s
+anonymous memory, which its 256 MiB cap does not keep from the helper: a
+256 MiB VM's session gets 16 MiB less, a 1 GiB VM's 64 MiB less, and from
+1.5 GiB on 96 MiB less, about 1% of the default 8 GiB.
+A session that filled the VM would leave the helper no memory to
 serve the file service, and pages the session faults back in from it would
 never arrive, so the kernel would thrash instead of killing a process. The
 helper, as PID 1, is never the kernel's OOM victim. The file service holds
@@ -294,10 +299,24 @@ the same hardening the server uses for a checkout on its disk: a root-owned
 scratch repository on the data disk, the checkout's config, hooks and
 attributes never consulted. So Changes, the live patch and staging behave as
 for a Docker session. It is `aether-internal guest git-service`, a process of
-its own outside the session cgroup that PID 1 starts again whenever it ends,
-waiting up to 30 seconds after a start that did not last:
-PID 1 reaps every child it has, which would collect a git's exit before the
-engine's own wait. It serves `internal/guest/guestpb/git.proto` on vsock port
+its own that PID 1 starts again whenever it ends, waiting up to 30 seconds
+after a start that did not last: PID 1 reaps every child it has, which would
+collect a git's exit before the engine's own wait. Its cgroup,
+`/sys/fs/cgroup/git`, sits beside the session, whose cap and pause leave it
+alone, and has a `memory.max` of 256 MiB; an OOM there kills one git, and
+when the service itself ends, the helper kills whatever is left in it and
+clears the lock files a killed git leaves before starting the next one, and the next one records what changed meanwhile once the
+server reconnects. The service's Go heap aims at 64 MiB (`GOMEMLIMIT`), a
+file travels to and from it in chunks, and git runs with
+`core.bigFileThreshold=16m`, `pack.windowMemory=64m` and `pack.threads=1`.
+So a file over 16 MiB shows as binary in a VM session's diffs, where a
+Docker session shows its text up to the patch limit: without the threshold
+git reads such a file whole and a 100 MiB one passed the cap. With the
+session holding all its cap leaves on a 1 GiB VM, a snapshot and commit of
+40,000 changed files and a 100 MiB file, then a 64 MiB upload and read,
+keep the git cgroup's anonymous memory near 60 MiB; the rest is page cache
+the kernel reclaims. It serves `internal/guest/guestpb/git.proto` on vsock
+port
 1100, to the host only, as the API is:
 
 | Call | What it does |

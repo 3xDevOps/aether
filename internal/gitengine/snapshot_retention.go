@@ -95,7 +95,7 @@ func (e *Engine) retainRecordedSnapshotTrees(ctx context.Context, workspace doma
 		for id := range ids {
 			input.WriteString(id + "\n")
 		}
-		listing, listErr := e.gitInput(ctx, store, gitEnv(), []byte(input.String()), "cat-file", "--batch-check=%(objectname) %(objecttype)")
+		listing, listErr := e.gitInput(ctx, store, e.gitEnv(), []byte(input.String()), "cat-file", "--batch-check=%(objectname) %(objecttype)")
 		if listErr != nil {
 			return listErr
 		}
@@ -110,7 +110,7 @@ func (e *Engine) retainRecordedSnapshotTrees(ctx context.Context, workspace doma
 		}
 		if refs.Len() > 0 {
 			transaction := "start\n" + refs.String() + "prepare\ncommit\n"
-			if _, updateErr := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); updateErr != nil {
+			if _, updateErr := e.gitInput(ctx, store, e.gitEnv(), []byte(transaction), "update-ref", "--stdin"); updateErr != nil {
 				return updateErr
 			}
 		}
@@ -124,7 +124,7 @@ func (e *Engine) retainRecordedSnapshotTrees(ctx context.Context, workspace doma
 func (e *Engine) retainSnapshot(ctx context.Context, store, tree string) error {
 	transaction := "start\nupdate refs/aether/latest " + tree +
 		"\nupdate " + snapshotHistoryRoot + tree + " " + tree + "\nprepare\ncommit\n"
-	_, err := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin")
+	_, err := e.gitInput(ctx, store, e.gitEnv(), []byte(transaction), "update-ref", "--stdin")
 	return err
 }
 
@@ -161,7 +161,7 @@ func (e *Engine) detachSnapshotStore(ctx context.Context, run domain.RunID, chec
 	if err != nil {
 		return err
 	}
-	if _, packErr := e.gitInput(ctx, store, gitEnv(), []byte(roots), "pack-objects", "--revs", "--non-empty", filepath.Join(store, "objects", "pack", "pack")); packErr != nil {
+	if _, packErr := e.gitInput(ctx, store, e.gitEnv(), []byte(roots), "pack-objects", "--revs", "--non-empty", filepath.Join(store, "objects", "pack", "pack")); packErr != nil {
 		return packErr
 	}
 	if removeErr := os.Remove(filepath.Join(store, "objects", "info", "alternates")); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
