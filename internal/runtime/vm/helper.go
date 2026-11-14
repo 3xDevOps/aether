@@ -19,6 +19,7 @@ type helper interface {
 	PowerOff(context.Context) error
 	Freeze(ctx context.Context, id string, timeout time.Duration) error
 	Thaw(ctx context.Context, id string) (bool, error)
+	FreezeSession(ctx context.Context, frozen bool) error
 	Sync(context.Context) error
 	Close() error
 }
