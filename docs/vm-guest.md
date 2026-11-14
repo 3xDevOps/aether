@@ -238,7 +238,10 @@ The session cgroup's `pids.max` is the session's process limit from `Boot`.
 Its `memory.max` is the guest's `MemAvailable` when the helper starts, less
 48 MiB: what the kernel and the helper already hold, the free memory the
 kernel keeps back, and 48 MiB for the helper to grow stay outside the
-session. A session that filled the VM would leave the helper no memory to
+session. A VM with checkouts keeps 96 MiB more out of it for the
+[git service](#the-git-service)'s own memory, which its 256 MiB cap does not
+keep from the helper, so a 2 GiB session VM gives its session about 5% less.
+A session that filled the VM would leave the helper no memory to
 serve the file service, and pages the session faults back in from it would
 never arrive, so the kernel would thrash instead of killing a process. The
 helper, as PID 1, is never the kernel's OOM victim. The file service holds
@@ -294,10 +297,17 @@ the same hardening the server uses for a checkout on its disk: a root-owned
 scratch repository on the data disk, the checkout's config, hooks and
 attributes never consulted. So Changes, the live patch and staging behave as
 for a Docker session. It is `aether-internal guest git-service`, a process of
-its own outside the session cgroup that PID 1 starts again whenever it ends,
-waiting up to 30 seconds after a start that did not last:
-PID 1 reaps every child it has, which would collect a git's exit before the
-engine's own wait. It serves `internal/guest/guestpb/git.proto` on vsock port
+its own that PID 1 starts again whenever it ends, waiting up to 30 seconds
+after a start that did not last: PID 1 reaps every child it has, which would
+collect a git's exit before the engine's own wait. A restarted service picks
+each checkout's watch up again when the server reconnects. It and every git
+it runs live in `/sys/fs/cgroup/git`, beside the session, whose cap and
+pause leave it alone, with a `memory.max` of 256 MiB; git runs with
+`core.bigFileThreshold=16m`, `pack.windowMemory=64m` and `pack.threads=1`.
+A full snapshot and commit of a 40,000-file checkout with a 100 MiB file,
+while the session holds all its cap leaves, peaks near 110 MiB, of which
+62 to 89 MiB is anonymous memory, the rest page cache the kernel reclaims;
+the session's cap keeps room for that anonymous memory. It serves `internal/guest/guestpb/git.proto` on vsock port
 1100, to the host only, as the API is:
 
 | Call | What it does |

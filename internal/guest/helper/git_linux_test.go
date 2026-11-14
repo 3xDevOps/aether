@@ -37,8 +37,10 @@ type gitPair struct {
 	base     string
 	branch   string
 	checkout string
+	guestDir string
 	socket   string
 	diffs    <-chan events.Event
+	stop     func()
 	// down makes the VM read as not running.
 	down atomic.Bool
 }
@@ -71,31 +73,11 @@ func newGitPair(t *testing.T, server func(*gitService) guestpb.GitServer) *gitPa
 	runGit(t, seed, "push", "--quiet", "origin", "HEAD:main")
 	p.base = runGit(t, seed, "rev-parse", "HEAD")
 
-	guestDir := filepath.Join(root, "guest")
-	git, err := newGitService(gitengine.Config{
-		ReposDir: filepath.Join(guestDir, "repos"), CheckoutsDir: guestDir,
-		QuietPeriod: 50 * time.Millisecond, MinInterval: 100 * time.Millisecond, MaxInterval: time.Second,
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p.git = git
-	t.Cleanup(func() { _ = git.engine.Close() })
-	socket := filepath.Join(t.TempDir(), "vsock.sock")
-	p.socket = socket
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := grpc.NewServer()
-	if server == nil {
-		guestpb.RegisterGitServer(srv, git)
-	} else {
-		guestpb.RegisterGitServer(srv, server(git))
-	}
-	go func() { _ = srv.Serve(hybridVsock{listener}) }()
-	t.Cleanup(srv.Stop)
-	client, err := guest.DialGit(socket)
+	p.guestDir = filepath.Join(root, "guest")
+	p.socket = filepath.Join(t.TempDir(), "vsock.sock")
+	p.serve(t, server, nil)
+	git := p.git
+	client, err := guest.DialGit(p.socket)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +110,7 @@ func newGitPair(t *testing.T, server func(*gitService) guestpb.GitServer) *gitPa
 		t.Fatal(err)
 	}
 	// What the checkout's prepared disk holds.
-	p.checkout = filepath.Join(guestDir, string(testRun))
+	p.checkout = filepath.Join(p.guestDir, string(testRun))
 	runGit(t, root, "clone", "--quiet", "--no-hardlinks", "--no-checkout", p.repo, p.checkout)
 	runGit(t, p.checkout, "checkout", "--quiet", "-b", gitengine.PreparedBranch, p.base)
 	if err := git.setup(ctx, []*guestpb.Checkout{{
@@ -138,6 +120,35 @@ func newGitPair(t *testing.T, server func(*gitService) guestpb.GitServer) *gitPa
 		t.Fatal(err)
 	}
 	return p
+}
+
+// serve runs a git service over the guest directory on the pair's socket;
+// server, when set, wraps it.
+func (p *gitPair) serve(t *testing.T, server func(*gitService) guestpb.GitServer, mounts []guest.CheckoutMount) {
+	t.Helper()
+	git, err := newGitService(gitengine.Config{
+		ReposDir: filepath.Join(p.guestDir, "repos"), CheckoutsDir: p.guestDir,
+		QuietPeriod: 50 * time.Millisecond, MinInterval: 100 * time.Millisecond, MaxInterval: time.Second,
+	}, mounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", p.socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := grpc.NewServer()
+	if server == nil {
+		guestpb.RegisterGitServer(srv, git)
+	} else {
+		guestpb.RegisterGitServer(srv, server(git))
+	}
+	go func() { _ = srv.Serve(hybridVsock{listener}) }()
+	p.git, p.stop = git, func() {
+		srv.Stop()
+		_ = git.engine.Close()
+	}
+	t.Cleanup(p.stop)
 }
 
 // nextDiff waits for a run.diff event that ok accepts.
@@ -288,6 +299,30 @@ func (l *lyingGit) Objects(req *guestpb.ObjectsRequest, stream grpc.ServerStream
 		return l.objects(stream)
 	}
 	return l.gitService.Objects(req, stream)
+}
+
+func TestARestartedGitServicePicksTheRunBackUp(t *testing.T) {
+	p := newGitPair(t, nil)
+	ctx := testContext(t)
+	if err := p.host.StartDiffWatch(ctx, testWorkspace, testRun); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.checkout, "before.txt"), []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.nextDiff(t, hasFile("before.txt"))
+	// As PID 1 starts the service again after the kernel killed it, with
+	// the checkouts the kernel command line names.
+	p.stop()
+	if err := os.WriteFile(filepath.Join(p.checkout, "during.txt"), []byte("during\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.serve(t, nil, []guest.CheckoutMount{{Key: string(testRun), Target: p.checkout}})
+	p.nextDiff(t, hasFile("during.txt"))
+	if err := os.WriteFile(filepath.Join(p.checkout, "after.txt"), []byte("after\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.nextDiff(t, hasFile("after.txt"))
 }
 
 func TestServerRefusesWhatAHostileVMSends(t *testing.T) {

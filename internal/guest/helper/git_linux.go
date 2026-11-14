@@ -43,9 +43,19 @@ const (
 	gitServiceArg = "git-service"
 )
 
-// superviseGit runs the git service and starts it again whenever it ends,
-// waiting longer after each start that did not last.
-func superviseGit(procs *processes) {
+// gitLimits bound the memory of every git the service runs: a file over
+// 16 MiB is streamed rather than read whole, and pack-objects keeps one
+// thread and 64 MiB of delta candidates. The engine passes them on.
+var gitLimits = []string{
+	"GIT_CONFIG_COUNT=3",
+	"GIT_CONFIG_KEY_0=core.bigFileThreshold", "GIT_CONFIG_VALUE_0=16m",
+	"GIT_CONFIG_KEY_1=pack.windowMemory", "GIT_CONFIG_VALUE_1=64m",
+	"GIT_CONFIG_KEY_2=pack.threads", "GIT_CONFIG_VALUE_2=1",
+}
+
+// superviseGit runs the git service in cgroup and starts it again whenever
+// it ends, waiting longer after each start that did not last.
+func superviseGit(procs *processes, cgroup *os.File) {
 	delay := time.Second
 	for n := 0; ; n++ {
 		started := time.Now()
@@ -53,9 +63,9 @@ func superviseGit(procs *processes) {
 			ProcessSpec: guest.ProcessSpec{
 				ID:   "git-" + strconv.Itoa(n),
 				Argv: []string{"/proc/self/exe", "guest", gitServiceArg},
-				Env:  []string{"PATH=" + defaultPath},
+				Env:  append([]string{"PATH=" + defaultPath}, gitLimits...),
 			},
-			log: os.Stderr, helper: true,
+			log: os.Stderr, cgroup: cgroup,
 		})
 		if err != nil {
 			slog.Error("guest: start the git service", "error", err)

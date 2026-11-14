@@ -44,7 +44,7 @@ func ownerGit(ctx context.Context, dir string, stdin io.Reader, args ...string) 
 	}
 	st := info.Sys().(*syscall.Stat_t)
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)...)
-	cmd.Env = []string{"PATH=" + defaultPath, "HOME=/", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}
+	cmd.Env = append([]string{"PATH=" + defaultPath, "HOME=/", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}, gitLimits...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: st.Uid, Gid: st.Gid, NoSetGroups: true}}
 	cmd.Stdin = stdin
 	if out, err := cmd.CombinedOutput(); err != nil {

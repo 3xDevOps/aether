@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -474,7 +475,7 @@ func (e *Engine) gitIn(ctx context.Context, dir string, env []string, args ...st
 // these the server blocks on /dev/tty forever whenever it was started from
 // a terminal.
 func gitEnv() []string {
-	return []string{
+	return append([]string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.TempDir(),
 		"GIT_CONFIG_NOSYSTEM=1",
@@ -483,8 +484,26 @@ func gitEnv() []string {
 		"SSH_ASKPASS=/bin/false",
 		"SSH_ASKPASS_REQUIRE=force",
 		"LC_ALL=C",
-	}
+	}, configEnv...)
 }
+
+// configEnv is the git configuration this process was given through
+// GIT_CONFIG_COUNT, which every git it runs gets too: the git service in a
+// session VM bounds git's memory that way.
+var configEnv = func() []string {
+	n, err := strconv.Atoi(os.Getenv("GIT_CONFIG_COUNT"))
+	if err != nil || n <= 0 {
+		return nil
+	}
+	env := []string{"GIT_CONFIG_COUNT=" + strconv.Itoa(n)}
+	for i := range n {
+		for _, name := range []string{"GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"} {
+			name += strconv.Itoa(i)
+			env = append(env, name+"="+os.Getenv(name))
+		}
+	}
+	return env
+}()
 
 // publishBranch emits git.branch for a run whose branch tip moved from
 // previous (empty for a new branch), scoped to the workspace recorded in the

@@ -129,9 +129,9 @@ func newProcesses(cgroup *os.File) *processes {
 type spawnSpec struct {
 	guest.ProcessSpec
 	log *os.File
-	// helper starts the process outside the session cgroup, as part of
-	// the helper rather than of the session.
-	helper bool
+	// cgroup, when set, is the directory the process starts in instead of
+	// the session cgroup.
+	cgroup *os.File
 }
 
 func (t *processes) spawn(spec spawnSpec) (*process, error) {
@@ -190,8 +190,8 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 // helper keeps; the child's are closed once it runs.
 func (t *processes) start(p *process, spec spawnSpec, program, dir string, env []string, cred *syscall.Credential) error {
 	attr := &syscall.SysProcAttr{Setsid: true, Credential: cred}
-	if t.cgroup != nil && !spec.helper {
-		attr.UseCgroupFD, attr.CgroupFD = true, int(t.cgroup.Fd())
+	if cgroup := cmp.Or(spec.cgroup, t.cgroup); cgroup != nil {
+		attr.UseCgroupFD, attr.CgroupFD = true, int(cgroup.Fd())
 	}
 	var child []*os.File
 	defer func() {

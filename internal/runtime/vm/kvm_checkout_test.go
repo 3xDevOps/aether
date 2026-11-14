@@ -108,7 +108,7 @@ func (h *checkoutHost) workspace(t *testing.T, ws domain.WorkspaceID, n int) str
 	return hostGit(t, repo, "rev-parse", "main")
 }
 
-func (h *checkoutHost) session(t *testing.T, ws domain.WorkspaceID, key, base string) time.Duration {
+func (h *checkoutHost) session(t *testing.T, ws domain.WorkspaceID, key, base string, mounts ...runtime.Mount) time.Duration {
 	t.Helper()
 	t.Cleanup(func() { _ = h.e.destroy(context.Background(), key) })
 	t.Cleanup(func() { _ = h.git.RemoveRunHistory(context.Background(), domain.RunID(key)) })
@@ -116,7 +116,7 @@ func (h *checkoutHost) session(t *testing.T, ws domain.WorkspaceID, key, base st
 	if err != nil {
 		t.Fatal(err)
 	}
-	created := h.boot(t, key, checkout, "1000:1000")
+	created := h.boot(t, key, checkout, "1000:1000", mounts...)
 	if err := h.git.StartDiffWatch(t.Context(), ws, domain.RunID(key)); err != nil {
 		t.Fatal(err)
 	}
@@ -125,13 +125,13 @@ func (h *checkoutHost) session(t *testing.T, ws domain.WorkspaceID, key, base st
 
 // boot creates and starts the VM of the session key as user, and returns
 // how long the create took.
-func (h *checkoutHost) boot(t *testing.T, key, checkout, user string) time.Duration {
+func (h *checkoutHost) boot(t *testing.T, key, checkout, user string, mounts ...runtime.Mount) time.Duration {
 	t.Helper()
 	spec := runtime.Spec{
 		Image: cmp.Or(os.Getenv("AETHER_TEST_IMAGE"), checkoutImage), CreationKey: key, TTY: true, User: user,
 		Command: []string{"/bin/sh", "-c", "exec sleep infinity"},
 		Env:     map[string]string{"AETHER_RUN_ID": key, "HOME": "/home/aether"}, CPULimit: 2, MemoryLimitBytes: 1 << 30,
-		WorktreeHostPath: checkout, WorktreeMountPath: "/workspace", WorkingDir: "/workspace",
+		WorktreeHostPath: checkout, WorktreeMountPath: "/workspace", WorkingDir: "/workspace", Mounts: mounts,
 	}
 	start := time.Now()
 	if _, err := h.e.create(t.Context(), key, spec, options{}); err != nil {
@@ -186,7 +186,7 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 		t.Errorf("checkout files are owned by %q", owner)
 	}
 	h.sh(t, key, "echo one > new.txt && echo two >> src/0/f0.txt")
-	waitDiff(t, h.diffs, "new.txt")
+	waitDiff(t, h.diffs, "new.txt", time.Minute)
 	patch, err := h.git.RunPatch(t.Context(), run, gitengine.PatchRequest{})
 	if err != nil || !strings.Contains(patch.Text, "+++ b/new.txt") || !strings.Contains(patch.Text, "+two") {
 		t.Fatalf("live patch = %+v, %v", patch, err)
@@ -334,9 +334,62 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	}
 }
 
-func waitDiff(t *testing.T, diffs <-chan events.Event, path string) {
+// TestKVMGitServiceBesideAFullSession snapshots and commits every file of a
+// checkout while the session holds all the memory its cap leaves: the git
+// service's own cap must keep the VM answering, as the session's does.
+func TestKVMGitServiceBesideAFullSession(t *testing.T) {
+	h := newCheckoutHost(t)
+	const files = 40000
+	ws := domain.WorkspaceID("wscheckout" + strconv.Itoa(files))
+	base := h.workspace(t, ws, files)
+	key := fmt.Sprintf("run-vmgit-%x", time.Now().Unix())
+	run := domain.RunID(key)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.session(t, ws, key, base, runtime.Mount{HostPath: self, ContainerPath: "/opt/aether-vmtest", ReadOnly: true})
+	free := h.sh(t, key, "echo $(( $(cat /sys/fs/cgroup/session/memory.max) - $(cat /sys/fs/cgroup/session/memory.current) - (32 << 20) ))")
+	_, att, err := h.e.spawn(t.Context(), key, guest.ProcessSpec{
+		ID: "hold", Argv: []string{"/opt/aether-vmtest", "-test.run", "^TestKVMHoldNow$"}, Env: []string{"AETHER_VM_TEST_HOLD_NOW=" + free},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readUntil(t, att, "held")
+	// Page cache is reclaimable, so only the git cgroup's anonymous memory
+	// competes with the helper's reserve: sample its peak while git works.
+	h.sh(t, key, `(read -r svc < /sys/fs/cgroup/git/cgroup.procs; peak=0; own=0; while [ ! -e /tmp/anon-stop ]; do while read -r k v; do [ "$k" = anon ] && [ "$v" -gt "$peak" ] && peak=$v && echo $peak > /tmp/anon-peak; done < /sys/fs/cgroup/git/memory.stat; while read -r k v u; do [ "$k" = RssAnon: ] && [ "$v" -gt "$own" ] && own=$v && echo $own > /tmp/anon-service; done < /proc/$svc/status; sleep 0.05; done) >/dev/null 2>&1 &`)
+	h.sh(t, key, "for f in src/*/*.txt; do echo changed >> $f; done; head -c 100M /dev/urandom > big.bin")
+	start := time.Now()
+	// 31 seconds on the KVM test host; CI's nested VMs are slower.
+	waitDiff(t, h.diffs, "big.bin", 3*time.Minute)
+	snapshot := time.Since(start)
+	start = time.Now()
+	commit, commitErr := h.git.CommitAll(t.Context(), run, "aether: a task", domain.GitIdentity{Name: "Member", Email: "member@localhost"}, nil)
+	committed := time.Since(start)
+	kills := h.sh(t, key, "grep -h oom_kill /sys/fs/cgroup/git/memory.events /sys/fs/cgroup/session/memory.events")
+	peak := h.sh(t, key, "cat /sys/fs/cgroup/git/memory.peak")
+	anon := h.sh(t, key, "touch /tmp/anon-stop; sleep 0.2; echo $(cat /tmp/anon-peak) bytes, the service $(cat /tmp/anon-service) KiB of it")
+	t.Logf("with the session holding %s bytes: snapshot %s, commit %s, git memory peak %s, anonymous %s", free, snapshot, committed, peak, anon)
+	if commitErr != nil || commit == "" {
+		console, _ := os.ReadFile(h.e.path(key, consoleLog))
+		var lines []string
+		for _, line := range strings.Split(string(console), "\n") {
+			if strings.Contains(line, "git") || strings.Contains(line, "panic") || strings.Contains(line, "fatal") || strings.Contains(line, "Out of memory") {
+				lines = append(lines, line)
+			}
+		}
+		t.Errorf("final commit beside a full session = %q, %v; console:\n%s", commit, commitErr, strings.Join(lines, "\n"))
+	}
+	if kills != "oom_kill 0\noom_kill 0" {
+		t.Errorf("OOM kills in the git service, then the session: %q", kills)
+	}
+}
+
+func waitDiff(t *testing.T, diffs <-chan events.Event, path string, within time.Duration) {
 	t.Helper()
-	timeout := time.After(60 * time.Second)
+	timeout := time.After(within)
 	for {
 		select {
 		case ev := <-diffs:
