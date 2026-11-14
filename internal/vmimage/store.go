@@ -191,12 +191,21 @@ func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (Disk, 
 		return Disk{}, fmt.Errorf("vmimage: root disk: %w", err)
 	}
 	pin := rootPin(path, base.ID)
+	_, statErr := os.Lstat(pin)
+	made := statErr != nil
 	if err = s.pin(base.Path, pin); err != nil {
+		return Disk{}, err
+	}
+	// A failed rebuild drops the link it made; the previous disk keeps its own.
+	failed := func(err error) (Disk, error) {
+		if made {
+			err = errors.Join(err, removeIfExists(pin))
+		}
 		return Disk{}, err
 	}
 	tmp := path + ".tmp"
 	if err = removeIfExists(tmp); err != nil {
-		return Disk{}, err
+		return failed(err)
 	}
 	disk := Disk{Path: path, Format: FormatRaw}
 	if base.serverBuilt() {
@@ -206,10 +215,10 @@ func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (Disk, 
 		err = copyDisk(ctx, pin, tmp)
 	}
 	if err != nil {
-		return Disk{}, errors.Join(err, removeIfExists(tmp))
+		return failed(errors.Join(err, removeIfExists(tmp)))
 	}
 	if err = os.Rename(tmp, path); err != nil {
-		return Disk{}, fmt.Errorf("vmimage: root disk %s: %w", path, err)
+		return failed(fmt.Errorf("vmimage: root disk %s: %w", path, err))
 	}
 	return disk, prunePins(path, pin)
 }

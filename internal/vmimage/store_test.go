@@ -369,8 +369,8 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if _, err = s.NewRootDisk(cancelled, saved, rootPath); err == nil {
 		t.Fatal("NewRootDisk with a cancelled context succeeded")
 	}
-	if info := qemuInfo(t, rootPath); info.Format != "qcow2" || info.Backing != basePin || nlink(t, base.Path) != 2 {
-		t.Errorf("after a failed rebuild the root disk is %+v and the base has %d links; want it over %s", info, nlink(t, base.Path), basePin)
+	if info := qemuInfo(t, rootPath); info.Format != "qcow2" || info.Backing != basePin || nlink(t, base.Path) != 2 || nlink(t, saved.Path) != 1 {
+		t.Errorf("after a failed rebuild the root disk is %+v, the base has %d links and the saved base %d; want it over %s, and no link to the saved base", info, nlink(t, base.Path), nlink(t, saved.Path), basePin)
 	}
 	root, err = s.NewRootDisk(ctx, saved, rootPath)
 	if err != nil {

@@ -26,7 +26,7 @@ func TestQemuImgNamesFormatsAndNeverOpensAHeadersBackingFile(t *testing.T) {
 	real, _ := exec.LookPath("qemu-img")
 	bin := t.TempDir()
 	calls := filepath.Join(bin, "calls")
-	script := "#!/bin/sh\nprintf '%s\\037' \"$@\" >> " + calls + "\necho >> " + calls + "\nexec " + real + " \"$@\"\n"
+	script := "#!/bin/sh\nprintf '%s\\037' \"$@\" >> '" + calls + "'\necho >> '" + calls + "'\nexec '" + real + "' \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "qemu-img"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
