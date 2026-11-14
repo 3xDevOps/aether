@@ -71,12 +71,12 @@ func TestEveryDiskStatesItsFormatAndOnlyServerOverlaysBack(t *testing.T) {
 	}
 	r := &Runtime{vms: h.engine}
 	for _, key := range []string{"terminal:m1", "assistant:m1", "assistant-install:m1", "harness-update-m1-codex"} {
-		id, err := r.Create(ctx, runtime.Spec{Image: "aether/standard:1", Command: []string{"/bin/sh"}, CreationKey: key, MemoryLimitBytes: 1 << 30})
-		if err == nil {
-			err = r.Start(ctx, id)
+		id, createErr := r.Create(ctx, runtime.Spec{Image: "aether/standard:1", Command: []string{"/bin/sh"}, CreationKey: key, MemoryLimitBytes: 1 << 30})
+		if createErr == nil {
+			createErr = r.Start(ctx, id)
 		}
-		if err != nil {
-			t.Fatalf("%s: %v", key, err)
+		if createErr != nil {
+			t.Fatalf("%s: %v", key, createErr)
 		}
 	}
 	if err = r.CheckImage(ctx, "aether/member-m1:a", "1000:1000"); err != nil {
