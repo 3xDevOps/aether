@@ -52,3 +52,31 @@ func TestConsoleLogStaysBoundedWhateverTheGuestWrites(t *testing.T) {
 		}
 	}
 }
+
+func TestConsoleLogResumesAfterARotationFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), consoleLog)
+	c, err := openConsoleLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.Write(bytes.Repeat([]byte("x"), consoleLogBytes)); err != nil {
+		t.Fatal(err)
+	}
+	// A directory in the way fails the rename, as a host out of room fails
+	// the new file.
+	if err = os.MkdirAll(filepath.Join(path+".1", "blocker"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.Write([]byte("dropped\n")); err == nil {
+		t.Fatal("a write past the bound with no way to rotate succeeded")
+	}
+	if err = os.RemoveAll(path + ".1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.Write([]byte("captured\n")); err != nil {
+		t.Fatalf("the write after the host recovered: %v", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "captured\n" {
+		t.Errorf("console.log after recovering = %.40q", data)
+	}
+}
