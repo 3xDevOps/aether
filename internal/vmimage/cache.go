@@ -24,66 +24,41 @@ const (
 	currentCache = "current"
 )
 
-// NewCacheDisk creates a qcow2 cache disk at path over pool's newest cache,
-// or over a new empty one, and pins that cache as NewRootDisk pins a base.
+// NewCacheDisk creates a raw cache disk at path: a copy of pool's newest
+// cache, cloned where the filesystem can, or an empty one. A session wrote
+// every cache, so no qcow2 disk ever backs onto one.
 func (s *Store) NewCacheDisk(ctx context.Context, pool, path string) (Disk, error) {
 	if !validPool(pool) {
 		return Disk{}, fmt.Errorf("vmimage: cache pool %q is not a plain name", pool)
 	}
-	path, err := filepath.Abs(path)
-	if err != nil {
-		return Disk{}, fmt.Errorf("vmimage: cache disk: %w", err)
-	}
-	base, err := s.pinNewestCache(ctx, pool, path)
-	if err != nil {
+	tmp, src := path+".tmp", path+".newest"
+	if err := removeIfExists(tmp); err != nil {
 		return Disk{}, err
 	}
-	return s.NewRootDisk(ctx, base, path)
+	// The link keeps a promotion's sweep from deleting the cache mid-copy.
+	s.mu.Lock()
+	newest, err := s.readNewest(filepath.Join(s.cachesDir(), pool))
+	if err == nil {
+		err = s.pinLocked(newest.Path, src)
+	}
+	s.mu.Unlock()
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		err = mkfs(ctx, tmp, cacheSize, "aether-cache", "")
+	case err == nil:
+		err = copyDisk(ctx, src, tmp)
+	}
+	if err = errors.Join(err, removeIfExists(src)); err != nil {
+		return Disk{}, errors.Join(err, removeIfExists(tmp))
+	}
+	if err = os.Rename(tmp, path); err != nil {
+		return Disk{}, fmt.Errorf("vmimage: cache disk %s: %w", path, err)
+	}
+	return Disk{Path: path, Format: FormatRaw}, nil
 }
 
 func validPool(pool string) bool {
 	return pool != "" && filepath.Base(pool) == pool && !strings.HasPrefix(pool, ".")
-}
-
-// pinNewestCache pins pool's newest cache for the disk at path under the
-// store lock, so a promotion's sweep cannot delete it before the disk backs
-// onto it. A pool without one gets an empty cache first.
-func (s *Store) pinNewestCache(ctx context.Context, pool, path string) (Base, error) {
-	dir := filepath.Join(s.cachesDir(), pool)
-	pinned := func() (Base, bool, error) {
-		base, err := s.readNewest(dir)
-		if errors.Is(err, fs.ErrNotExist) {
-			return Base{}, false, nil
-		}
-		if err == nil {
-			err = s.pinLocked(base.Path, rootPin(path, base.ID))
-		}
-		return base, err == nil, err
-	}
-	s.mu.Lock()
-	base, ok, err := pinned()
-	s.mu.Unlock()
-	if ok || err != nil {
-		return base, err
-	}
-	work, err := os.MkdirTemp(s.tmpDir(), "cache-")
-	if err != nil {
-		return Base{}, fmt.Errorf("vmimage: new cache: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(work) }()
-	disk := filepath.Join(work, "disk.raw")
-	if err = mkfs(ctx, disk, cacheSize, "aether-cache", ""); err != nil {
-		return Base{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if base, ok, err = pinned(); ok || err != nil {
-		return base, err
-	}
-	if base, err = s.publishCacheLocked(dir, disk, 0); err != nil {
-		return Base{}, err
-	}
-	return base, s.pinLocked(base.Path, rootPin(path, base.ID))
 }
 
 func (s *Store) readNewest(dir string) (Base, error) {
@@ -101,7 +76,7 @@ func (s *Store) publishCacheLocked(dir, disk string, seq int64) (Base, error) {
 	if err != nil {
 		return Base{}, err
 	}
-	name := fmt.Sprintf("%020d-%s.raw", seq, strings.TrimPrefix(id, "local:"))
+	name := fmt.Sprintf("%020d-%s.raw", seq, strings.TrimPrefix(id, localPrefix))
 	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return Base{}, fmt.Errorf("vmimage: cache pool: %w", err)
 	}
@@ -124,29 +99,19 @@ func (s *Store) publishCacheLocked(dir, disk string, seq int64) (Base, error) {
 	return Base{ID: "cache:" + strings.TrimSuffix(name, ".raw"), Path: filepath.Join(dir, name)}, nil
 }
 
-// SnapshotCache copies a stopped VM's cache disk into the store, cloning it
-// where the filesystem can, and pins the cache it is made over, so the VM
-// may start again or be deleted while PromoteCache reads the copy.
-func (s *Store) SnapshotCache(ctx context.Context, disk string) (string, error) {
-	backing, err := backingFile(disk)
-	if err != nil {
-		return "", err
+// SnapshotCache copies a stopped VM's raw cache disk into the store,
+// cloning it where the filesystem can, so the VM may start again or be
+// deleted while PromoteCache publishes the copy.
+func (s *Store) SnapshotCache(ctx context.Context, disk Disk) (string, error) {
+	if disk.Format != FormatRaw {
+		return "", fmt.Errorf("vmimage: copy cache %s: a cache disk must be raw, not %q", disk.Path, disk.Format)
 	}
 	work, err := os.MkdirTemp(s.tmpDir(), fmt.Sprintf("snapshot-%d-", time.Now().UnixNano()))
 	if err != nil {
 		return "", fmt.Errorf("vmimage: copy cache: %w", err)
 	}
-	pin, snapshot := filepath.Join(work, "base.raw"), filepath.Join(work, "cache.qcow2")
-	err = os.Link(backing, pin)
-	if err == nil {
-		err = run(ctx, "cp", "--reflink=auto", disk, snapshot)
-	}
-	if err == nil {
-		err = run(ctx, "qemu-img", "rebase", "-q", "-u", "-f", "qcow2", "-F", "raw", "-b", pin, snapshot)
-	}
-	if err != nil {
-		_ = os.RemoveAll(work)
-		return "", fmt.Errorf("vmimage: copy cache %s: %w", disk, err)
+	if err = copyDisk(ctx, disk.Path, filepath.Join(work, "disk.raw")); err != nil {
+		return "", errors.Join(fmt.Errorf("vmimage: copy cache %s: %w", disk.Path, err), os.RemoveAll(work))
 	}
 	return work, nil
 }
@@ -156,15 +121,12 @@ func (s *Store) SnapshotCache(ctx context.Context, disk string) (string, error) 
 // the snapshot and every cache of the pool no disk uses. A snapshot older
 // than the pool's newest cache, whose promotion finished first, changes
 // nothing.
-func (s *Store) PromoteCache(ctx context.Context, pool, snapshot string) error {
+func (s *Store) PromoteCache(pool, snapshot string) error {
 	defer func() { _ = os.RemoveAll(snapshot) }()
 	if !validPool(pool) {
 		return fmt.Errorf("vmimage: cache pool %q is not a plain name", pool)
 	}
 	disk := filepath.Join(snapshot, "disk.raw")
-	if err := run(ctx, "qemu-img", "convert", "-f", "qcow2", "-O", "raw", filepath.Join(snapshot, "cache.qcow2"), disk); err != nil {
-		return err
-	}
 	info, err := os.Stat(disk)
 	if err != nil {
 		return fmt.Errorf("vmimage: promote cache: %w", err)
@@ -180,8 +142,7 @@ func (s *Store) PromoteCache(ctx context.Context, pool, snapshot string) error {
 	default:
 		_, err = s.publishCacheLocked(dir, disk, seq)
 	}
-	// The snapshot pins the cache it was made over until it is gone.
-	return errors.Join(err, os.RemoveAll(snapshot), s.sweepCachesLocked(dir))
+	return errors.Join(err, s.sweepCachesLocked(dir))
 }
 
 // sweepCachesLocked deletes a pool's caches that are not its newest and
@@ -218,7 +179,7 @@ func snapshotSeq(snapshot string) int64 {
 }
 
 // newestSeq is when the snapshot a pool's newest cache came from was taken,
-// 0 for an empty cache or none.
+// 0 for none.
 func newestSeq(newest Base) int64 {
 	digits, _, _ := strings.Cut(filepath.Base(newest.Path), "-")
 	seq, _ := strconv.ParseInt(digits, 10, 64)

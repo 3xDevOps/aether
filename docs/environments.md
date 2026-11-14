@@ -416,9 +416,10 @@ What changes:
   each from a fresh root disk. The server stops their containers still
   running in Docker when it starts with `vm`, as it does the terminal's.
 - **Save environment** freezes the terminal's root filesystem while it
-  copies the disk's changes, well under a second on a host whose filesystem
-  can share blocks (XFS, Btrfs), then builds a new base disk from the copy
-  while the terminal goes on. Writes to `/` wait meanwhile; the home and
+  copies the root disk, well under a second on a host whose filesystem can
+  share blocks (XFS, Btrfs), then builds a new base disk from the copy while
+  the terminal goes on. A session started from a saved image gets a raw copy
+  of it, made the same way. Writes to `/` wait meanwhile; the home and
   `/tmp` stay writable. A copy that takes longer than 5 minutes fails the
   save, and the terminal thaws by itself then even if the server died. The
   check boots the new image in a VM with no network, which systemd stops

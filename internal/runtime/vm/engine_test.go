@@ -101,7 +101,7 @@ func TestStartBootsTheVMInItsUnit(t *testing.T) {
 	for _, want := range []string{
 		"--cpus boot=2,nested=off", "--memory size=2048M,shared=on", "--balloon size=0,free_page_reporting=on",
 		"--kernel /k/vmlinux", "page_reporting.page_reporting_order=0", "aether.mount=home,0,/root",
-		"helper.img,image_type=raw,id=helper,serial=helper,readonly=on", "root.img,image_type=qcow2,id=root,serial=root,backing_files=on",
+		"helper.img,image_type=raw,backing_files=off,id=helper,serial=helper,readonly=on", "root.img,image_type=qcow2,backing_files=on,id=root,serial=root",
 		"--net id=net0,tap=aethervm1,ip=10.200.0.5,mask=255.255.255.252",
 	} {
 		if !strings.Contains(args, want) {
@@ -178,7 +178,7 @@ func TestACacheIsPromotedOnlyWhenItsVMStopsForGood(t *testing.T) {
 	h := newHarness(t)
 	h.images.promoted = make(chan string, 4)
 	cache := runtime.Mount{HostPath: "/data/cache/m1/runs", ContainerPath: "/aether-cache", Kind: runtime.MountCache}
-	want := cachePool(cache) + " cache.qcow2.snapshot"
+	want := cachePool(cache) + " cache.img.snapshot"
 	promoted := func() string {
 		h.engine.promotions.Wait()
 		select {
@@ -195,7 +195,7 @@ func TestACacheIsPromotedOnlyWhenItsVMStopsForGood(t *testing.T) {
 	}
 
 	session("run-a", cache)
-	if args := strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "cache.qcow2,image_type=qcow2,id=cache,serial=cache") {
+	if args := strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "cache.img,image_type=raw,backing_files=off,id=cache,serial=cache") {
 		t.Errorf("launch args lack the cache disk:\n%s", args)
 	}
 	if err := h.engine.save(t.Context(), "run-a"); err != nil {
@@ -272,7 +272,7 @@ func TestASessionsDatabaseDiskOutlivesItsVM(t *testing.T) {
 	disk := filepath.Join(dir, stateDiskFile)
 	h.createStarted("run-a", spec)
 	args := strings.Join(h.units.last().launch.Args, " ")
-	for _, want := range []string{"path=" + disk + ",image_type=raw,id=state,serial=state", "aether.mount=state,0,/root/.codex/vm-sqlite", "aether.mount=state,1,/root/.agent/index"} {
+	for _, want := range []string{"path=" + disk + ",image_type=raw,backing_files=off,id=state,serial=state", "aether.mount=state,0,/root/.codex/vm-sqlite", "aether.mount=state,1,/root/.agent/index"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("launch args lack %q:\n%s", want, args)
 		}

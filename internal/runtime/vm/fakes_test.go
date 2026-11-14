@@ -88,8 +88,10 @@ type fakeImages struct {
 }
 
 type fakeSave struct {
-	disk, ref string
-	labels    map[string]string
+	disk   vmimage.Disk
+	base   vmimage.Base
+	ref    string
+	labels map[string]string
 	// copied is what the disk held when SaveBase read it.
 	copied string
 }
@@ -118,14 +120,14 @@ func (f *fakeImages) LookupBase(ref string) (vmimage.Base, error) {
 	return vmimage.Base{}, fmt.Errorf("image %s: %w", ref, runtime.ErrNotFound)
 }
 
-func (f *fakeImages) SaveBase(_ context.Context, disk, ref string, labels map[string]string) (vmimage.Base, error) {
-	data, err := os.ReadFile(disk)
+func (f *fakeImages) SaveBase(_ context.Context, disk vmimage.Disk, base vmimage.Base, ref string, labels map[string]string) (vmimage.Base, error) {
+	data, err := os.ReadFile(disk.Path)
 	if err != nil {
 		return vmimage.Base{}, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.saves = append(f.saves, fakeSave{disk: disk, ref: ref, labels: labels, copied: string(data)})
+	f.saves = append(f.saves, fakeSave{disk: disk, base: base, ref: ref, labels: labels, copied: string(data)})
 	if f.saveErr != nil {
 		return vmimage.Base{}, f.saveErr
 	}
@@ -183,14 +185,14 @@ func (f *fakeImages) NewDataDisk(_ context.Context, path string, _ int64) (vmima
 }
 
 func (f *fakeImages) NewCacheDisk(_ context.Context, _, path string) (vmimage.Disk, error) {
-	return vmimage.Disk{Path: path, Format: "qcow2"}, os.WriteFile(path, nil, 0o600)
+	return vmimage.Disk{Path: path, Format: "raw"}, os.WriteFile(path, nil, 0o600)
 }
 
-func (f *fakeImages) SnapshotCache(_ context.Context, disk string) (string, error) {
-	return disk + ".snapshot", nil
+func (f *fakeImages) SnapshotCache(_ context.Context, disk vmimage.Disk) (string, error) {
+	return disk.Path + ".snapshot", nil
 }
 
-func (f *fakeImages) PromoteCache(_ context.Context, pool, snapshot string) error {
+func (f *fakeImages) PromoteCache(pool, snapshot string) error {
 	f.mu.Lock()
 	promoted := f.promoted
 	f.mu.Unlock()

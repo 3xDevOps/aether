@@ -23,7 +23,7 @@ func (s *Store) NewCheckoutDisk(ctx context.Context, key string, size int64, fil
 	if err != nil {
 		return fmt.Errorf("vmimage: checkout disk: %w", err)
 	}
-	base := Base{ID: "prepared:" + key, Path: filepath.Join(s.preparedDir(), key, "disk.raw")}
+	base := Base{ID: preparedPrefix + key, Path: filepath.Join(s.preparedDir(), key, "disk.raw")}
 	// Pinned under the store lock as soon as it exists, so a sweep cannot
 	// remove it before the new disk backs onto it.
 	pin := path + "." + dirName(base.ID) + ".base"
@@ -44,7 +44,7 @@ func (s *Store) NewCheckoutDisk(ctx context.Context, key string, size int64, fil
 		if !errors.Is(statErr, fs.ErrNotExist) {
 			return fmt.Errorf("vmimage: prepared disk %s: %w", key, statErr)
 		}
-		built := s.builds.DoChan("prepared:"+key, func() (any, error) {
+		built := s.builds.DoChan(preparedPrefix+key, func() (any, error) {
 			buildCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), buildTimeout)
 			defer cancel()
 			return nil, s.buildPrepared(buildCtx, key, size, fill)

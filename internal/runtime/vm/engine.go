@@ -31,13 +31,13 @@ type Images interface {
 	LookupBase(ref string) (vmimage.Base, error)
 	NewRootDisk(ctx context.Context, base vmimage.Base, path string) (vmimage.Disk, error)
 	NewDataDisk(ctx context.Context, path string, size int64) (vmimage.Disk, error)
-	SaveBase(ctx context.Context, rootDisk, ref string, labels map[string]string) (vmimage.Base, error)
+	SaveBase(ctx context.Context, disk vmimage.Disk, base vmimage.Base, ref string, labels map[string]string) (vmimage.Base, error)
 	Tag(source, target string) error
 	Untag(ref string) error
 	Tags(repo string) ([]string, error)
 	NewCacheDisk(ctx context.Context, pool, path string) (vmimage.Disk, error)
-	SnapshotCache(ctx context.Context, disk string) (string, error)
-	PromoteCache(ctx context.Context, pool, snapshot string) error
+	SnapshotCache(ctx context.Context, disk vmimage.Disk) (string, error)
+	PromoteCache(pool, snapshot string) error
 	Sweep() error
 }
 
@@ -395,11 +395,24 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	if err != nil {
 		return launch{}, fmt.Errorf("vm runtime: helper disk: %w", err)
 	}
-	disks := []string{diskArg(helperDisk, "helper") + ",readonly=on", diskArg(rec.Root, "root"), diskArg(rec.Data, "data")}
+	disks := []attached{{helperDisk, "helper", true}, {rec.Root, "root", false}, {rec.Data, "data", false}}
 	checkouts := make([]guest.CheckoutMount, len(rec.CheckoutDisks))
 	for i, c := range rec.CheckoutDisks {
-		disks = append(disks, diskArg(c.Disk, checkoutSerial(i)))
+		disks = append(disks, attached{c.Disk, checkoutSerial(i), false})
 		checkouts[i] = guest.CheckoutMount{Serial: checkoutSerial(i), Key: c.Checkout.Key, Target: c.Target}
+	}
+	if rec.Cache.Path != "" {
+		disks = append(disks, attached{rec.Cache, "cache", false})
+	}
+	if rec.State.Path != "" {
+		disks = append(disks, attached{rec.State, "state", false})
+	}
+	if rec.Browser.Path != "" {
+		disks = append(disks, attached{rec.Browser, "browser", true})
+	}
+	diskArgs, err := diskArgs(disks)
+	if err != nil {
+		return launch{}, err
 	}
 	cfg := guest.Config{Hostname: rec.Key, Mounts: p.mounts, Checkouts: checkouts, Sockets: p.sockets, Serves: rec.Serves}
 	if rec.Browser.Path != "" {
@@ -424,16 +437,7 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		"--kernel", kernel, "--cmdline", cmdline,
 		"--disk",
 	}
-	args = append(args, disks...)
-	if rec.Cache.Path != "" {
-		args = append(args, diskArg(rec.Cache, "cache"))
-	}
-	if rec.State.Path != "" {
-		args = append(args, diskArg(rec.State, "state"))
-	}
-	if rec.Browser.Path != "" {
-		args = append(args, diskArg(rec.Browser, "browser")+",readonly=on")
-	}
+	args = append(args, diskArgs...)
 	args = append(args,
 		// With nested virtualization a guest rebooted on its second restore
 		// (Cloud Hypervisor v54.1 on a host that is itself a VM). Sessions
@@ -478,12 +482,35 @@ func (e *engine) stateDisk(ctx context.Context, mounts []runtime.Mount) (vmimage
 	return d, nil
 }
 
-func diskArg(d vmimage.Disk, id string) string {
-	arg := fmt.Sprintf("path=%s,image_type=%s,id=%s,serial=%s", d.Path, d.Format, id, id)
-	if d.Format == vmimage.FormatQcow2 {
-		arg += ",backing_files=on"
+// attached is a disk as the guest sees it, under its serial.
+type attached struct {
+	disk     vmimage.Disk
+	serial   string
+	readOnly bool
+}
+
+// diskArgs states every disk's format to Cloud Hypervisor, which would
+// otherwise guess it from bytes a session may have written. Only qcow2 disks,
+// which the server makes over bases no session wrote, may open a backing
+// file.
+func diskArgs(disks []attached) ([]string, error) {
+	args := make([]string, len(disks))
+	for i, a := range disks {
+		var backing string
+		switch a.disk.Format {
+		case vmimage.FormatRaw:
+			backing = "off"
+		case vmimage.FormatQcow2:
+			backing = "on"
+		default:
+			return nil, fmt.Errorf("vm runtime: disk %s has no known format %q", a.disk.Path, a.disk.Format)
+		}
+		args[i] = fmt.Sprintf("path=%s,image_type=%s,backing_files=%s,id=%s,serial=%s", a.disk.Path, a.disk.Format, backing, a.serial, a.serial)
+		if a.readOnly {
+			args[i] += ",readonly=on"
+		}
 	}
-	return arg
+	return args, nil
 }
 
 func (e *engine) launch(ctx context.Context, rec *record, l launch) error {

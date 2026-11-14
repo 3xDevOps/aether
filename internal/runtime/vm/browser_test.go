@@ -43,7 +43,7 @@ func TestSessionVMBootsWithTheBrowsersDiskAndSocket(t *testing.T) {
 	h.browserSession()
 	last := h.units.last()
 	args := strings.Join(last.launch.Args, " ")
-	if !strings.Contains(args, "id=browser,serial=browser,backing_files=on,readonly=on") || !strings.Contains(args, "aether.serve=2001,") {
+	if !strings.Contains(args, "image_type=qcow2,backing_files=on,id=browser,serial=browser,readonly=on") || !strings.Contains(args, "aether.serve=2001,") {
 		t.Errorf("a session VM boots without the browser's disk or socket: %s", args)
 	}
 	const newer = "ghcr.io/3xdevops/aether-browser:v2"

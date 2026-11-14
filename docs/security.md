@@ -65,6 +65,17 @@ remaining `virtiofsd` share (a checkout not yet on a VM disk) cannot carry a
 device node or a file-capability binary to the host. The bullets below on Docker, Sysbox and networks
 describe Docker mode; what a session is given, after them, applies to both.
 
+Every disk a VM gets names its format to Cloud Hypervisor, so nothing guesses
+a format from bytes a guest wrote. The disks a session writes directly - its
+data, cache and state disks, and a root disk made from a saved environment -
+are attached raw with backing files off. The only qcow2 disks are the root
+disk over an image, a checkout's disk over its prepared disk, and the
+browser's disk: the server makes each with `qemu-img create -F raw -u` over a
+base it built with `mkfs.ext4`, and no qcow2 disk ever sits on bytes a
+session wrote. A session's cache goes back to the member as a raw copy, and
+Save environment reads a qcow2 root disk over the base the server recorded,
+never over the backing file its header names.
+
 - Agents run as uid `1000`, or as an image's own non-root user. What they may
   do as root depends on the session's [permission tier](#permission-tiers).
   Treat root in a session as able to do anything its sandbox can reach.
