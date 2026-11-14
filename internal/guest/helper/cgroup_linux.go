@@ -164,15 +164,15 @@ func readStats(cgroup *sessionCgroup) (*guestpb.StatsReply, error) {
 		CpuUsageNanos:    cpu,
 		MemoryLimitBytes: meminfo["MemTotal"],
 		MemoryBytes:      meminfo["MemTotal"] - min(meminfo["MemAvailable"], meminfo["MemTotal"]),
-		OomKills:         vmstat["oom_kill"] - min(browser["oom_kill"], vmstat["oom_kill"]),
 	}
+	kills := vmstat["oom_kill"]
 	if cgroup != nil {
 		// The git service's own kills are not the session's.
 		events, err := readCounters(filepath.Join(cgroup.dir, "memory.events"), 1)
 		if err != nil {
 			return nil, err
 		}
-		stats.OomKills = events["oom_kill"]
+		kills = events["oom_kill"]
 		data, err := os.ReadFile(filepath.Join(cgroup.dir, "pids.current"))
 		if err != nil {
 			return nil, err
@@ -182,6 +182,7 @@ func readStats(cgroup *sessionCgroup) (*guestpb.StatsReply, error) {
 		}
 		stats.PidsLimit = uint64(cgroup.limit.Load())
 	}
+	stats.OomKills = kills - min(browser["oom_kill"], kills)
 	return stats, nil
 }
 
