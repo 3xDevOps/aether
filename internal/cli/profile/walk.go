@@ -15,9 +15,8 @@ import (
 )
 
 // Why a file was left out of a push. No reason refuses a push: every one
-// of them drops the file it names and is reported, so a single bad file
-// can never decide that the rest of a profile stays off the server.
-// Inventory reports every reason to the user.
+// of them drops the file it names, so a single bad file can never decide
+// that the rest of a profile stays off the server.
 const (
 	// ExcludeCredential is a basename on the harness credential denylist.
 	ExcludeCredential = "credential"
@@ -40,7 +39,7 @@ const (
 	// ExcludeTooLarge is a file over the server's per-file cap. It is
 	// never read, so its content is never scanned either - which is what
 	// keeps a profile root full of multi-megabyte transcripts from
-	// costing minutes of regex time to preview.
+	// costing minutes of regex time to push.
 	ExcludeTooLarge = "too-large"
 	// ExcludeOverBudget is a file left out because higher-priority files
 	// already filled the server's per-snapshot cap.
@@ -87,20 +86,18 @@ func isVendored(harnessName, rel string) bool {
 }
 
 // visited is one entry the walk classified. Reason is empty for a file
-// that would be pushed; otherwise it is one of the Exclude constants and
-// Detail says which rule fired.
+// that would be pushed; otherwise it is one of the Exclude constants and,
+// for the ones DiscoverFiles reports, Detail says which rule fired.
 type visited struct {
 	Rel     string
-	Abs     string
 	Mode    uint32
-	Size    int64
 	Content []byte
 	Reason  string
 	Detail  string
 }
 
 // maxFileBytes and maxTotalBytes mirror the server's push caps, so a
-// preview can never promise a file the server would reject. They are
+// push never carries a file the server would reject. They are
 // vars, not the profilesvc constants directly, so a test can shrink them
 // to keep a budget-exhaustion fixture small; production always runs with
 // the real caps.
@@ -123,8 +120,8 @@ type candidate struct {
 // push applies - default and user ignores, credential denylist, symlink
 // escape rejection, regular-file check, size caps, content scan - and
 // hands every entry to visit with its verdict. allowed names files whose
-// scanner findings pass (the CLI's --allow-secret); Inventory passes
-// none. A visit error aborts the walk and is returned unchanged.
+// scanner findings pass (the CLI's --allow-secret). A visit error aborts
+// the walk and is returned unchanged.
 //
 // It runs in two passes. The first stats and classifies the tree without
 // opening anything. The second reads what survived, in category priority
@@ -200,19 +197,16 @@ func classifyRoot(ctx context.Context, root string, prof harness.Profile, matche
 		if info.Mode()&os.ModeSymlink != 0 {
 			target, resolveErr := filepath.EvalSymlinks(path)
 			if resolveErr != nil {
-				return visit(visited{Rel: relSlash, Abs: path, Reason: ExcludeSymlink, Detail: "symlink escape: cannot resolve"})
+				return visit(visited{Rel: relSlash, Reason: ExcludeSymlink, Detail: "symlink escape: cannot resolve"})
 			}
 			if escapesRoot(rootResolved, target) {
-				return visit(visited{Rel: relSlash, Abs: path, Reason: ExcludeSymlink, Detail: "symlink escape"})
+				return visit(visited{Rel: relSlash, Reason: ExcludeSymlink, Detail: "symlink escape"})
 			}
 			return nil
 		}
 		if d.IsDir() {
 			if matcher != nil && matcher.ignoredDir(relSlash) {
-				// One entry for the directory rather than one per file
-				// inside it: the user needs to know the directory was
-				// dropped, not to scroll a transcript archive.
-				if err := visit(visited{Rel: relSlash, Abs: path, Reason: ExcludeIgnored, Detail: ignoreDetail(prof.Name, relSlash)}); err != nil {
+				if err := visit(visited{Rel: relSlash, Reason: ExcludeIgnored}); err != nil {
 					return err
 				}
 				return fs.SkipDir
@@ -227,23 +221,22 @@ func classifyRoot(ctx context.Context, root string, prof harness.Profile, matche
 		// context check above runs only between entries, so one of these
 		// would hang the walk for good on an fd nothing can reclaim.
 		if !info.Mode().IsRegular() {
-			return visit(visited{Rel: relSlash, Abs: path, Reason: ExcludeNotRegular,
-				Detail: "not a regular file (" + irregularKind(info.Mode()) + ")"})
+			return visit(visited{Rel: relSlash, Reason: ExcludeNotRegular})
 		}
 		if profilesvc.DeniedBasename(relSlash, prof.DenyNames) {
-			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeCredential, Detail: "credential file excluded for " + prof.Name})
+			return visit(visited{Rel: relSlash, Reason: ExcludeCredential})
 		}
 		if matcher != nil && matcher.ignored(relSlash) {
-			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeIgnored, Detail: ignoreDetail(prof.Name, relSlash)})
+			return visit(visited{Rel: relSlash, Reason: ExcludeIgnored})
 		}
 		// The per-file cap is applied from the stat, before the file is
 		// opened. The server refuses these files anyway, so reading one
 		// buys nothing - and reading it would also hand it to the secret
 		// scanner, whose cost grows sharply with size. A profile root
 		// holding large agent transcripts is ordinary, so this is the
-		// difference between a preview that answers and one that hangs.
+		// difference between a push that answers and one that hangs.
 		if info.Size() > maxFileBytes {
-			return visit(visited{Rel: relSlash, Abs: path, Size: info.Size(), Reason: ExcludeTooLarge,
+			return visit(visited{Rel: relSlash, Reason: ExcludeTooLarge,
 				Detail: fmt.Sprintf("%d bytes, over the %d-byte limit for one file", info.Size(), maxFileBytes)})
 		}
 		out = append(out, candidate{
@@ -279,7 +272,7 @@ func readCandidates(ctx context.Context, harnessName string, candidates []candid
 			return err
 		}
 		if total+c.size > maxTotalBytes {
-			err := visit(visited{Rel: c.rel, Abs: c.abs, Size: c.size, Reason: ExcludeOverBudget,
+			err := visit(visited{Rel: c.rel, Reason: ExcludeOverBudget,
 				Detail: fmt.Sprintf("the %d-byte limit for one snapshot was already reached", maxTotalBytes)})
 			if err != nil {
 				return err
@@ -290,7 +283,7 @@ func readCandidates(ctx context.Context, harnessName string, candidates []candid
 		if err != nil {
 			return err
 		}
-		file := visited{Rel: c.rel, Abs: c.abs, Mode: c.mode, Size: c.size, Content: content}
+		file := visited{Rel: c.rel, Mode: c.mode, Content: content}
 		if findings := scanContent(c.rel, content); len(findings) > 0 && !allowed[c.rel] && !allowed[c.abs] {
 			file.Content = nil
 			file.Reason, file.Detail = findingVerdict(harnessName, c.rel, findings[0])
@@ -339,35 +332,6 @@ func categoryRank(category string) int {
 		}
 	}
 	return len(categoryOrder)
-}
-
-// ignoreDetail says which rule dropped a path: one Aether ships for this
-// harness, or the user's own file. They are compiled together, so the
-// answer is whether a default pattern names this path at all.
-func ignoreDetail(harnessName, rel string) string {
-	for _, pattern := range profilesvc.DefaultIgnores(harnessName) {
-		root := strings.TrimSuffix(pattern, "/")
-		if strings.HasPrefix(rel+"/", root+"/") {
-			return "skipped by default for " + harnessName + " (" + pattern +
-				"); add !" + pattern + " to " + IgnoreFileName + " to include it"
-		}
-	}
-	return IgnoreFileName
-}
-
-// irregularKind names the file type for the exclusion message, so the
-// user can tell a stray socket from a device node.
-func irregularKind(mode os.FileMode) string {
-	switch {
-	case mode&os.ModeSocket != 0:
-		return "socket"
-	case mode&os.ModeNamedPipe != 0:
-		return "named pipe"
-	case mode&os.ModeDevice != 0:
-		return "device"
-	default:
-		return "irregular"
-	}
 }
 
 func escapesRoot(root, target string) bool {

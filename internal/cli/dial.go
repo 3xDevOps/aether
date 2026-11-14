@@ -184,9 +184,6 @@ func (c *Conn) Ping(ctx context.Context) error {
 // Close tears down the SSH connection.
 func (c *Conn) Close() error { return c.client.Close() }
 
-// SSH is the underlying SSH client (port-forwards, extra sessions).
-func (c *Conn) SSH() *ssh.Client { return c.client }
-
 func hostKeyCallback(path string) (ssh.HostKeyCallback, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("cli: known_hosts dir: %w", err)

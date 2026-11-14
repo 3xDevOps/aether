@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -196,21 +197,12 @@ func TestPullRequiresBranch(t *testing.T) {
 	if _, err := Pull(t.TempDir(), "aether", "host:2222", protocol.RunPullResult{}); err == nil {
 		t.Fatal("Pull accepted coordinates without a branch")
 	}
-	if _, _, err := PullCommand(t.TempDir(), "aether", "host:2222", protocol.RunPullResult{}); err == nil {
-		t.Fatal("PullCommand accepted coordinates without a branch")
-	}
 }
 
-func TestPullCommandShapesFetch(t *testing.T) {
-	branch, cmd, err := PullCommand("/repo", "alice", "host:2222", protocol.RunPullResult{
-		WorkspaceID: "ws_1",
-		Branch:      "aether/run_1",
-	})
+func TestFetchCommandShapesFetch(t *testing.T) {
+	cmd, err := fetchCommand("/repo", cli.GitURL("alice", "host:2222", "ws_1"), "aether/run_1")
 	if err != nil {
-		t.Fatalf("PullCommand: %v", err)
-	}
-	if branch != "aether/run_1" {
-		t.Fatalf("branch = %q", branch)
+		t.Fatalf("fetchCommand: %v", err)
 	}
 	want := []string{
 		"git", "-C", "/repo", "fetch", "--no-tags",

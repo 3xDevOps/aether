@@ -340,10 +340,6 @@ func TestCheckBacksOffAfterFailuresInARow(t *testing.T) {
 	if n := hits.Load(); n != 2 {
 		t.Fatalf("dialed %d times, want 2 while backing off", n)
 	}
-	last, lastErr, ok := c.Last()
-	if !ok || lastErr == nil || last.CheckedAt.IsZero() {
-		t.Fatalf("Last = %+v, %v, %v; want the failure and when it happened", last, lastErr, ok)
-	}
 
 	// A refresh bypasses the backoff, and a success resets it.
 	setTag("v1.3.0")

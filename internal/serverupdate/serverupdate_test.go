@@ -713,7 +713,7 @@ func TestIncapableServerRefusesAndNamesTheManualCommands(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(e.dir, 0o755) })
 
-	if e.svc.Capable() {
+	if e.svc.incapableReason() == "" {
 		t.Fatal("a read-only binary directory must report incapable")
 	}
 	_, _, err := e.svc.Update(t.Context(), "mem_a",

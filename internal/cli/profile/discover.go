@@ -12,9 +12,16 @@ import (
 // LocalFile is one discovered profile file, relative to the harness LocalRoot.
 type LocalFile struct {
 	Path    string
-	AbsPath string
 	Mode    uint32
 	Content []byte
+}
+
+// Exclusion is one file a push would leave behind, and why. Reason is one
+// of the Exclude constants.
+type Exclusion struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // userHome is os.UserHomeDir, overridden in tests.
@@ -36,21 +43,18 @@ func LocalDir(harnessName string) (string, harness.Profile, error) {
 	return filepath.Join(home, filepath.FromSlash(p.LocalRoot)), p, nil
 }
 
-// Discover walks harness LocalRoot, applying the denylist, gitignore-style
-// .aether-profile-ignore, symlink-escape rejection, and content scanning.
-// allowSecret names files (relative, basename, or absolute) that may pass
-// scanner findings. Negation in the ignore file cannot re-include denied
-// credential paths, extra credential names, symlink escapes, or findings
-// that were not explicitly allowed. A scanner finding drops the file it
-// names and is reported as an exclusion; it never refuses the walk.
-func Discover(ctx context.Context, harnessName string, allowSecret []string) ([]LocalFile, error) {
-	files, _, err := DiscoverFiles(ctx, harnessName, allowSecret)
-	return files, err
-}
-
-// DiscoverFiles is Discover plus the entries it left out: the ones the
-// size caps dropped, symlinks pointing out of the profile root, and
-// scanner findings. Those are the exclusions a caller has to be able to
+// DiscoverFiles walks harness LocalRoot, applying the denylist,
+// gitignore-style .aether-profile-ignore, symlink-escape rejection, and
+// content scanning. allowSecret names files (relative, basename, or
+// absolute) that may pass scanner findings. Negation in the ignore file
+// cannot re-include denied credential paths, extra credential names,
+// symlink escapes, or findings that were not explicitly allowed. A
+// scanner finding drops the file it names and is reported as an
+// exclusion; it never refuses the walk.
+//
+// It returns the files and the entries it left out: the ones the size
+// caps dropped, symlinks pointing out of the profile root, and scanner
+// findings. Those are the exclusions a caller has to be able to
 // mention - a credential or an ignored file is excluded by a rule the
 // user wrote or asked for, but a file dropped for its size, a link the
 // walk would not follow, or one the scanner flagged is one they would
@@ -82,7 +86,7 @@ func discoverRoot(ctx context.Context, root string, prof harness.Profile, allowS
 		case ExcludeSecret, ExcludeSymlink, ExcludeVendoredSecret, ExcludeTooLarge, ExcludeOverBudget:
 			skipped = append(skipped, Exclusion{Path: f.Rel, Reason: f.Reason, Detail: f.Detail})
 		case "":
-			out = append(out, LocalFile{Path: f.Rel, AbsPath: f.Abs, Mode: f.Mode, Content: f.Content})
+			out = append(out, LocalFile{Path: f.Rel, Mode: f.Mode, Content: f.Content})
 		}
 		// Credential and ignored files are simply not pushed.
 		return nil
