@@ -104,9 +104,9 @@ func runHypervisor(args []string, served <-chan error, flush func()) error {
 
 // drainConsole makes the FIFO Cloud Hypervisor writes the serial console
 // to, and copies what arrives into console.log. Output the host cannot
-// write is dropped rather than left to stall the guest. flush, once Cloud
-// Hypervisor has exited, waits for the drain to copy what is left.
-func drainConsole(dir string) (flush func(), err error) {
+// write is dropped rather than left to stall the guest. The func it returns
+// waits, once Cloud Hypervisor has exited, for the drain to copy the rest.
+func drainConsole(dir string) (func(), error) {
 	pipe := filepath.Join(dir, consolePipe)
 	if err := unix.Mkfifo(pipe, 0o600); err != nil {
 		return nil, fmt.Errorf("vm monitor: make %s: %w", pipe, err)
@@ -115,8 +115,8 @@ func drainConsole(dir string) (flush func(), err error) {
 	if err != nil {
 		return nil, fmt.Errorf("vm monitor: %w", err)
 	}
-	// keep holds the FIFO open, so it reaches end of file only once flush
-	// closes keep and Cloud Hypervisor has closed it too.
+	// keep holds the FIFO open, so it reaches end of file only once the
+	// returned func closes keep and Cloud Hypervisor has closed it too.
 	keep, err := os.OpenFile(pipe, os.O_WRONLY, 0)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("vm monitor: %w", err), fifo.Close())
