@@ -35,6 +35,7 @@ const (
 	// mounts name.
 	stateDiskFile = "disk.img"
 	consoleLog    = "console.log"
+	consolePipe   = "console.pipe"
 	eventsFile    = "events.json"
 	monitorLog    = "monitor.log"
 	snapshotDir   = "snapshot"

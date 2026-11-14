@@ -23,6 +23,7 @@ const (
 	cloudHypervisor       = "cloud-hypervisor"
 	virtiofsd             = "/usr/libexec/virtiofsd"
 	virtiofsdReadyTimeout = 10 * time.Second
+	consoleFlushTimeout   = 2 * time.Second
 )
 
 // Monitor runs in a VM's unit, whose private mount namespace keeps every
@@ -39,10 +40,14 @@ func Monitor(args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{apiSocket, vsockSocket, fsSocket, eventsFile, homeSocket} {
+	for _, name := range []string{apiSocket, vsockSocket, fsSocket, eventsFile, homeSocket, consolePipe} {
 		if err = os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("vm monitor: remove stale %s: %w", name, err)
 		}
+	}
+	flush, err := drainConsole(dir)
+	if err != nil {
+		return err
 	}
 	if len(l.Shares) > 0 {
 		root := filepath.Join(dir, shareDir)
@@ -64,12 +69,12 @@ func Monitor(args []string) error {
 		}
 		go func() { served <- home.Serve(listener, *l.Home) }()
 	}
-	return runHypervisor(l.Args, served)
+	return runHypervisor(l.Args, served, flush)
 }
 
 // runHypervisor runs Cloud Hypervisor and exits as it does. The unit's stop
 // signals every process in it, so the monitor only waits for its child.
-func runHypervisor(args []string, served <-chan error) error {
+func runHypervisor(args []string, served <-chan error, flush func()) error {
 	signal.Notify(make(chan os.Signal, 1), unix.SIGTERM, unix.SIGINT, unix.SIGHUP)
 	cmd := exec.Command(cloudHypervisor, args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
@@ -82,8 +87,10 @@ func runHypervisor(args []string, served <-chan error) error {
 	case err := <-served:
 		_ = cmd.Process.Kill()
 		<-exited
+		flush()
 		return fmt.Errorf("vm monitor: the file service stopped: %w", err)
 	case err := <-exited:
+		flush()
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			if status, ok := exit.Sys().(syscall.WaitStatus); ok && status.Signaled() {
@@ -93,6 +100,52 @@ func runHypervisor(args []string, served <-chan error) error {
 		}
 		return err
 	}
+}
+
+// drainConsole makes the FIFO Cloud Hypervisor writes the serial console
+// to, and copies what arrives into console.log. Output the host cannot
+// write is dropped rather than left to stall the guest. The func it returns
+// waits, once Cloud Hypervisor has exited, for the drain to copy the rest.
+func drainConsole(dir string) (func(), error) {
+	pipe := filepath.Join(dir, consolePipe)
+	if err := unix.Mkfifo(pipe, 0o600); err != nil {
+		return nil, fmt.Errorf("vm monitor: make %s: %w", pipe, err)
+	}
+	fifo, err := os.OpenFile(pipe, os.O_RDONLY|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, fmt.Errorf("vm monitor: %w", err)
+	}
+	// keep holds the FIFO open, so it reaches end of file only once the
+	// returned func closes keep and Cloud Hypervisor has closed it too.
+	keep, err := os.OpenFile(pipe, os.O_WRONLY, 0)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("vm monitor: %w", err), fifo.Close())
+	}
+	log, err := openConsoleLog(filepath.Join(dir, consoleLog))
+	if err != nil {
+		return nil, errors.Join(err, keep.Close(), fifo.Close())
+	}
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		buf := make([]byte, 32<<10)
+		for {
+			n, err := fifo.Read(buf)
+			if n > 0 {
+				_, _ = log.Write(buf[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return func() {
+		_ = keep.Close()
+		select {
+		case <-drained:
+		case <-time.After(consoleFlushTimeout):
+		}
+	}, nil
 }
 
 // composeShare mounts a small tmpfs at root and binds every share at

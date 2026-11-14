@@ -434,7 +434,7 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	args := []string{
 		"--api-socket", "path=" + e.path(rec.Key, apiSocket),
 		"--vsock", "cid=3,socket=" + e.path(rec.Key, vsockSocket),
-		"--serial", "file=" + e.path(rec.Key, consoleLog), "--console", "off",
+		"--serial", "file=" + e.path(rec.Key, consolePipe), "--console", "off",
 		"--event-monitor", "path=" + e.path(rec.Key, eventsFile),
 		"--kernel", kernel, "--cmdline", cmdline,
 		"--disk",
