@@ -33,7 +33,7 @@ func deviceKeyLine(t *testing.T) string {
 func sshGrant(t *testing.T, a *Agent, connID string) edgeproto.Grant {
 	now := time.Now()
 	return edgeproto.Grant{
-		Issuer: a.origin, ServerID: a.ServerID(), ConnID: connID, Kind: edgeproto.KindSSH,
+		Issuer: a.origin, ServerID: a.serverID, ConnID: connID, Kind: edgeproto.KindSSH,
 		Account:  edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1001", Login: "octo"},
 		DeviceID: "dev-1", DeviceKey: deviceKeyLine(t),
 		IssuedAt: now, ExpiresAt: now.Add(edgeproto.GrantTTL),

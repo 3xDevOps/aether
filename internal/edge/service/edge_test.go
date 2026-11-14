@@ -192,7 +192,6 @@ const (
 
 type harness struct {
 	svc      *Service
-	ts       *httptest.Server
 	provider *fakeProvider
 	link     *fakeLink
 	clock    *fakeClock
@@ -229,7 +228,7 @@ func newHarness(t *testing.T) *harness {
 	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, ts.Listener.Addr().String())
 	}
-	return &harness{svc: svc, ts: ts, provider: provider, link: link, clock: clock, dataDir: dataDir,
+	return &harness{svc: svc, provider: provider, link: link, clock: clock, dataDir: dataDir,
 		client: &http.Client{Transport: transport}}
 }
 

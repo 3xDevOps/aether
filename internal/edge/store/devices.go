@@ -28,7 +28,6 @@ type DeviceAuth struct {
 	// person who confirms it.
 	ClientAddr string
 	Status     string
-	AccountID  int64
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
 	LastPollAt time.Time
@@ -49,13 +48,13 @@ func (s *Store) CreateDeviceAuth(ctx context.Context, a DeviceAuth) error {
 	return nil
 }
 
-const deviceAuthCols = `code_hash, user_code_hash, label, public_key, client_addr, status, COALESCE(account_id, 0),
+const deviceAuthCols = `code_hash, user_code_hash, label, public_key, client_addr, status,
 	created_at, expires_at, last_poll_at`
 
 func scanDeviceAuth(row *sql.Row) (DeviceAuth, error) {
 	var a DeviceAuth
 	var created, expires, polled int64
-	err := row.Scan(&a.CodeHash, &a.UserCodeHash, &a.Label, &a.Key, &a.ClientAddr, &a.Status, &a.AccountID,
+	err := row.Scan(&a.CodeHash, &a.UserCodeHash, &a.Label, &a.Key, &a.ClientAddr, &a.Status,
 		&created, &expires, &polled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DeviceAuth{}, ErrNotFound

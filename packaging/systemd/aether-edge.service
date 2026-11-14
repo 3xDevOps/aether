@@ -61,7 +61,7 @@ SystemCallErrorNumber=EPERM
 LimitNOFILE=1048576
 Restart=always
 RestartSec=5s
-# SIGTERM sends drain to every server, then closes within 10 seconds.
+# SIGTERM sends drain to every server, then closes within 20 seconds.
 TimeoutStopSec=30s
 
 [Install]

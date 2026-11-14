@@ -369,8 +369,8 @@ func TestEnrollPinsEdgeKeyPrivately(t *testing.T) {
 	a := newAgent(t, edge.srv.URL, dir, newFakeSSH())
 	run(t, a)
 	ec := edge.nextControl(t)
-	if ec.serverID != a.ServerID() {
-		t.Fatalf("edge derived %s, agent is %s", ec.serverID, a.ServerID())
+	if ec.serverID != a.serverID {
+		t.Fatalf("edge derived %s, agent is %s", ec.serverID, a.serverID)
 	}
 	expect[edgeproto.Directory](t, ec)
 	pinned, err := a.state.PinnedKey()
@@ -786,7 +786,7 @@ func TestLeaveUnenrollsAndForgetsTheOwner(t *testing.T) {
 	state := OpenState(dir)
 	setOwner(t, state, edge.pub, edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"})
 	a := newAgent(t, edge.srv.URL, dir, nil)
-	if _, _, err := state.IssueClaimCode(a.ServerID(), "", time.Now()); err != nil {
+	if _, _, err := state.IssueClaimCode(a.serverID, "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.Leave(context.Background()); err != nil {

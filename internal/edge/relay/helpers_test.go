@@ -321,14 +321,12 @@ func account(subject string) edgeproto.Account {
 
 // agent is a fake Aether server holding a control channel.
 type agent struct {
-	t      *testing.T
-	e      *env
-	signer ssh.Signer
-	id     string
-	ws     *websocket.Conn
-	ready  edgeproto.Ready
-	msgs   chan edgeproto.Message
-	data   chan net.Conn
+	e     *env
+	id    string
+	ws    *websocket.Conn
+	ready edgeproto.Ready
+	msgs  chan edgeproto.Message
+	data  chan net.Conn
 	// attach makes run answer every open by attaching a data socket.
 	attach bool
 	// err is what ended run, set before msgs closes.
@@ -404,7 +402,7 @@ func enrollAt(t *testing.T, e *env, signer ssh.Signer, version int) *agent {
 	if !ok {
 		t.Fatalf("got %T, want ready", m)
 	}
-	return &agent{t: t, e: e, signer: signer, id: ready.ServerID, ws: ws, ready: ready,
+	return &agent{e: e, id: ready.ServerID, ws: ws, ready: ready,
 		msgs: make(chan edgeproto.Message, 64), data: make(chan net.Conn, 64)}
 }
 

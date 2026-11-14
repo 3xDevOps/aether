@@ -8,7 +8,7 @@
   "files": {
     "images/edge/Dockerfile": "7bc5e3fe26365379ba4ac3a00ea89152ec2cc2bf0c565c12677792e0dfc73161",
     "packaging/edge/aether-edge.env.example": "dd5102ec41d8d15621855ccaa67822a6cd4d6234922e4e759a753b7016f2117f",
-    "packaging/systemd/aether-edge.service": "b52874c3db752d911ca613deff45200a28165c1b86331fe00dee457605c8e20e"
+    "packaging/systemd/aether-edge.service": "14e5ec0236caaf1a9db630b9253a68b453175d44aa3610ab433dfae345b25374"
   },
   "min_upgrade_from": "v0.5.2-alpha.4",
   "manual_steps": []

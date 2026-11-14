@@ -167,9 +167,6 @@ func New(cfg Config) (*Agent, error) {
 	}, nil
 }
 
-// ServerID is this server's id at the edge.
-func (a *Agent) ServerID() string { return a.serverID }
-
 // Run keeps the control connection until ctx is done, reconnecting with
 // jittered exponential backoff. It never gives up: an unreachable or
 // misbehaving edge is logged and retried, and leaves the rest of the server
