@@ -380,9 +380,13 @@ What changes:
 - Each VM has its own address in `10.200.0.0/16` and a tap device
   `aethervm<n>`. It reaches the server host, and the internet only through
   the host's default-route interfaces and the DNS servers it was given. It
-  reaches no other VM, no Docker container, neither cloud metadata address
-  (`169.254.169.254`, `100.100.100.200`) and nothing over IPv6, and cannot
-  send from another address. Nothing outside starts a connection into it.
+  reaches no other VM, no Docker container, nothing in the link-local range
+  `169.254.0.0/16` (which holds the cloud metadata, credential and resolver
+  endpoints), not the `100.100.100.200` or `168.63.129.16` metadata
+  addresses, and nothing over IPv6, and cannot send from another address. A
+  DNS server it was given stays reachable on port 53 even when it is a
+  link-local address. Nothing outside
+  starts a connection into it.
 - A session with [egress control](#egress-control) gets the tap
   `aethervme<n>`, no DNS servers, and reaches only the egress proxy at
   `10.200.0.1:3128`. That address is on the dummy link `aether-vmproxy`; the
