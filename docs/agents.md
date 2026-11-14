@@ -8,7 +8,7 @@ Aether, sets up the server over ssh, and launches and follows sessions through t
 Aether's terms: the **server** is the Linux machine where agents run
 (`aether-server`); this computer is a **client** (`aether`). A **workspace** is
 one repository on the server. A **session** is one agent working on one task in its
-own container, on its own git branch. The **edge** is a relay at
+own sandbox (a container or virtual machine), on its own git branch. The **edge** is a relay at
 `https://edge.onaether.dev` that the server and clients dial out to, so neither
 needs an open port. The [glossary](README.md#concepts) has the rest.
 

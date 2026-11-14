@@ -1,6 +1,6 @@
 # Member environments
 
-Every member has an environment: their own container on the server where agent
+Every member has an environment: their own sandbox on the server where agent
 CLIs and system tools are installed, and from which every session they launch
 starts. Read this to install tools for your agents, save them, and understand
 the limits on what a session can use. Terms such as member, session and workspace are
@@ -10,7 +10,7 @@ in the [glossary](README.md#concepts).
 flowchart LR
     std["Standard image"] -->|"used until you save"| env["Your environment"]
     env -->|"Save environment"| saved["Your saved image"]
-    saved -->|"new sessions start from it"| run["Each session's container"]
+    saved -->|"new sessions start from it"| run["Each session's sandbox"]
     std -.->|"if nothing is saved"| run
     home[("Your home directory")] --- env
     home --- run
@@ -44,7 +44,7 @@ The server uses the image tagged for its own release, from
 
 ### Git in session environments
 
-Aether commits for a session with the Git in the session's container. Stock Ubuntu
+Aether commits for a session with the Git in the session's sandbox. Stock Ubuntu
 24.04 Git is enough. These commits do not run commit hooks, so if your
 repository needs hooks, run `git commit` in the session's terminal. A custom image
 whose Git lacks prepared reference transactions (`git update-ref --stdin`
@@ -118,7 +118,7 @@ pushed to a registry.
 - Saving needs a running terminal. If it is stopped, `aether env save` fails
   with `environment terminal is not running`. Open it with `aether terminal`,
   check your changes are there, then save.
-- The environment container survives a stop, a shell exit and a server
+- The environment survives a stop, a shell exit and a server
   restart, so unsaved changes stay until you reset. Aether recreates the
   container, and the unsaved changes are lost, when the next open finds
   different settings than the container was created with (the standard image,
@@ -202,10 +202,10 @@ forgets your saved image and removes it and your previous image from the server.
 home are lost. The next open and all new sessions use the standard image.
 
 On a terminal the command asks
-`This destroys your Environment's container, unsaved changes and saved image. Your home stays. Reset? [y/N]: `.
+`This destroys your Environment's sandbox, unsaved changes and saved image. Your home stays. Reset? [y/N]: `.
 Anything but `y` or `yes` prints `aether: aether env reset: nothing was reset`
 and exits 1. Without a terminal it needs `--yes`, or it fails with
-`aether: --yes is required because aether env reset destroys your Environment's container, unsaved changes and saved image: aether env reset --yes`.
+`aether: --yes is required because aether env reset destroys your Environment's sandbox, unsaved changes and saved image: aether env reset --yes`.
 
 **Stop environment…** (`aether terminal stop`) only stops the container. Your
 home, saved image and unsaved changes stay.
@@ -280,7 +280,7 @@ How the boundary differs from the host is in
 
 ## Resource limits and launch admission
 
-Each new session and environment container gets a ceiling on CPU, memory and
+Each new session and environment gets a ceiling on CPU, memory and
 processes. An admin changes the defaults with `aether-server serve` flags:
 
 | Flag | Default (`0`) | What it limits |
@@ -447,13 +447,13 @@ removes the session's browser companion, the Chromium container behind its
 Browser tab; a relaunched session creates a new companion when its Browser
 tab is next used.
 [What stays after a session ends](failure-handling.md#what-stays-after-a-session-ends)
-covers Close, Kill, **Free container…** and Delete.
+covers Close, Kill, **Free sandbox…** and Delete.
 
 ## Workspace environment
 
 A workspace is a repository you run agents against. Its environment applies
 to every new session in it, whoever launches it: a **setup script** that runs
-before the agent, **variables** set in the session's container, and optional
+before the agent, **variables** set in the session's sandbox, and optional
 **egress control**, which limits the hosts sessions can reach. A variable can be
 marked **secret**.
 
@@ -476,8 +476,8 @@ aether workspace env script --file setup.sh    # replace it; - reads stdin
 aether workspace env script --clear
 ```
 
-The script (for a Node project, one line: `npm ci`) runs once in each new
-session's container, after it starts and before the agent. It runs as `/bin/sh -ec`
+The script (for a Node project, one line: `npm ci`) runs in each new
+session's sandbox, after it starts and before the agent. It runs as `/bin/sh -ec`
 (POSIX `sh`, stops at the first failing command, stderr merged into stdout) in
 `/workspace` as the session's user, which is never root. A session with
 extra repos (`aether session --repo`) runs it in the primary one; the others are at

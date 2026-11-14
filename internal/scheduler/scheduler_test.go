@@ -1646,8 +1646,8 @@ func TestContainerAddrRequiresSupervisedRun(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, err := e.sched.ContainerAddr(t.Context(), "run_missing")
-	if err == nil || err.Error() != "session has no live container" {
-		t.Fatalf("ContainerAddr missing = %v, want session has no live container", err)
+	if err == nil || err.Error() != "session has no live sandbox" {
+		t.Fatalf("ContainerAddr missing = %v, want session has no live sandbox", err)
 	}
 }
 

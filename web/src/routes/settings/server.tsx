@@ -159,7 +159,7 @@ function RunLimitsRow({ client }: { client: Api }) {
     <SettingRow
       id="run-limits"
       label="Session limits"
-      help={`Memory, CPU and process ceiling for every session's container, applied to sessions started after you save. A session's launch options can override them. Now: ${limitsText(limits.effective)}.`}
+      help={`Memory, CPU and process ceiling for every session's sandbox, applied to sessions started after you save. A session's launch options can override them. Now: ${limitsText(limits.effective)}.`}
       control={(
         <Button size="sm" disabled={draft === null || saving || !parsed.limits} onClick={save}>
           {saving ? 'Saving…' : 'Save'}
@@ -240,13 +240,13 @@ function RetainedContainersRow() {
   return (
     <SettingRow
       id="retained-containers"
-      label="Retained containers"
+      label="Retained sandboxes"
       help={count > 0
-        ? `${count} finished ${count === 1 ? 'session keeps its' : 'sessions keep their'} container${where}. Removing containers prevents reopening those sessions; it does not delete all session data, homes, repositories or history.`
-        : `No finished session keeps a container${where}.`}
+        ? `${count} finished ${count === 1 ? 'session keeps its' : 'sessions keep their'} sandbox${where}. Removing sandboxes prevents reopening those sessions; it does not delete all session data, homes, repositories or history.`
+        : `No finished session keeps a sandbox${where}.`}
       control={(
         <Button size="sm" variant="secondary" disabled={count === 0} onClick={() => openDialog('release-finished')}>
-          Free retained containers…
+          Free retained sandboxes…
         </Button>
       )}
     />

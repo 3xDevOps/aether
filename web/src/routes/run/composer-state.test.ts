@@ -105,8 +105,8 @@ describe('composerBlock for a finished run', () => {
   const finished = (reason: string) => toRecord(run({ status: 'merged', reason }))
 
   it.each([
-    ['retained container reclaimed for disk space', 'This session has finished. Its container was removed early because disk space was low.'],
-    ['retained container expired', 'This session has finished. Its container was removed when it expired.'],
+    ['retained container reclaimed for disk space', 'This session has finished. Its sandbox was removed early because disk space was low.'],
+    ['retained container expired', 'This session has finished. Its sandbox was removed when it expired.'],
     ['closed', 'This session has finished.'],
   ])('says why a released container is gone: %s', (reason, text) => {
     expect(composerBlock(finished(reason), true, false)).toBe(text)

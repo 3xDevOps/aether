@@ -269,8 +269,8 @@ linked to its existing workspace.
 An **agent** is the coding CLI a session starts: Claude Code, Codex, OpenCode, pi,
 oh-my-pi, GitHub Copilot CLI, Gemini CLI, Cursor CLI or Antigravity CLI. Agents
 run on the server, not on your computer. You install each one in your
-**environment**, your own container there, with the vendor's own login. Your
-**home** there persists, so this is done once.
+**environment**, your own sandbox there (a container or virtual machine), with
+the vendor's own login. Your **home** there persists, so this is done once.
 
 1. In **Onboarding → Agent**, or on the **Agents** page, click **Set up**
    beside an agent.
@@ -333,7 +333,7 @@ the setup ([environment-home.md](environment-home.md#from-the-cli)).
 
 ## 6. Launch a session
 
-A **session** is one agent on one task, in its own container and on its own git
+A **session** is one agent on one task, in its own sandbox and on its own git
 branch. It uses your home, so your agent login and configuration come along.
 
 In the dashboard, click **New session**, or continue to onboarding's **First session**,

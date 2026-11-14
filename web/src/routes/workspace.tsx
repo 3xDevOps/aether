@@ -155,7 +155,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
             <SettingsSection title="Danger zone" heading="h2" tone="danger">
               <SettingRow
                 label="Delete this workspace"
-                help="Deletes its finished sessions, retained containers, files, history and server repository. Members and their environments stay."
+                help="Deletes its finished sessions, retained sandboxes, files, history and server repository. Members and their environments stay."
                 control={<Button size="sm" variant="danger" onClick={() => setDialog('delete')}>Delete…</Button>}
               />
             </SettingsSection>
@@ -175,7 +175,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
       {dialog === 'delete' && (
         <Confirm
           title={`Delete ${workspace.name}?`}
-          description="This permanently deletes the workspace, its finished sessions, retained containers, files, history and server repository. Members, their environments and external repositories stay."
+          description="This permanently deletes the workspace, its finished sessions, retained sandboxes, files, history and server repository. Members, their environments and external repositories stay."
           action="Delete workspace"
           onConfirm={() => client.workspaceDelete(workspaceID)}
           onDone={() => {

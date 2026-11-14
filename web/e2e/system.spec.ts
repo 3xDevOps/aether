@@ -37,7 +37,7 @@ test('Insights › System measures a running run and opens it from the list', as
 
   await expect(page.getByRole('group', { name: 'CPU', exact: true })).toContainText(/\d%/, { timeout: 30_000 })
   await expect(page.getByRole('group', { name: 'Memory', exact: true })).toContainText(/ of /)
-  const row = page.getByRole('list', { name: 'Containers by usage' }).getByRole('button', { name: new RegExp(task) })
+  const row = page.getByRole('list', { name: 'Sandboxes by usage' }).getByRole('button', { name: new RegExp(task) })
   await expect(row).toContainText(/cores · .*% of host/, { timeout: 30_000 })
 
   await row.click()

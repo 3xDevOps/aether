@@ -102,7 +102,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
       title="No sessions yet"
       action={withAsk(canLaunch({ cap: caps, role }) && <Button variant={mobile ? 'secondary' : 'primary'} onClick={() => openDialog('launch')}>New session</Button>)}
     >
-      A session is one agent working on its own branch in its own container.
+      A session is one agent working on its own branch in its own sandbox, a container or virtual machine on the server.
     </EmptyState>
   )
 }

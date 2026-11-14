@@ -383,7 +383,7 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 		return fmt.Errorf("scheduler: finish reported session %s: %w", run, err)
 	}
 	if !r.Status.Terminal() {
-		return fmt.Errorf("scheduler: finish reported session %s: the session is %s and has no live container yet", run, r.Status)
+		return fmt.Errorf("scheduler: finish reported session %s: the session is %s and has no live sandbox yet", run, r.Status)
 	}
 	base, note := withoutCleanupNote(r.Reason)
 	exited := (r.Status == domain.RunCompleted && base == exitedCompletedReason) ||
@@ -492,7 +492,7 @@ func (s *Scheduler) requireFinished(ctx context.Context, run domain.RunID, what 
 	if r.Status.Terminal() {
 		return finished
 	}
-	return fmt.Errorf("scheduler: %s %s: the session is %s and has no live container yet", what, run, r.Status)
+	return fmt.Errorf("scheduler: %s %s: the session is %s and has no live sandbox yet", what, run, r.Status)
 }
 
 // startReportedFinishLocked finishes an armed run off the caller's path so

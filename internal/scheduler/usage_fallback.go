@@ -841,7 +841,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	}
 	s.cfg.PTY.StopSessionsWithPrefix(ctx, string(ptyhost.RunShellSession(run.ID, "")))
 	if derr := s.destroyDevelopmentContainer(ctx, run.ID, cid); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
-		return failed(fmt.Errorf("remove the container on %s's account: %w", fromName, derr))
+		return failed(fmt.Errorf("remove the sandbox on %s's account: %w", fromName, derr))
 	}
 	s.mu.Lock()
 	entry.containerID = ""

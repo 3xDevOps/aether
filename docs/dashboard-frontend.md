@@ -2,7 +2,7 @@
 
 The dashboard is the browser client for Aether. A **workspace** is one
 repository and base branch; a **session** is one agent working on its own branch
-in its own container. The dashboard shows a member's sessions, lets them launch,
+in its own sandbox, a container or virtual machine on the server. The dashboard shows a member's sessions, lets them launch,
 watch, message and review them, and holds the pages for agents, files,
 templates, members and settings.
 
@@ -1698,7 +1698,7 @@ server drops the reply.
 scope (Mine applies); **Back to Finished** returns. Archived sessions have no
 automatic deletion countdown. **More finished-run actions** (`…`, in the Finished
 heading, only when it has an item) holds **Archive finished sessions…** and, for
-admins, **Free retained containers…**. Both open the
+admins, **Free retained sandboxes…**. Both open the
 store-hosted confirmations (`src/components/palette/clear-done-dialog.tsx`,
 drawn by `src/routes/board/clear-done-dialog.tsx`) over a plan snapshotted
 when they open: `clearDonePlan()` and `releaseFinishedPlan()` in
@@ -1741,7 +1741,7 @@ review, state, pause or pending requests); one deleted meanwhile is dropped
 without an error, and a skipped or
 failed close leaves it live and unarchived, and the toast names each session
 that failed with its error.
-Freeing removes a retained container and keeps the session and its history.
+Freeing removes a retained sandbox and keeps the session and its history.
 
 **Empty board.** With no sessions in scope the board names the first unmet
 requirement, with one sentence and one button:
@@ -1754,7 +1754,7 @@ requirement, with one sentence and one button:
 3. `agent.list` reports nothing installed: **Set up an agent** (Agents);
 4. Mine hides every session in scope: **Show everyone's sessions**;
 5. otherwise: "A session is one agent working on its own branch in its own
-   container." and **New session**, for members who may launch.
+   sandbox, a container or virtual machine on the server." and **New session**, for members who may launch.
 
 Loading shows two delayed card-sized skeletons per group; a hydrated empty
 group says "Nothing here.". An unreachable server shows its error in place
@@ -2437,7 +2437,7 @@ It is reached from the workspace switcher, `g` then `l` and the palette's
 capability gate, optional confirmation and call. Session verbs (`runCommands`):
 **Pause session** / **Resume session**, **Send a message to the agent…**, **Forward a
 port…** (local gateway), **Close session…**, **Kill run**, **Delete run**, **Free
-container…**, **Archive run** / **Restore run**, **Protect run** /
+sandbox…**, **Archive run** / **Restore run**, **Protect run** /
 **Unprotect run**, **Relaunch**, **Pull branch** (local gateway) and **Hand
 off to <member>**. Pull branch fetches the session branch into the linked
 repository; unless you are already on that branch, its toast offers **Switch
@@ -2446,7 +2446,7 @@ reason) and **Copy command** (`git switch <branch>`). Board verbs (`boardCommand
 all workspaces**, **Connect ChatGPT or Claude** (these three in the Navigate
 group), **Ask Aether** (opens the assistant; offered when the server
 serves `assistant.status`), **New session…**, **Launch from a template…**,
-**Archive finished sessions…**, **Free retained containers…** and the three theme
+**Archive finished sessions…**, **Free retained sandboxes…** and the three theme
 commands. Each verb is offered only when the server would allow it: the gates
 ask the same questions `internal/permissions` does. `useCommandRunner()`
 reports gateway success or its real refusal in both the session's More menu and
@@ -2530,7 +2530,7 @@ the server's events with an RPC response.
   neither confirms, since archiving is reversible. The palette resolves its
   focused session from the session map by `route.params.runId` rather than the session
   list, so an archived session's own page still offers Restore.
-- **Free container…** removes a finished session's retained container and keeps
+- **Free sandbox…** removes a finished session's retained sandbox and keeps
   the session and its history; the session can no longer be reopened. It needs
   `run.release`, the kill permission and a retained-container reason
   (`isRetainedRun`). A freed or expired session no longer offers it, and the
@@ -2551,7 +2551,7 @@ the server's events with an RPC response.
   repository on this machine, so it answers to `hasLocal('pull')` alone. It
   does not refresh a workspace base or authorize a mirror source.
 
-A command with a `confirm` field - Kill, Delete and Free container - opens
+A command with a `confirm` field - Kill, Delete and Free sandbox - opens
 the session-naming confirmation (`run-command-confirmation.tsx`) from More or the
 palette, with Cancel initially focused. **Close session…** opens its own dialog,
 which asks whether the work was merged or abandoned; a choice closes it and
@@ -3007,7 +3007,7 @@ The actions, in order:
    which the composer replaces, then **Hand off…**, the mode switch,
    **Open in editor…**, **Captures…** and **Raw events…**, then **Close
    session…**, **Kill run** and **Delete run** after a separator. Kill, Delete
-   and **Free container…** confirm first. Where the server offers
+   and **Free sandbox…** confirm first. Where the server offers
    `run.children.allow`, the owner of a live session also gets
    **Allow subsessions** (`run.children.allow` `on`), and the owner or an
    admin **Turn off subsessions** on a session that allowed them.
@@ -3070,7 +3070,7 @@ when the session page opens, every 60
 seconds while the page is visible, after each push or creation in the
 dialog, and at once on a `run.pr` or `git.branch` event for the session. The header and the [git card](#changes-view-and-publish)
 share one poll per session however many of them are mounted. It re-reads `run.git.status` only when the answer says the branch or
-HEAD moved. Both calls execute `git` and `gh` in the session's container, so the
+HEAD moved. Both calls execute `git` and `gh` in the session's sandbox, so the
 check state exists only while the session is `running` or `needs-attention`: a
 session that leaves those states keeps the link and drops the state, and a page
 loaded after that shows neither. The board and sidebar show no pull request.
@@ -3889,7 +3889,7 @@ focus raises a soft keyboard. The frame renders one `TakeoverDialog`
 above every sheet and dialog for the holder's decision; the dialog restores
 the interrupted focus.
 
-**Shells.** A shell is a shared development terminal in the session's container
+**Shells.** A shell is a shared development terminal in the session's sandbox
 ([terminal.md](terminal.md#session-shells)). **+ Shell** (named "New shell")
 starts one with `dev.terminal.start`. `useRunShells(runID, visible)` in
 `shells.tsx` lists them with `dev.terminal.list` every two seconds while the
@@ -5188,8 +5188,8 @@ whatever opened it. Sections (`details.tsx`):
   already-deleted note drops its own sticky too, rather than leaving an orphan.
 - **Details**: the task, Owner, Agent account (when it is someone else's),
   Agent and mode, Branch, Created, Changed, Last commit, In control,
-  Watching, Container ("Starting", "Running", "Stopped, kept for reopening"
-  or "Removed"), Container size (what the session wrote inside its container
+  Watching, Sandbox ("Starting", "Running", "Stopped, kept for reopening"
+  or "Removed"), Sandbox size (what a Docker session wrote inside its container
   outside the mounted home, checkout and cache; shown to the session's owner and
   admins once measured), Archived, and **Last reason**, the server's `run.reason`, so
   a parked error or stall detail the reason line leaves out is never hidden.
@@ -6209,7 +6209,7 @@ protocol](local-gateway.md#files-and-member-configuration) for the
 ## Environment
 
 `src/routes/environment/` is the member's **Environment**: a shell into their
-own long-lived container, where they install tools, log in to agents and save
+own long-lived sandbox, where they install tools, log in to agents and save
 the result as the image new sessions start from
 ([environment-home.md](environment-home.md)). It is reached through the
 header's **Environment** button (or **More navigation → Environment**) or
@@ -6246,8 +6246,8 @@ menu.
 
 From the moment a tab opens until its attach is acked, a spinner covers the
 terminal. The words follow what the dock knows: a terminal it has not seen
-running is **Starting your environment container**, the wait Docker's
-container start accounts for; a second tab, a tab switch or an expanded dock
+running is **Starting your environment**, the wait its sandbox's
+start accounts for; a second tab, a tab switch or an expanded dock
 is **Connecting to your environment**. A refused or failed start replaces the
 terminal with the gateway's own error and **Retry**.
 
@@ -6637,7 +6637,7 @@ has loaded.
 - **Save** sends one `workspace.environment.set` holding only what changed,
   so an untouched secret is never named. It is disabled until something
   differs; **Unsaved changes.** and **Discard** show while it does. Beside it
-  the page says what a save reaches: sessions launched afterwards, not containers
+  the page says what a save reaches: sessions launched afterwards, not sandboxes
   that exist. A row that cannot be saved - no name, a name used twice, `=` in
   a name, a secret with no value - is marked on **Save**, which focuses it and
   sends nothing. The server's refusal shows verbatim under **Not saved**, and
@@ -6694,7 +6694,7 @@ while one of its entries is visible, so the nav and search never disagree.
 | You | Subsessions (`children`) | Subsessions (`child-runs`): the on/off switch, Limits (`child-limits`) |
 | You | Usage (`usage`) | Subscription usage (`subscription-usage`) |
 | This computer | This computer (`this-computer`) | Link (`link`); Syncing: Sync daemon (`sync-daemon`), Mirror session files (`mirror`); Danger zone (`danger-zone`) |
-| Server | Server (`server`) | Status: Version (`version`), Tailnet dashboard, Disk and performance (`disk`); Admin: Docker inside sessions (`docker`), Retained containers (`retained-containers`) |
+| Server | Server (`server`) | Status: Version (`version`), Tailnet dashboard, Disk and performance (`disk`); Admin: Docker inside sessions (`docker`), Retained sandboxes (`retained-containers`) |
 | Server | Remote access (`remote-access`) | Edge (`edge`) |
 
 **Addressing.** The route is `{name: "settings", params: {section}}`, and
@@ -6879,7 +6879,7 @@ Categories:
   verbatim and the restart command a config change needs, re-read every 30
   seconds while the category is open because the server keeps retrying; and
   **Disk and performance**, a link to [Insights › System](#insights). For
-  admins, **Free retained containers…** opens the same confirmation as the
+  admins, **Free retained sandboxes…** opens the same confirmation as the
   board's Finished menu for the active workspace. It prevents reopening those
   sessions but does not delete all session data: checkouts, homes, repositories and
   history retain their existing lifecycle.
@@ -7462,7 +7462,7 @@ that runs a newer release than a client refuses that client
       list, using the server's definition of busy: a paused session and one
       parked at needs-attention do not count. The dialog says what the
       restart costs: sessions keep going because the server reattaches to
-      their containers, and attached terminals reconnect on their own. The
+      their sandboxes, and attached terminals reconnect on their own. The
       confirm calls `server.update` with `when: "now"`. Update when idle
       sends `when: "idle"`, and the row becomes *Server X is scheduled.
       Scheduled by <member>, applies when no session is active.*, with a
@@ -8025,9 +8025,9 @@ notification frame and fallback timer.
 
 Session actions cover the retained-run contract: Close chooses merged or abandoned,
 while Reopen run appears only for eligible retained Standard sessions. Free
-container is also offered for finished retained subsessions; its
+sandbox is also offered for finished retained subsessions; its
 confirmation and error path do not hide or delete history. Expired or
-unavailable sessions offer no Free container. Sidebar tests cover group
+unavailable sessions offer no Free sandbox. Sidebar tests cover group
 disclosure: every group starts expanded and closes when its header is pressed.
 They also cover an unopened finish: the row and a nested subsession keep the text
 colour and say so in their names until `finish_unopened` clears. They also

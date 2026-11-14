@@ -1121,7 +1121,7 @@ func TestMoveThatCannotRemoveTheOldContainerKeepsIt(t *testing.T) {
 	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
 
 	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	if got.Reason != "Usage limit reached on Ada's account; continuing on Grace's account failed: remove the container on Ada's account: daemon busy" {
+	if got.Reason != "Usage limit reached on Ada's account; continuing on Grace's account failed: remove the sandbox on Ada's account: daemon busy" {
 		t.Fatalf("reason %q", got.Reason)
 	}
 	waitFor(t, "the old container kept for cleanup", func() bool {

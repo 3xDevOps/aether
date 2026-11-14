@@ -12,7 +12,7 @@ export const permissions: { value: Permission; label: string; description: strin
     value: 'root',
     label: 'Root access',
     description: 'sudo runs without asking',
-    detail: 'The agent can install system packages and change anything in its container, as well as your home.',
+    detail: 'The agent can install system packages and change anything in its sandbox, as well as your home.',
   },
   {
     value: 'default',

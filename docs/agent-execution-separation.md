@@ -53,7 +53,7 @@ for owned processes and terminals, not just gaps between model requests.
 
 ## Aether's current boundary and adapter findings
 
-Aether runs the native CLI and its tools in the same session container. Enhanced
+Aether runs the native CLI and its tools in the same session sandbox. Enhanced
 mode changes the session protocol and presentation, not execution placement.
 The [ACP host](../internal/acphost/conn.go) advertises terminal authentication
 and output display, not client-side filesystem or terminal execution.

@@ -179,7 +179,7 @@ describe('settings view', () => {
     const server = screen.getByRole('region', { name: 'Server' })
     fireEvent.click(within(server).getByRole('button', { name: 'Update…' }))
     expect(useStore.getState().updatesOpen).toBe(true)
-    fireEvent.click(within(server).getByRole('button', { name: 'Free retained containers…' }))
+    fireEvent.click(within(server).getByRole('button', { name: 'Free retained sandboxes…' }))
     expect(useStore.getState().paletteDialog).toBe('release-finished')
   })
 
@@ -224,7 +224,7 @@ describe('settings view', () => {
     render(<SettingsRoute params={{ section: 'server' }} client={fakeApi()} />)
     const server = screen.getByRole('region', { name: 'Server' })
     expect(within(server).getByText('Version')).toBeDefined()
-    expect(within(server).queryByText('Retained containers')).toBeNull()
+    expect(within(server).queryByText('Retained sandboxes')).toBeNull()
   })
 
   it('leaves disk figures to Insights › System and links there', () => {

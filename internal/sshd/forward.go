@@ -73,7 +73,7 @@ func (s *Server) handleDirectTCPIP(ctx context.Context, member domain.MemberID, 
 		defer release()
 		addr, err = s.cfg.Runs.ContainerAddr(ctx, runID)
 		if err != nil || addr == "" {
-			rejectDirectTCPIP(nc, ssh.Prohibited, "session has no live container")
+			rejectDirectTCPIP(nc, ssh.Prohibited, "session has no live sandbox")
 			return
 		}
 	default:

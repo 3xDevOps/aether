@@ -137,7 +137,7 @@ export function AssistantSignIn({ agent, client, onDone, onBack, terminal: termi
         </div>
       )}
       <p className="text-ui">
-        Sign in to {agent.display_name} for the assistant. The sign-in runs in the assistant's own container and is kept there, apart from your sessions, which cannot read or change it.
+        Sign in to {agent.display_name} for the assistant. The sign-in runs in the assistant's own sandbox and is kept there, apart from your sessions, which cannot read or change it.
       </p>
       {refused && (
         <Callout tone="failed" role="alert" title="The sign-in could not start" actions={<Button size="sm" variant="secondary" onClick={retry}>Try again</Button>}>

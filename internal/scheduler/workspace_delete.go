@@ -67,7 +67,7 @@ func (s *Scheduler) WithInactiveWorkspace(ctx context.Context, id domain.Workspa
 			return scErr
 		}
 		if scErr == nil && sc.ContainerID != "" {
-			return fmt.Errorf("%w: session %s still has a container mounting this workspace as an extra repository; delete that session first", ErrInvalidTransition, run)
+			return fmt.Errorf("%w: session %s still has a sandbox mounting this workspace as an extra repository; delete that session first", ErrInvalidTransition, run)
 		}
 	}
 	return cleanup(runs)

@@ -13,9 +13,10 @@ workspace.
 
 ## Where it runs
 
-Each member's assistant runs in a container of its own,
-`aether-assistant-<member>`, created from the server's standard image. Your
-sessions and your [environment](environments.md) (the persistent container
+Each member's assistant runs in a sandbox of its own, created from the
+server's standard image: the container `aether-assistant-<member>`, or with
+`session-runtime vm` the VM unit `aether-vm-assistant-<member id>.service`.
+Your sessions and your [environment](environments.md) (the persistent sandbox
 `aether terminal` opens) cannot see it:
 
 - Its home is `<data>/assistant/<member>/home` on the server. It mounts

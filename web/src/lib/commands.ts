@@ -286,7 +286,7 @@ export async function runReleaseFinished(
   if (failures.length > 0) {
     toast.error(`Freed ${released}, ${failures.length} failed: ${failures[0]}`)
   } else {
-    toast.success(`Freed the containers of ${released} ${released === 1 ? 'session' : 'sessions'}`)
+    toast.success(`Freed the sandboxes of ${released} ${released === 1 ? 'session' : 'sessions'}`)
   }
 }
 
@@ -511,14 +511,14 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   if (cap.hasMethod('run.release') && mayKill && isRetainedRun(run)) {
     list.push({
       id: 'release',
-      label: 'Free container…',
+      label: 'Free sandbox…',
       Icon: PackageX,
       value: 'release cleanup',
-      done: 'Freed container',
+      done: 'Freed sandbox',
       confirm: {
-        title: 'Free this session’s container?',
-        body: 'Its compute is released and the exact process cannot be reopened. Files, result branches and history have separate lifetimes; this does not delete all session data or archive it.',
-        action: 'Free container',
+        title: 'Free this session’s sandbox?',
+        body: 'Its sandbox is removed and the exact process cannot be reopened. Files, result branches and history have separate lifetimes; this does not delete all session data or archive it.',
+        action: 'Free sandbox',
       },
       predict: () => ({ runID: id, record: { container_retained_until: undefined, cleanup_pending: undefined } }),
       slow: true,
@@ -748,7 +748,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('run.release')) {
     list.push({
       id: 'release-finished',
-      label: 'Free retained containers…',
+      label: 'Free retained sandboxes…',
       Icon: PackageX,
       value: 'release cleanup',
       perform: (d) => d.openDialog('release-finished'),

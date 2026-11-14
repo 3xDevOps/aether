@@ -173,12 +173,12 @@ function Rows({ stats, metric, rows, result, capacity }: { stats: SystemStats; m
   if (stats.containersError && stats.containers.length === 0) {
     return <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{stats.containersError}</Callout>
   }
-  if (stats.containersAt === 0) return <p className="text-ui text-muted">Measuring containers…</p>
-  if (stats.containers.length === 0) return <p className="text-ui text-muted">No run containers are running.</p>
+  if (stats.containersAt === 0) return <p className="text-ui text-muted">Measuring sandboxes…</p>
+  if (stats.containers.length === 0) return <p className="text-ui text-muted">No sandboxes are running.</p>
   return (
     <>
       {stats.containersError && <p className="whitespace-pre-wrap break-words text-ui-sm text-state-failed">{stats.containersError}</p>}
-      <ul aria-label="Containers by usage" className="flex min-w-0 flex-col divide-y divide-seam">
+      <ul aria-label="Sandboxes by usage" className="flex min-w-0 flex-col divide-y divide-seam">
         {rows.map((c) => {
           const key = containerKey(c)
           const slot = result.slots.get(key)
@@ -191,7 +191,7 @@ function Rows({ stats, metric, rows, result, capacity }: { stats: SystemStats; m
           const level = limitLevel(share)
           const history = stats.history.get(key)?.[metric] ?? []
           const hostShare = capacity > 0 ? percentText((value / capacity) * 100) : ''
-          const sub = c.owner_kind === 'member' ? 'Environment container' : names.member(c.member_id)
+          const sub = c.owner_kind === 'member' ? 'Environment sandbox' : names.member(c.member_id)
           // The Environment page opens only the viewer's own environment.
           const open = c.owner_kind !== 'member' ? () => navigate('run', { runId: c.owner_id }) : c.owner_id === selfID ? () => navigate('environment') : undefined
           const rowClass = 'flex h-auto w-full min-w-0 items-center justify-start gap-3 whitespace-normal px-1.5 py-2 text-left font-normal text-text'
@@ -259,7 +259,7 @@ function EverythingElse({ rest, stats, metric }: { rest: number; stats: SystemSt
       </p>
       {stats.others && (
         <p className="flex justify-between gap-2">
-          <span>Other containers ({stats.others.containers})</span>
+          <span>Other sandboxes ({stats.others.containers})</span>
           <span className="tabular-nums">{amount(metric, others)}</span>
         </p>
       )}

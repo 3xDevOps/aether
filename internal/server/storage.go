@@ -199,7 +199,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 				continue
 			}
 			e.OwnerKind, e.OwnerID = "run", string(run.ID)
-			e.Reason = "Session /tmp; removed when the session's container is removed"
+			e.Reason = "Session /tmp; removed when the session's sandbox is removed"
 		case "repo":
 			workspace, err := d.Store.GetWorkspace(ctx, domain.WorkspaceID(e.Key))
 			if err != nil {

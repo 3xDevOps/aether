@@ -130,7 +130,7 @@ export function AgentSetup({
           <>
             <p className="text-ui text-text">
               {needsInstall
-                ? `Installs ${name}${enhanced && agent.enhanced === 'adapter' ? ' and its Enhanced adapter' : ''} in your environment, the container Aether keeps for you on the server. Every workspace uses it.`
+                ? `Installs ${name}${enhanced && agent.enhanced === 'adapter' ? ' and its Enhanced adapter' : ''} in your environment, the sandbox (a container or virtual machine) Aether keeps for you on the server. Every workspace uses it.`
                 : `${name} is installed in your environment${enhanced ? ' with Enhanced' : ''}.`}
             </p>
             <div className="flex flex-wrap items-center gap-2">

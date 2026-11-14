@@ -19,7 +19,7 @@ function renderSystem(over: Partial<Api> = {}) {
   return client
 }
 
-const rows = () => within(screen.getByRole('list', { name: 'Containers by usage' })).getAllByRole('listitem')
+const rows = () => within(screen.getByRole('list', { name: 'Sandboxes by usage' })).getAllByRole('listitem')
 
 describe('system tab', () => {
   it('shows six tile placeholders and keeps the sentence for assistive technology', async () => {
@@ -40,7 +40,7 @@ describe('system tab', () => {
     expect(memory.textContent).toContain('8.0 GB of 16 GB · swap 0 B of 2.0 GB')
     expect(screen.getByRole('group', { name: 'Disk' }).textContent).toContain('25%')
     expect(screen.getByRole('group', { name: 'Network' }).textContent).toContain('↓ 117 KB/s ↑ 29 KB/s')
-    expect(screen.getByRole('group', { name: 'Containers' }).textContent).toContain('9 running8 sessions · 1 environment · up 3d 4h')
+    expect(screen.getByRole('group', { name: 'Sandboxes' }).textContent).toContain('9 running8 sessions · 1 environment · up 3d 4h')
     expect(screen.getByRole('group', { name: 'Pressure' }).textContent).toContain('CPU 2.0% · Memory 0.0% · I/O 0.5%')
     expect(screen.getByRole('status').textContent).toBe('Live · every 5s')
     expect(client.systemStats).toHaveBeenCalledWith({ since_ms: 0 }, expect.any(AbortSignal))
@@ -48,7 +48,7 @@ describe('system tab', () => {
 
   it('filters the ranked list to the Other runs slice and clears it', async () => {
     renderSystem()
-    await screen.findByRole('list', { name: 'Containers by usage' })
+    await screen.findByRole('list', { name: 'Sandboxes by usage' })
     expect(rows()).toHaveLength(9)
     expect(rows()[0]!.textContent).toContain('rewrite the checkout flow')
 
@@ -64,7 +64,7 @@ describe('system tab', () => {
 
   it('opens the run behind a row', async () => {
     renderSystem()
-    await screen.findByRole('list', { name: 'Containers by usage' })
+    await screen.findByRole('list', { name: 'Sandboxes by usage' })
 
     fireEvent.click(within(rows()[0]!).getByRole('button'))
 
@@ -73,8 +73,8 @@ describe('system tab', () => {
 
   it("opens only the viewer's own environment", async () => {
     renderSystem()
-    await screen.findByRole('list', { name: 'Containers by usage' })
-    expect(rows()[1]!.textContent).toContain('Environment container')
+    await screen.findByRole('list', { name: 'Sandboxes by usage' })
+    expect(rows()[1]!.textContent).toContain('Environment sandbox')
     expect(within(rows()[1]!).queryByRole('button')).toBeNull()
     cleanup()
 
@@ -83,21 +83,21 @@ describe('system tab', () => {
         containers: [systemContainer({ owner_kind: 'member', owner_id: alice.id, member_id: alice.id, title: undefined, status: undefined })],
       })),
     })
-    await screen.findByRole('list', { name: 'Containers by usage' })
+    await screen.findByRole('list', { name: 'Sandboxes by usage' })
     fireEvent.click(within(rows()[0]!).getByRole('button'))
     expect(useStore.getState().route).toEqual({ name: 'environment', params: {} })
   })
 
   it('starts over when the signed-in identity changes', async () => {
     const client = renderSystem()
-    await screen.findByRole('list', { name: 'Containers by usage' })
+    await screen.findByRole('list', { name: 'Sandboxes by usage' })
     const read = vi.mocked(client.systemStats)
     read.mockClear()
     read.mockImplementation(async () => systemStats({ containers: [], others: undefined }))
 
     act(() => useStore.setState({ identityKey: 'another-server' }))
 
-    expect(await screen.findByText('No run containers are running.')).toBeDefined()
+    expect(await screen.findByText('No sandboxes are running.')).toBeDefined()
     expect(read).toHaveBeenCalledWith({ since_ms: 0 }, expect.any(AbortSignal))
   })
 

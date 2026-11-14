@@ -8,7 +8,7 @@ that runs coding agents for you and your team. If you are new, start with the
 
 | Term | Meaning | Guide |
 | --- | --- | --- |
-| Server | `aether-server`, the Linux program that runs agents in Docker containers and stores your workspaces. Clients reach it over SSH, on port `2222` by default, over a tailnet, or through an edge. | [install.md](install.md) |
+| Server | `aether-server`, the Linux program that runs agents in Docker containers or virtual machines and stores your workspaces. Clients reach it over SSH, on port `2222` by default, over a tailnet, or through an edge. | [install.md](install.md) |
 | Client | What you use to reach a server: the `aether` CLI (Linux, macOS, Windows), the desktop app, or the Android app. | [install.md](install.md) |
 | Dashboard | The web app for sessions, agents, files and settings. The desktop app, `aether gui` and the Android app show it, and the server can host it on a tailnet. | [networking.md](networking.md#the-dashboard) |
 | Tailnet | A private network made with Tailscale. On a tailnet the server can sign people in by their Tailscale login and host the dashboard. | [networking.md](networking.md) |
@@ -22,10 +22,11 @@ that runs coding agents for you and your team. If you are new, start with the
 | Workspace | One repository and its base branch (the branch new sessions start from), plus the sessions, notes and history that belong to it. Members reach only the workspaces they own or were granted. | [teams.md](teams.md) |
 | Source mirror | A workspace imported from GitHub or another Git host follows that repository: the server's mirror fetches it read-only and moves the base branch forward. A workspace without one is local-only, and collaborators push its base branch. | [teams.md](teams.md#source-mirror) |
 | Publish destination | The repository sessions push their branches to, shown as **Publish changes to**: the source repository, a fork, or none. | [teams.md](teams.md#workspaces) |
-| Session | One agent working on one task in its own container, with its own checkout of the workspace and optionally of other workspaces ([extra repos](quickstart.md#working-across-repos)). A closed session keeps its container for 7 days, so you can relaunch it. | [quickstart.md](quickstart.md) |
+| Sandbox | What a session or environment runs in on the server: a Docker container, or a Cloud Hypervisor virtual machine when the server runs with `session-runtime vm`. | [install.md](install.md#hosts-for-vm-sessions) |
+| Session | One agent working on one task in its own sandbox, with its own checkout of the workspace and optionally of other workspaces ([extra repos](quickstart.md#working-across-repos)). A closed session keeps its sandbox for 7 days, so you can relaunch it. | [quickstart.md](quickstart.md) |
 | Session branch | Each session commits to its own branch, `aether/run-<task>-<id>`, in the workspace's repository on the server. The session's **Changes** view shows its diff and has **Publish…**. | [quickstart.md](quickstart.md#8-review-and-publish-the-result) |
 | Board | The dashboard page that groups sessions into **Needs you**, **Working** and **Finished**. | [quickstart.md](quickstart.md#7-watch-it) |
-| Environment | Your own container on the server, opened from **Environment** in the dashboard or with `aether terminal`. Your sessions start from its image: agents you install reach them at once, other tools only after **Save environment**. | [environments.md](environments.md) |
+| Environment | Your own sandbox on the server, opened from **Environment** in the dashboard or with `aether terminal`. Your sessions start from its image: agents you install reach them at once, other tools only after **Save environment**. | [environments.md](environments.md) |
 | Home | Your persistent directory on the server, mounted as `$HOME` in your environment and in every session you launch. Installed agents (`~/.local/bin`), their logins and their configuration live there. | [environment-home.md](environment-home.md) |
 | Standard image | The container image an environment starts from until its member saves their own, `ghcr.io/3xdevops/aether-standard`. | [environments.md](environments.md) |
 | Agent | A coding CLI a session starts: Claude Code, Codex, OpenCode, pi, oh-my-pi (`omp`), GitHub Copilot CLI, Gemini CLI, Cursor CLI, Antigravity CLI, or one you add. Aether's code calls these harnesses. | [harnesses.md](harnesses.md) |

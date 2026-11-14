@@ -232,7 +232,7 @@ func (s *Scheduler) loginRefusedAdvice(login runLogin, cause error, how refusedH
 		case refusedRestarting:
 			return "Aether restarted the agent so it reads the account's login again: send the message again"
 		case refusedAfterRestart:
-			return "restarting the agent did not restore its sign-in, so this container's copy of the login is stale or unreadable: start a new session"
+			return "restarting the agent did not restore its sign-in, so this sandbox's copy of the login is stale or unreadable: start a new session"
 		}
 		return "sign the agent in from this session's Terminal tab"
 	}

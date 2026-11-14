@@ -138,10 +138,10 @@ func (s *Scheduler) reservationConflictLocked(home, login domain.MemberID, user,
 			continue
 		}
 		if other.home == home {
-			return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but %s resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
+			return fmt.Errorf("member's environment home %s is reserved by %s as user %s, but %s resolved user %s; concurrent sandboxes for the same member must share one uid:gid mapping",
 				home, other.holder(), other.user, owner, user)
 		}
-		return fmt.Errorf("the login %s shares is held by %s as user %s, but %s resolved user %s; a session on a shared account must use the uid:gid of the owner's live containers and of other sessions on that login",
+		return fmt.Errorf("the login %s shares is held by %s as user %s, but %s resolved user %s; a session on a shared account must use the uid:gid of the owner's live sandboxes and of other sessions on that login",
 			login, other.holder(), other.user, owner, user)
 	}
 	return nil
@@ -157,7 +157,7 @@ func (s *Scheduler) reserveTerminalUser(ctx context.Context, entry *terminalSupe
 	s.syncRunUserReservationsLocked()
 	for other := range s.credentialUsers {
 		if other.blocks(entry.member, "", user) {
-			return withLookupError(fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent containers for the same member must share one uid:gid mapping",
+			return withLookupError(fmt.Errorf("member's environment home %s is reserved by %s as user %s, but environment terminal resolved user %s; concurrent sandboxes for the same member must share one uid:gid mapping",
 				entry.member, other.holder(), other.user, user), lookupErr)
 		}
 	}
@@ -236,7 +236,7 @@ func (s *Scheduler) resolveStaleRunUsers(ctx context.Context, home, login domain
 	for _, c := range candidates {
 		info, err := s.runContainerInfo(ctx, c.entry.runID, c.cid)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("look up the container of session %s: %w", c.entry.runID, err))
+			errs = append(errs, fmt.Errorf("look up the sandbox of session %s: %w", c.entry.runID, err))
 			continue
 		}
 		resolved := normalizeRecoveryRunUser(info.User)

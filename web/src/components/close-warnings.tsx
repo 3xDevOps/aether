@@ -200,7 +200,7 @@ function Explain({ warning, run, onLeave }: { warning: CloseWarning; run: Run | 
       if (run && isAdminRole(self.role)) return 'Protected. You can still close it as an admin.'
       return `${warning.detail}.`
     case 'cleanup_pending':
-      return `${warning.detail}. Cleanup keeps retrying after the close; the container may stay until it succeeds.`
+      return `${warning.detail}. Cleanup keeps retrying after the close; the sandbox may stay until it succeeds.`
     default:
       return `${warning.detail}.`
   }

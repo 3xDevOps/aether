@@ -58,7 +58,7 @@ export function StopEnvironmentDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Stop your environment?</AlertDialogTitle>
           <AlertDialogDescription>
-            The environment container stops now, and so does everything
+            The environment stops now, and so does everything
             running in it. Your home files and your saved image remain, and a
             later open starts it again.
           </AlertDialogDescription>

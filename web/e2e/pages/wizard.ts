@@ -168,7 +168,7 @@ class AgentStep extends Step {
 
   /** The terminal dock's overlay while the environment container starts. */
   containerStarting(): Locator {
-    return this.section.getByRole('status').filter({ hasText: 'Starting your environment container' })
+    return this.section.getByRole('status').filter({ hasText: 'Starting your environment' })
   }
 
 
