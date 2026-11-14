@@ -258,6 +258,8 @@ func runGitQuiet(dir string, args ...string) string {
 type lyingGit struct {
 	*gitService
 	tree    func(real string) string
+	files   []events.FileDiffStat
+	gap     atomic.Bool
 	objects func(stream grpc.ServerStreamingServer[guestpb.Chunk]) error
 	stage   func()
 	write   func()
@@ -299,12 +301,21 @@ func (w lyingWatch) Recv() (*guestpb.WatchAck, error) {
 }
 
 func (w lyingWatch) Send(ev *guestpb.WatchEvent) error {
-	if diff, ok := ev.GetKind().(*guestpb.WatchEvent_Diff); ok && w.l.tree != nil {
+	diff, ok := ev.GetKind().(*guestpb.WatchEvent_Diff)
+	if ok && (w.l.tree != nil || w.l.files != nil || w.l.gap.Load()) {
 		var p events.RunDiffPayload
 		if err := json.Unmarshal(diff.Diff, &p); err != nil {
 			return err
 		}
-		p.Tree = w.l.tree(p.Tree)
+		if w.l.tree != nil {
+			p.Tree = w.l.tree(p.Tree)
+		}
+		if w.l.gap.Load() {
+			p.Tree, p.SnapshotError = "", "Snapshot history unavailable; current change statistics remain live."
+		}
+		if w.l.files != nil {
+			p.Files = w.l.files
+		}
 		data, err := json.Marshal(p)
 		if err != nil {
 			return err
@@ -435,6 +446,64 @@ func TestServerPublishesABackwardReset(t *testing.T) {
 	runGit(t, p.checkout, "reset", "--hard", "HEAD~1")
 	first := runGit(t, p.checkout, "rev-parse", "HEAD")
 	waitBranch(first)
+}
+
+// TestServerComputesDiffFilesFromTheTree proves the server derives a
+// snapshot's changed-file list from the tree it verified, not from the list
+// the guest claimed: a session cannot fake a file path to manufacture an
+// overlap and waive a peer's messaging protection.
+func TestServerComputesDiffFilesFromTheTree(t *testing.T) {
+	liar := &lyingGit{files: []events.FileDiffStat{{Path: "fabricated.txt", Status: "modified", Additions: 99}}}
+	p := newGitPair(t, func(real *gitService) guestpb.GitServer { liar.gitService = real; return liar })
+	ctx := testContext(t)
+	if err := p.host.StartDiffWatch(ctx, testWorkspace, testRun); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.checkout, "real.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	diff := p.nextDiff(t, hasFile("real.txt"))
+	for _, f := range diff.Files {
+		if f.Path == "fabricated.txt" {
+			t.Fatalf("server published the guest's fabricated file path: %+v", diff.Files)
+		}
+	}
+}
+
+// TestServerKeepsVerifiedFilesAcrossAGap proves that when a VM reports a
+// history gap (no snapshot tree), the server republishes the last recorded
+// interval's verified files and ignores the list the guest claims in the gap
+// payload, so an honest session keeps its overlap and a hostile one cannot
+// fake a path where it has no tree to verify.
+func TestServerKeepsVerifiedFilesAcrossAGap(t *testing.T) {
+	liar := &lyingGit{files: []events.FileDiffStat{{Path: "fabricated.txt", Status: "modified", Additions: 50}}}
+	p := newGitPair(t, func(real *gitService) guestpb.GitServer { liar.gitService = real; return liar })
+	ctx := testContext(t)
+	if err := p.host.StartDiffWatch(ctx, testWorkspace, testRun); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.checkout, "real.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.nextDiff(t, hasFile("real.txt")) // a verified snapshot is recorded first
+
+	liar.gap.Store(true)
+	if err := os.WriteFile(filepath.Join(p.checkout, "later.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gap := p.nextDiff(t, func(d events.RunDiffPayload) bool { return d.HistoryGap })
+	real, fabricated := false, false
+	for _, f := range gap.Files {
+		switch f.Path {
+		case "real.txt":
+			real = true
+		case "fabricated.txt":
+			fabricated = true
+		}
+	}
+	if !real || fabricated {
+		t.Fatalf("history-gap diff = %+v, want the last verified files and no fabricated path", gap.Files)
+	}
 }
 
 // oversizePack builds a tiny pack holding a base blob and one REF_DELTA whose
