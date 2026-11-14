@@ -107,22 +107,33 @@ func TestKVMUnitSandboxHoldsAgainstRootInIt(t *testing.T) {
 	if err = os.WriteFile(other, []byte("another VM"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	pin := filepath.Join(e.dir(key), helperImage)
+	// Each attempt is guarded by if, so a denial (a read-only-filesystem
+	// error on a redirection, which would otherwise end a POSIX shell) never
+	// aborts the probe; a marker prints only if the forbidden action worked.
+	write := func(path string) string { return "if (echo x >> " + path + ") 2>/dev/null; then echo " }
 	probe := `disk=` + disk + `
-cat /proc/sys/kernel/core_uses_pid > /proc/sys/kernel/core_uses_pid 2>/dev/null && echo sysctl-written
-head -c 1 "$disk" >/dev/null 2>&1 && echo disk-opened
-ip link show >/dev/null 2>&1 && echo netlink-used
-ls -A /root | grep -q . && echo root-seen
-cat ` + db + ` 2>/dev/null && echo database-read
-cat ` + other + ` 2>/dev/null && echo other-vm-read
-touch ` + filepath.Join(e.root, "escape") + ` 2>/dev/null && echo outside-written
-touch ` + e.path(key, "inside") + ` && echo own-dir-written
+if (cat /proc/sys/kernel/core_uses_pid > /proc/sys/kernel/core_uses_pid) 2>/dev/null; then echo sysctl-written; fi
+if head -c 1 "$disk" >/dev/null 2>&1; then echo disk-opened; fi
+if ip link show >/dev/null 2>&1; then echo netlink-used; fi
+if ls -A /root 2>/dev/null | grep -q .; then echo root-seen; fi
+if cat ` + db + ` >/dev/null 2>&1; then echo database-read; fi
+if cat ` + other + ` >/dev/null 2>&1; then echo other-vm-read; fi
+if (touch ` + filepath.Join(e.root, "escape") + `) 2>/dev/null; then echo outside-written; fi
+` + write(pin) + `base-written; fi
+` + write(e.path(key, recordFile)) + `record-written; fi
+` + write(e.path(key, launchFile)) + `launch-written; fi
+if touch ` + e.path(key, "inside") + `; then echo own-dir-written; fi
 echo probe-done`
 	out, err = exec.Command("systemd-run", append(append(args, "--"), "/bin/sh", "-c", probe)...).CombinedOutput()
 	got := string(out)
 	if err != nil || !strings.Contains(got, "probe-done") || !strings.Contains(got, "own-dir-written") {
 		t.Fatalf("probe unit: %v: %s", err, got)
 	}
-	for _, escaped := range []string{"sysctl-written", "disk-opened", "netlink-used", "root-seen", "database-read", "other-vm-read", "outside-written"} {
+	for _, escaped := range []string{
+		"sysctl-written", "disk-opened", "netlink-used", "root-seen", "database-read",
+		"other-vm-read", "outside-written", "base-written", "record-written", "launch-written",
+	} {
 		if strings.Contains(got, escaped) {
 			t.Errorf("root in a unit with the VM's sandbox got %s:\n%s", escaped, got)
 		}

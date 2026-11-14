@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,18 +25,30 @@ var fileCaps = []string{"CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH", 
 var shareCaps = []string{"CAP_SYS_ADMIN", "CAP_SETUID", "CAP_SETGID", "CAP_SETPCAP", "CAP_MKNOD", "CAP_SETFCAP"}
 
 // revealPaths lists each host path a VM's unit needs, by whether its
-// processes write it. The disks and their backing links are reached through
-// the VM's own directory and each checkout's directory, so the image store
-// never shows; the shares, the home and the forwarded sockets are named
-// where they live; a forwarded socket by its directory, which CH reaches
-// by following a link in the VM directory.
+// processes write it. The disks are reached through the VM's own directory
+// and each checkout's directory, so the image store never shows; the shares,
+// the home and the forwarded sockets are named where they live; a forwarded
+// socket by its directory, which CH reaches by following a link in the VM
+// directory. The files the server trusts across boots and the base images
+// the disks are built from are revealed read-only inside those writable
+// directories, so a compromised unit cannot rewrite its own record, its
+// launch, or a shared base: systemd binds the deeper read-only path after
+// the directory.
 func revealPaths(dir, kernel string, rec *record, p plan) map[string]bool {
 	reveal := map[string]bool{dir: true}
+	readOnly := func(path string) {
+		reveal[path] = false
+	}
+	readOnly(filepath.Join(dir, recordFile))
+	readOnly(filepath.Join(dir, launchFile))
 	if rec.State.Path != "" {
 		reveal[rec.State.Path] = true
 	}
 	for _, c := range rec.CheckoutDisks {
 		reveal[filepath.Dir(c.Disk.Path)] = true
+	}
+	for _, pin := range backingPins(dir, rec) {
+		readOnly(pin)
 	}
 	for _, s := range p.shares {
 		reveal[s.Source] = reveal[s.Source] || !s.ReadOnly
@@ -44,14 +57,40 @@ func revealPaths(dir, kernel string, rec *record, p plan) map[string]bool {
 		reveal[s.Source] = reveal[s.Source] || !s.ReadOnly
 	}
 	for _, target := range p.links {
-		reveal[filepath.Dir(target)] = true
+		d := filepath.Dir(target)
+		if _, ok := reveal[d]; !ok {
+			readOnly(d)
+		}
 	}
 	if kernel != "" {
 		if _, ok := reveal[kernel]; !ok {
-			reveal[kernel] = false
+			readOnly(kernel)
 		}
 	}
 	return reveal
+}
+
+// backingPins are the read-only files in a VM's directory and its checkouts'
+// directories that are hard links to the image store - the helper disk and
+// every base a qcow2 disk is built over - which a disk shares its bytes with.
+func backingPins(dir string, rec *record) []string {
+	pins := []string{filepath.Join(dir, helperImage)}
+	roots := []string{dir}
+	for _, c := range rec.CheckoutDisks {
+		roots = append(roots, filepath.Dir(c.Disk.Path))
+	}
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".base") {
+				pins = append(pins, filepath.Join(root, e.Name()))
+			}
+		}
+	}
+	return pins
 }
 
 // sandbox confines a VM's unit: a tmpfs hides the whole data directory, so

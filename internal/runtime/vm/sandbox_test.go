@@ -64,14 +64,24 @@ func TestVMUnitsWriteOnlyTheirOwnPathsAndKeepFewCapabilities(t *testing.T) {
 			t.Errorf("a session's unit writes %v, want it to include %s", writable, want)
 		}
 	}
-	if readonly := property(session, "BindReadOnlyPaths"); !slices.Contains(readonly, `"-`+login+`"`) {
-		t.Errorf("a session's read-only binds %v lack the login %s", readonly, login)
+	// The login, the record and launch the server trusts, and the helper
+	// disk's base link are revealed read-only inside the writable directory.
+	readonly := property(session, "BindReadOnlyPaths")
+	for _, want := range []string{
+		`"-` + login + `"`,
+		`"-` + h.engine.path("run-a", recordFile) + `"`,
+		`"-` + h.engine.path("run-a", launchFile) + `"`,
+		`"-` + h.engine.path("run-a", helperImage) + `"`,
+	} {
+		if !slices.Contains(readonly, want) {
+			t.Errorf("a session's read-only binds %v lack %s", readonly, want)
+		}
+		if slices.Contains(writable, want) {
+			t.Errorf("%s is writable to the unit: %v", want, writable)
+		}
 	}
-	if slices.Contains(writable, `"-`+login+`"`) {
-		t.Errorf("the read-only login %s is writable to the unit: %v", login, writable)
-	}
-	if got := property(offline, "BindPaths"); !slices.Equal(got, []string{`"-` + h.engine.dir("check-a") + `"`}) {
-		t.Errorf("an offline VM without shares writes %v, want only its directory", got)
+	if got := property(offline, "BindPaths"); !slices.Contains(got, `"-`+h.engine.dir("check-a")+`"`) {
+		t.Errorf("an offline VM writes %v, want its directory", got)
 	}
 	caps := func(props []string) []string {
 		return strings.Fields(strings.Join(property(props, "CapabilityBoundingSet"), " "))

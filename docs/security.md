@@ -58,8 +58,12 @@ with its own kernel instead
 ([Sessions in virtual machines](environments.md#sessions-in-virtual-machines)
 has its network rules). Cloud Hypervisor and the host services a VM uses,
 such as its [file service](vm-guest.md#the-file-service) and `virtiofsd`, run
-as root on the host, so a flaw in any of them reaches the host. Their systemd
-unit limits that:
+as root on the host, so a flaw in any of them reaches the host. The guest
+kernel is [hardened](vm-guest.md#kernel-hardening) to keep an unprivileged
+agent from reaching root inside the VM without the sudo gate, and the one
+remaining `virtiofsd` share (a checkout not yet on a VM disk) cannot carry a
+device node or a file-capability binary to the host. Their systemd unit
+limits what a flaw in them reaches:
 
 - `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`,
   `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`,
@@ -71,15 +75,19 @@ unit limits that:
   VM's disks and files are gone from the unit. Only the paths this VM needs
   are bound back, writable only where it writes: its own directory, its state
   disk, each checkout's directory, the home and shares the session mounts,
-  and the sockets forwarded into it. Its disks reach their base images
-  through hard links inside those directories, so the image store itself is
-  never exposed.
+  and the directories of the sockets forwarded into it, those read-only. Its
+  disks reach their base images through hard links inside those directories,
+  so the image store itself is never exposed; those links, the helper disk,
+  and the record and launch files the server trusts across a restart or
+  restore are bound read-only inside the writable directories, so the unit
+  cannot rewrite them to reach another VM's disks or the database on its next
+  boot.
 - Its capability bounding set is `CAP_CHOWN`, `CAP_DAC_OVERRIDE`,
   `CAP_DAC_READ_SEARCH`, `CAP_FOWNER` and `CAP_FSETID` for the file service,
   plus `CAP_NET_ADMIN`, with which Cloud Hypervisor makes the VM's tap, when
   it has a network. A VM with a virtio-fs share also starts with the mount
-  and `virtiofsd` capabilities; the monitor drops them once `virtiofsd`
-  runs, before Cloud Hypervisor and the file service start.
+  and `virtiofsd` capabilities; the monitor drops them once `virtiofsd` runs,
+  before Cloud Hypervisor and the file service start.
 - What it does not stop: it reads the host outside the data directory as
   root, outside `/home`, `/root` and `/run/user`. `CAP_NET_ADMIN` still lets
   a compromised Cloud Hypervisor change host interfaces and routes through
@@ -87,8 +95,8 @@ unit limits that:
   own login, makes that whole directory writable to the unit; the file
   service still serves the session only that file.
 
-The bullets below on Docker, Sysbox and networks describe Docker mode; what a
-session is given, after them, applies to both.
+The bullets below on Docker, Sysbox and networks
+describe Docker mode; what a session is given, after them, applies to both.
 
 Every disk a VM gets names its format to Cloud Hypervisor, so nothing guesses
 a format from bytes a guest wrote. The disks a session writes directly - its
@@ -1128,8 +1136,24 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 ## Limits
 
 - Containers share the host kernel. A kernel or Docker escape reaches the
-  host. A session VM has its own kernel; a flaw in Cloud Hypervisor or a host
-  service the VM uses reaches the host.
+  host. A session VM has its own kernel, [hardened](vm-guest.md#kernel-hardening)
+  against an unprivileged agent; a flaw in Cloud Hypervisor or a host service
+  the VM uses reaches the host.
+- A session VM leaves an unprivileged agent two in-VM escalation surfaces by
+  design. Unprivileged user namespaces stay on because the in-VM development
+  browser's Chromium sandbox needs them; through one the agent reaches
+  `nf_tables`. The agents themselves do not need them - they run as uid 1000
+  with the VM as their boundary, and nested Docker runs its daemon as root -
+  so a seccomp filter on the agent process tree could deny the agent
+  `CLONE_NEWUSER` while the browser keeps it, a tightening left to the owner.
+  `perf_event_open` likewise stays available to the unprivileged. Both are
+  bounded by the VM.
+- Root in a session VM (a Root-tier session, a Default session with Docker, or
+  a Default session whose `sudo` was approved) can move a process out of the
+  `/session` cgroup and so evade the close-time freeze, the session process
+  limit and the kill when the main process exits. This is accepted: it is
+  already root in its own throwaway VM, and the VM, not the cgroup, is what
+  keeps it off the host and out of other sessions.
 - Outbound traffic is limited only for sessions of a workspace with egress
   control on. Other sessions and environment terminals
   reach the internet, your network and ports the server host listens on.
