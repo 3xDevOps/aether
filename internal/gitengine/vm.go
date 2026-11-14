@@ -249,7 +249,7 @@ func (e *Engine) detachVMStore(ctx context.Context, run domain.RunID) error {
 		return err
 	}
 	if roots != "" {
-		if _, err = e.gitInput(ctx, store, gitEnv(), []byte(roots), "pack-objects", "--revs", "--non-empty", filepath.Join(store, "objects", "pack", "pack")); err != nil {
+		if _, err = e.gitInput(ctx, store, e.gitEnv(), []byte(roots), "pack-objects", "--revs", "--non-empty", filepath.Join(store, "objects", "pack", "pack")); err != nil {
 			return fmt.Errorf("gitengine: detach the history of session %s: %w", run, err)
 		}
 	}

@@ -83,7 +83,7 @@ func (e *Engine) recordFinalTree(run domain.RunID, tree string) error {
 // git commit -m does, authored by author, committed by Aether, and signed
 // with signingKey when one is given.
 func (e *Engine) commitTree(ctx context.Context, store, tree, parent, message string, author domain.GitIdentity, signingKey []byte) (string, string, error) {
-	cleaned, err := e.gitInput(ctx, store, gitEnv(), []byte(message), "stripspace")
+	cleaned, err := e.gitInput(ctx, store, e.gitEnv(), []byte(message), "stripspace")
 	if err != nil {
 		return "", "", err
 	}
@@ -92,7 +92,7 @@ func (e *Engine) commitTree(ctx context.Context, store, tree, parent, message st
 	if author.Name != "" && author.Email != "" {
 		name, email = author.Name, author.Email
 	}
-	env := append(gitEnv(),
+	env := append(e.gitEnv(),
 		"GIT_AUTHOR_NAME="+name, "GIT_AUTHOR_EMAIL="+email,
 		"GIT_COMMITTER_NAME=Aether", "GIT_COMMITTER_EMAIL=aether@localhost",
 	)
@@ -128,7 +128,7 @@ func (e *Engine) packObjects(ctx context.Context, repo string, wants, haves []st
 		input.WriteString("^" + id + "\n")
 	}
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, "-C", repo, "-c", "safe.directory=*", "pack-objects", "--revs", "--stdout", "-q")
-	cmd.Env = gitEnv()
+	cmd.Env = e.gitEnv()
 	cmd.Stdin = strings.NewReader(input.String())
 	cmd.Stdout = w
 	var stderr bytes.Buffer

@@ -148,7 +148,7 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 	if _, ok := t.byID[spec.ID]; ok {
 		return nil, errExists
 	}
-	if t.sessionFrozen && !spec.helper {
+	if t.sessionFrozen && spec.cgroup == nil {
 		return nil, errPaused
 	}
 	p := &process{

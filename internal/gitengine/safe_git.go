@@ -300,7 +300,7 @@ func (e *Engine) checkoutHeadSource(ctx context.Context, run domain.RunID, check
 func (e *Engine) attributeSource(ctx context.Context, workTree, gitDir, objects string) (string, error) {
 	if run, err := e.checkoutRunID(workTree); err == nil {
 		if meta, metaErr := e.readRunMeta(run); metaErr == nil {
-			env := append(gitEnv(), "GIT_OBJECT_DIRECTORY="+objects)
+			env := append(e.gitEnv(), "GIT_OBJECT_DIRECTORY="+objects)
 			if tree, treeErr := e.gitIn(ctx, gitDir, env, "rev-parse", "--verify", "--quiet", meta.Base+"^{tree}"); treeErr == nil {
 				return tree, nil
 			}
@@ -371,7 +371,7 @@ func (e *Engine) gitWorktreeObjects(ctx context.Context, workTree, gitDir, index
 	}
 	argv = append(argv, args...)
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, argv...)
-	cmd.Env = append(gitEnv(),
+	cmd.Env = append(e.gitEnv(),
 		"GIT_INDEX_FILE="+index,
 		"GIT_OBJECT_DIRECTORY="+objects,
 		"GIT_ATTR_SOURCE="+attributes,

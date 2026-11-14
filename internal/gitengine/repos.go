@@ -63,10 +63,10 @@ func (e *Engine) eachExtra(run domain.RunID, history bool, fn func(domain.RunID)
 }
 
 func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error {
-	if err := e.startDiffWatch(ctx, workspace, run); err != nil {
+	if err := e.startDiffWatch(ctx, workspace, run, false); err != nil {
 		return err
 	}
-	return e.eachExtra(run, false, func(key domain.RunID) error { return e.startDiffWatch(ctx, workspace, key) })
+	return e.eachExtra(run, false, func(key domain.RunID) error { return e.startDiffWatch(ctx, workspace, key, false) })
 }
 
 func (e *Engine) LastFileChange(run domain.RunID) (time.Time, bool) {

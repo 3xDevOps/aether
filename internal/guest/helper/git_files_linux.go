@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/guest/guestpb"
 	"github.com/mutagen-io/mutagen/pkg/encoding"
@@ -44,7 +45,7 @@ func ownerGit(ctx context.Context, dir string, stdin io.Reader, args ...string) 
 	}
 	st := info.Sys().(*syscall.Stat_t)
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}, args...)...)
-	cmd.Env = append([]string{"PATH=" + defaultPath, "HOME=/", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}, gitLimits...)
+	cmd.Env = append([]string{"PATH=" + defaultPath, "HOME=/", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}, gitengine.ConfigEnv(gitLimits)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: st.Uid, Gid: st.Gid, NoSetGroups: true}}
 	cmd.Stdin = stdin
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -193,27 +194,70 @@ func (s *gitService) Tree(ctx context.Context, req *guestpb.TreeRequest) (*guest
 	return out, nil
 }
 
-func (s *gitService) ReadFile(ctx context.Context, req *guestpb.ReadFileRequest) (*guestpb.FileReply, error) {
+func (s *gitService) ReadFile(req *guestpb.ReadFileRequest, stream grpc.ServerStreamingServer[guestpb.FileChunk]) error {
 	if _, err := s.workspace(req.GetKey()); err != nil {
-		return nil, err
+		return err
 	}
-	read, err := s.engine.ReadFileMeta(ctx, filepath.Join(s.dir, req.GetKey()), "", req.GetPath(), int(req.GetMaxBytes()))
+	file, info, err := s.engine.OpenCheckoutFile(filepath.Join(s.dir, req.GetKey()), req.GetPath())
 	if err != nil {
-		return nil, gitStatus(err)
+		return gitStatus(err)
 	}
-	return &guestpb.FileReply{Content: read.Content, Truncated: read.Truncated, Size: read.Size}, nil
+	defer func() { _ = file.Close() }()
+	limit := io.LimitReader(file, int64(min(max(req.GetMaxBytes(), 1), guest.MaxFileBytes)))
+	buf := make([]byte, guest.ObjectsChunk)
+	chunk := &guestpb.FileChunk{Size: info.Size()}
+	for {
+		n, readErr := io.ReadFull(limit, buf)
+		chunk.Data = buf[:n]
+		if err := stream.Send(chunk); err != nil {
+			return err
+		}
+		if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+		chunk = &guestpb.FileChunk{}
+	}
 }
 
-func (s *gitService) WriteFile(ctx context.Context, req *guestpb.WriteFileRequest) (*guestpb.FileReply, error) {
-	ws, err := s.workspace(req.GetKey())
+func (s *gitService) WriteFile(stream grpc.ClientStreamingServer[guestpb.WriteFileChunk, guestpb.WriteFileReply]) error {
+	first, err := stream.Recv()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	written, err := s.engine.FilesWrite(ctx, ws, domain.RunID(req.GetKey()), "", req.GetPath(), req.GetContent(), req.GetRevision(), domain.GitIdentity{}, nil)
+	ws, err := s.workspace(first.GetKey())
 	if err != nil {
-		return nil, gitStatus(err)
+		return err
 	}
-	return &guestpb.FileReply{Size: written.Size}, nil
+	content := &chunkReader{data: first.GetData(), next: func() ([]byte, error) {
+		chunk, recvErr := stream.Recv()
+		return chunk.GetData(), recvErr
+	}}
+	if _, err = s.engine.WriteCheckoutFile(ws, domain.RunID(first.GetKey()), first.GetPath(), content, first.GetRevision()); err != nil {
+		return gitStatus(err)
+	}
+	return stream.SendAndClose(&guestpb.WriteFileReply{})
+}
+
+// chunkReader reads the data of a stream's chunks in order.
+type chunkReader struct {
+	data []byte
+	next func() ([]byte, error)
+}
+
+func (r *chunkReader) Read(p []byte) (int, error) {
+	for len(r.data) == 0 {
+		data, err := r.next()
+		if err != nil {
+			return 0, err
+		}
+		r.data = data
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
 }
 
 func (s *gitService) FileDiff(ctx context.Context, req *guestpb.FileDiffRequest) (*guestpb.PatchReply, error) {

@@ -1246,30 +1246,28 @@ func (x *ReadFileRequest) GetMaxBytes() uint32 {
 	return 0
 }
 
-type WriteFileRequest struct {
+type FileChunk struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
-	Content       []byte                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
-	Revision      string                 `protobuf:"bytes,4,opt,name=revision,proto3" json:"revision,omitempty"`
+	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	Size          int64                  `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *WriteFileRequest) Reset() {
-	*x = WriteFileRequest{}
+func (x *FileChunk) Reset() {
+	*x = FileChunk{}
 	mi := &file_git_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *WriteFileRequest) String() string {
+func (x *FileChunk) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*WriteFileRequest) ProtoMessage() {}
+func (*FileChunk) ProtoMessage() {}
 
-func (x *WriteFileRequest) ProtoReflect() protoreflect.Message {
+func (x *FileChunk) ProtoReflect() protoreflect.Message {
 	mi := &file_git_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1281,63 +1279,114 @@ func (x *WriteFileRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use WriteFileRequest.ProtoReflect.Descriptor instead.
-func (*WriteFileRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use FileChunk.ProtoReflect.Descriptor instead.
+func (*FileChunk) Descriptor() ([]byte, []int) {
 	return file_git_proto_rawDescGZIP(), []int{21}
 }
 
-func (x *WriteFileRequest) GetKey() string {
+func (x *FileChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *FileChunk) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+type WriteFileChunk struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	Revision      string                 `protobuf:"bytes,3,opt,name=revision,proto3" json:"revision,omitempty"`
+	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriteFileChunk) Reset() {
+	*x = WriteFileChunk{}
+	mi := &file_git_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriteFileChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriteFileChunk) ProtoMessage() {}
+
+func (x *WriteFileChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriteFileChunk.ProtoReflect.Descriptor instead.
+func (*WriteFileChunk) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *WriteFileChunk) GetKey() string {
 	if x != nil {
 		return x.Key
 	}
 	return ""
 }
 
-func (x *WriteFileRequest) GetPath() string {
+func (x *WriteFileChunk) GetPath() string {
 	if x != nil {
 		return x.Path
 	}
 	return ""
 }
 
-func (x *WriteFileRequest) GetContent() []byte {
-	if x != nil {
-		return x.Content
-	}
-	return nil
-}
-
-func (x *WriteFileRequest) GetRevision() string {
+func (x *WriteFileChunk) GetRevision() string {
 	if x != nil {
 		return x.Revision
 	}
 	return ""
 }
 
-type FileReply struct {
+func (x *WriteFileChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type WriteFileReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Content       []byte                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
-	Truncated     bool                   `protobuf:"varint,2,opt,name=truncated,proto3" json:"truncated,omitempty"`
-	Size          int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *FileReply) Reset() {
-	*x = FileReply{}
-	mi := &file_git_proto_msgTypes[22]
+func (x *WriteFileReply) Reset() {
+	*x = WriteFileReply{}
+	mi := &file_git_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *FileReply) String() string {
+func (x *WriteFileReply) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*FileReply) ProtoMessage() {}
+func (*WriteFileReply) ProtoMessage() {}
 
-func (x *FileReply) ProtoReflect() protoreflect.Message {
-	mi := &file_git_proto_msgTypes[22]
+func (x *WriteFileReply) ProtoReflect() protoreflect.Message {
+	mi := &file_git_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1348,30 +1397,9 @@ func (x *FileReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FileReply.ProtoReflect.Descriptor instead.
-func (*FileReply) Descriptor() ([]byte, []int) {
-	return file_git_proto_rawDescGZIP(), []int{22}
-}
-
-func (x *FileReply) GetContent() []byte {
-	if x != nil {
-		return x.Content
-	}
-	return nil
-}
-
-func (x *FileReply) GetTruncated() bool {
-	if x != nil {
-		return x.Truncated
-	}
-	return false
-}
-
-func (x *FileReply) GetSize() int64 {
-	if x != nil {
-		return x.Size
-	}
-	return 0
+// Deprecated: Use WriteFileReply.ProtoReflect.Descriptor instead.
+func (*WriteFileReply) Descriptor() ([]byte, []int) {
+	return file_git_proto_rawDescGZIP(), []int{23}
 }
 
 type FileDiffRequest struct {
@@ -1384,7 +1412,7 @@ type FileDiffRequest struct {
 
 func (x *FileDiffRequest) Reset() {
 	*x = FileDiffRequest{}
-	mi := &file_git_proto_msgTypes[23]
+	mi := &file_git_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1396,7 +1424,7 @@ func (x *FileDiffRequest) String() string {
 func (*FileDiffRequest) ProtoMessage() {}
 
 func (x *FileDiffRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_git_proto_msgTypes[23]
+	mi := &file_git_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1409,7 +1437,7 @@ func (x *FileDiffRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileDiffRequest.ProtoReflect.Descriptor instead.
 func (*FileDiffRequest) Descriptor() ([]byte, []int) {
-	return file_git_proto_rawDescGZIP(), []int{23}
+	return file_git_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *FileDiffRequest) GetKey() string {
@@ -1436,7 +1464,7 @@ type SyncChunk struct {
 
 func (x *SyncChunk) Reset() {
 	*x = SyncChunk{}
-	mi := &file_git_proto_msgTypes[24]
+	mi := &file_git_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1448,7 +1476,7 @@ func (x *SyncChunk) String() string {
 func (*SyncChunk) ProtoMessage() {}
 
 func (x *SyncChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_git_proto_msgTypes[24]
+	mi := &file_git_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1461,7 +1489,7 @@ func (x *SyncChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncChunk.ProtoReflect.Descriptor instead.
 func (*SyncChunk) Descriptor() ([]byte, []int) {
-	return file_git_proto_rawDescGZIP(), []int{24}
+	return file_git_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SyncChunk) GetKey() string {
@@ -1491,7 +1519,7 @@ type PatchRequest struct {
 
 func (x *PatchRequest) Reset() {
 	*x = PatchRequest{}
-	mi := &file_git_proto_msgTypes[25]
+	mi := &file_git_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1503,7 +1531,7 @@ func (x *PatchRequest) String() string {
 func (*PatchRequest) ProtoMessage() {}
 
 func (x *PatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_git_proto_msgTypes[25]
+	mi := &file_git_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1516,7 +1544,7 @@ func (x *PatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PatchRequest.ProtoReflect.Descriptor instead.
 func (*PatchRequest) Descriptor() ([]byte, []int) {
-	return file_git_proto_rawDescGZIP(), []int{25}
+	return file_git_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *PatchRequest) GetKey() string {
@@ -1552,7 +1580,7 @@ type PatchReply struct {
 
 func (x *PatchReply) Reset() {
 	*x = PatchReply{}
-	mi := &file_git_proto_msgTypes[26]
+	mi := &file_git_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1564,7 +1592,7 @@ func (x *PatchReply) String() string {
 func (*PatchReply) ProtoMessage() {}
 
 func (x *PatchReply) ProtoReflect() protoreflect.Message {
-	mi := &file_git_proto_msgTypes[26]
+	mi := &file_git_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1577,7 +1605,7 @@ func (x *PatchReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PatchReply.ProtoReflect.Descriptor instead.
 func (*PatchReply) Descriptor() ([]byte, []int) {
-	return file_git_proto_rawDescGZIP(), []int{26}
+	return file_git_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *PatchReply) GetBase() string {
@@ -1689,16 +1717,16 @@ const file_git_proto_rawDesc = "" +
 	"\x0fReadFileRequest\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x1b\n" +
-	"\tmax_bytes\x18\x03 \x01(\rR\bmaxBytes\"n\n" +
-	"\x10WriteFileRequest\x12\x10\n" +
+	"\tmax_bytes\x18\x03 \x01(\rR\bmaxBytes\"3\n" +
+	"\tFileChunk\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\x12\x12\n" +
+	"\x04size\x18\x02 \x01(\x03R\x04size\"f\n" +
+	"\x0eWriteFileChunk\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
-	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +
-	"\acontent\x18\x03 \x01(\fR\acontent\x12\x1a\n" +
-	"\brevision\x18\x04 \x01(\tR\brevision\"W\n" +
-	"\tFileReply\x12\x18\n" +
-	"\acontent\x18\x01 \x01(\fR\acontent\x12\x1c\n" +
-	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x12\n" +
-	"\x04size\x18\x03 \x01(\x03R\x04size\"7\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x1a\n" +
+	"\brevision\x18\x03 \x01(\tR\brevision\x12\x12\n" +
+	"\x04data\x18\x04 \x01(\fR\x04data\"\x10\n" +
+	"\x0eWriteFileReply\"7\n" +
 	"\x0fFileDiffRequest\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\"1\n" +
@@ -1714,7 +1742,7 @@ const file_git_proto_rawDesc = "" +
 	"\x04base\x18\x01 \x01(\tR\x04base\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x1c\n" +
 	"\ttruncated\x18\x03 \x01(\bR\ttruncated\x12\x1b\n" +
-	"\tfork_tree\x18\x04 \x01(\tR\bforkTree2\x98\a\n" +
+	"\tfork_tree\x18\x04 \x01(\tR\bforkTree2\x9f\a\n" +
 	"\x03Git\x12C\n" +
 	"\x05Setup\x12\x1d.aether.guest.v1.SetupRequest\x1a\x1b.aether.guest.v1.SetupReply\x12C\n" +
 	"\x05Watch\x12\x19.aether.guest.v1.WatchAck\x1a\x1b.aether.guest.v1.WatchEvent(\x010\x01\x12C\n" +
@@ -1724,9 +1752,9 @@ const file_git_proto_rawDesc = "" +
 	"\x04Head\x12\x1c.aether.guest.v1.HeadRequest\x1a\x1a.aether.guest.v1.HeadReply\x12C\n" +
 	"\x05Stage\x12\x1d.aether.guest.v1.StageRequest\x1a\x1b.aether.guest.v1.StageReply\x12I\n" +
 	"\aInstall\x12\x1d.aether.guest.v1.InstallChunk\x1a\x1d.aether.guest.v1.InstallReply(\x01\x12@\n" +
-	"\x04Tree\x12\x1c.aether.guest.v1.TreeRequest\x1a\x1a.aether.guest.v1.TreeReply\x12H\n" +
-	"\bReadFile\x12 .aether.guest.v1.ReadFileRequest\x1a\x1a.aether.guest.v1.FileReply\x12J\n" +
-	"\tWriteFile\x12!.aether.guest.v1.WriteFileRequest\x1a\x1a.aether.guest.v1.FileReply\x12I\n" +
+	"\x04Tree\x12\x1c.aether.guest.v1.TreeRequest\x1a\x1a.aether.guest.v1.TreeReply\x12J\n" +
+	"\bReadFile\x12 .aether.guest.v1.ReadFileRequest\x1a\x1a.aether.guest.v1.FileChunk0\x01\x12O\n" +
+	"\tWriteFile\x12\x1f.aether.guest.v1.WriteFileChunk\x1a\x1f.aether.guest.v1.WriteFileReply(\x01\x12I\n" +
 	"\bFileDiff\x12 .aether.guest.v1.FileDiffRequest\x1a\x1b.aether.guest.v1.PatchReply\x12B\n" +
 	"\x04Sync\x12\x1a.aether.guest.v1.SyncChunk\x1a\x1a.aether.guest.v1.SyncChunk(\x010\x01B3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
 
@@ -1743,7 +1771,7 @@ func file_git_proto_rawDescGZIP() []byte {
 }
 
 var file_git_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_git_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_git_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_git_proto_goTypes = []any{
 	(StageRequest_Purpose)(0), // 0: aether.guest.v1.StageRequest.Purpose
 	(*GitFailure)(nil),        // 1: aether.guest.v1.GitFailure
@@ -1767,12 +1795,13 @@ var file_git_proto_goTypes = []any{
 	(*TreeEntry)(nil),         // 19: aether.guest.v1.TreeEntry
 	(*TreeReply)(nil),         // 20: aether.guest.v1.TreeReply
 	(*ReadFileRequest)(nil),   // 21: aether.guest.v1.ReadFileRequest
-	(*WriteFileRequest)(nil),  // 22: aether.guest.v1.WriteFileRequest
-	(*FileReply)(nil),         // 23: aether.guest.v1.FileReply
-	(*FileDiffRequest)(nil),   // 24: aether.guest.v1.FileDiffRequest
-	(*SyncChunk)(nil),         // 25: aether.guest.v1.SyncChunk
-	(*PatchRequest)(nil),      // 26: aether.guest.v1.PatchRequest
-	(*PatchReply)(nil),        // 27: aether.guest.v1.PatchReply
+	(*FileChunk)(nil),         // 22: aether.guest.v1.FileChunk
+	(*WriteFileChunk)(nil),    // 23: aether.guest.v1.WriteFileChunk
+	(*WriteFileReply)(nil),    // 24: aether.guest.v1.WriteFileReply
+	(*FileDiffRequest)(nil),   // 25: aether.guest.v1.FileDiffRequest
+	(*SyncChunk)(nil),         // 26: aether.guest.v1.SyncChunk
+	(*PatchRequest)(nil),      // 27: aether.guest.v1.PatchRequest
+	(*PatchReply)(nil),        // 28: aether.guest.v1.PatchReply
 }
 var file_git_proto_depIdxs = []int32{
 	3,  // 0: aether.guest.v1.SetupRequest.checkouts:type_name -> aether.guest.v1.Checkout
@@ -1783,28 +1812,28 @@ var file_git_proto_depIdxs = []int32{
 	5,  // 5: aether.guest.v1.Git.Watch:input_type -> aether.guest.v1.WatchAck
 	7,  // 6: aether.guest.v1.Git.Flush:input_type -> aether.guest.v1.FlushRequest
 	9,  // 7: aether.guest.v1.Git.Objects:input_type -> aether.guest.v1.ObjectsRequest
-	26, // 8: aether.guest.v1.Git.Patch:input_type -> aether.guest.v1.PatchRequest
+	27, // 8: aether.guest.v1.Git.Patch:input_type -> aether.guest.v1.PatchRequest
 	11, // 9: aether.guest.v1.Git.Head:input_type -> aether.guest.v1.HeadRequest
 	13, // 10: aether.guest.v1.Git.Stage:input_type -> aether.guest.v1.StageRequest
 	16, // 11: aether.guest.v1.Git.Install:input_type -> aether.guest.v1.InstallChunk
 	18, // 12: aether.guest.v1.Git.Tree:input_type -> aether.guest.v1.TreeRequest
 	21, // 13: aether.guest.v1.Git.ReadFile:input_type -> aether.guest.v1.ReadFileRequest
-	22, // 14: aether.guest.v1.Git.WriteFile:input_type -> aether.guest.v1.WriteFileRequest
-	24, // 15: aether.guest.v1.Git.FileDiff:input_type -> aether.guest.v1.FileDiffRequest
-	25, // 16: aether.guest.v1.Git.Sync:input_type -> aether.guest.v1.SyncChunk
+	23, // 14: aether.guest.v1.Git.WriteFile:input_type -> aether.guest.v1.WriteFileChunk
+	25, // 15: aether.guest.v1.Git.FileDiff:input_type -> aether.guest.v1.FileDiffRequest
+	26, // 16: aether.guest.v1.Git.Sync:input_type -> aether.guest.v1.SyncChunk
 	4,  // 17: aether.guest.v1.Git.Setup:output_type -> aether.guest.v1.SetupReply
 	6,  // 18: aether.guest.v1.Git.Watch:output_type -> aether.guest.v1.WatchEvent
 	8,  // 19: aether.guest.v1.Git.Flush:output_type -> aether.guest.v1.FlushReply
 	10, // 20: aether.guest.v1.Git.Objects:output_type -> aether.guest.v1.Chunk
-	27, // 21: aether.guest.v1.Git.Patch:output_type -> aether.guest.v1.PatchReply
+	28, // 21: aether.guest.v1.Git.Patch:output_type -> aether.guest.v1.PatchReply
 	12, // 22: aether.guest.v1.Git.Head:output_type -> aether.guest.v1.HeadReply
 	14, // 23: aether.guest.v1.Git.Stage:output_type -> aether.guest.v1.StageReply
 	17, // 24: aether.guest.v1.Git.Install:output_type -> aether.guest.v1.InstallReply
 	20, // 25: aether.guest.v1.Git.Tree:output_type -> aether.guest.v1.TreeReply
-	23, // 26: aether.guest.v1.Git.ReadFile:output_type -> aether.guest.v1.FileReply
-	23, // 27: aether.guest.v1.Git.WriteFile:output_type -> aether.guest.v1.FileReply
-	27, // 28: aether.guest.v1.Git.FileDiff:output_type -> aether.guest.v1.PatchReply
-	25, // 29: aether.guest.v1.Git.Sync:output_type -> aether.guest.v1.SyncChunk
+	22, // 26: aether.guest.v1.Git.ReadFile:output_type -> aether.guest.v1.FileChunk
+	24, // 27: aether.guest.v1.Git.WriteFile:output_type -> aether.guest.v1.WriteFileReply
+	28, // 28: aether.guest.v1.Git.FileDiff:output_type -> aether.guest.v1.PatchReply
+	26, // 29: aether.guest.v1.Git.Sync:output_type -> aether.guest.v1.SyncChunk
 	17, // [17:30] is the sub-list for method output_type
 	4,  // [4:17] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
@@ -1828,7 +1857,7 @@ func file_git_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_git_proto_rawDesc), len(file_git_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

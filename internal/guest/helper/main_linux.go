@@ -123,11 +123,7 @@ func serve() error {
 	record("mount volumes", mountVolumes(cfg.Mounts))
 	record("mount checkouts", mountCheckouts(cfg.Checkouts))
 	record("configure the network", configureNetwork(cfg))
-	reserve := uint64(sessionReserve)
-	if len(cfg.Checkouts) > 0 {
-		reserve += gitReserve
-	}
-	cgroup, err := newSessionCgroup("/sys/fs/cgroup", reserve)
+	cgroup, err := newSessionCgroup("/sys/fs/cgroup", len(cfg.Checkouts) > 0)
 	record("create the session cgroup", err)
 	var procsDir *os.File
 	if cgroup != nil {

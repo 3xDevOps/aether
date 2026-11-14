@@ -113,7 +113,7 @@ func (e *Engine) fetchVMObjects(ctx context.Context, run domain.RunID, store str
 	defer cancel()
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, "-C", store, "-c", "safe.directory=*",
 		"index-pack", "--strict", "--stdin", "--max-input-size="+strconv.FormatInt(limit, 10))
-	cmd.Env = gitEnv()
+	cmd.Env = e.gitEnv()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err

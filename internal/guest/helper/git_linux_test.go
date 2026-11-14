@@ -311,8 +311,9 @@ func TestARestartedGitServicePicksTheRunBackUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.nextDiff(t, hasFile("before.txt"))
-	// As PID 1 starts the service again after the kernel killed it, with
-	// the checkouts the kernel command line names.
+	// As PID 1 starts the service again after it ended, with the checkouts
+	// the kernel command line names. TestKVMGitServiceBesideAFullSession
+	// kills a real one.
 	p.stop()
 	if err := os.WriteFile(filepath.Join(p.checkout, "during.txt"), []byte("during\n"), 0o644); err != nil {
 		t.Fatal(err)

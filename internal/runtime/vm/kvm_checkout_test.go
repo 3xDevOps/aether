@@ -3,6 +3,7 @@
 package vm
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"fmt"
@@ -334,9 +335,12 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	}
 }
 
-// TestKVMGitServiceBesideAFullSession snapshots and commits every file of a
-// checkout while the session holds all the memory its cap leaves: the git
-// service's own cap must keep the VM answering, as the session's does.
+// TestKVMGitServiceBesideAFullSession runs the git service's heaviest work
+// while the session holds all the memory its cap leaves: a snapshot and a
+// commit of every file of a checkout, then a Files write and read at the
+// size limit. The service must come through with no OOM kill. Then it is
+// killed during a commit: nothing it started may outlive it, and the run
+// must be picked back up.
 func TestKVMGitServiceBesideAFullSession(t *testing.T) {
 	h := newCheckoutHost(t)
 	const files = 40000
@@ -357,33 +361,82 @@ func TestKVMGitServiceBesideAFullSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	readUntil(t, att, "held")
+	const gitService = "for p in $(cat /sys/fs/cgroup/git/cgroup.procs); do tr '\\0' ' ' < /proc/$p/cmdline | grep -q git-service && echo $p; done; true"
+	service := h.sh(t, key, gitService)
 	// Page cache is reclaimable, so only the git cgroup's anonymous memory
 	// competes with the helper's reserve: sample its peak while git works.
-	h.sh(t, key, `(read -r svc < /sys/fs/cgroup/git/cgroup.procs; peak=0; own=0; while [ ! -e /tmp/anon-stop ]; do while read -r k v; do [ "$k" = anon ] && [ "$v" -gt "$peak" ] && peak=$v && echo $peak > /tmp/anon-peak; done < /sys/fs/cgroup/git/memory.stat; while read -r k v u; do [ "$k" = RssAnon: ] && [ "$v" -gt "$own" ] && own=$v && echo $own > /tmp/anon-service; done < /proc/$svc/status; sleep 0.05; done) >/dev/null 2>&1 &`)
+	h.sh(t, key, `(peak=0; while [ ! -e /tmp/anon-stop ]; do while read -r k v; do [ "$k" = anon ] && [ "$v" -gt "$peak" ] && peak=$v && echo $peak > /tmp/anon-peak; done < /sys/fs/cgroup/git/memory.stat; sleep 0.05; done) >/dev/null 2>&1 &`)
 	h.sh(t, key, "for f in src/*/*.txt; do echo changed >> $f; done; head -c 100M /dev/urandom > big.bin")
 	start := time.Now()
 	// 31 seconds on the KVM test host; CI's nested VMs are slower.
 	waitDiff(t, h.diffs, "big.bin", 3*time.Minute)
 	snapshot := time.Since(start)
+	member := domain.GitIdentity{Name: "Member", Email: "member@localhost"}
 	start = time.Now()
-	commit, commitErr := h.git.CommitAll(t.Context(), run, "aether: a task", domain.GitIdentity{Name: "Member", Email: "member@localhost"}, nil)
-	committed := time.Since(start)
-	kills := h.sh(t, key, "grep -h oom_kill /sys/fs/cgroup/git/memory.events /sys/fs/cgroup/session/memory.events")
-	peak := h.sh(t, key, "cat /sys/fs/cgroup/git/memory.peak")
-	anon := h.sh(t, key, "touch /tmp/anon-stop; sleep 0.2; echo $(cat /tmp/anon-peak) bytes, the service $(cat /tmp/anon-service) KiB of it")
-	t.Logf("with the session holding %s bytes: snapshot %s, commit %s, git memory peak %s, anonymous %s", free, snapshot, committed, peak, anon)
-	if commitErr != nil || commit == "" {
-		console, _ := os.ReadFile(h.e.path(key, consoleLog))
-		var lines []string
-		for _, line := range strings.Split(string(console), "\n") {
-			if strings.Contains(line, "git") || strings.Contains(line, "panic") || strings.Contains(line, "fatal") || strings.Contains(line, "Out of memory") {
-				lines = append(lines, line)
-			}
-		}
-		t.Errorf("final commit beside a full session = %q, %v; console:\n%s", commit, commitErr, strings.Join(lines, "\n"))
+	commit, err := h.git.CommitAll(t.Context(), run, "aether: a task", member, nil)
+	if err != nil || commit == "" {
+		t.Errorf("final commit beside a full session = %q, %v", commit, err)
 	}
-	if kills != "oom_kill 0\noom_kill 0" {
-		t.Errorf("OOM kills in the git service, then the session: %q", kills)
+	committed := time.Since(start)
+	content := bytes.Repeat([]byte("0123456789abcde\n"), guest.MaxFileBytes/16)
+	start = time.Now()
+	if _, err = h.git.FilesWrite(t.Context(), ws, run, "", "upload.txt", content, "", domain.GitIdentity{}, nil); err != nil {
+		t.Errorf("upload at the size limit beside a full session: %v", err)
+	}
+	read, err := h.git.FilesRead(t.Context(), ws, run, "", "upload.txt", 0)
+	if err != nil || !bytes.Equal(read.Content, content) {
+		t.Errorf("read of that upload: %d bytes, %v", len(read.Content), err)
+	}
+	transfer := time.Since(start)
+	anon := h.sh(t, key, "touch /tmp/anon-stop; sleep 0.2; cat /tmp/anon-peak")
+	t.Logf("with the session holding %s bytes: snapshot %s, commit %s, a 64 MiB write and read %s; git's anonymous memory peaked at %s bytes", free, snapshot, committed, transfer, anon)
+	if after := h.sh(t, key, gitService+"; grep -h oom_kill /sys/fs/cgroup/git/memory.events /sys/fs/cgroup/session/memory.events"); after != service+"\noom_kill 0\noom_kill 0" {
+		t.Errorf("git service %s; afterwards the git service, then OOM kills in its cgroup and the session: %q", service, after)
+	}
+
+	// The two big files would keep every later snapshot over its input
+	// bound.
+	h.sh(t, key, "rm big.bin upload.txt; for f in src/1*/*.txt; do echo again >> $f; done")
+	committing := make(chan error, 1)
+	go func() {
+		_, commitErr := h.git.CommitAll(context.WithoutCancel(t.Context()), run, "aether: again", member, nil)
+		committing <- commitErr
+	}()
+	time.Sleep(time.Second)
+	service = h.sh(t, key, gitService)
+	killer, _, err := h.e.spawn(t.Context(), key, guest.ProcessSpec{ID: "kill", Argv: []string{"/bin/kill", "-9", service}, User: "0:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, waitErr := killer.Wait(t.Context()); waitErr != nil || code != 0 {
+		t.Fatalf("kill the git service: %d, %v", code, waitErr)
+	}
+	t.Logf("a commit whose service was killed: %v", <-committing)
+	deadline := time.Now().Add(time.Minute)
+	for procs := ""; ; time.Sleep(200 * time.Millisecond) {
+		procs = h.sh(t, key, "cat /sys/fs/cgroup/git/cgroup.procs")
+		if procs != "" && procs != service && !strings.Contains(procs, "\n") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the git cgroup a minute after its service was killed holds %q, not one new service", procs)
+		}
+	}
+	// The new service picks the run's watch back up: its next change reaches
+	// the server's history, and a commit goes through.
+	h.sh(t, key, "echo after > after-kill.txt")
+	store := filepath.Join(filepath.Dir(h.repos), "checkouts", key+".diffsnap")
+	for deadline = time.Now().Add(3 * time.Minute); ; time.Sleep(time.Second) {
+		out, _ := exec.Command("git", "-C", store, "ls-tree", "--name-only", "refs/aether/published", "after-kill.txt").Output()
+		if strings.TrimSpace(string(out)) == "after-kill.txt" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no snapshot of the change made after the git service was killed reached the server")
+		}
+	}
+	if commit, err = h.git.CommitAll(t.Context(), run, "aether: after", member, nil); err != nil || commit == "" {
+		t.Errorf("commit after the git service was killed mid-commit = %q, %v", commit, err)
 	}
 }
 

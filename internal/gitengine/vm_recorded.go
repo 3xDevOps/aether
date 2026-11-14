@@ -83,7 +83,7 @@ func (e *Engine) recordedFileDiff(ctx context.Context, run domain.RunID, path st
 	if err != nil {
 		return Patch{}, err
 	}
-	text, truncated, err := e.gitBareBoundedEnv(ctx, store, append(gitEnv(), "GIT_ATTR_SOURCE="+emptyTree), MaxPatchBytes,
+	text, truncated, err := e.gitBareBoundedEnv(ctx, store, append(e.gitEnv(), "GIT_ATTR_SOURCE="+emptyTree), MaxPatchBytes,
 		"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", base, tree, "--", path)
 	if err != nil {
 		return Patch{}, err

@@ -40,9 +40,10 @@ func (e *Engine) CheckoutHead(ctx context.Context, key domain.RunID) (string, er
 }
 
 // WatchCheckout starts the diff watch of key's checkout alone, unless it
-// runs.
+// runs. A watch it starts records what changed while none ran, as while the
+// git service was down, without waiting for another change.
 func (e *Engine) WatchCheckout(ctx context.Context, workspace domain.WorkspaceID, key domain.RunID) error {
-	return e.startDiffWatch(ctx, workspace, key)
+	return e.startDiffWatch(ctx, workspace, key, true)
 }
 
 // FinishWatch takes the diff watch's last snapshot of key's checkout and
@@ -93,6 +94,11 @@ func (e *Engine) stageCommitLocked(ctx context.Context, key domain.RunID, checko
 		return "", err
 	}
 	index := filepath.Join(store, commitIndexName)
+	// Every writer holds snapshotLock, so an index lock here is stale: left
+	// by a git killed with its service.
+	if err = os.Remove(index + ".lock"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("gitengine: clear the stale commit index lock of %s: %w", key, err)
+	}
 	data, err := e.readCheckoutGitFile(checkout, "index", maxCommitIndexBytes)
 	switch {
 	case errors.Is(err, os.ErrNotExist):

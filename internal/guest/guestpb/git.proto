@@ -40,10 +40,12 @@ service Git {
   rpc Install(stream InstallChunk) returns (InstallReply);
   // Tree, ReadFile, WriteFile and FileDiff are the Files view's calls on
   // the checkout, as the server's engine answers them for a checkout on its
-  // own disk.
+  // own disk. A file travels in chunks, so neither end holds it in one
+  // message: ReadFile's first chunk carries the file's size, WriteFile's
+  // first chunk names the file.
   rpc Tree(TreeRequest) returns (TreeReply);
-  rpc ReadFile(ReadFileRequest) returns (FileReply);
-  rpc WriteFile(WriteFileRequest) returns (FileReply);
+  rpc ReadFile(ReadFileRequest) returns (stream FileChunk);
+  rpc WriteFile(stream WriteFileChunk) returns (WriteFileReply);
   rpc FileDiff(FileDiffRequest) returns (PatchReply);
   // Sync serves a live overlay's endpoint at the checkout; the first chunk
   // names the checkout and every chunk carries the overlay's stream.
@@ -180,18 +182,19 @@ message ReadFileRequest {
   uint32 max_bytes = 3;
 }
 
-message WriteFileRequest {
-  string key = 1;
-  string path = 2;
-  bytes content = 3;
-  string revision = 4;
+message FileChunk {
+  bytes data = 1;
+  int64 size = 2;
 }
 
-message FileReply {
-  bytes content = 1;
-  bool truncated = 2;
-  int64 size = 3;
+message WriteFileChunk {
+  string key = 1;
+  string path = 2;
+  string revision = 3;
+  bytes data = 4;
 }
+
+message WriteFileReply {}
 
 message FileDiffRequest {
   string key = 1;
