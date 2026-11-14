@@ -28,23 +28,23 @@ func TestDiskUseCountsTheBlocksOfEachVMsDisks(t *testing.T) {
 
 func TestHoldDisksStopsAFrozenVMUntilItsResume(t *testing.T) {
 	h := newHarness(t)
-	h.createWithCheckoutDisk("run-a")
-	if err := h.engine.pause(t.Context(), "run-a"); err != nil {
+	h.createWithCheckoutDisk("run-b")
+	if err := h.engine.pause(t.Context(), "run-b"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.engine.holdDisks(t.Context(), "run-a"); err != nil {
+	if err := h.engine.holdDisks(t.Context(), "run-b"); err != nil {
 		t.Fatal(err)
 	}
-	if !h.engine.halted(t.Context(), "run-a") || !h.guest("run-a").isSessionFrozen() {
+	if !h.engine.halted(t.Context(), "run-b") || !h.guest("run-b").isSessionFrozen() {
 		t.Fatal("a held VM runs on, or its session thawed")
 	}
-	if err := h.engine.holdDisks(t.Context(), "run-a"); err != nil {
+	if err := h.engine.holdDisks(t.Context(), "run-b"); err != nil {
 		t.Errorf("holding a held VM again = %v", err)
 	}
-	if err := h.engine.resume(t.Context(), "run-a"); err != nil {
+	if err := h.engine.resume(t.Context(), "run-b"); err != nil {
 		t.Fatal(err)
 	}
-	if h.engine.halted(t.Context(), "run-a") || h.guest("run-a").isSessionFrozen() {
+	if h.engine.halted(t.Context(), "run-b") || h.guest("run-b").isSessionFrozen() {
 		t.Error("resume left the held VM stopped or its session frozen")
 	}
 }
