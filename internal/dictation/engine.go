@@ -220,6 +220,7 @@ func (s *sidecar) start(ctx context.Context, m Manifest) (containerruntime.ID, e
 			filepath.Join(s.dir, m.Files, "model"):   engineRoot + "/model",
 		},
 		Writable:    map[string]string{filepath.Join(s.dir, "sock"): socketDir},
+		Socket:      filepath.Base(s.socket()),
 		CPUs:        float64(threads()),
 		MemoryBytes: memoryLimit,
 		GPU:         m.Provider == "cuda",

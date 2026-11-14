@@ -191,6 +191,29 @@ func dialVsock(ctx context.Context, socket string, port uint32) (net.Conn, error
 	return conn, nil
 }
 
+// DialServed connects to the socket the helper serves on port (a
+// Config.Serves entry) and returns once the socket in the VM accepted.
+func DialServed(ctx context.Context, vsockPath string, port uint32) (net.Conn, error) {
+	conn, err := dialVsock(ctx, vsockPath, port)
+	if err != nil {
+		return nil, fmt.Errorf("guest: served socket: %w", err)
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })
+	defer stop()
+	var b [1]byte
+	if _, err = io.ReadFull(conn, b[:]); err == nil && b[0] != 0 {
+		err = fmt.Errorf("the helper sent %d before the stream", b[0])
+	}
+	if err == nil {
+		err = conn.SetDeadline(time.Time{})
+	}
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("guest: socket served on port %d: %w", port, err)
+	}
+	return conn, nil
+}
+
 // readOK reads the reply line one byte at a time: the helper's first bytes
 // may follow it in the same segment.
 func readOK(conn net.Conn) error {

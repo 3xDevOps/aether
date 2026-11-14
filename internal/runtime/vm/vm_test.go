@@ -52,7 +52,7 @@ func TestVMForRoutesEachKindToItsOwnVM(t *testing.T) {
 }
 
 // dockerOnly takes IDs that only Docker ever hands out.
-var dockerOnly = []string{"DictationState", "InspectBrowser"}
+var dockerOnly = []string{"InspectBrowser"}
 
 // TestEveryContainerMethodIsRouted fails when Docker gains a method that
 // takes a container, unless Runtime routes it or it is listed above: a

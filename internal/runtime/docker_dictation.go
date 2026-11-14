@@ -28,8 +28,11 @@ type DictationSpec struct {
 	Entrypoint []string
 	User       string
 	// ReadOnly and Writable map host paths to container paths.
-	ReadOnly    map[string]string
-	Writable    map[string]string
+	ReadOnly map[string]string
+	Writable map[string]string
+	// Socket names the engine's socket in its one Writable directory, which
+	// the server dials.
+	Socket      string
 	CPUs        float64
 	MemoryBytes int64
 	GPU         bool

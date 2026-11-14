@@ -75,6 +75,7 @@ type engine struct {
 	booting map[string]bool
 	fresh   map[string]bool
 	events  map[string]runtime.MemoryEvents
+	relays  map[string]*relay
 
 	netMu    sync.Mutex
 	reserved map[int]bool
@@ -86,7 +87,7 @@ func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
 	return &engine{
 		cfg: cfg, root: filepath.Join(cfg.DataDir, "vm"), units: u, dial: dial, run: runCommand,
 		locks: map[string]*sync.Mutex{}, helpers: map[string]helper{}, gits: map[string]*guest.Git{}, booting: map[string]bool{},
-		fresh: map[string]bool{}, events: map[string]runtime.MemoryEvents{}, reserved: map[int]bool{},
+		fresh: map[string]bool{}, events: map[string]runtime.MemoryEvents{}, relays: map[string]*relay{}, reserved: map[int]bool{},
 	}
 }
 
@@ -180,6 +181,11 @@ type options struct {
 	// Lifetime has systemd end the VM after it, even when no server is
 	// left to: the VM of a check that a crash interrupted.
 	Lifetime time.Duration
+	// OwnedDirs are made in the VM, owned by the spec's user, before the
+	// main process starts.
+	OwnedDirs []string
+	// Serves are the VM's sockets the host reaches through the helper.
+	Serves []guest.Socket
 }
 
 func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts options) (_ runtime.ID, err error) {
@@ -247,7 +253,7 @@ func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts
 		WorkingDir: cmp.Or(spec.WorkingDir, base.Config.WorkingDir, "/"), Command: spec.Command, TTY: spec.TTY,
 		SetupScript: spec.SetupScript, SecretEnv: spec.SecretEnv, NestedDocker: spec.NestedDocker, Sudo: spec.Sudo,
 		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: shared, CheckoutDisks: disks, Mounts: spec.Mounts, Net: index, Egress: spec.Egress,
-		KeepRoot: opts.KeepRoot, Lifetime: opts.Lifetime,
+		KeepRoot: opts.KeepRoot, Lifetime: opts.Lifetime, OwnedDirs: opts.OwnedDirs, Serves: opts.Serves,
 	}
 	if err = e.store(rec); err != nil {
 		return "", err
@@ -380,7 +386,7 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		disks = append(disks, diskArg(c.Disk, checkoutSerial(i)))
 		checkouts[i] = guest.CheckoutMount{Serial: checkoutSerial(i), Key: c.Checkout.Key, Target: c.Target}
 	}
-	cfg := guest.Config{Hostname: rec.Key, Mounts: p.mounts, Checkouts: checkouts, Sockets: p.sockets}
+	cfg := guest.Config{Hostname: rec.Key, Mounts: p.mounts, Checkouts: checkouts, Sockets: p.sockets, Serves: rec.Serves}
 	if rec.Net != offline {
 		var dns []netip.Addr
 		if !rec.Egress {
@@ -525,6 +531,12 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 		}
 		if gitErr != nil {
 			return fmt.Errorf("vm runtime: set up the checkouts of VM %s: %w", rec.Key, gitErr)
+		}
+	}
+	for _, dir := range rec.OwnedDirs {
+		code, out, dirErr := e.runAsRoot(ctx, h, rec, []string{"/bin/sh", "-c", `mkdir -p -- "$1" && chown -- "$2" "$1"`, "aether-dir", dir, rec.User})
+		if dirErr != nil || code != 0 {
+			return errors.Join(dirErr, fmt.Errorf("vm runtime: make %s for user %s: exit %d: %s", dir, rec.User, code, strings.TrimSpace(out)))
 		}
 	}
 	var tty *guest.Size

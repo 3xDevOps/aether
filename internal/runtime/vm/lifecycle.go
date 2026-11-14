@@ -388,6 +388,7 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 	if _, err := os.Stat(e.dir(key)); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
+	e.stopRelay(key)
 	up, err := e.running(ctx, key)
 	if err != nil {
 		e.forgetHelper(key)
