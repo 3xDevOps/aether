@@ -483,6 +483,37 @@ func TestAClosedVMIsSavedAndRelaunchRestoresIt(t *testing.T) {
 	waitItems(t, s2, run.ID, "a turn after reopening", turnEnded("end_turn", 2))
 }
 
+func TestARelaunchOfAClosedVMThatFailsAfterTheRestoreCanBeRetried(t *testing.T) {
+	t.Parallel()
+	e, _, sr := newSaveEnv(t, false)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatal(err)
+	}
+	cid := e.cid(t, run.ID)
+	e.rt.mu.Lock()
+	e.rt.attachHook = func(context.Context, runtime.ID) (runtime.Attachment, error) {
+		return nil, errors.New("attach refused")
+	}
+	e.rt.mu.Unlock()
+	if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err == nil {
+		t.Fatal("Relaunch succeeded with its attach refused")
+	}
+	if from := sr.savedFrom(cid); from != "paused" {
+		t.Fatalf("the failed Relaunch saved the closed VM from %q, want paused", from)
+	}
+	e.rt.mu.Lock()
+	e.rt.attachHook = nil
+	e.rt.mu.Unlock()
+	if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("Relaunch after a failed one: %v", err)
+	}
+	if containerState(e.container(t, run.ID)) != "running" {
+		t.Fatal("the second Relaunch left the VM paused")
+	}
+}
+
 func TestASavedRunWakesWithItsAgentAfterARestart(t *testing.T) {
 	t.Parallel()
 	e, rt, sr := newSaveEnv(t, false)

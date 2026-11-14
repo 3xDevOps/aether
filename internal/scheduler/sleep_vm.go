@@ -272,14 +272,20 @@ func (s *Scheduler) recordSaved(entry *supervised, saved bool) error {
 }
 
 // resaveAsleep saves entry's VM again after a failed wake reattached part of
-// it. A VM that cannot be saved stays running, for the next wake to take
-// up. Caller holds entry.lifecycleMu.
+// it. A closed session is paused first, as saveClosed saves it, for the
+// next reopen's restore to resume. A VM that cannot be saved stays up, for
+// the next wake to take up. Caller holds entry.lifecycleMu.
 func (s *Scheduler) resaveAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
 	s.mu.Lock()
-	cid := entry.containerID
+	cid, closed := entry.containerID, entry.retained
 	entry.paused = true
 	s.mu.Unlock()
 	detachErr := s.detachForSave(ctx, entry)
+	if closed {
+		if err := s.cfg.Runtime.Pause(ctx, cid); err != nil {
+			return errors.Join(fmt.Errorf("pause the closed session to save it again: %w", err), detachErr)
+		}
+	}
 	if err := saver.Save(ctx, cid); err != nil {
 		return errors.Join(fmt.Errorf("save the session again: %w", err), detachErr)
 	}
