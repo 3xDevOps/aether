@@ -168,7 +168,10 @@ func (e *engine) pauseBrowser(ctx context.Context, key string, paused bool) erro
 	if err != nil {
 		return err
 	}
-	if err = h.PauseBrowser(ctx, paused); err != nil {
+	callCtx, cancel := context.WithTimeout(ctx, helperCallTimeout)
+	err = h.PauseBrowser(callCtx, paused)
+	cancel()
+	if err != nil {
 		return fmt.Errorf("vm runtime: browser in VM %s: %w", key, err)
 	}
 	rec.Companion.Paused = paused
