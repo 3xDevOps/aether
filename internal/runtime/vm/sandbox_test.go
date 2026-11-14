@@ -44,7 +44,10 @@ func TestVMUnitsWriteOnlyTheirOwnPathsAndKeepFewCapabilities(t *testing.T) {
 	offline := h.units.last().properties
 
 	for _, props := range [][]string{session, offline} {
-		for _, want := range []string{"NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes"} {
+		for _, want := range []string{
+			"NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes", "ProtectKernelTunables=yes",
+			"DevicePolicy=closed", "DeviceAllow=/dev/kvm rw", "RestrictAddressFamilies=AF_UNIX AF_INET",
+		} {
 			if !slices.Contains(props, want) {
 				t.Errorf("unit properties %v lack %s", props, want)
 			}

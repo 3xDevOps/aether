@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 
@@ -49,6 +50,9 @@ func Monitor(args []string) error {
 			return err
 		}
 		if err = startVirtiofsd(filepath.Join(dir, fsSocket), root); err != nil {
+			return err
+		}
+		if err = dropShareCaps(); err != nil {
 			return err
 		}
 	}
@@ -158,6 +162,36 @@ func bindShare(target string, s share) error {
 	}
 	if err := unix.MoveMount(tree, "", unix.AT_FDCWD, target, unix.MOVE_MOUNT_F_EMPTY_PATH); err != nil {
 		return fmt.Errorf("vm monitor: bind %s: %w", s.Source, err)
+	}
+	return nil
+}
+
+// shareCapBits are shareCaps, in the order they can be dropped: CAP_SETPCAP
+// last, since dropping from the bounding set takes it.
+var shareCapBits = []uintptr{unix.CAP_SYS_ADMIN, unix.CAP_SETUID, unix.CAP_SETGID, unix.CAP_MKNOD, unix.CAP_SETFCAP, unix.CAP_SETPCAP}
+
+// dropShareCaps takes the share's capabilities off every thread of the
+// monitor once its mounts are made and virtiofsd runs, so neither Cloud
+// Hypervisor nor the file service could undo the unit's mounts.
+func dropShareCaps() error {
+	for _, c := range shareCapBits {
+		if _, _, errno := syscall.AllThreadsSyscall(unix.SYS_PRCTL, unix.PR_CAPBSET_DROP, c, 0); errno != 0 {
+			return fmt.Errorf("vm monitor: drop capability %d from the bounding set: %w", c, errno)
+		}
+	}
+	hdr := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	var data [2]unix.CapUserData
+	if err := unix.Capget(&hdr, &data[0]); err != nil {
+		return fmt.Errorf("vm monitor: read capabilities: %w", err)
+	}
+	for _, c := range shareCapBits {
+		bit := uint32(1) << (c % 32)
+		data[c/32].Effective &^= bit
+		data[c/32].Permitted &^= bit
+		data[c/32].Inheritable &^= bit
+	}
+	if _, _, errno := syscall.AllThreadsSyscall(unix.SYS_CAPSET, uintptr(unsafe.Pointer(&hdr)), uintptr(unsafe.Pointer(&data[0])), 0); errno != 0 {
+		return fmt.Errorf("vm monitor: drop the share's capabilities: %w", errno)
 	}
 	return nil
 }

@@ -18,13 +18,16 @@ var hiddenDirs = []string{"/home", "/root", "/run/user"}
 var fileCaps = []string{"CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH", "CAP_FOWNER", "CAP_FSETID"}
 
 // shareCaps are what the monitor needs to compose the virtio-fs share and
-// virtiofsd its namespace sandbox.
+// virtiofsd its namespace sandbox. The monitor drops them once virtiofsd
+// runs (dropShareCaps).
 var shareCaps = []string{"CAP_SYS_ADMIN", "CAP_SETUID", "CAP_SETGID", "CAP_SETPCAP", "CAP_MKNOD", "CAP_SETFCAP"}
 
 // sandbox confines a VM's unit: it writes only the VM's directory and the
 // host files its disks and shares name, sees no home directory, gains no
 // privilege by exec, and keeps only the capabilities its processes use.
-// Cloud Hypervisor makes the VM's tap, which takes CAP_NET_ADMIN.
+// Root in the unit could otherwise still write /proc, /sys and devices.
+// Cloud Hypervisor makes the VM's tap, which takes CAP_NET_ADMIN; without
+// netlink it cannot touch the host's firewall or routes through it.
 func sandbox(dir string, rec *record, l launch) []string {
 	caps := slices.Clone(fileCaps)
 	if len(l.Shares) > 0 {
@@ -54,6 +57,10 @@ func sandbox(dir string, rec *record, l launch) []string {
 	}
 	props := []string{
 		"NoNewPrivileges=yes", "ProtectSystem=strict", "ProtectHome=yes",
+		"ProtectKernelTunables=yes", "ProtectKernelModules=yes", "ProtectKernelLogs=yes",
+		"ProtectControlGroups=yes", "ProtectClock=yes",
+		"DevicePolicy=closed", "DeviceAllow=/dev/kvm rw", "DeviceAllow=/dev/net/tun rw",
+		"RestrictAddressFamilies=AF_UNIX AF_INET",
 		"CapabilityBoundingSet=" + strings.Join(caps, " "),
 	}
 	// A path that is gone is skipped rather than failing the unit, as the

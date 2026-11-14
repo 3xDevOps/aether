@@ -59,15 +59,31 @@ with its own kernel instead
 has its network rules). Cloud Hypervisor and the host services a VM uses,
 such as its [file service](vm-guest.md#the-file-service) and `virtiofsd`, run
 as root on the host, so a flaw in any of them reaches the host. Their systemd
-unit limits that: `NoNewPrivileges=yes`, `ProtectSystem=strict` and
-`ProtectHome=yes`, writes only to the VM's directory and the host files its
-state disk, checkout disks and writable mounts name, and a capability
-bounding set of `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_DAC_READ_SEARCH`,
-`CAP_FOWNER` and `CAP_FSETID` for the file service, plus the mount and
-`virtiofsd` capabilities when the VM has a virtio-fs share and
-`CAP_NET_ADMIN`, with which Cloud Hypervisor makes the VM's tap, when it has
-a network. They can still read the rest of the host as root. The bullets below on Docker, Sysbox and networks
-describe Docker mode; what a session is given, after them, applies to both.
+unit limits that:
+
+- `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=yes`,
+  `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`,
+  `ProtectKernelLogs=yes`, `ProtectControlGroups=yes` and `ProtectClock=yes`.
+  It writes only to the VM's directory and the host files its state disk,
+  checkout disks and writable mounts name, opens no device but `/dev/kvm`,
+  `/dev/net/tun` and the standard pseudo devices (`DevicePolicy=closed`), and
+  has no netlink (`RestrictAddressFamilies=AF_UNIX AF_INET`).
+- Its capability bounding set is `CAP_CHOWN`, `CAP_DAC_OVERRIDE`,
+  `CAP_DAC_READ_SEARCH`, `CAP_FOWNER` and `CAP_FSETID` for the file service,
+  plus `CAP_NET_ADMIN`, with which Cloud Hypervisor makes the VM's tap, when
+  it has a network. A VM with a virtio-fs share also starts with the mount
+  and `virtiofsd` capabilities; the monitor drops them once `virtiofsd`
+  runs, before Cloud Hypervisor and the file service start.
+- What it does not stop: it reads the rest of the host as root, outside
+  `/home`, `/root` and `/run/user`, Aether's data directory included.
+  `CAP_NET_ADMIN` still lets a compromised Cloud Hypervisor change host
+  interfaces and routes through `ioctl`. A mount of one file inside a
+  directory, as an Isolated session's own login, makes that whole directory
+  writable to the unit; the file service still serves the session only that
+  file.
+
+The bullets below on Docker, Sysbox and networks describe Docker mode; what a
+session is given, after them, applies to both.
 
 Every disk a VM gets names its format to Cloud Hypervisor, so nothing guesses
 a format from bytes a guest wrote. The disks a session writes directly - its
