@@ -21,21 +21,53 @@ In order, as PID 1:
    switches root to it. The helper stays PID 1; nothing is executed.
 2. Mounts `/dev/pts`, `/dev/shm`, the cgroup v2 hierarchy on `/sys/fs/cgroup`
    and a tmpfs on `/run`.
-3. Reads its configuration from `/proc/cmdline` (below), mounts the volumes
+3. Writes the boot sysctls that harden the kernel against an unprivileged
+   agent ([Kernel hardening](#kernel-hardening)).
+4. Reads its configuration from `/proc/cmdline` (below), mounts the volumes
    it names and binds what it names from them, then mounts each checkout
    disk ([Checkouts](#checkouts)).
-4. Brings up `lo` and the VM's network device, sets the hostname, and writes
+5. Brings up `lo` and the VM's network device, sets the hostname, and writes
    `/etc/hostname`, `/etc/hosts` and, when DNS servers are given,
    `/etc/resolv.conf`.
-5. Creates the session cgroup `/sys/fs/cgroup/session` (below).
-6. Listens on every forwarded socket.
-7. Serves the API on vsock port 1024. It accepts connections from the host
+6. Creates the session cgroup `/sys/fs/cgroup/session` (below).
+7. Listens on every forwarded socket.
+8. Serves the API on vsock port 1024. It accepts connections from the host
    only (vsock CID 2): a process in the VM that reached it through vsock
    loopback could start processes as root.
 
 A step that fails is logged on the serial console and reported by the API's
 `Info` as `boot_error`; the helper still serves, so the server can show the
 error. When it cannot serve at all, it powers the VM off.
+
+## Kernel hardening
+
+A Default-tier session runs the agent as an unprivileged user (uid 1000),
+and root in the VM waits for the sudo gate ([security.md](security.md#sudo-in-a-default-session)).
+The guest kernel shrinks the surface that user has to reach root in the VM
+without the gate, in two places.
+
+The kernel config (`images/kernel/config-x86_64`) turns unprivileged BPF off
+and locks it (`CONFIG_BPF_UNPRIV_DEFAULT_OFF`), restricts `dmesg` to root,
+builds in YAMA, and zeroes freshly allocated memory and hardens the
+copy-to/from-user and SLUB-freelist paths. It also builds the kernel
+relocatable with `RANDOMIZE_BASE`, but Cloud Hypervisor boots the
+uncompressed `vmlinux` through PVH, which does not run the decompressor that
+performs the relocation, so the kernel base is not randomized today; KASLR
+takes effect only if the kernel is booted as a bzImage.
+
+The helper writes the rest at boot, since they have no compile-time default:
+`kernel.kptr_restrict=2` (every kernel pointer in `/proc` reads as zero, for
+all users), `kernel.yama.ptrace_scope=1` (a process may ptrace only its own
+descendants), `kernel.io_uring_disabled=2` (io_uring is off for everyone; the
+harnesses fall back when `io_uring_setup` returns `ENOSYS`), and
+`kernel.perf_event_paranoid=3`. A missing one, where the kernel lacks the
+feature, is skipped; any other failure is reported as a `boot_error`.
+
+Root in the VM, which a Root-tier or nested-Docker session has, is still root
+in its own VM: it can relax these at runtime where the kernel allows it (not
+unprivileged BPF, which is locked), and escape the session cgroup
+([Checkouts](#checkouts)). The VM, not these settings, is what isolates it
+from the host and from other sessions.
 
 ## Kernel command line
 
@@ -62,7 +94,7 @@ The volumes:
 
 | Volume | What it is | Source |
 | --- | --- | --- |
-| `share` | The virtio-fs share tagged `aether`, on `/run/aether-guest/share`. Binds are `nosuid,nodev`. Only checkouts left on the server's disk use it. | A path in the share |
+| `share` | The virtio-fs share tagged `aether`, on `/run/aether-guest/share`. Binds are `nosuid,nodev`, and `virtiofsd` drops `CAP_MKNOD` and `CAP_SETFCAP`, so the guest cannot land a device node or a file-capability binary on the host. Only checkouts left on the server's disk use it. | A path in the share |
 | `home` | The [file service](#the-file-service), on `/run/aether-guest/home`. Binds are `nosuid,nodev`. | The index of a shared host file |
 | `data` | The disk with serial `data`, on `/run/aether-guest/data`. A missing source directory is created with the mode and owner its target has in the image, so `/tmp` keeps its sticky bit. | A path on the disk |
 | `cache` | The disk with serial `cache`, on `/run/aether-guest/cache`: the session's copy of the member's tool caches. Its root is mode `1777` and has no `lost+found`. | `.` |

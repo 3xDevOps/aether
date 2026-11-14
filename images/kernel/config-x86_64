@@ -13,6 +13,20 @@ CONFIG_LEGACY_VSYSCALL_XONLY=y
 CONFIG_CPU_MITIGATIONS=y
 CONFIG_STACKPROTECTOR=y
 CONFIG_STACKPROTECTOR_STRONG=y
+# Kernel hardening against a Default-tier uid-1000 agent escalating in the
+# VM. RELOCATABLE and RANDOMIZE_BASE/MEMORY give KASLR when the kernel is
+# booted as a bzImage; Cloud Hypervisor's PVH boot of the uncompressed
+# vmlinux does not run the decompressor, so they take effect only through
+# the bzImage path (see images/kernel/build.sh). The rest apply either way:
+# zero-on-allocation, usercopy bounds, and a hardened/randomized SLUB
+# freelist raise the bar for heap and copy-to/from-user exploits.
+CONFIG_RELOCATABLE=y
+CONFIG_RANDOMIZE_BASE=y
+CONFIG_RANDOMIZE_MEMORY=y
+CONFIG_HARDENED_USERCOPY=y
+CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
+CONFIG_SLAB_FREELIST_RANDOM=y
+CONFIG_SLAB_FREELIST_HARDENED=y
 CONFIG_JUMP_LABEL=y
 CONFIG_NO_HZ_IDLE=y
 CONFIG_HIGH_RES_TIMERS=y
@@ -131,6 +145,17 @@ CONFIG_SECCOMP=y
 CONFIG_SECCOMP_FILTER=y
 CONFIG_BPF_SYSCALL=y
 CONFIG_BPF_JIT=y
+# A Default-tier agent runs as uid 1000; unprivileged BPF is a large
+# local-privilege-escalation surface it must not have. The default-off
+# option also locks the sysctl, so it cannot be turned back on in the VM.
+CONFIG_BPF_UNPRIV_DEFAULT_OFF=y
+# YAMA gates ptrace to a process's own descendants (the helper sets
+# ptrace_scope at boot), and dmesg is restricted to root by default so the
+# kernel log cannot leak addresses to the agent.
+CONFIG_SECURITY=y
+CONFIG_SECURITY_YAMA=y
+CONFIG_SECURITY_DMESG_RESTRICT=y
+CONFIG_LSM="yama"
 CONFIG_NET=y
 CONFIG_INET=y
 CONFIG_IP_PNP=y
