@@ -76,24 +76,37 @@ func TestTerminalExecScriptMarksOnlyACommandStoppedAtTheLimit(t *testing.T) {
 	if _, err := exec.LookPath("timeout"); err != nil {
 		t.Skip("no timeout on PATH")
 	}
-	run := func(command string) (int, string, string) {
+	// On a loaded machine starting the login shell can take the whole
+	// limit, so a run whose command had not begun when the limit came is
+	// repeated with twice the limit.
+	run := func(command string, began func(stdout, stderr string) bool) (int, string, string) {
 		t.Helper()
-		var stdout, stderr bytes.Buffer
-		argv := terminalExecArgv(command, "MARK", time.Second)
-		cmd := exec.CommandContext(t.Context(), argv[0], argv[1:]...)
-		cmd.Stdout, cmd.Stderr = &stdout, &stderr
-		err := cmd.Run()
-		var exit *exec.ExitError
-		if err != nil && !errors.As(err, &exit) {
-			t.Fatalf("session %q: %v", command, err)
+		for limit := time.Second; ; limit *= 2 {
+			var stdout, stderr bytes.Buffer
+			argv := terminalExecArgv(command, "MARK", limit)
+			cmd := exec.CommandContext(t.Context(), argv[0], argv[1:]...)
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+			var exit *exec.ExitError
+			if err != nil && !errors.As(err, &exit) {
+				t.Fatalf("session %q: %v", command, err)
+			}
+			if began(stdout.String(), stderr.String()) || limit >= 16*time.Second {
+				return cmd.ProcessState.ExitCode(), stdout.String(), stderr.String()
+			}
 		}
-		return cmd.ProcessState.ExitCode(), stdout.String(), stderr.String()
 	}
 
 	// The child ignores TERM and would outlive a kill of its parent alone.
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	stubborn := `sh -c 'trap "" TERM; echo $$ >"$0"; while :; do sleep 0.1; done' ` + pidFile + ` & echo out; echo late >&2; sleep 30; echo never`
-	code, stdout, stderr := run(stubborn)
+	code, stdout, stderr := run(stubborn, func(stdout, stderr string) bool {
+		if _, err := os.Stat(pidFile); err == nil && strings.Contains(stdout, "out\n") && strings.Contains(stderr, "late\n") {
+			return true
+		}
+		_ = os.Remove(pidFile)
+		return false
+	})
 	if !strings.Contains(stdout, "out\n") || strings.Contains(stdout, "never") || !strings.Contains(stderr, "late\n") || !strings.HasSuffix(stderr, "MARK\n") {
 		t.Errorf("a command past the limit = (%d, %q, %q), want its output so far and then the mark", code, stdout, stderr)
 	}
@@ -126,11 +139,12 @@ func TestTerminalExecScriptMarksOnlyACommandStoppedAtTheLimit(t *testing.T) {
 	}
 	_ = syscall.Kill(child, syscall.SIGKILL)
 
+	ran := func(_, stderr string) bool { return strings.Contains(stderr, "own\n") }
 	for _, own := range []struct {
 		command string
 		code    int
 	}{{"echo own >&2; exit 137", 137}, {"echo own >&2; exit 124", 124}, {"echo own >&2; exit 143", 143}, {"echo own >&2; exit 7", 7}, {"echo own >&2", 0}} {
-		if code, _, stderr := run(own.command); code != own.code || !strings.Contains(stderr, "own\n") || strings.HasSuffix(stderr, "MARK\n") {
+		if code, _, stderr := run(own.command, ran); code != own.code || !strings.Contains(stderr, "own\n") || strings.HasSuffix(stderr, "MARK\n") {
 			t.Errorf("%q = (%d, %q), want its own status %d and no mark", own.command, code, stderr, own.code)
 		}
 	}
