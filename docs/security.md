@@ -62,7 +62,43 @@ as root on the host, so a flaw in any of them reaches the host. The guest
 kernel is [hardened](vm-guest.md#kernel-hardening) to keep an unprivileged
 agent from reaching root inside the VM without the sudo gate, and the one
 remaining `virtiofsd` share (a checkout not yet on a VM disk) cannot carry a
-device node or a file-capability binary to the host. The bullets below on Docker, Sysbox and networks
+device node or a file-capability binary to the host. Their systemd unit
+limits what a flaw in them reaches:
+
+- `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectKernelTunables=yes`,
+  `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`,
+  `ProtectControlGroups=yes` and `ProtectClock=yes`. It opens no device but
+  `/dev/kvm`, `/dev/net/tun` and the standard pseudo devices
+  (`DevicePolicy=closed`), and has no netlink
+  (`RestrictAddressFamilies=AF_UNIX AF_INET`). It also gets `ProtectHome=yes`,
+  which hides `/home`, `/root` and `/run/user`, unless the data directory or
+  the guest kernel lives under one of those (a server run from a home
+  directory), since that setting hides a path past every bind.
+- A tmpfs hides the whole data directory, so the database and every other
+  VM's disks and files are gone from the unit. Only the paths this VM needs
+  are bound back, writable only where it writes: its own directory, its state
+  disk, each checkout's directory, the home and shares the session mounts,
+  and the directories of the sockets forwarded into it, those read-only. Its
+  disks reach their base images through hard links inside those directories,
+  so the image store itself is never exposed; those links, the helper disk,
+  and the record and launch files the server trusts across a restart or
+  restore are bound read-only inside the writable directories, so the unit
+  cannot rewrite them to reach another VM's disks or the database on its next
+  boot.
+- Its capability bounding set is `CAP_CHOWN`, `CAP_DAC_OVERRIDE`,
+  `CAP_DAC_READ_SEARCH`, `CAP_FOWNER` and `CAP_FSETID` for the file service,
+  plus `CAP_NET_ADMIN`, with which Cloud Hypervisor makes the VM's tap, when
+  it has a network. A VM with a virtio-fs share also starts with the mount
+  and `virtiofsd` capabilities; the monitor drops them once `virtiofsd` runs,
+  before Cloud Hypervisor and the file service start.
+- What it does not stop: it reads the host outside the data directory as
+  root, outside `/home`, `/root` and `/run/user`. `CAP_NET_ADMIN` still lets
+  a compromised Cloud Hypervisor change host interfaces and routes through
+  `ioctl`. A mount of one file inside a directory, as an Isolated session's
+  own login, makes that whole directory writable to the unit; the file
+  service still serves the session only that file.
+
+The bullets below on Docker, Sysbox and networks
 describe Docker mode; what a session is given, after them, applies to both.
 
 Every disk a VM gets names its format to Cloud Hypervisor, so nothing guesses

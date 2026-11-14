@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math"
 	"net/netip"
@@ -16,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/guest"
@@ -449,7 +451,7 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	if rec.Net != offline {
 		args = append(args, "--net", "id=net0,"+chNetArg(rec.Net, rec.Egress))
 	}
-	l := launch{Args: args, Shares: p.shares, Home: p.homeConfig(rec.User)}
+	l := launch{Args: args, Shares: p.shares, Home: p.homeConfig(rec.User), Reveal: revealPaths(e.dir(rec.Key), kernel, rec, p)}
 	if len(p.shares) > 0 {
 		l.Args = append(l.Args, "--fs", "tag="+guest.ShareTag+",socket="+e.path(rec.Key, fsSocket))
 	}
@@ -533,6 +535,7 @@ func (e *engine) launch(ctx context.Context, rec *record, l launch) error {
 	if rec.Lifetime > 0 {
 		properties = append(properties, fmt.Sprintf("RuntimeMaxSec=%d", int(rec.Lifetime.Seconds())))
 	}
+	properties = append(properties, sandbox(filepath.Dir(e.root), e.cfg.Monitor[0], rec, l)...)
 	argv := append(append([]string{}, e.cfg.Monitor...), e.dir(rec.Key))
 	if err := e.units.Start(ctx, unitName(rec.Key), argv, properties); err != nil {
 		return err
@@ -667,7 +670,9 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 func (e *engine) logTail(key string) string {
 	var out strings.Builder
 	for _, name := range []string{monitorLog, consoleLog} {
-		data, err := os.ReadFile(e.path(key, name))
+		// The log files are in the VM's own directory, which its unit may
+		// write, so a symlink planted there must not be followed off it.
+		data, err := readNoFollow(e.path(key, name))
 		if err != nil || len(data) == 0 {
 			continue
 		}
@@ -675,4 +680,14 @@ func (e *engine) logTail(key string) string {
 		fmt.Fprintf(&out, "\n%s:\n%s", name, strings.Join(lines[max(0, len(lines)-15):], "\n"))
 	}
 	return out.String()
+}
+
+// readNoFollow reads a file, refusing to follow a final symlink.
+func readNoFollow(path string) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return io.ReadAll(f)
 }

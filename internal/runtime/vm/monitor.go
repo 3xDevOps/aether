@@ -16,6 +16,9 @@ type launch struct {
 	Shares []share      `json:"shares,omitempty"`
 	Home   *home.Config `json:"home,omitempty"`
 	Args   []string     `json:"args"`
+	// Reveal is each host path the unit's processes need, by whether they
+	// write it, bound back through the tmpfs that hides the data directory.
+	Reveal map[string]bool `json:"reveal,omitempty"`
 }
 
 func readLaunch(dir string) (launch, error) {
