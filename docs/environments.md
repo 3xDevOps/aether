@@ -64,7 +64,9 @@ a newer Git in your environment and save it, or
    image it started from.
 
 An admin who set `--standard-image` has to move it to a newer tag or digest. A
-reused tag such as `:latest` also needs `docker pull` on the host.
+reused tag such as `:latest` also needs `docker pull` on the host, except with
+`session-runtime vm`: the VM image store fetches a reference once and keeps
+it, so only a new tag or digest reaches VMs.
 
 ```sh
 sudo aether-server config set standard-image <a newer image> && sudo systemctl restart aether-server
