@@ -19,12 +19,13 @@ import (
 
 // saveRuntime runs every container as a session VM: a save ends it as a
 // stop does but keeps its execs, the agent's keeper among them, and a
-// restore starts it again with them.
+// restore starts it again with them, paused if it was saved paused.
 type saveRuntime struct {
 	*acpRuntime
 
-	saveMu  sync.Mutex
-	saved   map[runtime.ID]bool
+	saveMu sync.Mutex
+	// saved holds the state each saved container was saved from.
+	saved   map[runtime.ID]string
 	saveErr error
 	// saving, when set, receives each save as it starts, which then waits
 	// for release.
@@ -54,12 +55,13 @@ func (r *saveRuntime) Save(_ context.Context, id runtime.ID) error {
 	if err != nil {
 		return err
 	}
-	if state := c.currentState(); state != "running" {
+	state := c.currentState()
+	if state != "running" && state != "paused" {
 		return errors.New("save from state " + state)
 	}
 	c.endProcess(137)
 	r.saveMu.Lock()
-	r.saved[id] = true
+	r.saved[id] = state
 	r.saveMu.Unlock()
 	return nil
 }
@@ -74,13 +76,20 @@ func (r *saveRuntime) Restore(ctx context.Context, id runtime.ID) error {
 	r.saveMu.Unlock()
 	switch {
 	case err != nil && late:
-		return errors.Join(err, r.Start(ctx, id))
+		return errors.Join(err, r.restart(ctx, id, saved))
 	case err != nil:
 		return err
-	case !saved:
+	case saved == "":
 		return errors.New("it has no saved state")
 	}
-	return r.Start(ctx, id)
+	return r.restart(ctx, id, saved)
+}
+
+func (r *saveRuntime) restart(ctx context.Context, id runtime.ID, state string) error {
+	if err := r.Start(ctx, id); err != nil || state != "paused" {
+		return err
+	}
+	return r.Pause(ctx, id)
 }
 
 func (r *saveRuntime) Stop(ctx context.Context, id runtime.ID, grace time.Duration) error {
@@ -91,6 +100,10 @@ func (r *saveRuntime) Stop(ctx context.Context, id runtime.ID, grace time.Durati
 }
 
 func (r *saveRuntime) isSaved(id runtime.ID) bool {
+	return r.savedFrom(id) != ""
+}
+
+func (r *saveRuntime) savedFrom(id runtime.ID) string {
 	r.saveMu.Lock()
 	defer r.saveMu.Unlock()
 	return r.saved[id]
@@ -104,7 +117,7 @@ func newSaveEnv(t *testing.T, resumable bool) (*testEnv, *acpRuntime, *saveRunti
 	e, rt := newACPEnv(t, func(cfg *Config) {
 		cfg.VMSleepAfter = time.Nanosecond
 		cfg.sleepAnyAgent = resumable
-		sr = &saveRuntime{acpRuntime: cfg.Runtime.(*acpRuntime), saved: map[runtime.ID]bool{}}
+		sr = &saveRuntime{acpRuntime: cfg.Runtime.(*acpRuntime), saved: map[runtime.ID]string{}}
 		cfg.Runtime = sr
 	})
 	e.onGuestCPU("0")
@@ -443,8 +456,8 @@ func TestAClosedVMIsSavedAndRelaunchRestoresIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	cid := e.cid(t, run.ID)
-	if state := e.sched.Sleep(run.ID); state.AsleepSince == nil || !state.Saved || !sr.isSaved(cid) {
-		t.Fatalf("a closed VM was not saved at the close: %+v", state)
+	if state := e.sched.Sleep(run.ID); state.AsleepSince == nil || !state.Saved || sr.savedFrom(cid) != "paused" {
+		t.Fatalf("a closed VM was not saved paused at the close: %+v, saved from %q", state, sr.savedFrom(cid))
 	}
 	if e.rt.byName(string(run.ID)) == nil {
 		t.Fatal("the save destroyed the retained VM")

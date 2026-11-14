@@ -658,9 +658,11 @@ lost, so more sessions sleep, sooner:
   yet to fire. A save that fails leaves the session running; Aether tries
   again after another `--run-sleep-after`.
 - A closed session is saved as soon as the close finishes, instead of
-  staying paused in memory, unless `--run-sleep-after` is `0`. **Relaunch**
-  restores it. Closing or killing a sleeping session wakes it first, so its
-  work is committed as for a running one.
+  staying paused in memory, unless `--run-sleep-after` is `0`. It stays
+  paused through the save, so nothing changes its files after the close's
+  commit. **Relaunch** restores and resumes it. Closing or killing a
+  sleeping session wakes it first, so its work is committed as for a
+  running one.
 
 A sleeping VM keeps everything: its processes, including dev servers,
 nested Docker containers such as a `docker compose` stack and the Browser

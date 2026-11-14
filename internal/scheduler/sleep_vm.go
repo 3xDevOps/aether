@@ -165,10 +165,16 @@ func (s *Scheduler) reattach(ctx context.Context, entry *supervised, restored bo
 // entry.lifecycleMu and has reserved capacity.
 func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) (woke, error) {
 	s.mu.Lock()
-	cid := entry.containerID
+	cid, closed := entry.containerID, entry.retained
 	s.mu.Unlock()
 	restoreErr := saver.Restore(ctx, cid)
 	if restoreErr == nil {
+		// A closed session was saved paused, and comes back paused.
+		if closed {
+			if err := s.cfg.Runtime.Resume(ctx, cid); err != nil {
+				return woke{}, fmt.Errorf("resume the restored session: %w", err)
+			}
+		}
 		s.superviseWoken(entry)
 		return woke{restored: true}, nil
 	}
@@ -280,34 +286,23 @@ func (s *Scheduler) resaveAsleep(ctx context.Context, entry *supervised, saver r
 	return errors.Join(detachErr, s.recordSaved(entry, true))
 }
 
-// saveClosed saves a closed session's frozen VM. The close stopped its agent
-// and terminals; the VM runs again only to write its data to its disks
-// before the save. A save that fails leaves it frozen. Caller holds
+// saveClosed saves a closed session's VM as the close's pause left it, so no
+// process writes between the close's commit and the save; the reopen's
+// restore resumes it. A save that fails leaves it paused. Caller holds
 // entry.lifecycleMu, set sleeping and marked the run asleep.
 func (s *Scheduler) saveClosed(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
 	s.mu.Lock()
 	cid := entry.containerID
 	s.mu.Unlock()
-	if err := s.cfg.Runtime.Resume(ctx, cid); err != nil {
-		return errors.Join(fmt.Errorf("resume the closed session to save it: %w", err), s.unmarkAsleep(entry))
-	}
-	saveErr := saver.Save(ctx, cid)
-	if saveErr == nil {
-		recordErr := s.recordSaved(entry, true)
-		s.endSleep(entry, true)
-		return recordErr
-	}
-	saveErr = fmt.Errorf("save the closed session: %w", saveErr)
-	s.mu.Lock()
-	entry.saveFailedAt = time.Now().UTC()
-	s.mu.Unlock()
-	if err := s.cfg.Runtime.Pause(context.WithoutCancel(ctx), cid); err != nil {
+	if err := saver.Save(ctx, cid); err != nil {
 		s.mu.Lock()
-		entry.paused = false
+		entry.saveFailedAt = time.Now().UTC()
 		s.mu.Unlock()
-		saveErr = errors.Join(saveErr, fmt.Errorf("freeze it again: %w", err))
+		return errors.Join(fmt.Errorf("save the closed session: %w", err), s.unmarkAsleep(entry))
 	}
-	return errors.Join(saveErr, s.unmarkAsleep(entry))
+	recordErr := s.recordSaved(entry, true)
+	s.endSleep(entry, true)
+	return recordErr
 }
 
 // saveRecoveredAsleep finishes the save of a VM a server restart caught
