@@ -147,12 +147,15 @@ func (e *Engine) fetchVMObjects(ctx context.Context, run domain.RunID, store str
 	if len(missing) == 0 {
 		return nil
 	}
-	// A pack never takes the disk's last maxVMPackBytes.
-	free, err := disk.Free(store)
-	if err != nil || free <= 2*maxVMPackBytes {
-		return fmt.Errorf("%w: the server has too little free disk for objects from session %s", ErrSnapshotStorageLimit, run)
+	// Reserve the disk this receive may write so concurrent receives cannot
+	// each spend the same free space and jointly cross the floor. The grant
+	// also caps the pack size.
+	grant, err := e.reserveVMReceive(store, limit)
+	if err != nil {
+		return fmt.Errorf("gitengine: %w for objects from session %s", err, run)
 	}
-	limit = min(limit, int64(free-maxVMPackBytes))
+	defer e.releaseVMReceive(grant)
+	limit = grant
 	g, err := e.vmGit(ctx, run)
 	if err != nil {
 		return err
@@ -204,6 +207,48 @@ func (e *Engine) fetchVMObjects(ctx context.Context, run domain.RunID, store str
 		if !e.hasObject(ctx, store, id) {
 			return fmt.Errorf("gitengine: session %s sent a pack without %s", run, id)
 		}
+	}
+	return nil
+}
+
+// reserveVMReceive grants the bytes a receive into path may write, keeping the
+// disk's last maxVMPackBytes free and counting in-flight grants so concurrent
+// receives share the headroom. The caller releases the grant when done.
+func (e *Engine) reserveVMReceive(path string, want int64) (int64, error) {
+	free, err := disk.Free(path)
+	if err != nil {
+		return 0, fmt.Errorf("%w: cannot inspect free disk", ErrSnapshotStorageLimit)
+	}
+	e.vmReceiveMu.Lock()
+	defer e.vmReceiveMu.Unlock()
+	avail := int64(free) - e.vmReceiveReserved
+	if avail <= 2*maxVMPackBytes {
+		return 0, fmt.Errorf("%w: the server has too little free disk", ErrSnapshotStorageLimit)
+	}
+	grant := min(want, avail-maxVMPackBytes)
+	e.vmReceiveReserved += grant
+	return grant, nil
+}
+
+func (e *Engine) releaseVMReceive(grant int64) {
+	e.vmReceiveMu.Lock()
+	e.vmReceiveReserved -= grant
+	e.vmReceiveMu.Unlock()
+}
+
+// checkVMReceiveSpace refuses a receive into path that would leave the disk
+// below the floor once in-flight grants are counted. It is the lighter check
+// for a copy whose size is already bounded, such as the branch fetch into the
+// workspace repository after its objects passed the reserved store receive.
+func (e *Engine) checkVMReceiveSpace(path string) error {
+	free, err := disk.Free(path)
+	if err != nil {
+		return fmt.Errorf("%w: cannot inspect free disk", ErrSnapshotStorageLimit)
+	}
+	e.vmReceiveMu.Lock()
+	defer e.vmReceiveMu.Unlock()
+	if int64(free)-e.vmReceiveReserved <= 2*maxVMPackBytes {
+		return fmt.Errorf("%w: the server has too little free disk", ErrSnapshotStorageLimit)
 	}
 	return nil
 }

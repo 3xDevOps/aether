@@ -437,7 +437,11 @@ adds the commit object, the only one the server sends, and makes it HEAD,
 moving HEAD only from the commit it was staged on. As on the server's disk,
 the commit has no bound on the checkout's size; its new objects, like a
 moved HEAD's, may take up to 4 GiB, and the server keeps 128 MiB of disk
-free. The server records the committed tree; while the VM does not run,
+free. Each receive of a VM's objects reserves the disk it may write against
+a server-wide counter, so several at once - and the second copy a published
+branch makes into the workspace repository - hold to that floor together
+rather than each spending the same free space.
+The server records the committed tree; while the VM does not run,
 evidence retains that tree, and without one capture fails and cleanup keeps
 the checkout's disk, since only the VM can read it. Pausing a VM whose
 checkouts live on its own disks freezes the session cgroup with the

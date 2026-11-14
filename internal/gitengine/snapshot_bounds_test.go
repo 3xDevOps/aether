@@ -115,3 +115,29 @@ func TestCheckTreeBoundsRefusesOversizeContent(t *testing.T) {
 		t.Fatalf("checkTreeBounds within the limit = %v, want nil", err)
 	}
 }
+
+// TestReserveVMReceiveSharesHeadroom proves concurrent receives of VM objects
+// share the free-disk headroom: a first receive that claims nearly the whole
+// disk leaves the next below the floor, where two independent disk.Free checks
+// would each have proceeded.
+func TestReserveVMReceiveSharesHeadroom(t *testing.T) {
+	e := boundsEngine(t)
+	dir := t.TempDir()
+	grant, err := e.reserveVMReceive(dir, 1<<62)
+	if err != nil {
+		t.Fatalf("first reserve: %v", err)
+	}
+	if grant <= 0 {
+		t.Fatalf("first grant = %d, want > 0", grant)
+	}
+	if _, err := e.reserveVMReceive(dir, 1<<20); !errors.Is(err, ErrSnapshotStorageLimit) {
+		t.Fatalf("second reserve while the first holds the headroom = %v, want ErrSnapshotStorageLimit", err)
+	}
+	if err := e.checkVMReceiveSpace(dir); !errors.Is(err, ErrSnapshotStorageLimit) {
+		t.Fatalf("checkVMReceiveSpace while reserved = %v, want ErrSnapshotStorageLimit", err)
+	}
+	e.releaseVMReceive(grant)
+	if _, err := e.reserveVMReceive(dir, 1<<20); err != nil {
+		t.Fatalf("reserve after release: %v", err)
+	}
+}
