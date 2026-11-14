@@ -259,7 +259,23 @@ type lyingGit struct {
 	*gitService
 	tree    func(real string) string
 	objects func(stream grpc.ServerStreamingServer[guestpb.Chunk]) error
+	stage   func()
+	write   func()
 	refused chan string
+}
+
+func (l *lyingGit) Stage(ctx context.Context, req *guestpb.StageRequest) (*guestpb.StageReply, error) {
+	if l.stage != nil {
+		l.stage()
+	}
+	return l.gitService.Stage(ctx, req)
+}
+
+func (l *lyingGit) WriteFile(stream grpc.ClientStreamingServer[guestpb.WriteFileChunk, guestpb.WriteFileReply]) error {
+	if l.write != nil {
+		l.write()
+	}
+	return l.gitService.WriteFile(stream)
 }
 
 func (l *lyingGit) Watch(stream grpc.BidiStreamingServer[guestpb.WatchAck, guestpb.WatchEvent]) error {
@@ -385,6 +401,42 @@ func TestServerRefusesWhatAHostileVMSends(t *testing.T) {
 	}
 }
 
+// TestServerPublishesABackwardReset proves publishVMHead follows an
+// intentional backward move (a `git reset --hard` to an older commit) rather
+// than mistaking it for a slower publish that a newer one overtook.
+func TestServerPublishesABackwardReset(t *testing.T) {
+	p := newGitPair(t, nil)
+	ctx := testContext(t)
+	if err := p.host.StartDiffWatch(ctx, testWorkspace, testRun); err != nil {
+		t.Fatal(err)
+	}
+	commit := func(name string) string {
+		if err := os.WriteFile(filepath.Join(p.checkout, name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, p.checkout, "add", name)
+		runGit(t, p.checkout, "commit", "--quiet", "-m", name)
+		return runGit(t, p.checkout, "rev-parse", "HEAD")
+	}
+	waitBranch := func(want string) {
+		t.Helper()
+		for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+			if runGitQuiet(p.repo, "rev-parse", "refs/heads/"+p.branch) == want {
+				return
+			}
+		}
+		t.Fatalf("run branch never reached %s", want)
+	}
+
+	commit("first.txt")
+	second := commit("second.txt")
+	waitBranch(second)
+
+	runGit(t, p.checkout, "reset", "--hard", "HEAD~1")
+	first := runGit(t, p.checkout, "rev-parse", "HEAD")
+	waitBranch(first)
+}
+
 // oversizePack builds a tiny pack holding a base blob and one REF_DELTA whose
 // header claims a target of targetSize bytes. index-pack must allocate that
 // whole buffer to reconstruct the result, so a few bytes drive a huge host
@@ -506,6 +558,96 @@ func TestServerBoundsAHostilePackReceive(t *testing.T) {
 			t.Fatal("server published a HEAD whose objects it could not safely receive")
 		}
 	})
+}
+
+// TestEvidenceStallDoesNotBlockTheEngine proves a session VM that stalls a
+// git-service reply during evidence capture no longer freezes the engine's
+// workspace-wide maintenance: another operation that needs the same
+// engine-wide mutexes completes while the capture is blocked in the guest.
+func TestEvidenceStallDoesNotBlockTheEngine(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	liar := &lyingGit{stage: func() {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+	}}
+	p := newGitPair(t, func(real *gitService) guestpb.GitServer { liar.gitService = real; return liar })
+	ctx := testContext(t)
+	captured := make(chan error, 1)
+	go func() {
+		_, err := p.host.CaptureEvidence(ctx, testRun, "packet-1")
+		captured <- err
+	}()
+	select {
+	case <-entered:
+	case err := <-captured:
+		t.Fatalf("evidence capture returned before the guest object fetch: %v", err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("evidence capture never reached the guest object fetch")
+	}
+
+	// With the capture blocked in the guest, an operation that takes the
+	// engine-wide mutexes must still complete promptly.
+	done := make(chan error, 1)
+	go func() { done <- p.host.RemoveEvidence(ctx, testWorkspace, "packet-2") }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RemoveEvidence = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		close(release)
+		<-captured
+		t.Fatal("RemoveEvidence blocked behind a VM stalled in evidence capture")
+	}
+	close(release)
+	<-captured
+}
+
+// TestFilesWriteStallDoesNotBlockTheEngine proves a Files write to a VM that
+// stalls in the guest no longer holds fileWriteMu, which every other write
+// shares: a workspace-wide operation completes while the write is blocked.
+func TestFilesWriteStallDoesNotBlockTheEngine(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	liar := &lyingGit{write: func() {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+	}}
+	p := newGitPair(t, func(real *gitService) guestpb.GitServer { liar.gitService = real; return liar })
+	ctx := testContext(t)
+	written := make(chan error, 1)
+	go func() {
+		_, err := p.host.FilesWrite(ctx, testWorkspace, testRun, "", "README", []byte("edited\n"), "", domain.GitIdentity{}, nil)
+		written <- err
+	}()
+	select {
+	case <-entered:
+	case err := <-written:
+		t.Fatalf("Files write returned before the guest call: %v", err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("Files write never reached the guest")
+	}
+	done := make(chan error, 1)
+	go func() { done <- p.host.RemoveEvidence(ctx, testWorkspace, "packet") }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RemoveEvidence = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		close(release)
+		<-written
+		t.Fatal("RemoveEvidence blocked behind a VM stalled in a Files write")
+	}
+	close(release)
+	<-written
 }
 
 func TestGitServiceAnswersTheServersCheckoutCalls(t *testing.T) {

@@ -540,16 +540,20 @@ func (e *Engine) FilesWrite(ctx context.Context, workspace domain.WorkspaceID, r
 		return FileRead{}, fmt.Errorf("%w: invalid file revision", ErrInvalidPath)
 	}
 
-	e.fileWriteMu.Lock()
-	defer e.fileWriteMu.Unlock()
 	if run != "" {
 		checkout, meta, err := e.writableCheckout(workspace, run)
 		if err != nil {
 			return FileRead{}, err
 		}
 		if meta.VM {
+			// fileWriteMu guards the server's on-disk read/compare/replace,
+			// which a VM write never touches; the guest serializes its own
+			// writes. Holding it across the guest call would block every
+			// other write engine-wide, so a VM write takes it nowhere.
 			return e.vmFilesWrite(ctx, run, name, content, revision)
 		}
+		e.fileWriteMu.Lock()
+		defer e.fileWriteMu.Unlock()
 		written, err := writeCheckoutFile(e, checkout, name, bytes.NewReader(content), revision)
 		if err != nil {
 			return FileRead{}, err
@@ -564,6 +568,8 @@ func (e *Engine) FilesWrite(ctx context.Context, workspace domain.WorkspaceID, r
 	if strings.TrimSpace(ref) == "" {
 		return FileRead{}, errors.New("gitengine: repository ref is required")
 	}
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
 	return e.writeBareFile(ctx, repo, ref, name, content, revision, author, signingKey)
 }
 

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -46,6 +47,23 @@ var guestReceiveConfig = []string{
 
 func guestReceiveEnv(base []string) []string {
 	return append(base, "GIT_ALLOC_LIMIT="+strconv.Itoa(guestReceiveAllocLimit))
+}
+
+// guestReceiveIdleTimeout bounds how long a guest-object receive may make no
+// progress before it is cancelled. It is an inactivity window, not a cap on
+// the whole transfer, so a large but steady history still lands.
+const guestReceiveIdleTimeout = 2 * time.Minute
+
+// idleResetWriter resets an inactivity timer on each write, so a receive that
+// keeps delivering bytes is never cancelled while a silent one is.
+type idleResetWriter struct {
+	w     io.Writer
+	reset func()
+}
+
+func (w *idleResetWriter) Write(p []byte) (int, error) {
+	w.reset()
+	return w.w.Write(p)
 }
 
 // gitReceive runs a git command that indexes objects originating in a VM
@@ -161,7 +179,16 @@ func (e *Engine) fetchVMObjects(ctx context.Context, run domain.RunID, store str
 	if err = cmd.Start(); err != nil {
 		return fmt.Errorf("gitengine: receive objects of session %s: %w", run, err)
 	}
-	sendErr := g.Objects(ctx, string(run), missing, present, stdin, limit)
+	// Fail the receive if the guest sends no pack bytes for the idle window: a
+	// stalled VM, dead or merely silent, then loses only this one receive (no
+	// lock is held across it), while a transfer that keeps delivering bytes
+	// resets the timer and is never capped by a total deadline. index-pack
+	// streams stdin to a temp pack as it arrives, so the window covers the
+	// receive, not the delta resolution that follows once the timer is stopped.
+	idle := time.AfterFunc(guestReceiveIdleTimeout, cancel)
+	progress := &idleResetWriter{w: stdin, reset: func() { idle.Reset(guestReceiveIdleTimeout) }}
+	sendErr := g.Objects(ctx, string(run), missing, present, progress, limit)
+	idle.Stop()
 	_ = stdin.Close()
 	if sendErr != nil {
 		cancel()

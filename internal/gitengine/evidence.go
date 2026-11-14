@@ -78,14 +78,6 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 		return EvidenceRevision{}, fmt.Errorf("%w: packet id %q: %v", ErrInvalidEvidenceID, packetID, err)
 	}
 
-	e.fileWriteMu.Lock()
-	defer e.fileWriteMu.Unlock()
-	e.repoMaintenanceMu.Lock()
-	defer e.repoMaintenanceMu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return EvidenceRevision{}, err
-	}
-
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {
 		return EvidenceRevision{}, err
@@ -121,8 +113,12 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 	}
 	var tree string
 	if meta.VM {
-		// Staged before the lock below: the VM's watch may hold its own
-		// snapshot lock while it waits on the server's.
+		// These calls reach into the guest and acquire the per-run snapshot
+		// lock, so they hold no engine-wide mutex (set below) and no caller
+		// lock: a stalled VM then blocks only this run's evidence, not every
+		// workspace's evidence, Files and mirror work. The objects land in the
+		// run's store, which the fetch below copies into the retained
+		// evidence repository.
 		if _, err = e.vmStore(ctx, run, meta); err != nil {
 			return EvidenceRevision{}, err
 		}
@@ -130,15 +126,32 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 			return EvidenceRevision{}, fmt.Errorf("gitengine: capture evidence tree for session %s: %w", run, err)
 		}
 		checkout = ""
-	} else if boundsErr := e.checkEvidenceCaptureBounds(ctx, run, checkout); boundsErr != nil {
-		return EvidenceRevision{}, boundsErr
 	}
-	// Keep the source objects pinned until fetch has copied them into the
-	// independently retained evidence repository.
-	lock := e.snapshotLock(run)
-	lock.Lock()
-	defer lock.Unlock()
+
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
+	e.repoMaintenanceMu.Lock()
+	defer e.repoMaintenanceMu.Unlock()
+	if err = ctx.Err(); err != nil {
+		return EvidenceRevision{}, err
+	}
+	// A capture that raced ahead while we staged, in this or another process,
+	// already retained the packet.
+	if commit, found, refErr := e.evidenceRefCommit(ctx, repo, ref); refErr != nil {
+		return EvidenceRevision{}, refErr
+	} else if found {
+		return e.readEvidenceRevision(ctx, repo, meta.Workspace, commit)
+	}
+
 	if !meta.VM {
+		// writeSnapshotTreeLocked stages the server's own checkout, so its
+		// per-run lock is safe to hold under the engine-wide mutexes.
+		lock := e.snapshotLock(run)
+		lock.Lock()
+		defer lock.Unlock()
+		if boundsErr := e.checkEvidenceCaptureBounds(ctx, run, checkout); boundsErr != nil {
+			return EvidenceRevision{}, boundsErr
+		}
 		if tree, err = e.writeSnapshotTreeLocked(ctx, run, checkout); err != nil {
 			return EvidenceRevision{}, fmt.Errorf("gitengine: capture evidence tree for session %s: %w", run, err)
 		}
@@ -154,7 +167,9 @@ func (e *Engine) CaptureEvidence(ctx context.Context, run domain.RunID, packetID
 	if _, initErr := e.git(ctx, "", "init", "--bare", "--quiet", staging); initErr != nil {
 		return EvidenceRevision{}, fmt.Errorf("gitengine: stage evidence: %w", initErr)
 	}
-	if alternatesErr := writeEvidenceAlternates(staging, store, checkout); alternatesErr != nil {
+	// The staging repo reads base from the workspace repository directly, so
+	// it survives a concurrent checkout removal detaching the run's store.
+	if alternatesErr := writeEvidenceAlternates(staging, store, checkout, repo); alternatesErr != nil {
 		return EvidenceRevision{}, alternatesErr
 	}
 	commit, err := e.commitEvidence(ctx, staging, tree, base, run, packetID)
@@ -507,15 +522,19 @@ func parseDiffCount(value string) (int, error) {
 	return count, nil
 }
 
-func writeEvidenceAlternates(repo, store, checkout string) error {
-	objects := filepath.Join(repo, "objects")
+// writeEvidenceAlternates points the staging repository at the objects it
+// needs: the run's store (the snapshot tree and its blobs), the workspace
+// repository (the base commit), and the checkout when one is on disk.
+func writeEvidenceAlternates(staging, store, checkout, workspaceRepo string) error {
+	objects := filepath.Join(staging, "objects")
 	if err := os.MkdirAll(filepath.Join(objects, "info"), 0o700); err != nil {
 		return fmt.Errorf("gitengine: stage evidence alternates: %w", err)
 	}
-	alternates := []byte(filepath.Join(store, "objects") + "\n")
+	sources := []string{filepath.Join(store, "objects"), filepath.Join(workspaceRepo, "objects")}
 	if checkout != "" {
-		alternates = append(alternates, filepath.Join(checkout, ".git", "objects")+"\n"...)
+		sources = append(sources, filepath.Join(checkout, ".git", "objects"))
 	}
+	alternates := []byte(strings.Join(sources, "\n") + "\n")
 	if err := os.WriteFile(filepath.Join(objects, "info", "alternates"), alternates, 0o600); err != nil {
 		return fmt.Errorf("gitengine: stage evidence alternates: %w", err)
 	}
