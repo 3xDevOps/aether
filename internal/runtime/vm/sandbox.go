@@ -71,15 +71,23 @@ func checkVisible(what, path string) error {
 	if err != nil {
 		return fmt.Errorf("vm runtime: %s %s: %w", what, path, err)
 	}
+	if err = visible(what, path, abs); err != nil {
+		return err
+	}
 	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("vm runtime: %s %s: %w", what, path, err)
 	}
-	for _, p := range []string{abs, resolved} {
-		for _, hidden := range hiddenDirs {
-			if p == hidden || strings.HasPrefix(p, hidden+"/") {
-				return fmt.Errorf("vm runtime: the %s %s is under %s, which every VM's unit hides (ProtectHome=yes); move it out", what, path, hidden)
-			}
+	return visible(what, path, resolved)
+}
+
+func visible(what, path, p string) error {
+	for _, hidden := range hiddenDirs {
+		if p == hidden || strings.HasPrefix(p, hidden+"/") {
+			return fmt.Errorf("vm runtime: the %s %s is under %s, which every VM's unit hides (ProtectHome=yes); move it out", what, path, hidden)
 		}
 	}
 	return nil
