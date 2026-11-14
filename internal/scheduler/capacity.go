@@ -114,15 +114,7 @@ func (s *Scheduler) reserveCapacity(ctx context.Context) (func(), error) {
 func (s *Scheduler) measureCapacity(ctx context.Context) ([]runtime.FilesystemCapacity, *runtime.HostCapacity, error) {
 	var filesystems []runtime.FilesystemCapacity
 	if s.cfg.MinFreeBytes >= 0 {
-		measure := s.cfg.filesystemCapacity
-		if measure == nil {
-			measure = disk.Filesystem
-		}
-		path := s.cfg.DataDir
-		if path == "" {
-			path = s.cfg.StateDir
-		}
-		data, err := measure(path)
+		data, err := s.dataFilesystem()
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: Aether data filesystem: %w", ErrCapacityUnknown, err)
 		}
@@ -140,6 +132,19 @@ func (s *Scheduler) measureCapacity(ctx context.Context) ([]runtime.FilesystemCa
 		return nil, nil, fmt.Errorf("%w: runtime filesystems were not measured", ErrCapacityUnknown)
 	}
 	return append(filesystems, capacity.Filesystems...), &capacity, nil
+}
+
+// dataFilesystem measures the filesystem that holds Aether's data.
+func (s *Scheduler) dataFilesystem() (disk.Usage, error) {
+	measure := s.cfg.filesystemCapacity
+	if measure == nil {
+		measure = disk.Filesystem
+	}
+	path := s.cfg.DataDir
+	if path == "" {
+		path = s.cfg.StateDir
+	}
+	return measure(path)
 }
 
 func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {

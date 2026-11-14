@@ -162,7 +162,7 @@ func mountCheckout(m guest.CheckoutMount) error {
 		return err
 	}
 	disk := filepath.Join(disksDir, m.Key)
-	if err := mountOnce(mountSpec{device, disk, "ext4", 0, ""}); err != nil {
+	if err := mountOnce(mountSpec{device, disk, "ext4", 0, guestDiskOptions}); err != nil {
 		return err
 	}
 	for _, target := range []string{filepath.Join(gitDir, m.Key), m.Target} {

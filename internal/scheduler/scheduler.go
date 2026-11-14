@@ -221,6 +221,11 @@ type Scheduler struct {
 	pressureSkipLog      sync.Once
 	capacityReservations uint64
 
+	// vmDiskMu serializes the disk guard's checks; vmDiskUse is each VM's
+	// disk use at the last one.
+	vmDiskMu  sync.Mutex
+	vmDiskUse map[runtime.ID]int64
+
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
 	// loginRefusals are the sign-in refusals agents gave on an account.
@@ -372,6 +377,7 @@ type supervised struct {
 	quietFrom         time.Time // a resume or restart; the stall clock starts no earlier
 	stallTurnAt       time.Time // when the Enhanced turn the last stall parked started
 	paused            bool
+	diskHeld          bool // the pause is the disk guard's, which ends it
 	killRequested     bool
 	killActor         domain.MemberID
 	killBy            domain.RunID // the parent that stopped this child run
@@ -808,8 +814,12 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	s.sweepBrowsers(ctx)
 	gc := time.NewTicker(time.Hour)
 	defer gc.Stop()
+	disks := time.NewTicker(vmDiskCheck)
+	defer disks.Stop()
 	for {
 		select {
+		case <-disks.C:
+			s.guardVMDisks(ctx)
 		case <-ctx.Done():
 			s.superCancel()
 			return nil

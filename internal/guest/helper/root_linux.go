@@ -34,6 +34,10 @@ const (
 	selfExe = "/proc/self/exe"
 )
 
+// guestDiskOptions mount every disk the guest writes. discard hands the
+// blocks of a deleted file back to the host, whose disk files are sparse.
+const guestDiskOptions = "discard"
+
 type mountSpec struct {
 	source, target, fstype string
 	flags                  uintptr
@@ -66,7 +70,7 @@ func switchRoot() error {
 		return nil
 	}
 	const newRoot = "/mnt"
-	if err := unix.Mount(device, newRoot, "ext4", 0, ""); err != nil {
+	if err := unix.Mount(device, newRoot, "ext4", 0, guestDiskOptions); err != nil {
 		return fmt.Errorf("mount %s at %s: %w", device, newRoot, err)
 	}
 	for _, dir := range []string{"/dev", "/proc", "/sys"} {
@@ -217,7 +221,7 @@ func mountVolume(v guest.Volume, root string) error {
 	if err != nil {
 		return err
 	}
-	if err = mountOnce(mountSpec{device, root, "ext4", 0, ""}); err != nil || v != guest.VolumeCache {
+	if err = mountOnce(mountSpec{device, root, "ext4", 0, guestDiskOptions}); err != nil || v != guest.VolumeCache {
 		return err
 	}
 	// Any user of the session writes the caches, as any writes /tmp, and

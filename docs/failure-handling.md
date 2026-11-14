@@ -260,6 +260,19 @@ If that is not enough, the launch is refused:
 scheduler: insufficient disk headroom: <filesystem> has <n> free bytes; reserve <n> bytes plus <n> bytes per provisioning (<n> already in flight)
 ```
 
+With `session-runtime vm`, a session's disks are sparse files that grow as
+it writes, so a running session can take the filesystem below the reserve.
+Every 5 seconds while the Aether data filesystem is below it, the server
+pauses the one session whose disks grew the most since the last check, and
+its timeline notes `Paused: the server is low on disk, and this session's
+disks grew the most since the last check. It resumes on its own once there
+is space again.` A session whose disks did not grow is never paused. Once
+free space is back above the reserve plus 4 GiB, the sessions it paused
+resume and note `Resumed: the server has disk space again.`; one you paused
+yourself stays paused. Files a session deletes give their space back to the
+host. Resuming a session the server paused by hand works, and it is paused
+again only if it keeps growing while space stays low.
+
 Attaching, messaging, pulling, closing, killing and deleting sessions keep
 working below the reserve, and so does reopening a closed session whose container
 is still there. To free space yourself:
