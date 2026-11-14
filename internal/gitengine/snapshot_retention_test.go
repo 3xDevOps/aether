@@ -204,7 +204,7 @@ func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T
 		t.Fatal(err)
 	}
 	tree = strings.TrimSpace(tree)
-	unrecordedLocal, localErr := e.gitInput(ctx, store, gitEnv(), []byte("040000 tree "+tree+"\tunrecorded\n"), "mktree")
+	unrecordedLocal, localErr := e.gitInput(ctx, store, e.gitEnv(), []byte("040000 tree "+tree+"\tunrecorded\n"), "mktree")
 	if localErr != nil {
 		t.Fatal(localErr)
 	}
@@ -541,7 +541,7 @@ func TestSnapshotHistorySurvivesFormerCountAndAgeLimits(t *testing.T) {
 			if err := e.initSnapshotStore(ctx, "run1", checkout, store); err != nil {
 				t.Fatal(err)
 			}
-			blob, err := e.gitInput(ctx, store, gitEnv(), []byte("recorded\n"), "hash-object", "-w", "--stdin")
+			blob, err := e.gitInput(ctx, store, e.gitEnv(), []byte("recorded\n"), "hash-object", "-w", "--stdin")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -551,7 +551,7 @@ func TestSnapshotHistorySurvivesFormerCountAndAgeLimits(t *testing.T) {
 			for i := range 1025 {
 				fmt.Fprintf(&input, "100644 blob %s\tversion-%d.txt\n\n", strings.TrimSpace(blob), i)
 			}
-			out, err := e.gitInput(ctx, store, gitEnv(), []byte(input.String()), "mktree", "--batch")
+			out, err := e.gitInput(ctx, store, e.gitEnv(), []byte(input.String()), "mktree", "--batch")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -566,7 +566,7 @@ func TestSnapshotHistorySurvivesFormerCountAndAgeLimits(t *testing.T) {
 				fmt.Fprintf(&refs, "update %s%019d-%s %s\n", snapshotHistoryRoot, stamp+int64(i), tree, tree)
 			}
 			refs.WriteString("prepare\ncommit\n")
-			if _, err := e.gitInput(ctx, store, gitEnv(), []byte(refs.String()), "update-ref", "--stdin"); err != nil {
+			if _, err := e.gitInput(ctx, store, e.gitEnv(), []byte(refs.String()), "update-ref", "--stdin"); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := e.writeWatchSnapshot(ctx, "run1", checkout, "", nil); err != nil {

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -39,6 +40,14 @@ var forwarded = []os.Signal{
 // enters its working directory and executes the program.
 const startArg = "start"
 
+// enterRootArg runs the helper binary as the first step of a process
+// spawned in another root: in its new mount namespace, still root, it makes
+// that root its own with pivot_root, as a container runtime does, then
+// drops to the process's user without new privileges or vsock and executes
+// the program. A chroot would keep the program from making user namespaces,
+// which Chromium's sandbox needs.
+const enterRootArg = "enter-root"
+
 // Main runs the helper with the arguments after "guest". It never returns
 // as PID 1: a helper that cannot serve powers the VM off, and the kernel
 // would panic if PID 1 exited.
@@ -50,6 +59,9 @@ func Main(args []string) int {
 		err := serveGit()
 		slog.Error("guest: the git service stopped", "error", err)
 		return 1
+	}
+	if len(args) > 6 && args[0] == enterRootArg {
+		return execInRoot(args[1], args[2], args[3], args[4], args[5], args[6:])
 	}
 	if os.Getpid() != 1 {
 		fmt.Fprintln(os.Stderr, "aether-internal guest: runs only as PID 1 of a session VM")
@@ -69,13 +81,7 @@ func Main(args []string) int {
 func execStart(noNewPrivs bool, dir, program string, argv []string) int {
 	runtime.LockOSThread()
 	status := os.NewFile(3, "exec status")
-	syscall.CloseOnExec(3)
-	syscall.CloseOnExec(4)
-	_, err := status.Write([]byte{startMarker})
-	var environ []byte
-	if err == nil {
-		environ, err = io.ReadAll(os.NewFile(4, "environment"))
-	}
+	env, err := started(status)
 	if err == nil && noNewPrivs {
 		err = unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
 	}
@@ -89,21 +95,90 @@ func execStart(noNewPrivs bool, dir, program string, argv []string) int {
 		}
 	}
 	if err == nil {
-		var env []string
-		if len(environ) > 0 {
-			env = strings.Split(string(environ), "\x00")
-		}
 		err = unix.Exec(program, argv, env)
 		for errors.Is(err, unix.EINTR) {
 			err = unix.Exec(program, argv, env)
 		}
 	}
+	return execFailed(status, err)
+}
+
+// started writes startMarker to the status pipe and returns the program's
+// environment, which the spawning helper sends on fd 4.
+func started(status *os.File) ([]string, error) {
+	syscall.CloseOnExec(3)
+	syscall.CloseOnExec(4)
+	if _, err := status.Write([]byte{startMarker}); err != nil {
+		return nil, err
+	}
+	environ, err := io.ReadAll(os.NewFile(4, "environment"))
+	if err != nil || len(environ) == 0 {
+		return nil, err
+	}
+	return strings.Split(string(environ), "\x00"), nil
+}
+
+// execFailed reports a failed start's errno on the status pipe.
+func execFailed(status *os.File, err error) int {
 	errno, ok := err.(unix.Errno)
 	if !ok {
 		errno = unix.EINVAL
 	}
 	_, _ = fmt.Fprint(status, int(errno))
 	return 126
+}
+
+// execInRoot reports like execStart, on fd 3, and takes the environment
+// from fd 4 as it does.
+func execInRoot(root, uid, gid, dir, program string, argv []string) int {
+	runtime.LockOSThread()
+	status := os.NewFile(3, "exec status")
+	env, err := started(status)
+	if err == nil {
+		err = enterRoot(root)
+	}
+	if err == nil {
+		err = unix.Chdir(dir)
+	}
+	u, uidErr := strconv.Atoi(uid)
+	g, gidErr := strconv.Atoi(gid)
+	if err == nil {
+		err = errors.Join(uidErr, gidErr)
+	}
+	if err == nil {
+		err = unix.Setgroups(nil)
+	}
+	if err == nil {
+		err = unix.Setresgid(g, g, g)
+	}
+	if err == nil {
+		err = unix.Setresuid(u, u, u)
+	}
+	if err == nil {
+		err = unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+	}
+	if err == nil {
+		err = denyVsock()
+	}
+	if err == nil {
+		err = unix.Exec(program, argv, env)
+	}
+	return execFailed(status, err)
+}
+
+// enterRoot pivots the process's own mount namespace onto root and detaches
+// the old root, so nothing of the VM's own filesystem stays reachable.
+func enterRoot(root string) error {
+	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
+		return err
+	}
+	if err := unix.Chdir(root); err != nil {
+		return err
+	}
+	if err := unix.PivotRoot(".", "."); err != nil {
+		return err
+	}
+	return unix.Unmount(".", unix.MNT_DETACH)
 }
 
 func serve() error {
@@ -123,7 +198,7 @@ func serve() error {
 	record("mount volumes", mountVolumes(cfg.Mounts))
 	record("mount checkouts", mountCheckouts(cfg.Checkouts))
 	record("configure the network", configureNetwork(cfg))
-	cgroup, err := newSessionCgroup("/sys/fs/cgroup")
+	cgroup, err := newSessionCgroup("/sys/fs/cgroup", len(cfg.Checkouts) > 0)
 	record("create the session cgroup", err)
 	var procsDir *os.File
 	if cgroup != nil {
@@ -136,7 +211,11 @@ func serve() error {
 	}
 	go reapForever(procs)
 	if len(cfg.Checkouts) > 0 {
-		go superviseGit(procs)
+		gitCgroup, gitErr := newGitCgroup("/sys/fs/cgroup")
+		record("create the git service's cgroup", gitErr)
+		if gitErr == nil {
+			go superviseGit(procs, gitCgroup)
+		}
 	}
 	go forwardSignals(procs)
 	record("forward sockets", forwardSockets(cfg.Sockets))
@@ -157,6 +236,7 @@ func serve() error {
 		return unix.ClockSettime(unix.CLOCK_REALTIME, &ts)
 	}
 	svc.freezer = &freezer{set: freezeRoot}
+	svc.companion = &browser{}
 	listener, err := vsock.Listen(guest.APIPort, nil)
 	if err != nil {
 		return fmt.Errorf("listen on vsock port %d: %w", guest.APIPort, err)

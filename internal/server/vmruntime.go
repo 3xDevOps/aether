@@ -20,7 +20,7 @@ const DefaultVMKernel = "/usr/local/lib/aether/vmlinux"
 // vm-monitor subcommand and whose in-VM helper is this binary too. Their
 // checkouts live on disks of their own, which checkouts makes. members are
 // this server's: their containers left in Docker are stopped.
-func newVMRuntime(ctx context.Context, dataDir, kernel string, members []string, docker *runtime.Docker, checkouts vm.CheckoutDisks) (*vm.Runtime, *vmimage.Store, error) {
+func newVMRuntime(ctx context.Context, dataDir, kernel, browserImage string, members []string, docker *runtime.Docker, checkouts vm.CheckoutDisks) (*vm.Runtime, *vmimage.Store, error) {
 	if os.Geteuid() != 0 {
 		return nil, nil, errors.New("server: session-runtime vm needs the server to run as root: it starts each VM in a systemd unit and sets up its network")
 	}
@@ -34,7 +34,7 @@ func newVMRuntime(ctx context.Context, dataDir, kernel string, members []string,
 	}
 	rt, err := vm.New(vm.Config{
 		Docker: docker, DataDir: dataDir, Images: images,
-		Monitor: []string{exe, vm.MonitorCommand}, Helper: exe, CheckoutDisks: checkouts,
+		Monitor: []string{exe, vm.MonitorCommand}, Helper: exe, CheckoutDisks: checkouts, BrowserImage: browserImage,
 	})
 	if err != nil {
 		return nil, nil, err

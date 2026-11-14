@@ -21,6 +21,9 @@ type helper interface {
 	Thaw(ctx context.Context, id string) (bool, error)
 	FreezeSession(ctx context.Context, frozen bool) error
 	Sync(context.Context) error
+	StartBrowser(context.Context, guest.BrowserSpec) error
+	PauseBrowser(ctx context.Context, paused bool) error
+	StopBrowser(context.Context) error
 	Close() error
 }
 

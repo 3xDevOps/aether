@@ -361,7 +361,7 @@ func (e *Engine) pruneEvidence(ctx context.Context, ws domain.WorkspaceID) error
 		return err
 	}
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, "-C", repo, "-c", "safe.directory=*", "gc", "--prune=now", "--quiet")
-	cmd.Env = gitEnv()
+	cmd.Env = e.gitEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	// gc's repack, pack-objects and prune children outlive a killed gc and
@@ -521,7 +521,7 @@ func writeEvidenceAlternates(repo, store, checkout string) error {
 }
 
 func (e *Engine) commitEvidence(ctx context.Context, repo, tree, base string, run domain.RunID, packetID string) (string, error) {
-	env := append(gitEnv(),
+	env := append(e.gitEnv(),
 		"GIT_AUTHOR_NAME=Aether",
 		"GIT_AUTHOR_EMAIL=aether@localhost",
 		"GIT_COMMITTER_NAME=Aether",
@@ -539,7 +539,7 @@ func (e *Engine) commitEvidence(ctx context.Context, repo, tree, base string, ru
 }
 
 func (e *Engine) gitBareBounded(ctx context.Context, repo string, limit int, args ...string) (string, bool, error) {
-	return e.gitBareBoundedEnv(ctx, repo, gitEnv(), limit, args...)
+	return e.gitBareBoundedEnv(ctx, repo, e.gitEnv(), limit, args...)
 }
 
 func (e *Engine) gitBareBoundedEnv(ctx context.Context, repo string, env []string, limit int, args ...string) (string, bool, error) {

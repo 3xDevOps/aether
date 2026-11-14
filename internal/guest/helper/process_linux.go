@@ -125,13 +125,24 @@ func newProcesses(cgroup *os.File) *processes {
 }
 
 // spawnSpec is a guest.ProcessSpec with the helper's own options: log sends
-// both output streams to a file instead of the process's buffers.
+// both output streams to a file instead of the process's buffers; root runs
+// the process chrooted there, with an absolute program in it; cgroup starts
+// it in that cgroup instead of the session's; newIPC gives it an IPC
+// namespace of its own.
 type spawnSpec struct {
 	guest.ProcessSpec
 	log *os.File
-	// helper starts the process outside the session cgroup, as part of
-	// the helper rather than of the session.
-	helper bool
+	// cgroup, when set, is the directory the process starts in instead of
+	// the session cgroup.
+	cgroup *os.File
+	root   string
+	newIPC bool
+}
+
+// inSession reports a process of the session: in its cgroup, or in one
+// inside it, as the browser's, which a frozen session holds too.
+func (s spawnSpec) inSession() bool {
+	return s.cgroup == nil || strings.HasPrefix(s.cgroup.Name(), "/sys/fs/cgroup"+sessionCgroupParent+"/")
 }
 
 func (t *processes) spawn(spec spawnSpec) (*process, error) {
@@ -148,7 +159,7 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 	if _, ok := t.byID[spec.ID]; ok {
 		return nil, errExists
 	}
-	if t.sessionFrozen && !spec.helper {
+	if t.sessionFrozen && spec.inSession() {
 		return nil, errPaused
 	}
 	p := &process{
@@ -157,7 +168,16 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 	}
 	dir := cmp.Or(spec.Dir, "/")
 	program, err := lookPath(spec.Argv[0], envValue(env, "PATH"), dir)
-	if info, statErr := os.Stat(dir); err == nil && (statErr != nil || !info.IsDir()) {
+	if spec.root != "" {
+		program = spec.Argv[0]
+		err = nil
+		if !filepath.IsAbs(program) {
+			err = &execError{code: 127, err: fmt.Errorf("%s: a program in another root must be an absolute path", program)}
+		} else if execErr := executable(filepath.Join(spec.root, program)); execErr != nil {
+			err = execErr
+		}
+	}
+	if info, statErr := os.Stat(filepath.Join(spec.root, dir)); err == nil && (statErr != nil || !info.IsDir()) {
 		err = &execError{code: 126, err: fmt.Errorf("working directory %s: %w", dir, cmp.Or[error](statErr, syscall.ENOTDIR))}
 	}
 	if err == nil {
@@ -190,8 +210,11 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 // helper keeps; the child's are closed once it runs.
 func (t *processes) start(p *process, spec spawnSpec, program, dir string, env []string, cred *syscall.Credential) error {
 	attr := &syscall.SysProcAttr{Setsid: true, Credential: cred}
-	if t.cgroup != nil && !spec.helper {
-		attr.UseCgroupFD, attr.CgroupFD = true, int(t.cgroup.Fd())
+	if cgroup := cmp.Or(spec.cgroup, t.cgroup); cgroup != nil {
+		attr.UseCgroupFD, attr.CgroupFD = true, int(cgroup.Fd())
+	}
+	if spec.newIPC {
+		attr.Cloneflags |= syscall.CLONE_NEWIPC
 	}
 	var child []*os.File
 	defer func() {
@@ -249,6 +272,15 @@ func (t *processes) start(p *process, spec spawnSpec, program, dir string, env [
 		var environ *os.File
 		if environ, err = environment(env); err == nil {
 			argv := append([]string{"aether-internal", "guest", startArg, strconv.FormatBool(spec.NoNewPrivileges), dir, program}, spec.Argv...)
+			if spec.root != "" {
+				uid, gid := os.Getuid(), os.Getgid()
+				if cred != nil {
+					uid, gid = int(cred.Uid), int(cred.Gid)
+				}
+				attr.Credential = nil
+				attr.Cloneflags |= syscall.CLONE_NEWNS
+				argv = append([]string{"aether-internal", "guest", enterRootArg, spec.root, strconv.Itoa(uid), strconv.Itoa(gid), dir, program}, spec.Argv...)
+			}
 			fds := make([]uintptr, 0, len(child)+2)
 			for _, f := range append(child, statusW, environ) {
 				fds = append(fds, f.Fd())

@@ -23,7 +23,7 @@ import (
 // Protocol is the API version this build speaks. A helper reporting another
 // one, such as an older helper in a VM restored from a save, is refused with
 // ErrIncompatible: the session then needs a cold start.
-const Protocol = 1
+const Protocol = 2
 
 const (
 	// maxReply bounds every message the helper sends. Read replies, the
@@ -384,6 +384,46 @@ func (c *Client) FreezeSession(ctx context.Context, frozen bool) error {
 	}
 	if err != nil {
 		return fmt.Errorf("guest: freeze the session: %w", err)
+	}
+	return nil
+}
+
+// BrowserSpec is the development browser's companion: its process, whose
+// program is a path in the browser's root, and its limits.
+type BrowserSpec struct {
+	Process     ProcessSpec
+	MemoryBytes uint64
+	// CPUMillis caps CPU in thousandths of a core; 0 is unlimited.
+	CPUMillis uint32
+	ShmBytes  uint64
+}
+
+// StartBrowser starts the companion, from the VM's browser disk.
+func (c *Client) StartBrowser(ctx context.Context, spec BrowserSpec) error {
+	return c.browser(ctx, &guestpb.BrowserRequest{
+		Action: guestpb.BrowserRequest_START, Process: spec.Process.proto(),
+		MemoryBytes: spec.MemoryBytes, CpuMillis: spec.CPUMillis, ShmBytes: spec.ShmBytes,
+	})
+}
+
+// PauseBrowser freezes the companion's processes, or thaws them.
+func (c *Client) PauseBrowser(ctx context.Context, paused bool) error {
+	action := guestpb.BrowserRequest_RESUME
+	if paused {
+		action = guestpb.BrowserRequest_PAUSE
+	}
+	return c.browser(ctx, &guestpb.BrowserRequest{Action: action})
+}
+
+// StopBrowser kills every process of the companion.
+func (c *Client) StopBrowser(ctx context.Context) error {
+	return c.browser(ctx, &guestpb.BrowserRequest{Action: guestpb.BrowserRequest_STOP})
+}
+
+func (c *Client) browser(ctx context.Context, req *guestpb.BrowserRequest) error {
+	_, err := retry(ctx, func() (*guestpb.BrowserReply, error) { return c.api.Browser(ctx, req) })
+	if err != nil {
+		return fmt.Errorf("guest: browser %s: %w", strings.ToLower(req.GetAction().String()), err)
 	}
 	return nil
 }

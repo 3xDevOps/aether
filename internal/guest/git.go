@@ -317,21 +317,56 @@ func (g *Git) Tree(ctx context.Context, key, dir string) ([]TreeEntry, error) {
 // whether it read all of the file and how large the file is.
 func (g *Git) ReadFile(ctx context.Context, key, path string, maxBytes int) ([]byte, bool, int64, error) {
 	maxBytes = min(max(maxBytes, 1), MaxFileBytes)
-	reply, err := g.api.ReadFile(ctx, &guestpb.ReadFileRequest{Key: key, Path: path, MaxBytes: uint32(maxBytes)},
-		grpc.MaxCallRecvMsgSize(maxBytes+64<<10))
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := g.api.ReadFile(ctx, &guestpb.ReadFileRequest{Key: key, Path: path, MaxBytes: uint32(maxBytes)})
 	if err != nil {
 		return nil, false, 0, gitErr("read", key, err)
 	}
-	if len(reply.GetContent()) > maxBytes {
-		return nil, false, 0, fmt.Errorf("guest: read %s: helper sent %d bytes for a %d-byte limit", key, len(reply.GetContent()), maxBytes)
+	var content []byte
+	size := int64(-1)
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, false, 0, gitErr("read", key, err)
+		}
+		if size < 0 {
+			size = chunk.GetSize()
+		}
+		if len(content)+len(chunk.GetData()) > maxBytes {
+			return nil, false, 0, fmt.Errorf("guest: read %s: helper sent more than the %d-byte limit", key, maxBytes)
+		}
+		content = append(content, chunk.GetData()...)
 	}
-	return reply.GetContent(), reply.GetTruncated(), reply.GetSize(), nil
+	if size < int64(len(content)) {
+		return nil, false, 0, fmt.Errorf("guest: read %s: helper sent %d bytes of a %d-byte file", key, len(content), size)
+	}
+	return content, size > int64(len(content)), size, nil
 }
 
 // WriteFile writes content to path in the checkout, when revision is empty
 // or the file's current one.
 func (g *Git) WriteFile(ctx context.Context, key, path string, content []byte, revision string) error {
-	if _, err := g.api.WriteFile(ctx, &guestpb.WriteFileRequest{Key: key, Path: path, Content: content, Revision: revision}); err != nil {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := g.api.WriteFile(ctx)
+	if err != nil {
+		return gitErr("write", key, err)
+	}
+	chunk := &guestpb.WriteFileChunk{Key: key, Path: path, Revision: revision}
+	for {
+		n := min(len(content), ObjectsChunk)
+		chunk.Data, content = content[:n], content[n:]
+		// A failed send means the call ended; its status comes below.
+		if stream.Send(chunk) != nil || len(content) == 0 {
+			break
+		}
+		chunk = &guestpb.WriteFileChunk{}
+	}
+	if _, err = stream.CloseAndRecv(); err != nil {
 		return gitErr("write", key, err)
 	}
 	return nil

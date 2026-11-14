@@ -407,6 +407,10 @@ type fakeHelper struct {
 	sessionFrozen bool
 	sessionErr    error
 	bootError     string
+	// browser is the companion's process ID.
+	browser      string
+	browserSpec  guest.BrowserSpec
+	browserCalls []string
 }
 
 func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
@@ -419,7 +423,7 @@ func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return guest.Info{BootID: "b1", Protocol: 1, BootError: g.bootError}, nil
+	return guest.Info{BootID: "b1", Protocol: guest.Protocol, BootError: g.bootError}, nil
 }
 
 func (g *fakeHelper) Boot(ctx context.Context, spec guest.BootSpec) error {
@@ -576,6 +580,36 @@ func (g *fakeHelper) isSessionFrozen() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.sessionFrozen
+}
+
+// StartBrowser runs the companion as a process under its own ID.
+func (g *fakeHelper) StartBrowser(_ context.Context, spec guest.BrowserSpec) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if p := g.procs[g.browser]; p != nil && !p.exited() {
+		return errors.New("the browser still runs")
+	}
+	g.browser, g.browserSpec = spec.Process.ID, spec
+	g.procs[spec.Process.ID] = newFakeProc(spec.Process, "", 0, false)
+	g.browserCalls = append(g.browserCalls, "start")
+	return nil
+}
+
+func (g *fakeHelper) PauseBrowser(_ context.Context, paused bool) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.browserCalls = append(g.browserCalls, fmt.Sprintf("pause %v", paused))
+	return nil
+}
+
+func (g *fakeHelper) StopBrowser(context.Context) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if p := g.procs[g.browser]; p != nil {
+		p.exit(137)
+	}
+	g.browserCalls = append(g.browserCalls, "stop")
+	return nil
 }
 
 func (g *fakeHelper) frozen() []string {

@@ -309,26 +309,11 @@ func (e *Engine) openCheckoutRoot(checkout string) (*os.Root, error) {
 }
 
 func (e *Engine) readCheckoutFile(checkout, path string, maxBytes int) ([]byte, bool, int64, error) {
-	root, err := e.openCheckoutRoot(checkout)
+	file, opened, err := e.OpenCheckoutFile(checkout, path)
 	if err != nil {
-		return nil, false, 0, fmt.Errorf("gitengine: open checkout: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-	file, err := rootfs.Open(root, path)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, false, 0, fmt.Errorf("gitengine: stat checkout path %s: %w", path, err)
-		}
-		return nil, false, 0, fmt.Errorf("%w: checkout path %s: %v", ErrInvalidPath, path, err)
-	}
-	defer func() { _ = file.Close() }()
-	opened, err := file.Stat()
-	if err != nil || !opened.Mode().IsRegular() {
-		if err == nil {
-			err = fmt.Errorf("%w: checkout path is not a regular file", ErrInvalidPath)
-		}
 		return nil, false, 0, err
 	}
+	defer func() { _ = file.Close() }()
 	var content []byte
 	if maxBytes > 0 {
 		content, err = io.ReadAll(io.LimitReader(file, int64(maxBytes)+1))
@@ -345,34 +330,66 @@ func (e *Engine) readCheckoutFile(checkout, path string, maxBytes int) ([]byte, 
 	return content, truncated, opened.Size(), nil
 }
 
+// OpenCheckoutFile opens the regular file at path in checkout, never
+// through a link out of it, for a caller that streams it.
+func (e *Engine) OpenCheckoutFile(checkout, path string) (*os.File, os.FileInfo, error) {
+	if err := ValidatePath(path); err != nil {
+		return nil, nil, err
+	}
+	root, err := e.openCheckoutRoot(checkout)
+	if err != nil {
+		return nil, nil, fmt.Errorf("gitengine: open checkout: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	file, err := rootfs.Open(root, path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, fmt.Errorf("gitengine: stat checkout path %s: %w", path, err)
+		}
+		return nil, nil, fmt.Errorf("%w: checkout path %s: %v", ErrInvalidPath, path, err)
+	}
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() {
+		_ = file.Close()
+		if err == nil {
+			err = fmt.Errorf("%w: checkout path is not a regular file", ErrInvalidPath)
+		}
+		return nil, nil, err
+	}
+	return file, opened, nil
+}
+
 func isBinary(content []byte) bool {
 	return bytes.IndexByte(content, 0) >= 0
 }
 
-func checkoutCurrentFile(parent *os.Root, name string) (os.FileInfo, []byte, bool, error) {
+// checkoutCurrentFile returns the regular file name's info and revision,
+// hashed as it is read; a file over MaxFileBytes has none.
+func checkoutCurrentFile(parent *os.Root, name string) (os.FileInfo, string, bool, error) {
 	file, err := rootfs.Open(parent, name)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil, false, nil
+		return nil, "", false, nil
 	}
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("%w: checkout path %s: %v", ErrInvalidPath, name, err)
+		return nil, "", false, fmt.Errorf("%w: checkout path %s: %v", ErrInvalidPath, name, err)
 	}
 	defer func() { _ = file.Close() }()
 	opened, err := file.Stat()
 	if err != nil {
-		return nil, nil, false, err
+		return nil, "", false, err
 	}
 	if !opened.Mode().IsRegular() {
-		return nil, nil, false, fmt.Errorf("%w: checkout path is not a regular file", ErrInvalidPath)
+		return nil, "", false, fmt.Errorf("%w: checkout path is not a regular file", ErrInvalidPath)
 	}
-	data, err := io.ReadAll(io.LimitReader(file, MaxFileBytes+1))
+	hash := sha256.New()
+	n, err := io.Copy(hash, io.LimitReader(file, MaxFileBytes+1))
 	if err != nil {
-		return nil, nil, false, err
+		return nil, "", false, err
 	}
-	if len(data) > MaxFileBytes {
-		return opened, nil, true, nil
+	if n > MaxFileBytes {
+		return opened, "", true, nil
 	}
-	return opened, data, true, nil
+	return opened, fmt.Sprintf("%x", hash.Sum(nil)), true, nil
 }
 
 func ensureCheckoutParents(root *os.Root, name string) (*os.Root, error) {
@@ -526,21 +543,19 @@ func (e *Engine) FilesWrite(ctx context.Context, workspace domain.WorkspaceID, r
 	e.fileWriteMu.Lock()
 	defer e.fileWriteMu.Unlock()
 	if run != "" {
-		checkout, err := e.existingCheckoutPath(run)
+		checkout, meta, err := e.writableCheckout(workspace, run)
 		if err != nil {
 			return FileRead{}, err
-		}
-		meta, err := e.readRunMeta(run)
-		if err != nil {
-			return FileRead{}, err
-		}
-		if meta.Workspace != workspace {
-			return FileRead{}, fmt.Errorf("%w: session belongs to another workspace", ErrWorkspaceMismatch)
 		}
 		if meta.VM {
 			return e.vmFilesWrite(ctx, run, name, content, revision)
 		}
-		return writeCheckoutFile(e, checkout, name, content, revision)
+		written, err := writeCheckoutFile(e, checkout, name, bytes.NewReader(content), revision)
+		if err != nil {
+			return FileRead{}, err
+		}
+		written.Content = append([]byte(nil), content...)
+		return written, nil
 	}
 	repo, err := e.existingRepoPath(workspace)
 	if err != nil {
@@ -550,6 +565,43 @@ func (e *Engine) FilesWrite(ctx context.Context, workspace domain.WorkspaceID, r
 		return FileRead{}, errors.New("gitengine: repository ref is required")
 	}
 	return e.writeBareFile(ctx, repo, ref, name, content, revision, author, signingKey)
+}
+
+// WriteCheckoutFile writes name in run's checkout on this engine's disk from
+// content, at most MaxFileBytes, as it arrives: the git service in a session
+// VM never holds an upload whole. The result carries no content.
+func (e *Engine) WriteCheckoutFile(workspace domain.WorkspaceID, run domain.RunID, name string, content io.Reader, revision string) (FileRead, error) {
+	if err := ValidatePath(name); err != nil {
+		return FileRead{}, err
+	}
+	if name == "" {
+		return FileRead{}, fmt.Errorf("%w: file path is required", ErrInvalidPath)
+	}
+	if revision != "" && !validRevision(revision) {
+		return FileRead{}, fmt.Errorf("%w: invalid file revision", ErrInvalidPath)
+	}
+	e.fileWriteMu.Lock()
+	defer e.fileWriteMu.Unlock()
+	checkout, _, err := e.writableCheckout(workspace, run)
+	if err != nil {
+		return FileRead{}, err
+	}
+	return writeCheckoutFile(e, checkout, name, content, revision)
+}
+
+func (e *Engine) writableCheckout(workspace domain.WorkspaceID, run domain.RunID) (string, runMeta, error) {
+	checkout, err := e.existingCheckoutPath(run)
+	if err != nil {
+		return "", runMeta{}, err
+	}
+	meta, err := e.readRunMeta(run)
+	if err != nil {
+		return "", runMeta{}, err
+	}
+	if meta.Workspace != workspace {
+		return "", runMeta{}, fmt.Errorf("%w: session belongs to another workspace", ErrWorkspaceMismatch)
+	}
+	return checkout, meta, nil
 }
 
 func validRevision(revision string) bool {
@@ -568,7 +620,7 @@ func fileRevision(content []byte) string {
 	sum := sha256.Sum256(content)
 	return fmt.Sprintf("%x", sum[:])
 }
-func writeCheckoutFile(e *Engine, checkout, name string, content []byte, revision string) (FileRead, error) {
+func writeCheckoutFile(e *Engine, checkout, name string, content io.Reader, revision string) (FileRead, error) {
 	root, err := e.openCheckoutRoot(checkout)
 	if err != nil {
 		return FileRead{}, fmt.Errorf("gitengine: open checkout: %w", err)
@@ -583,7 +635,7 @@ func writeCheckoutFile(e *Engine, checkout, name string, content []byte, revisio
 	if i := strings.LastIndexByte(name, '/'); i >= 0 {
 		leaf = name[i+1:]
 	}
-	oldInfo, oldContent, exists, err := checkoutCurrentFile(parent, leaf)
+	oldInfo, oldRevision, exists, err := checkoutCurrentFile(parent, leaf)
 	if err != nil {
 		return FileRead{}, err
 	}
@@ -593,7 +645,7 @@ func writeCheckoutFile(e *Engine, checkout, name string, content []byte, revisio
 			return FileRead{}, ErrRevisionConflict
 		}
 	} else {
-		if revision == "" || oldContent == nil || fileRevision(oldContent) != revision {
+		if revision == "" || oldRevision != revision {
 			return FileRead{}, ErrRevisionConflict
 		}
 		mode = oldInfo.Mode().Perm()
@@ -615,9 +667,15 @@ func writeCheckoutFile(e *Engine, checkout, name string, content []byte, revisio
 		cleanup()
 		return FileRead{}, fmt.Errorf("gitengine: stage checkout file: %w", err)
 	}
-	if _, err = file.Write(content); err != nil {
+	hash := sha256.New()
+	size, err := io.Copy(io.MultiWriter(file, hash), io.LimitReader(content, MaxFileBytes+1))
+	if err != nil {
 		cleanup()
 		return FileRead{}, fmt.Errorf("gitengine: stage checkout file: %w", err)
+	}
+	if size > MaxFileBytes {
+		cleanup()
+		return FileRead{}, fmt.Errorf("%w: file exceeds %d bytes", ErrInvalidPath, MaxFileBytes)
 	}
 	if err = file.Sync(); err != nil {
 		cleanup()
@@ -627,12 +685,12 @@ func writeCheckoutFile(e *Engine, checkout, name string, content []byte, revisio
 		cleanup()
 		return FileRead{}, fmt.Errorf("gitengine: stage checkout file: %w", err)
 	}
-	newInfo, newContent, nowExists, err := checkoutCurrentFile(parent, leaf)
+	newInfo, newRevision, nowExists, err := checkoutCurrentFile(parent, leaf)
 	if err != nil {
 		_ = parent.Remove(tmp)
 		return FileRead{}, err
 	}
-	if nowExists != exists || (exists && (newContent == nil || fileRevision(newContent) != revision || newInfo.Mode().Perm() != mode)) {
+	if nowExists != exists || (exists && (newRevision != revision || newInfo.Mode().Perm() != mode)) {
 		_ = parent.Remove(tmp)
 		return FileRead{}, ErrRevisionConflict
 	}
@@ -640,12 +698,7 @@ func writeCheckoutFile(e *Engine, checkout, name string, content []byte, revisio
 		_ = parent.Remove(tmp)
 		return FileRead{}, fmt.Errorf("gitengine: replace checkout file: %w", err)
 	}
-	return FileRead{
-		Content:  append([]byte(nil), content...),
-		Size:     int64(len(content)),
-		Revision: fileRevision(content),
-		Writable: true,
-	}, nil
+	return FileRead{Size: size, Revision: fmt.Sprintf("%x", hash.Sum(nil)), Writable: true}, nil
 }
 
 func (e *Engine) writeBareFile(ctx context.Context, repo, ref, name string, content []byte, revision string, author domain.GitIdentity, signingKey []byte) (FileRead, error) {
@@ -674,7 +727,7 @@ func (e *Engine) writeBareFile(ctx context.Context, repo, ref, name string, cont
 	if (entry.oid == "") != (revision == "") || (entry.oid != "" && oldRevision != revision) {
 		return FileRead{}, ErrRevisionConflict
 	}
-	blob, err := e.gitInput(ctx, repo, gitEnv(), content, "hash-object", "-w", "--stdin")
+	blob, err := e.gitInput(ctx, repo, e.gitEnv(), content, "hash-object", "-w", "--stdin")
 	if err != nil {
 		return FileRead{}, err
 	}
@@ -684,7 +737,7 @@ func (e *Engine) writeBareFile(ctx context.Context, repo, ref, name string, cont
 	}
 	defer func() { _ = os.RemoveAll(scratch) }()
 	index := filepath.Join(scratch, "index")
-	env := append(gitEnv(), "GIT_INDEX_FILE="+index)
+	env := append(e.gitEnv(), "GIT_INDEX_FILE="+index)
 	if _, err = e.gitIn(ctx, repo, env, "read-tree", base); err != nil {
 		return FileRead{}, err
 	}
@@ -853,7 +906,7 @@ func (e *Engine) isCheckout(path string) bool {
 func (e *Engine) gitBytes(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	argv := append([]string{"-C", dir, "-c", "safe.directory=*"}, args...)
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, argv...)
-	cmd.Env = gitEnv()
+	cmd.Env = e.gitEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -866,7 +919,7 @@ func (e *Engine) gitBytes(ctx context.Context, dir string, args ...string) ([]by
 func (e *Engine) gitBounded(ctx context.Context, dir string, limit int, args ...string) ([]byte, bool, error) {
 	argv := append([]string{"-C", dir, "-c", "safe.directory=*"}, args...)
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, argv...)
-	cmd.Env = gitEnv()
+	cmd.Env = e.gitEnv()
 	out := &boundedBuffer{limit: limit}
 	var stderr bytes.Buffer
 	cmd.Stdout = out

@@ -38,6 +38,7 @@ const (
 	Guest_Thaw_FullMethodName          = "/aether.guest.v1.Guest/Thaw"
 	Guest_FreezeSession_FullMethodName = "/aether.guest.v1.Guest/FreezeSession"
 	Guest_Sync_FullMethodName          = "/aether.guest.v1.Guest/Sync"
+	Guest_Browser_FullMethodName       = "/aether.guest.v1.Guest/Browser"
 )
 
 // GuestClient is the client API for Guest service.
@@ -71,6 +72,10 @@ type GuestClient interface {
 	// Sync writes every filesystem's dirty data to its disk, then drops the
 	// page cache, before a save.
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (*SyncReply, error)
+	// Browser starts, pauses, resumes or stops the development browser's
+	// companion, which runs from the disk with serial "browser" in a root,
+	// cgroup and IPC namespace of its own.
+	Browser(ctx context.Context, in *BrowserRequest, opts ...grpc.CallOption) (*BrowserReply, error)
 }
 
 type guestClient struct {
@@ -231,6 +236,16 @@ func (c *guestClient) Sync(ctx context.Context, in *SyncRequest, opts ...grpc.Ca
 	return out, nil
 }
 
+func (c *guestClient) Browser(ctx context.Context, in *BrowserRequest, opts ...grpc.CallOption) (*BrowserReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BrowserReply)
+	err := c.cc.Invoke(ctx, Guest_Browser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GuestServer is the server API for Guest service.
 // All implementations must embed UnimplementedGuestServer
 // for forward compatibility.
@@ -262,6 +277,10 @@ type GuestServer interface {
 	// Sync writes every filesystem's dirty data to its disk, then drops the
 	// page cache, before a save.
 	Sync(context.Context, *SyncRequest) (*SyncReply, error)
+	// Browser starts, pauses, resumes or stops the development browser's
+	// companion, which runs from the disk with serial "browser" in a root,
+	// cgroup and IPC namespace of its own.
+	Browser(context.Context, *BrowserRequest) (*BrowserReply, error)
 	mustEmbedUnimplementedGuestServer()
 }
 
@@ -316,6 +335,9 @@ func (UnimplementedGuestServer) FreezeSession(context.Context, *FreezeSessionReq
 }
 func (UnimplementedGuestServer) Sync(context.Context, *SyncRequest) (*SyncReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Sync not implemented")
+}
+func (UnimplementedGuestServer) Browser(context.Context, *BrowserRequest) (*BrowserReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method Browser not implemented")
 }
 func (UnimplementedGuestServer) mustEmbedUnimplementedGuestServer() {}
 func (UnimplementedGuestServer) testEmbeddedByValue()               {}
@@ -608,6 +630,24 @@ func _Guest_Sync_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Guest_Browser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BrowserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GuestServer).Browser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Guest_Browser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GuestServer).Browser(ctx, req.(*BrowserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Guest_ServiceDesc is the grpc.ServiceDesc for Guest service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -674,6 +714,10 @@ var Guest_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Sync",
 			Handler:    _Guest_Sync_Handler,
+		},
+		{
+			MethodName: "Browser",
+			Handler:    _Guest_Browser_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -344,7 +344,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 			checkouts := func(ctx context.Context, path, target string, uid, gid int) (string, guest.Checkout, bool, error) {
 				return s.git.VMCheckoutDisk(ctx, path, target, uid, gid)
 			}
-			vms, images, vmErr := newVMRuntime(ctx, cfg.DataDir, cmp.Or(cfg.VMKernel, DefaultVMKernel), ids, s.docker, checkouts)
+			vms, images, vmErr := newVMRuntime(ctx, cfg.DataDir, cmp.Or(cfg.VMKernel, DefaultVMKernel), cfg.BrowserImage, ids, s.docker, checkouts)
 			if vmErr != nil {
 				return nil, vmErr
 			}

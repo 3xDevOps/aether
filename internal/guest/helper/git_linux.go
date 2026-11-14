@@ -43,9 +43,14 @@ const (
 	gitServiceArg = "git-service"
 )
 
-// superviseGit runs the git service and starts it again whenever it ends,
-// waiting longer after each start that did not last.
-func superviseGit(procs *processes) {
+// gitLimits bound the memory of every git the service runs: a file over
+// 16 MiB is streamed rather than read whole, and pack-objects keeps one
+// thread and 64 MiB of delta candidates.
+var gitLimits = []string{"core.bigFileThreshold=16m", "pack.windowMemory=64m", "pack.threads=1"}
+
+// superviseGit runs the git service in cgroup and starts it again whenever
+// it ends, waiting longer after each start that did not last.
+func superviseGit(procs *processes, cgroup *os.File) {
 	delay := time.Second
 	for n := 0; ; n++ {
 		started := time.Now()
@@ -53,14 +58,21 @@ func superviseGit(procs *processes) {
 			ProcessSpec: guest.ProcessSpec{
 				ID:   "git-" + strconv.Itoa(n),
 				Argv: []string{"/proc/self/exe", "guest", gitServiceArg},
-				Env:  []string{"PATH=" + defaultPath},
+				// The heap goal keeps garbage from crowding the git
+				// service's cgroup.
+				Env: []string{"PATH=" + defaultPath, "GOMEMLIMIT=64MiB"},
 			},
-			log: os.Stderr, helper: true,
+			log: os.Stderr, cgroup: cgroup,
 		})
 		if err != nil {
 			slog.Error("guest: start the git service", "error", err)
 		} else {
 			<-p.done
+			// A git the dead service started would race the next service
+			// over the same files.
+			if killErr := os.WriteFile(filepath.Join(cgroup.Name(), "cgroup.kill"), []byte("1"), 0); killErr != nil {
+				slog.Error("guest: end what the git service started", "error", killErr)
+			}
 			slog.Warn("guest: the git service exited; starting it again", "code", p.code, "in", delay)
 		}
 		if time.Since(started) > time.Minute {
@@ -86,7 +98,7 @@ func serveGit() error {
 	if err = os.Setenv("MUTAGEN_DATA_DIRECTORY", filepath.Join(gitDir, "mutagen")); err != nil {
 		return err
 	}
-	svc, err := newGitService(gitengine.Config{ReposDir: filepath.Join(gitDir, "repos"), CheckoutsDir: gitDir}, cfg.Checkouts)
+	svc, err := newGitService(gitengine.Config{ReposDir: filepath.Join(gitDir, "repos"), CheckoutsDir: gitDir, GitConfig: gitLimits}, cfg.Checkouts)
 	if err != nil {
 		return err
 	}
@@ -94,8 +106,9 @@ func serveGit() error {
 	if err != nil {
 		return fmt.Errorf("listen on vsock port %d: %w", guest.GitPort, err)
 	}
-	// A Files write carries the whole file.
-	server := newGRPCServer(guest.MaxFileBytes + 1<<20)
+	// A guest short of memory can be slow to read the host's ping reply,
+	// and a connection the ping drops fails the long git work it carries.
+	server := newGRPCServer(8<<20, time.Minute)
 	guestpb.RegisterGitServer(server, svc)
 	return server.Serve(hostOnly{listener})
 }
@@ -206,6 +219,9 @@ func newGitService(cfg gitengine.Config, mounts []guest.CheckoutMount) (*gitServ
 	for _, m := range mounts {
 		if ws, wsErr := engine.CheckoutWorkspace(domain.RunID(m.Key)); wsErr == nil {
 			s.workspaces[m.Key] = ws
+		}
+		if err = engine.ClearStaleLocks(domain.RunID(m.Key)); err != nil {
+			return nil, fmt.Errorf("checkout %s: %w", m.Key, err)
 		}
 	}
 	return s, nil
