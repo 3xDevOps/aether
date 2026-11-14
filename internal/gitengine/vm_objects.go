@@ -27,6 +27,42 @@ const (
 	maxVMHistoryBytes = 4 << 30
 )
 
+// guestReceiveAllocLimit caps a single allocation in any git command that
+// indexes objects a VM sent. index-pack streams a blob larger than it rather
+// than allocating it whole, so a legitimate large file still indexes, but a
+// delta whose claimed result is larger aborts that one command before the
+// host memory is touched. It is git's default core.bigFileThreshold, pinned
+// here and as that config so the two cannot drift. The cap does not depend on
+// the pack-size budget: the history budget is 4 GiB, which is too much memory
+// for a few hostile pack bytes to command.
+const guestReceiveAllocLimit = 512 << 20
+
+// guestReceiveConfig is the -c run of every such command, and guestReceiveEnv
+// its environment.
+var guestReceiveConfig = []string{
+	"-c", "pack.threads=1",
+	"-c", "core.bigFileThreshold=" + strconv.Itoa(guestReceiveAllocLimit),
+}
+
+func guestReceiveEnv(base []string) []string {
+	return append(base, "GIT_ALLOC_LIMIT="+strconv.Itoa(guestReceiveAllocLimit))
+}
+
+// gitReceive runs a git command that indexes objects originating in a VM
+// (such as a fetch from the run's store) under the guest-receive limits.
+func (e *Engine) gitReceive(ctx context.Context, dir string, args ...string) error {
+	argv := append([]string{"-C", dir, "-c", "safe.directory=*"}, guestReceiveConfig...)
+	argv = append(argv, args...)
+	cmd := exec.CommandContext(ctx, e.cfg.GitPath, argv...)
+	cmd.Env = guestReceiveEnv(e.gitEnv())
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gitengine: git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
 // vmStore returns the snapshot store of a checkout in a VM, creating it on
 // first use. Its objects borrow the workspace repository's, which hold the
 // fork point; everything else arrives from the VM.
@@ -111,9 +147,11 @@ func (e *Engine) fetchVMObjects(ctx context.Context, run domain.RunID, store str
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, e.cfg.GitPath, "-C", store, "-c", "safe.directory=*",
-		"index-pack", "--strict", "--stdin", "--max-input-size="+strconv.FormatInt(limit, 10))
-	cmd.Env = e.gitEnv()
+	// --max-input-size bounds the compressed pack, not what it expands to.
+	argv := append([]string{"-C", store, "-c", "safe.directory=*"}, guestReceiveConfig...)
+	argv = append(argv, "index-pack", "--strict", "--stdin", "--max-input-size="+strconv.FormatInt(limit, 10))
+	cmd := exec.CommandContext(ctx, e.cfg.GitPath, argv...)
+	cmd.Env = guestReceiveEnv(e.gitEnv())
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err

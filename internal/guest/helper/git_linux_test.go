@@ -1,7 +1,11 @@
 package helper
 
 import (
+	"bytes"
+	"compress/zlib"
 	"context"
+	"crypto/sha1"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -379,6 +383,129 @@ func TestServerRefusesWhatAHostileVMSends(t *testing.T) {
 			}
 		})
 	}
+}
+
+// oversizePack builds a tiny pack holding a base blob and one REF_DELTA whose
+// header claims a target of targetSize bytes. index-pack must allocate that
+// whole buffer to reconstruct the result, so a few bytes drive a huge host
+// allocation unless the receive is bounded.
+func oversizePack(targetSize uint64) []byte {
+	base := []byte("hello")
+	var buf bytes.Buffer
+	buf.WriteString("PACK")
+	_ = binary.Write(&buf, binary.BigEndian, uint32(2))
+	_ = binary.Write(&buf, binary.BigEndian, uint32(2))
+
+	writePackObjHeader(&buf, 3, uint64(len(base)))
+	writePackZlib(&buf, base)
+
+	h := sha1.New()
+	_, _ = io.WriteString(h, "blob 5\x00")
+	h.Write(base)
+	baseSha := h.Sum(nil)
+
+	delta := appendPackVarint(nil, uint64(len(base)))
+	delta = appendPackVarint(delta, targetSize)
+	delta = append(delta, 0x01, 'x') // insert one literal byte
+	writePackObjHeader(&buf, 7, uint64(len(delta)))
+	buf.Write(baseSha)
+	writePackZlib(&buf, delta)
+
+	sum := sha1.Sum(buf.Bytes())
+	buf.Write(sum[:])
+	return buf.Bytes()
+}
+
+func writePackObjHeader(buf *bytes.Buffer, typ byte, size uint64) {
+	b := typ<<4 | byte(size&0x0f)
+	for size >>= 4; size > 0; size >>= 7 {
+		buf.WriteByte(b | 0x80)
+		b = byte(size & 0x7f)
+	}
+	buf.WriteByte(b)
+}
+
+func appendPackVarint(out []byte, v uint64) []byte {
+	for {
+		b := byte(v & 0x7f)
+		if v >>= 7; v > 0 {
+			out = append(out, b|0x80)
+			continue
+		}
+		return append(out, b)
+	}
+}
+
+func writePackZlib(buf *bytes.Buffer, data []byte) {
+	w := zlib.NewWriter(buf)
+	_, _ = w.Write(data)
+	_ = w.Close()
+}
+
+// TestServerBoundsAHostilePackReceive drives both receive paths - a diff
+// snapshot and a moved HEAD - with an Objects reply that is a tiny pack
+// claiming an object past the fixed allocation cap. The server must refuse it
+// at its git allocation limit on either path rather than letting index-pack
+// allocate the whole result; the cap does not loosen for the 4 GiB history
+// budget the HEAD path passes.
+func TestServerBoundsAHostilePackReceive(t *testing.T) {
+	const over = uint64(600 << 20) // past the 512 MiB guest-receive cap
+	newLiar := func() *lyingGit {
+		return &lyingGit{
+			refused: make(chan string, 1),
+			objects: func(stream grpc.ServerStreamingServer[guestpb.Chunk]) error {
+				return stream.Send(&guestpb.Chunk{Data: oversizePack(over)})
+			},
+		}
+	}
+	expectRefused := func(t *testing.T, liar *lyingGit) {
+		t.Helper()
+		select {
+		case reason := <-liar.refused:
+			if !strings.Contains(reason, "over limit") {
+				t.Fatalf("refused for %q, want a git allocation-limit failure", reason)
+			}
+		case <-time.After(15 * time.Second):
+			t.Fatal("the server never refused the oversized pack")
+		}
+	}
+
+	t.Run("snapshot", func(t *testing.T) {
+		liar := newLiar()
+		p := newGitPair(t, func(real *gitService) guestpb.GitServer { liar.gitService = real; return liar })
+		ctx := testContext(t)
+		if err := p.host.StartDiffWatch(ctx, testWorkspace, testRun); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(p.checkout, "new.txt"), []byte("one\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		expectRefused(t, liar)
+		select {
+		case ev := <-p.diffs:
+			t.Fatalf("server published %+v from an oversized pack", ev.Payload)
+		default:
+		}
+	})
+
+	t.Run("published head", func(t *testing.T) {
+		liar := newLiar()
+		p := newGitPair(t, func(real *gitService) guestpb.GitServer { liar.gitService = real; return liar })
+		ctx := testContext(t)
+		if err := p.host.StartDiffWatch(ctx, testWorkspace, testRun); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(p.checkout, "new.txt"), []byte("one\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, p.checkout, "add", "new.txt")
+		runGit(t, p.checkout, "commit", "--quiet", "-m", "move head")
+		head := runGit(t, p.checkout, "rev-parse", "HEAD")
+		expectRefused(t, liar)
+		if tip := runGitQuiet(p.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+p.branch); tip == head {
+			t.Fatal("server published a HEAD whose objects it could not safely receive")
+		}
+	})
 }
 
 func TestGitServiceAnswersTheServersCheckoutCalls(t *testing.T) {
