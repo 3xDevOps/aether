@@ -40,23 +40,7 @@ func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base
 	if err != nil {
 		return nil, false, err
 	}
-	files = make([]events.FileDiffStat, 0, 8)
-	status := map[string]string{}
-	tokens := strings.Split(out, "\x00")
-	for i := 0; i < len(tokens); i++ {
-		if strings.HasPrefix(tokens[i], ":") && i+1 < len(tokens) {
-			status[tokens[i+1]] = cmp.Or(rawStatus[tokens[i][len(tokens[i])-1]], "modified")
-			i++
-			continue
-		}
-		parts := strings.SplitN(tokens[i], "\t", 3)
-		if len(parts) != 3 {
-			continue
-		}
-		add, _ := strconv.Atoi(parts[0]) // "-" (binary) parses as 0
-		del, _ := strconv.Atoi(parts[1])
-		files = append(files, events.FileDiffStat{Path: parts[2], Additions: add, Deletions: del, Status: status[parts[2]]})
-	}
+	files = parseDiffRawNumstat(out)
 	untracked, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return nil, false, err
@@ -84,6 +68,30 @@ func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base
 		return strings.Compare(a.Path, b.Path)
 	})
 	return files, truncated, nil
+}
+
+// parseDiffRawNumstat turns `git diff --raw --numstat --no-renames -z` output
+// into one stat per changed path: the raw records carry the status, the
+// numstat records the line counts.
+func parseDiffRawNumstat(out string) []events.FileDiffStat {
+	files := make([]events.FileDiffStat, 0, 8)
+	status := map[string]string{}
+	tokens := strings.Split(out, "\x00")
+	for i := 0; i < len(tokens); i++ {
+		if strings.HasPrefix(tokens[i], ":") && i+1 < len(tokens) {
+			status[tokens[i+1]] = cmp.Or(rawStatus[tokens[i][len(tokens[i])-1]], "modified")
+			i++
+			continue
+		}
+		parts := strings.SplitN(tokens[i], "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		add, _ := strconv.Atoi(parts[0]) // "-" (binary) parses as 0
+		del, _ := strconv.Atoi(parts[1])
+		files = append(files, events.FileDiffStat{Path: parts[2], Additions: add, Deletions: del, Status: status[parts[2]]})
+	}
+	return files
 }
 
 // countBytesCap bounds how much of a single untracked file a snapshot will

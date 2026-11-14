@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -20,9 +21,8 @@ import (
 )
 
 const (
-	vmWatchRetryMin  = time.Second
-	vmWatchRetryMax  = 30 * time.Second
-	maxDiffPathBytes = 4096
+	vmWatchRetryMin = time.Second
+	vmWatchRetryMax = 30 * time.Second
 )
 
 // vmWatch follows the diff watch the git service runs in a VM and records
@@ -41,8 +41,12 @@ type vmWatch struct {
 	flushing atomic.Bool
 
 	// loop-goroutine state
-	lastTree   string
-	lastBase   string
+	lastTree string
+	lastBase string
+	// lastFiles is the last recorded interval's server-verified file set,
+	// shown on a history gap or when the current set is too large to list
+	// completely, so an honest session keeps its overlap and totals.
+	lastFiles  []events.FileDiffStat
 	historyGap bool
 	lastWarn   time.Time
 	// tokens and tokensAt limit what the VM gets recorded to what a diff
@@ -213,7 +217,11 @@ func (w *vmWatch) record(data []byte) error {
 	}
 	if payload.Tree == "" {
 		w.historyGap = true
+		// No snapshot tree to verify a file set against, so show the last
+		// recorded interval's server-verified files rather than the guest's
+		// claimed list; an honest session that hit a gap keeps its overlap.
 		payload.HistoryGap, payload.ParentTree = true, ""
+		payload.Files, payload.Truncated = w.lastFiles, false
 		return w.e.publishRunDiff(ctx, w.run, payload)
 	}
 	store, err := w.e.snapshotStorePath(w.run)
@@ -233,9 +241,23 @@ func (w *vmWatch) record(data []byte) error {
 		if tree == w.lastTree && base == w.lastBase && !w.historyGap {
 			return nil
 		}
+		files, complete, filesErr := w.e.vmSnapshotFiles(ctx, store, base, tree)
+		if filesErr != nil {
+			return filesErr
+		}
+		if !complete {
+			// Too many changed paths to list within the bound; keep the last
+			// verified set rather than publish a cut one with a partial path.
+			files = w.lastFiles
+		}
 		next := payload
 		next.Base, next.Tree, next.ParentTree, next.HistoryGap = base, tree, w.lastTree, w.historyGap
-		return w.e.publishRunDiff(ctx, w.run, next)
+		next.Files, next.Truncated = files, false
+		if publishErr := w.e.publishRunDiff(ctx, w.run, next); publishErr != nil {
+			return publishErr
+		}
+		w.lastFiles = files
+		return nil
 	})
 	if tree != "" {
 		w.lastTree = tree
@@ -249,6 +271,27 @@ func (w *vmWatch) record(data []byte) error {
 		return errors.New("gitengine: an earlier interval was recorded instead; send the snapshot again")
 	}
 	return nil
+}
+
+// vmSnapshotFiles computes the authoritative changed-file stats of a VM
+// snapshot from the base-to-tree diff in the run's store. The overlap index
+// and the peer-messaging waiver read these paths, so the server derives them
+// from the tree it checked rather than trusting the list the guest claimed.
+// It returns complete=false when the diff exceeds the output bound, so the
+// caller can keep the last verified set instead of publishing a cut listing
+// whose final record would be a fabricated path prefix.
+func (e *Engine) vmSnapshotFiles(ctx context.Context, store, base, tree string) (files []events.FileDiffStat, complete bool, err error) {
+	out, over, err := e.gitBareBounded(ctx, store, guest.MaxDiffEventBytes,
+		"diff", "--raw", "--numstat", "--no-renames", "-z", base, tree, "--")
+	if err != nil {
+		return nil, false, err
+	}
+	if over {
+		return nil, false, nil
+	}
+	files = parseDiffRawNumstat(out)
+	slices.SortFunc(files, func(a, b events.FileDiffStat) int { return strings.Compare(a.Path, b.Path) })
+	return files, true, nil
 }
 
 // checkVMSnapshot copies a reported snapshot's objects and returns the base
@@ -306,16 +349,9 @@ func decodeVMDiff(data []byte) (events.RunDiffPayload, error) {
 			return p, fmt.Errorf("%w: %q", ErrInvalidObjectID, id)
 		}
 	}
-	for _, f := range p.Files {
-		if f.Path == "" || len(f.Path) > maxDiffPathBytes || strings.ContainsRune(f.Path, 0) || f.Additions < 0 || f.Deletions < 0 {
-			return p, fmt.Errorf("gitengine: diff snapshot has an invalid entry %q", f.Path)
-		}
-		switch f.Status {
-		case "", "added", "deleted", "modified":
-		default:
-			return p, fmt.Errorf("gitengine: diff snapshot has status %q", f.Status)
-		}
-	}
+	// The server computes the file set itself from the snapshot tree, so the
+	// guest's claimed list is dropped rather than validated and trusted.
+	p.Files = nil
 	if p.SnapshotError != "" && !vmSnapshotErrors[p.SnapshotError] {
 		p.SnapshotError = "Snapshot history unavailable; current change statistics remain live."
 	}
