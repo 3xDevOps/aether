@@ -348,6 +348,10 @@ What changes:
 
 - Each VM runs in the systemd unit `aether-vm-<run id>.service` in
   `aether.slice`, so it keeps running through a server restart or update.
+  The unit is sandboxed ([security.md](security.md#the-agent-container)) and
+  hides `/home`, `/root` and `/run/user`, so the server refuses
+  `session-runtime vm` when its data directory or binary is under one of
+  them.
   Its disks and logs are in `<data dir>/vm/<run id>/`: `monitor.log` holds the
   VM monitor's output and `console.log` the guest kernel's.
 - The VM gets the CPU limit rounded up to whole vCPUs, held to the exact
