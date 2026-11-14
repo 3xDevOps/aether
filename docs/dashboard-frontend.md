@@ -4256,7 +4256,7 @@ and the Environment keep native xterm scrollback.
   starting apart from a terminal that is gone. A `queued` or `provisioning`
   session is not attached to at all: the tab clears the pane and covers it with
   `TerminalSpinner`, the overlay the environment dock uses, reading
-  **Starting the session's container**, and reports no connection state while
+  **Starting the session's sandbox**, and reports no connection state while
   nothing is connecting. The attach effect already re-runs on `run.status`,
   so the session turning `running` attaches on its own. On a session that is up, a
   `-32004` is retried a bounded number of times on the usual `backoff()`

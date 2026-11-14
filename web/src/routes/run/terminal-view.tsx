@@ -30,7 +30,7 @@ function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   const showConnection = !agent.starting && !ended && state.connection !== 'live'
   return (
     <div role="group" aria-label="Session presence" className="control-matrix-clear flex min-w-0 items-center gap-2">
-      {ended && <span className="shrink-0 text-ui-sm text-muted">{isRetainedRun(run) ? 'Container stopped' : 'Container removed'} · read-only</span>}
+      {ended && <span className="shrink-0 text-ui-sm text-muted">{isRetainedRun(run) ? 'Sandbox stopped' : 'Sandbox removed'} · read-only</span>}
       {showConnection && <span className="shrink-0 text-ui-sm text-state-needs-you">{connectionLabel[state.connection]}</span>}
       {agent.steerable && (
         <span className="min-w-0 truncate text-ui-sm text-muted">
@@ -198,7 +198,7 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
             imageUploadEnabled={!agent.starting && state.connection === 'live' && state.write && !state.steerDenied}
             replaying={replaying}
           >
-            {agent.starting && <TerminalSpinner label="Starting the session's container" />}
+            {agent.starting && <TerminalSpinner label="Starting the session's sandbox" />}
           </TerminalPane>
         </div>
       ) : !shellShown && (
@@ -218,7 +218,7 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
               </div>
             )}
           >
-            An Enhanced session talks to its agent in the Chat view. Open a shell to work in the session’s container.
+            An Enhanced session talks to its agent in the Chat view. Open a shell to work in the session’s sandbox.
           </EmptyState>
         </div>
       )}

@@ -118,8 +118,8 @@ The toolbar shows who controls the agent terminal (**You control**, **Alice
 controls**, **Nobody controls**) with **Take control** or **Release**. A name
 marked **(last known)** is stale. The connection word (**Connecting**,
 **Reconnecting**, **Offline**) shows while the attach is down. A finished session
-reads **Container removed · read-only**, or **Container stopped · read-only**
-when the container is kept. Without permission to steer, the line under the
+reads **Sandbox removed · read-only**, or **Sandbox stopped · read-only**
+when the sandbox is kept. Without permission to steer, the line under the
 toolbar reads **You can watch this session but not type in it.**
 
 The **Tools** menu has **Find**, **Smaller text**, **Larger text**, **Reset
