@@ -148,10 +148,6 @@ func (s *gitService) Install(stream grpc.ClientStreamingServer[guestpb.InstallCh
 // in. It writes beneath the checkout, so a .git the session made a symlink
 // cannot send the write elsewhere.
 func (s *gitService) installIndex(ctx context.Context, key, dir, tree string) error {
-	data, err := s.engine.CommitIndex(ctx, domain.RunID(key), tree)
-	if err != nil {
-		return err
-	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
@@ -168,7 +164,7 @@ func (s *gitService) installIndex(ctx context.Context, key, dir, tree string) er
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(data)
+	err = s.engine.CommitIndex(ctx, domain.RunID(key), tree, f)
 	if err == nil {
 		err = f.Chown(int(st.Uid), int(st.Gid))
 	}

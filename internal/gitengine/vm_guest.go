@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,17 +100,7 @@ func (e *Engine) stageCommitLocked(ctx context.Context, key domain.RunID, checko
 	if err = os.Remove(index + ".lock"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("gitengine: clear the stale commit index lock of %s: %w", key, err)
 	}
-	data, err := e.readCheckoutGitFile(checkout, "index", maxCommitIndexBytes)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		err = os.Remove(index)
-		if errors.Is(err, os.ErrNotExist) {
-			err = nil
-		}
-	case err == nil:
-		err = os.WriteFile(index, data, 0o600)
-	}
-	if err != nil {
+	if err = e.copyCheckoutIndex(checkout, index); err != nil {
 		return "", fmt.Errorf("gitengine: copy the index of %s: %w", key, err)
 	}
 	if _, _, err = e.gitStaged(ctx, checkout, index, 0, "add", "-A"); err != nil {
@@ -126,16 +117,17 @@ func (e *Engine) stageCommitLocked(ctx context.Context, key domain.RunID, checko
 	return tree, nil
 }
 
-// CommitIndex returns the index StageCheckout last staged a commit in,
-// provided it still holds tree.
-func (e *Engine) CommitIndex(ctx context.Context, key domain.RunID, tree string) ([]byte, error) {
+// CommitIndex copies the index StageCheckout last staged a commit in to w,
+// provided it still holds tree. Neither index is held whole: a checkout's
+// can be larger than the git service may hold.
+func (e *Engine) CommitIndex(ctx context.Context, key domain.RunID, tree string, w io.Writer) error {
 	checkout, err := e.existingCheckoutPath(key)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	store, err := e.snapshotStorePath(key)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	lock := e.snapshotLock(key)
 	lock.Lock()
@@ -143,10 +135,44 @@ func (e *Engine) CommitIndex(ctx context.Context, key domain.RunID, tree string)
 	index := filepath.Join(store, commitIndexName)
 	out, _, err := e.gitStaged(ctx, checkout, index, 256, "write-tree")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if strings.TrimSpace(out) != tree {
-		return nil, fmt.Errorf("gitengine: the staged index of %s no longer holds tree %s", key, tree)
+		return fmt.Errorf("gitengine: the staged index of %s no longer holds tree %s", key, tree)
 	}
-	return os.ReadFile(index)
+	f, err := os.Open(index)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	_, err = io.Copy(w, f)
+	return err
+}
+
+// copyCheckoutIndex makes index a copy of the checkout's own, at most
+// maxCommitIndexBytes, or removes it when the checkout has none.
+func (e *Engine) copyCheckoutIndex(checkout, index string) error {
+	src, err := e.openCheckoutGitFile(checkout, "index")
+	if errors.Is(err, os.ErrNotExist) {
+		if err = os.Remove(index); errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+	dst, err := os.OpenFile(index, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	n, err := io.Copy(dst, io.LimitReader(src, maxCommitIndexBytes+1))
+	if err = errors.Join(err, dst.Close()); err != nil {
+		return err
+	}
+	if n > maxCommitIndexBytes {
+		return fmt.Errorf("the checkout's index exceeds %d bytes", maxCommitIndexBytes)
+	}
+	return nil
 }
