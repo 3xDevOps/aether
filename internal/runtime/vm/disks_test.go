@@ -25,3 +25,26 @@ func TestDiskUseCountsTheBlocksOfEachVMsDisks(t *testing.T) {
 		t.Errorf("disk use = %v; want 2 MiB for run-a's root and data disks and nothing for run-b", use)
 	}
 }
+
+func TestHoldDisksStopsAFrozenVMUntilItsResume(t *testing.T) {
+	h := newHarness(t)
+	h.createWithCheckoutDisk("run-a")
+	if err := h.engine.pause(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.holdDisks(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if !h.engine.halted(t.Context(), "run-a") || !h.guest("run-a").isSessionFrozen() {
+		t.Fatal("a held VM runs on, or its session thawed")
+	}
+	if err := h.engine.holdDisks(t.Context(), "run-a"); err != nil {
+		t.Errorf("holding a held VM again = %v", err)
+	}
+	if err := h.engine.resume(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if h.engine.halted(t.Context(), "run-a") || h.guest("run-a").isSessionFrozen() {
+		t.Error("resume left the held VM stopped or its session frozen")
+	}
+}

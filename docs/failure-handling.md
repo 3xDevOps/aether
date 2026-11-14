@@ -263,15 +263,19 @@ scheduler: insufficient disk headroom: <filesystem> has <n> free bytes; reserve 
 With `session-runtime vm`, a session's disks are sparse files that grow as
 it writes, so a running session can take the filesystem below the reserve.
 Every 5 seconds while the Aether data filesystem is below it, the server
-pauses the one session whose disks grew the most since the last check, and
-its timeline notes `Paused: the server is low on disk, and this session's
-disks grew the most since the last check. It resumes on its own once there
-is space again.` A session whose disks did not grow is never paused. Once
-free space is back above the reserve plus 4 GiB, the sessions it paused
-resume and note `Resumed: the server has disk space again.`; one you paused
-yourself stays paused. Files a session deletes give their space back to the
-host. Resuming a session the server paused by hand works, and it is paused
-again only if it keeps growing while space stays low.
+pauses every session whose disks grew by 64 MiB or more since the last check
+and stops its whole VM, so root in it cannot write either. Its timeline notes
+`Paused: the server is low on disk, and this session's disks were filling
+it. It resumes on its own once there is space again.` A session that grew
+less is never paused. A VM that is not a session, such as an environment
+terminal, is only logged (`a VM that is not a session is filling the data
+filesystem`). Once free space is back above the reserve plus 4 GiB, the
+sessions it paused resume and note `Resumed: the server has disk space
+again.`; one you paused or resumed yourself is yours. A session that fills
+the disk again within 10 minutes of such a resume stays paused until you
+resume it (`Paused again: ...`). While a session is held, its Files view and
+closing it wait for the resume. Files a session deletes give their space back
+to the host.
 
 Attaching, messaging, pulling, closing, killing and deleting sessions keep
 working below the reserve, and so does reopening a closed session whose container

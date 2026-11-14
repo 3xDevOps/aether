@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"syscall"
@@ -12,6 +13,31 @@ import (
 
 func (r *Runtime) DiskUse(context.Context) (map[runtime.ID]int64, error) {
 	return r.vms.diskUse()
+}
+
+func (r *Runtime) HoldDisks(ctx context.Context, id runtime.ID) error {
+	key, ok := vmKey(id)
+	if !ok {
+		return fmt.Errorf("vm runtime: %s is not a VM", id)
+	}
+	return r.vms.holdDisks(ctx, key)
+}
+
+// holdDisks stops the vCPUs of a VM whose session Pause froze: root in the
+// guest can leave the frozen cgroup. resume starts them again first.
+func (e *engine) holdDisks(ctx context.Context, key string) error {
+	unlock := e.lock(key)
+	defer unlock()
+	if _, err := e.requireRunning(ctx, key, "hold the disks of"); err != nil {
+		return err
+	}
+	if e.halted(ctx, key) {
+		return nil
+	}
+	if err := newCHAPI(e.path(key, apiSocket)).pause(ctx); err != nil {
+		return fmt.Errorf("vm runtime: hold the disks of VM %s: %w", key, err)
+	}
+	return nil
 }
 
 func (e *engine) diskUse() (map[runtime.ID]int64, error) {

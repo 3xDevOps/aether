@@ -378,6 +378,7 @@ type supervised struct {
 	stallTurnAt       time.Time // when the Enhanced turn the last stall parked started
 	paused            bool
 	diskHeld          bool // the pause is the disk guard's, which ends it
+	diskReleasedAt    time.Time
 	killRequested     bool
 	killActor         domain.MemberID
 	killBy            domain.RunID // the parent that stopped this child run
@@ -797,9 +798,15 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		defer close(watched)
 		s.watchUsageLimits(watchCtx, limits, start)
 	}()
+	disksWatched := make(chan struct{})
+	go func() {
+		defer close(disksWatched)
+		s.watchVMDisks(watchCtx)
+	}()
 	defer func() {
 		stopWatch()
 		<-watched
+		<-disksWatched
 	}()
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
@@ -814,12 +821,8 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	s.sweepBrowsers(ctx)
 	gc := time.NewTicker(time.Hour)
 	defer gc.Stop()
-	disks := time.NewTicker(vmDiskCheck)
-	defer disks.Stop()
 	for {
 		select {
-		case <-disks.C:
-			s.guardVMDisks(ctx)
 		case <-ctx.Done():
 			s.superCancel()
 			return nil
