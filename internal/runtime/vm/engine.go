@@ -435,7 +435,10 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		args = append(args, diskArg(rec.Browser, "browser")+",readonly=on")
 	}
 	args = append(args,
-		"--cpus", fmt.Sprintf("boot=%d", rec.CPUs),
+		// With nested virtualization a guest rebooted on its second restore
+		// (Cloud Hypervisor v54.1 on a host that is itself a VM). Sessions
+		// run no VMs of their own.
+		"--cpus", fmt.Sprintf("boot=%d,nested=off", rec.CPUs),
 		"--memory", fmt.Sprintf("size=%dM,shared=on", rec.MemoryMiB),
 		"--balloon", "size=0,free_page_reporting=on",
 	)

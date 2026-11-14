@@ -1211,7 +1211,7 @@ describe('terminal view', () => {
       const view = mount({}, { status })
 
       expect(StubSocket.opened).toHaveLength(0)
-      expect(screen.getByText("Starting the session's container")).toBeDefined()
+      expect(screen.getByText("Starting the session's sandbox")).toBeDefined()
       expect(screen.queryByText('Offline')).toBeNull()
       expect(screen.queryByText('Retry')).toBeNull()
       expect(screen.queryByText('This session is not running')).toBeNull()
@@ -1227,7 +1227,7 @@ describe('terminal view', () => {
     attached()
 
     expect(StubSocket.opened).toHaveLength(1)
-    expect(screen.queryByText("Starting the session's container")).toBeNull()
+    expect(screen.queryByText("Starting the session's sandbox")).toBeNull()
     view.unmount()
   })
 
@@ -1251,7 +1251,7 @@ describe('terminal view', () => {
       }),
     )
 
-    expect(screen.queryByText("Starting the session's container")).toBeNull()
+    expect(screen.queryByText("Starting the session's sandbox")).toBeNull()
     expect(screen.getByText('provisioning: create checkout: no space left')).toBeDefined()
     expect(screen.queryByText('Retry')).toBeNull()
     view.unmount()
@@ -1259,7 +1259,7 @@ describe('terminal view', () => {
 
   it('calls a finished run read-only rather than offline', () => {
     const view = mount({}, { status: 'completed', finished_at: '2026-08-14T10:09:00Z' })
-    expect(screen.getByText('Container removed · read-only')).toBeDefined()
+    expect(screen.getByText('Sandbox removed · read-only')).toBeDefined()
     expect(screen.queryByText('Offline')).toBeNull()
     view.unmount()
   })

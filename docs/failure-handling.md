@@ -20,6 +20,7 @@ shown beside the status says why it is there.
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
 | Host memory is low, or the server stalls on memory | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | [Recover from memory pressure](#recover-from-memory-pressure). |
 | An Enhanced Claude Code session is idle for `--run-sleep-after` (30 minutes) | The Chat view shows **Asleep since <time>**; `aether sessions` shows `(asleep)`. | Stops the container with `docker stop`, freeing its memory and CPU, and keeps its disk and checkout. | Nothing. The next message wakes it ([Idle sleep](#idle-sleep)). |
+| A Standard or Enhanced session in a VM is idle for `--run-sleep-after` (5 minutes) | As above. | Saves the whole VM to disk with every process in it, freeing its memory and CPU. | Nothing. The next message restores it ([Sessions in VMs](#sessions-in-vms)). |
 | An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced session is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the session supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <session-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
 | A Standard agent exits | The session stays live and its terminal shows a login shell. | Opens a shell in place of the agent. It never restarts the agent. | Start the agent again in that shell, or close the session. |
 | A Background agent exits | `completed`, or `failed` with `agent exited <code>: <last line of output>`. | Commits and publishes the branch, then removes the container. | Read the full output in the session's transcript. |
@@ -236,15 +237,22 @@ When free space
 drops below the reserve plus 4 GiB, Aether frees space on its own, on every
 poll and before refusing a launch, in this order, until it is back above:
 
-1. Containers of closed sessions, the soonest to expire first. The timeline notes
+1. The saved memory of sleeping Enhanced session VMs whose agent restores
+   its conversation, the longest asleep first
+   ([Sessions in VMs](#sessions-in-vms)). The timeline notes `Deleted this
+   sleeping session's saved memory because disk space was low; it starts
+   again from its disk when it next wakes, and restores its conversation`.
+   Sessions that could not start again from their disk, Standard ones
+   among them, keep theirs.
+2. Containers of closed sessions, the soonest to expire first. The timeline notes
    `Removed this closed session's container early because disk space was low; the
    session can no longer be reopened, and its branch and history are kept`.
-2. Checkouts of every finished session, whatever their age. Skipped when
+3. Checkouts of every finished session, whatever their age. Skipped when
    `--checkout-ttl` is negative.
-3. Other members' stopped environments. Anything they installed and
+4. Other members' stopped environments. Anything they installed and
    did not save with `aether env save` is lost; their homes are kept.
-4. Caches and unused standard and browser images.
-5. Leftover scratch directories.
+5. Caches and unused standard and browser images.
+6. Leftover scratch directories.
 
 If that is not enough, the launch is refused:
 
@@ -322,7 +330,8 @@ other probes.
 To recover, close or kill sessions. A closed session's paused container still
 holds its memory; **Free sandbox…** releases it. An idle Enhanced Claude
 Code session, open or closed, frees its memory on its own after
-`--run-sleep-after` ([Idle sleep](#idle-sleep)). Running work is never
+`--run-sleep-after` ([Idle sleep](#idle-sleep)), and so does any idle session
+in a VM, which also frees it as soon as it is closed. Running work is never
 stopped to make room.
 
 ## Capture an unresponsive host
@@ -557,7 +566,8 @@ Memory and CPU are freed. Only Claude Code sleeps
 sessions never sleep, because starting their container again reruns the
 launch command with the original task; Background sessions are one-shot;
 Enhanced sessions of other agents stay awake until a test proves their
-conversation survives a restart.
+conversation survives a restart. Sessions in VMs sleep differently: see
+[Sessions in VMs](#sessions-in-vms).
 
 Activity is any of these within the window: a turn, queued prompt, open
 permission request or question; agent output or a file change in the
@@ -629,13 +639,82 @@ sessions.
 To keep every session awake, run
 `sudo aether-server config set run-sleep-after 0`, then
 `sudo systemctl restart aether-server`. Any other duration, such as `2h`,
-changes the idle time the same way. There is no dashboard setting.
+changes the idle time the same way, for containers and VMs alike. There is
+no dashboard setting.
+
+### Sessions in VMs
+
+With `--session-runtime vm`, a sleep saves the session's whole VM to disk,
+with every process in it, and a wake restores it where it was. Nothing is
+lost, so more sessions sleep, sooner:
+
+- Every agent sleeps, and Standard sessions too. Background sessions never
+  do.
+- `--run-sleep-after` defaults to `5m` for session VMs. A value you set
+  applies to VMs and containers alike.
+- The conditions above keep a VM awake as they keep a container, and so
+  do two more: a VM using more than a tenth of its CPU, such as a build or
+  a test run left in the background, and a wakeup the agent set that has
+  yet to fire. A save that fails leaves the session running; Aether tries
+  again after another `--run-sleep-after`.
+- A closed session is saved as soon as the close finishes, instead of
+  staying paused in memory, unless `--run-sleep-after` is `0`. It stays
+  paused through the save, so nothing changes its files after the close's
+  commit. **Relaunch** restores and resumes it. Closing or killing a
+  sleeping session wakes it first, so its work is committed as for a
+  running one.
+
+A sleeping VM keeps everything: its processes, including dev servers,
+nested Docker containers such as a `docker compose` stack and the Browser
+tab's browser; its terminals and shell tabs, which reconnect on the wake;
+the agent process and its conversation; its disks. Connections to outside
+the session, such as a database client's or a port forward's, can end while
+it sleeps, and the programs holding them see them fail after the wake, as
+after a network outage. The VM's clock is set right on the wake.
+
+Timers in a saved VM stop with it and count only time awake: on a test
+host, a 150-second `sleep` and a Node `setTimeout` started before a save
+fired 44 seconds after the wake, the time they still had left. So an
+Enhanced Claude Code session stays awake while a wakeup it set with
+`ScheduleWakeup` (as `/loop` does) or a one-shot `CronCreate` has yet to
+fire, and while a recurring `CronCreate` job runs, until `CronDelete`.
+Timers that Aether cannot see, such as a Standard session's or a `sleep`
+in a script, wait for the next wake. Aether's own wakes still wake a
+sleeping session, Standard or Enhanced: mail, `aether-internal report
+--until` conditions and watches reach it as any message does.
+
+A Standard session's Chat and Terminal views, and an Enhanced session's
+Chat view, show **Asleep since** with a **Wake** button while it sleeps.
+
+A wake takes a second or two on local NVMe: on a test host, a message to a
+sleeping Claude Code or Codex session running a dev server and a
+`docker compose` stack was accepted 0.7 to 1.5 seconds after it was sent,
+**Relaunch** of a closed one took 3 seconds, and a start from disk after a
+failed restore 5 seconds. The Chat view and the session's terminal say
+`Aether had saved this idle session to disk and restored it`.
+
+When the saved state cannot be restored, because the server now runs
+another Cloud Hypervisor or guest kernel, or the file is gone or damaged,
+an Enhanced session of an agent that restores its conversation starts again
+from its disk: processes that were running end, the conversation is
+restored, and the Chat view gives the restore's error. Any other session,
+a Standard one among them, stays asleep: the wake fails with the restore's
+error, and the VM keeps its disk and saved state. Launch a new session on
+its branch, or wake it again. A VM a failed save left running is taken up
+as it is on the next wake.
+
+A saved VM takes about as much disk as the memory its processes use, after
+the guest drops its page cache: 0.6 to 1.3 GB for those test sessions in
+2 GiB VMs. When disk runs low, Aether deletes the saved
+memory of the longest-sleeping sessions first
+([Recover from disk pressure](#recover-from-disk-pressure)). A server
+restart or update leaves sleeping VMs asleep; the next use wakes them.
 
 ## What stays after a session ends
 
 | Action | Container | Checkout | Reopen |
 | --- | --- | --- | --- |
-| **Close** (`aether close <session-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory, until an Enhanced Claude Code session's container is stopped after `--run-sleep-after` ([Idle sleep](#idle-sleep)). | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `aether reopen <session-id>`. The deadline is cleared while the session is live; the next close sets a new 7 days. |
+| **Close** (`aether close <session-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory, until an Enhanced Claude Code session's container is stopped after `--run-sleep-after` ([Idle sleep](#idle-sleep)). A session VM is saved to disk at once instead. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `aether reopen <session-id>`. The deadline is cleared while the session is live; the next close sets a new 7 days. |
 | A Background session finishes | Removed at once. | Kept for `--checkout-ttl` (72 hours) after the session ends. | No. |
 | **Kill run** (`aether kill <session-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the session ends. | No. |
 | **Free sandbox…** | Removed. History stays. | Kept until `--checkout-ttl` after the session ended. | No. |
@@ -704,7 +783,7 @@ sudo systemctl restart aether-server
 | `--poll-interval` | `30s` | How often stalls, retention and disk are checked. Values above `1m` act as `1m`. | Keep it at a third of the threshold or less. |
 | `--checkout-ttl` | `72h` | How long a finished session's checkout is kept after the session ends. It also stays while the session's container is kept. Negative keeps every checkout, and disk cleanup leaves them alone. | Lower on a small disk. |
 | `--run-container-ttl` | `168h` | How long a closed session's container is kept for reopening. Negative removes it at once. | Lower when paused containers hold too much memory. |
-| `--run-sleep-after` | `30m` | How long an idle Enhanced session of an agent that can restore its conversation, open or closed, keeps its container running ([Idle sleep](#idle-sleep)). `0` keeps every session awake. | Lower on a host short of memory; `0` when processes in idle sessions must keep running. |
+| `--run-sleep-after` | `30m`; `5m` for session VMs | How long an idle Enhanced session of an agent that can restore its conversation, open or closed, keeps its container running, and how long any idle session VM runs before it is saved ([Idle sleep](#idle-sleep)). `0` keeps every session awake. | Lower on a host short of memory; `0` when processes in idle sessions must keep running. |
 | `--min-free-disk` | automatic | The free-space reserve per filesystem, in bytes. Negative turns the disk check off; the memory check stays. | See below. |
 | `--run-cpus` | 8, or the host's CPU count if lower | CPU ceiling per session and environment. | Lower to share a small host. |
 | `--run-memory` | 8 GiB | Memory ceiling per session and environment, in bytes. Swap adds a quarter of it. | Raise when sessions hit out-of-memory kills. |

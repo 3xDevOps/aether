@@ -63,7 +63,8 @@ What each agent can do:
 - **Idle sleep**: an idle Enhanced session's container is stopped and started
   again on its next use, and the agent continues the same conversation
   ([Idle sleep](failure-handling.md#idle-sleep)). Sessions of the other agents
-  stay awake.
+  stay awake. In a VM, every agent's sessions sleep
+  ([Sessions in VMs](failure-handling.md#sessions-in-vms)).
 - **Set up suggests** is the mode **Set up** picks first. The dashboard then
   remembers your choice per agent
   ([Choose Enhanced](enhanced-sessions.md#choose-enhanced)), and `aether session`

@@ -120,8 +120,11 @@ type Config struct {
 	RunContainerTTL      time.Duration // default 1h; negative destroys on close/completion
 	// RunSleepAfter is how long an Enhanced session of an agent with
 	// harness.Capabilities.Sleep stays idle, open or closed, before its
-	// container is stopped; zero keeps every session awake.
+	// container is stopped; zero keeps every session awake. VMSleepAfter is
+	// the same for any Standard or Enhanced session VM, which a sleep saves
+	// with every process.
 	RunSleepAfter time.Duration
+	VMSleepAfter  time.Duration
 	// DefaultBrowserImage is this build's browser image; its repository is
 	// swept of unused tags.
 	DefaultBrowserImage string
@@ -535,6 +538,11 @@ type supervised struct {
 	sleepGen    uint64
 	waking      chan struct{}
 	wakeErr     error
+	// asleepSaved is set while a sleeping VM holds its saved memory, which
+	// a wake restores with every process. saveFailedAt is the last failed
+	// save, which the sleep sweep waits a full sleep delay after.
+	asleepSaved  bool
+	saveFailedAt time.Time
 	// awake counts callers the container must not stop under: a delivery,
 	// an exec or a browser operation in flight.
 	awake int

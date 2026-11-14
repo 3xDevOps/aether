@@ -328,7 +328,8 @@ func (c *Client) SyncClock(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-// Sync writes the guest's dirty data to the VM's disks.
+// Sync writes the guest's dirty data to the VM's disks and hands its page
+// cache back to the host, before a save.
 func (c *Client) Sync(ctx context.Context) error {
 	if _, err := retry(ctx, func() (*guestpb.SyncReply, error) {
 		return c.api.Sync(ctx, &guestpb.SyncRequest{})

@@ -480,6 +480,7 @@ type sidecar struct {
 	// AsleepSince is when idleness stopped the container; WakeError is the
 	// last wake's failure.
 	AsleepSince *time.Time `json:"asleep_since,omitempty"`
+	AsleepSaved bool       `json:"asleep_saved,omitempty"`
 	WakeError   string     `json:"wake_error,omitempty"`
 }
 
@@ -568,6 +569,7 @@ func (e *supervised) sidecar() sidecar {
 		AccountSwap:         swap,
 		UsageLimit:          e.usageLimit,
 		AsleepSince:         asleepSince,
+		AsleepSaved:         e.asleepSaved,
 		WakeError:           wakeError,
 	}
 }

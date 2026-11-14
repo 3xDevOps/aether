@@ -2,7 +2,6 @@ package vm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -137,8 +136,14 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	if !rec.Saved {
 		return fmt.Errorf("vm runtime: restore VM %s: it has no saved state", key)
 	}
-	if up, upErr := e.running(ctx, key); upErr != nil || up {
-		return errors.Join(upErr, fmt.Errorf("vm runtime: restore VM %s: it is already running", key))
+	up, err := e.running(ctx, key)
+	if err != nil {
+		return err
+	}
+	// A monitor a server left mid-restore or mid-save holds the guest
+	// paused at the saved state, which still matches the disks.
+	if up {
+		e.kill(ctx, key)
 	}
 	// The guest's mounts were made at boot: the shares keep the indexes they
 	// had then, whatever the host holds now.

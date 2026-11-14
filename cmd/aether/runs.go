@@ -62,8 +62,10 @@ type runView struct {
 	PendingInputs []pendingInput  `json:"pending_inputs"`
 	Branch        string          `json:"branch"`
 	Report        *runReport      `json:"report,omitempty"`
-	// AsleepSince is when idleness stopped the session's container.
+	// AsleepSince is when idleness stopped the session's container or
+	// saved its VM; AsleepSaved while the saved VM keeps every process.
 	AsleepSince *string `json:"asleep_since,omitempty"`
+	AsleepSaved bool    `json:"asleep_saved,omitempty"`
 	WakeError   string  `json:"wake_error,omitempty"`
 }
 
@@ -84,7 +86,7 @@ func viewOf(r protocol.Run, workspace string, items []protocol.AttentionItem, re
 	v := runView{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Workspace: workspace, Status: displayStatus(r), State: r.Status,
 		Reason: r.Reason, Wait: r.Wait, WaitText: r.Wait.Text(time.Now()), Branch: r.Branch, PendingInputs: []pendingInput{},
-		AsleepSince: r.AsleepSince, WakeError: r.WakeError,
+		AsleepSince: r.AsleepSince, AsleepSaved: r.AsleepSaved, WakeError: r.WakeError,
 	}
 	offered := map[string][]protocol.AttentionOption{}
 	for _, it := range items {
@@ -220,7 +222,11 @@ func printRunView(w io.Writer, v runView, items []protocol.AttentionItem) error 
 		if domain.RunStatus(v.State).Terminal() {
 			wakes = "aether reopen " + v.ID + " wakes it"
 		}
-		_, _ = fmt.Fprintf(tw, "asleep\tsince %s; its container is stopped until %s\n", *v.AsleepSince, wakes)
+		held := "its container is stopped"
+		if v.AsleepSaved {
+			held = "it is saved to disk with every process"
+		}
+		_, _ = fmt.Fprintf(tw, "asleep\tsince %s; %s until %s\n", *v.AsleepSince, held, wakes)
 	}
 	if v.WakeError != "" {
 		_, _ = fmt.Fprintf(tw, "wake failed\t%s\n", printable(v.WakeError))

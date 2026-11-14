@@ -39,6 +39,7 @@ func (s *Scheduler) kill(ctx context.Context, run domain.RunID, actor domain.Mem
 		return s.killUnsupervised(ctx, run, actor, by)
 	}
 	s.mu.Unlock()
+	s.wakeBeforeEnd(ctx, entry, actor)
 
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
@@ -72,6 +73,9 @@ func (s *Scheduler) kill(ctx context.Context, run domain.RunID, actor domain.Mem
 	// No container yet (still provisioning): the provisioning checkpoints
 	// see killRequested and abort. Not-found means the desired state is gone.
 	if cid != "" {
+		if err := s.endAsleepVM(ctx, entry); err != nil {
+			return err
+		}
 		if err := s.prepareDevelopmentClose(ctx, run); err != nil {
 			return err
 		}
@@ -823,6 +827,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 		}
 	}
 
+	s.wakeBeforeEnd(ctx, entry, actor)
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
@@ -941,6 +946,9 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 	run, outcome, actor := entry.runID, spec.outcome, spec.actor
 	closeReason := spec.retained
 	if mode.Interactive() && !status.Terminal() {
+		if err := s.endAsleepVM(ctx, entry); err != nil {
+			return err
+		}
 		if err := s.prepareDevelopmentClose(ctx, run); err != nil {
 			return err
 		}
@@ -1036,6 +1044,14 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 			if ttl < 0 {
 				s.stopCloseContainer(ctx, cid)
 				s.destroyClosedRetained(ctx, entry)
+				return nil
+			}
+			// A closed VM sleeps at once: unlike a frozen container, it gives
+			// its memory back. The sleep sweep tries again if this fails.
+			if _, saving := s.saver(cid); saving && s.cfg.VMSleepAfter > 0 {
+				if err := s.sleepClosedLocked(ctx, entry); err != nil && !errors.Is(err, errStayAwake) {
+					slog.Warn("scheduler: save a closed session", "run", run, "error", err)
+				}
 			}
 			return nil
 		}

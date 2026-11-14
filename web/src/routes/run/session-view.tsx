@@ -501,13 +501,11 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
         </VList>
         {notesWide && <NotesRail run={run} room={room} />}
       </div>
-      {enhanced && (
-        <div className={cn(sessionColumn, 'pb-2 empty:hidden')}>
-          <SessionFailureCallout run={run} session={session} switchable={switchable} shells={shells} nav={nav} />
-          <StallCallout run={run} agent={agent} rows={rows} nav={nav} />
-          <SleepCallout run={run} />
-        </div>
-      )}
+      <div className={cn(sessionColumn, 'pb-2 empty:hidden')}>
+        {enhanced && <SessionFailureCallout run={run} session={session} switchable={switchable} shells={shells} nav={nav} />}
+        {enhanced && <StallCallout run={run} agent={agent} rows={rows} nav={nav} />}
+        <SleepCallout run={run} />
+      </div>
       {!notesWide && <NotesStrip run={run} room={room} className={cn(sessionColumn, 'pb-2')} />}
       <ChangesBar run={run} />
       <CompletionPrompt run={run} className={cn(sessionColumn, 'pb-2')} />

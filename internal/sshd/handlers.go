@@ -399,7 +399,7 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 		out.Paused = s.cfg.Runs.Paused(run.ID)
 		if sleep := s.cfg.Runs.Sleep(run.ID); sleep.AsleepSince != nil {
 			since := sleep.AsleepSince.UTC().Format(time.RFC3339Nano)
-			out.AsleepSince, out.Waking, out.WakeError = &since, sleep.Waking, sleep.WakeError
+			out.AsleepSince, out.AsleepSaved, out.Waking, out.WakeError = &since, sleep.Saved, sleep.Waking, sleep.WakeError
 		}
 		out.Cause = string(s.cfg.Runs.Cause(run.ID, run.Activity))
 		out.Wait = s.cfg.Runs.Wait(run.ID, run.Activity)

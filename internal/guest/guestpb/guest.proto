@@ -32,7 +32,8 @@ service Guest {
   // Docker's pause does a container's, and returns once the kernel reports
   // the state. The helper and its git service run outside the session.
   rpc FreezeSession(FreezeSessionRequest) returns (FreezeSessionReply);
-  // Sync writes every filesystem's dirty data to its disk.
+  // Sync writes every filesystem's dirty data to its disk, then drops the
+  // page cache, before a save.
   rpc Sync(SyncRequest) returns (SyncReply);
   // Browser starts, pauses, resumes or stops the development browser's
   // companion, which runs from the disk with serial "browser" in a root,

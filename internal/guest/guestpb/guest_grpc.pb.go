@@ -69,7 +69,8 @@ type GuestClient interface {
 	// Docker's pause does a container's, and returns once the kernel reports
 	// the state. The helper and its git service run outside the session.
 	FreezeSession(ctx context.Context, in *FreezeSessionRequest, opts ...grpc.CallOption) (*FreezeSessionReply, error)
-	// Sync writes every filesystem's dirty data to its disk.
+	// Sync writes every filesystem's dirty data to its disk, then drops the
+	// page cache, before a save.
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (*SyncReply, error)
 	// Browser starts, pauses, resumes or stops the development browser's
 	// companion, which runs from the disk with serial "browser" in a root,
@@ -273,7 +274,8 @@ type GuestServer interface {
 	// Docker's pause does a container's, and returns once the kernel reports
 	// the state. The helper and its git service run outside the session.
 	FreezeSession(context.Context, *FreezeSessionRequest) (*FreezeSessionReply, error)
-	// Sync writes every filesystem's dirty data to its disk.
+	// Sync writes every filesystem's dirty data to its disk, then drops the
+	// page cache, before a save.
 	Sync(context.Context, *SyncRequest) (*SyncReply, error)
 	// Browser starts, pauses, resumes or stops the development browser's
 	// companion, which runs from the disk with serial "browser" in a root,

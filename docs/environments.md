@@ -428,15 +428,17 @@ What changes:
   built from the browser image that every session VM gets when it boots ([The
   development browser](vm-guest.md#the-development-browser)). Its memory comes
   out of the session VM's, under the companion's own cap, and a stopped
-  browser gives it back. Its pages survive a save and restore of the VM; a
-  session that sleeps still loses its browser until sleep saves VMs. A session
-  VM that started while the server was still building that disk, as just after
-  an install, has no browser until it next starts, as after it sleeps; every
-  cold start also takes the current browser image, so a VM running across an
-  upgrade keeps its older browser until then.
-- Closing a session while it is asleep makes no final commit: its VM is
-  stopped, so the run branch lacks the changes the session had not
-  committed. They stay on the session's checkout disk, which is kept.
+  browser gives it back. Its pages survive a save and restore of the VM, so a
+  session that sleeps keeps them. A session VM that started while the server
+  was still building that disk, as just after an install, has no browser
+  until it next starts from its disk; every such cold start also takes the
+  current browser image, so a VM running across an upgrade keeps its older
+  browser until then.
+- An idle session's VM is saved to disk with every process, and closing a
+  session saves its VM too
+  ([Sessions in VMs](failure-handling.md#sessions-in-vms)). Closing a
+  session while it is asleep wakes it first, so its final commit has its
+  uncommitted changes.
 - Switching to `vm` moves no running session: a session already in a
   container keeps it, through the restart and its sleeps and relaunches, and
   gets a VM only when it needs a new container.

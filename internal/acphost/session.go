@@ -162,6 +162,9 @@ type State struct {
 	Compacting bool `json:"compacting,omitempty"`
 	// Closed is true once the agent connection ended or its input broke.
 	Closed bool `json:"-"`
+	// WakeupPending is true while a wakeup the agent set with ScheduleWakeup
+	// or CronCreate has yet to fire.
+	WakeupPending bool `json:"-"`
 }
 
 // promptAcceptGrace is how long a prompt that starts a turn waits for the
@@ -225,6 +228,7 @@ type Session struct {
 	// endedTasks the status of tasks that ended before their tool call
 	// arrived, oldest first in endedOrder.
 	taskCalls  map[string]ToolCall
+	wakeups    agentWakeups
 	endedTasks map[string]string
 	endedOrder []string
 	lastUpdate time.Time
@@ -272,6 +276,7 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		tasks:      make(map[string]*liveTask),
 		taskCalls:  make(map[string]ToolCall),
 		endedTasks: make(map[string]string),
+		wakeups:    newAgentWakeups(),
 		spend:      Spend{Total: cfg.Cost},
 		openedAt:   time.Now(),
 	}
@@ -297,7 +302,15 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 			s.notify.close(nil)
 			return nil, errors.Join(fmt.Errorf("acphost: scan running tasks: %w", err), log.Close())
 		}
+		wakeups, err := scanAgentWakeups(log)
+		if err != nil {
+			_ = w.Close()
+			s.stop()
+			s.notify.close(nil)
+			return nil, errors.Join(fmt.Errorf("acphost: scan the agent's wakeups: %w", err), log.Close())
+		}
 		s.mu.Lock()
+		s.wakeups = wakeups
 		for _, it := range running {
 			s.taskCalls[it.ToolCall.Task.ID] = *it.ToolCall
 			if adopt == nil {
@@ -521,6 +534,7 @@ func (s *Session) State() State {
 	st.LastProgress, st.OpenedAt, st.TurnStartedAt = s.progressAt, s.openedAt, s.turnAt
 	st.ToolsOpen, st.Compacting = s.proj.toolsOpen(), s.compacting
 	st.Closed = s.closingLocked()
+	st.WakeupPending = s.wakeups.pending(time.Now())
 	info := s.conn.Info()
 	st.Steering, st.AuthMethods = info.Steering, info.AuthMethods
 	st.PromptImages = info.PromptImages
@@ -609,6 +623,7 @@ func (s *Session) emitLocked(it Item) {
 		}
 	case KindToolCall:
 		s.trackTaskCallLocked(&it)
+		s.wakeups.note(it.ToolCall, time.Now())
 	}
 	it.Turn = s.turn
 	s.appendLocked(it)

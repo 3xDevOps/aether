@@ -584,7 +584,7 @@ export async function applyEvent(
     case 'run.sleep': {
       // A run this client has not loaded arrives with its sleep in its snapshot.
       const p = ev.payload as RunSleepPayload
-      store.getState().patchRun(ev.run_id, { asleep_since: p.asleep_since, waking: p.waking, wake_error: p.wake_error })
+      store.getState().patchRun(ev.run_id, { asleep_since: p.asleep_since, asleep_saved: p.asleep_saved, waking: p.waking, wake_error: p.wake_error })
       break
     }
     case 'run.protected': {

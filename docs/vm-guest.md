@@ -289,7 +289,9 @@ A restored VM's clock stopped while it was saved. The server calls
 `SetClock`, through `guest.Client.SyncClock`, after every restore. Before a
 save it calls `Sync`, which writes every filesystem's dirty data to its
 disk, so the cache disk of a saved VM that is deleted without a restore
-holds what the session wrote.
+holds what the session wrote. `Sync` then drops the guest's page cache and
+waits 3 seconds, while free page reporting hands the freed memory to the
+host, so the saved state holds only what the session uses.
 
 ## Freezing the root disk
 

@@ -736,6 +736,31 @@ func (s *Scheduler) DetachDevelopmentTerminals(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// detachDevelopmentTerminals lets go of run's terminals before its VM is
+// saved, leaving them running. The first load after the wake takes each one
+// up again, as after a server restart.
+func (s *Scheduler) detachDevelopmentTerminals(ctx context.Context, run domain.RunID) error {
+	lock := s.lockForShell(run)
+	lock.Lock()
+	defer lock.Unlock()
+	set, err := s.loadRunTerminalsLocked(ctx, run)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, terminal := range set.Terminals {
+		if terminal.Exec == nil || terminal.ContainerEnded || terminal.Gone || terminal.Lost {
+			continue
+		}
+		errs = append(errs, releaseTerminal(terminal))
+		terminal.Exec = nil
+		terminal.Generation = 0
+		terminal.Unavailable = "the session is asleep; the terminal reconnects when it wakes"
+		set.deferred = true
+	}
+	return errors.Join(append(errs, s.persistRunTerminalsLocked(run, set))...)
+}
+
 func (s *Scheduler) DeleteDevelopmentTerminals(ctx context.Context, run domain.RunID) error {
 	if err := s.StopDevelopmentTerminals(ctx, run); err != nil {
 		return err

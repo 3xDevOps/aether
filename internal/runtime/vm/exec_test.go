@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -290,5 +291,34 @@ func TestStartEndsWhenTheVMDiesDuringSetup(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("start kept waiting on a VM that died during setup")
+	}
+}
+
+func TestRestoreReplacesAMonitorAServerLeftMidRestore(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	if err := h.engine.save(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := h.engine.load("run-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	booted, err := readLaunch(h.engine.dir("run-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leftover := launch{Home: booted.Home, Args: []string{
+		"--api-socket", "path=" + h.engine.path("run-a", apiSocket), "--restore", "source_url=file://" + h.engine.path("run-a", snapshotDir),
+	}}
+	if err = h.engine.launch(t.Context(), rec, leftover); err != nil {
+		t.Fatal(err)
+	}
+	stale := h.units.vmm("run-a")
+	if err = h.engine.restore(t.Context(), "run-a"); err != nil {
+		t.Fatalf("restore over the monitor of an unfinished restore: %v", err)
+	}
+	if vmm := h.units.vmm("run-a"); vmm == nil || vmm == stale || !slices.Contains(vmm.called(), "vm.resume") {
+		t.Error("restore kept the leftover monitor instead of restoring anew")
 	}
 }
