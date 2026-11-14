@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -106,5 +107,17 @@ func TestFailedThawKeepsTheDeadline(t *testing.T) {
 			t.Fatal("a failed thaw dropped the deadline")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestASessionFreezeWaitsForASpawnOnlyAsLongAsItsCaller(t *testing.T) {
+	procs := newProcesses(nil)
+	procs.mu.Lock()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := procs.refuseSessionSpawns(ctx)
+	procs.mu.Unlock()
+	if !errors.Is(err, context.DeadlineExceeded) || procs.sessionFrozen {
+		t.Fatalf("a freeze behind a spawn whose caller gave up = %v, spawns refused %t", err, procs.sessionFrozen)
 	}
 }

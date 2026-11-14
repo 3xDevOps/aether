@@ -99,10 +99,25 @@ type processes struct {
 	sessionFrozen bool
 }
 
-func (t *processes) setSessionFrozen(frozen bool) {
+// refuseSessionSpawns sets sessionFrozen, waiting for a spawn in progress,
+// which can hold the table for its whole startup, only until ctx ends.
+func (t *processes) refuseSessionSpawns(ctx context.Context) error {
+	for !t.mu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	defer t.mu.Unlock()
+	t.sessionFrozen = true
+	return nil
+}
+
+func (t *processes) allowSessionSpawns() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.sessionFrozen = frozen
+	t.sessionFrozen = false
 }
 
 func newProcesses(cgroup *os.File) *processes {

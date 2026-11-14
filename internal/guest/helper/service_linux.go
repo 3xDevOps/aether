@@ -30,6 +30,8 @@ type service struct {
 	powerOff  func() error
 	setClock  func(time.Time) error
 	freezer   *freezer
+	// freezing holds the FreezeSession call that runs.
+	freezing chan struct{}
 
 	bootOnce  sync.Once
 	bootDone  chan struct{}
@@ -38,7 +40,7 @@ type service struct {
 }
 
 func newService(procs *processes, cgroup *sessionCgroup, bootID, bootError string) *service {
-	return &service{procs: procs, cgroup: cgroup, bootID: bootID, bootError: bootError, bootDone: make(chan struct{})}
+	return &service{procs: procs, cgroup: cgroup, bootID: bootID, bootError: bootError, bootDone: make(chan struct{}), freezing: make(chan struct{}, 1)}
 }
 
 // newServer bounds requests and drops a server whose connection died
