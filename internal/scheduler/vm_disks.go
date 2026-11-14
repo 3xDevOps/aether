@@ -9,8 +9,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// vmDiskCheck is how often the disk guard measures: a stat of each VM disk
-// and of the data filesystem.
 const vmDiskCheck = 5 * time.Second
 
 const (
@@ -19,11 +17,8 @@ const (
 )
 
 // guardVMDisks keeps session VMs, whose sparse disks grow as their guests
-// write, from filling the data filesystem: while it is below its floor,
-// each check pauses the session whose disks grew the most since the last
-// one, and once it is back above the floor and reclaim's headroom the
-// sessions it paused resume. A session whose disks did not grow is never
-// paused.
+// write, from filling the data filesystem. Only a session whose disks grew
+// is ever paused, and only the guard's own pauses are resumed.
 func (s *Scheduler) guardVMDisks(ctx context.Context) {
 	vms, ok := s.cfg.Runtime.(runtime.DiskUseRuntime)
 	if !ok || s.cfg.MinFreeBytes < 0 {
@@ -77,8 +72,6 @@ func (s *Scheduler) holdGrowingVM(ctx context.Context, use, last map[runtime.ID]
 	s.publishTimeline(ctx, held.workspaceID, held.runID, "", events.TimelineNote, diskHeldNote)
 }
 
-// releaseHeldVMs resumes the sessions the guard paused, except one resumed
-// meanwhile by hand.
 func (s *Scheduler) releaseHeldVMs(ctx context.Context) {
 	s.mu.Lock()
 	var held []*supervised

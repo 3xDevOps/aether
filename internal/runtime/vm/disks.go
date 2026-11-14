@@ -14,8 +14,6 @@ func (r *Runtime) DiskUse(context.Context) (map[runtime.ID]int64, error) {
 	return r.vms.diskUse()
 }
 
-// diskUse counts the blocks each VM's guest-written disks hold on the host:
-// root, data, cache, state and checkouts.
 func (e *engine) diskUse() (map[runtime.ID]int64, error) {
 	keys, err := e.keys()
 	if err != nil {

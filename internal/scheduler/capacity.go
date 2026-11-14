@@ -134,7 +134,6 @@ func (s *Scheduler) measureCapacity(ctx context.Context) ([]runtime.FilesystemCa
 	return append(filesystems, capacity.Filesystems...), &capacity, nil
 }
 
-// dataFilesystem measures the filesystem that holds Aether's data.
 func (s *Scheduler) dataFilesystem() (disk.Usage, error) {
 	measure := s.cfg.filesystemCapacity
 	if measure == nil {
