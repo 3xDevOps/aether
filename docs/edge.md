@@ -774,9 +774,10 @@ aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is no
 
 Before you run a new digest, ask the edge you already run whether a release signed
 it ([Verified releases](install.md#verified-releases)) and whether the upgrade
-needs manual steps. `--from-digest` is the digest the edge runs: the build
+needs manual steps. `--from-digest` is the index digest the edge runs: the build
 number of the running release comes from `--from`'s signed manifest, which must
-name that digest, and the binary's own build must match it. `--channel` is the
+name that digest. `--from-manifest <file>` reads a saved copy of that manifest,
+with its signature in `<file>.sig`, instead of downloading it. `--channel` is the
 channel the host follows. It exits 1 when either manifest cannot be fetched and
 verified, when the release is not newer by build number, or when the channel
 does not take it (`stable` takes
@@ -1080,6 +1081,12 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now aether-edge-update.timer aether-edge-update-recover.service
 ```
 
+`AETHER_EDGE_DIGEST` must be the release's index digest, the `Digest:` that
+`docker buildx imagetools inspect ghcr.io/3xdevops/aether-edge:<release-tag>`
+prints, not a platform digest. Otherwise every run stops with `the running
+release <tag> signs the edge image <index digest>, not the running <digest>; pin
+the edge to the index digest <index digest>`.
+
 To change channel, set `AETHER_EDGE_UPDATE_CHANNEL` and run `sudo
 aether-edge-update --check`: it accepts a running release promoted on the old
 channel, but the next one must be promoted on the new channel. An edge that
@@ -1124,6 +1131,15 @@ updater does the rest.
   `/var/lib/aether-edge-update/state`.
 - A digest in `/var/lib/aether-edge-update/failed` is skipped on every session. Delete
   its line to try it again.
+- `/var/lib/aether-edge-update/releases/<tag>.json` and `.json.sig` are the signed
+  manifest of the release the edge runs, kept so updates still order after GitHub
+  prunes that release (nightlies after 14 days). A copy that does not verify is
+  refused with `saved <file>: ... is not signed by a trusted release key`; delete
+  both files and the next run downloads them again. Without a copy, `release-check`
+  downloads the manifest, so an edge whose release was pruned before a copy was
+  kept stops with `the running release: release <tag> has no signed
+  aether-release.json`: upgrade it by hand to the channel's current release
+  ([First upgrade](#first-upgrade)).
 - A host that reboots mid-update is recovered at boot by
   `aether-edge-update-recover.service`, or by `sudo aether-edge-update --recover`.
 

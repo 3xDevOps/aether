@@ -8,6 +8,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,7 +17,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/version"
 )
 
 var releaseKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
@@ -38,18 +39,25 @@ func serveRelease(t *testing.T, edge *selfupdate.Edge, key ed25519.PrivateKey) f
 	return serveManifests(t, key, ms...)
 }
 
+// signManifest completes m as a release and signs it with key.
+func signManifest(t *testing.T, key ed25519.PrivateKey, m selfupdate.Manifest) (data, sig []byte) {
+	t.Helper()
+	m.Schema, m.Commit, m.PublishedAt, m.StoreSchema = selfupdate.ManifestSchema, "c0ffee", time.Now(), 1
+	m.Assets = map[string]selfupdate.Asset{"aether-edge-linux-amd64": {SHA256: strings.Repeat("0", 64), Size: 1}}
+	data, sig, err := selfupdate.SignManifest(m, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data, sig
+}
+
 // serveManifests publishes each manifest under its version, signed by key.
 func serveManifests(t *testing.T, key ed25519.PrivateKey, ms ...selfupdate.Manifest) func(context.Context, string) (selfupdate.Manifest, error) {
 	t.Helper()
 	t.Cleanup(selfupdate.TrustKeysForTest(releaseKey.Public().(ed25519.PublicKey)))
 	mux := http.NewServeMux()
 	for _, m := range ms {
-		m.Schema, m.Commit, m.PublishedAt, m.StoreSchema = selfupdate.ManifestSchema, "c0ffee", time.Now(), 1
-		m.Assets = map[string]selfupdate.Asset{"aether-edge-linux-amd64": {SHA256: strings.Repeat("0", 64), Size: 1}}
-		data, sig, err := selfupdate.SignManifest(m, key)
-		if err != nil {
-			t.Fatal(err)
-		}
+		data, sig := signManifest(t, key, m)
 		mux.HandleFunc("/releases/download/"+m.Version+"/"+selfupdate.ManifestName, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(data) })
 		mux.HandleFunc("/releases/download/"+m.Version+"/"+selfupdate.SignatureName, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(sig) })
 	}
@@ -158,7 +166,7 @@ func TestReleaseCheckRefuses(t *testing.T) {
 		{"an older release", serveRelease(t, testEdge(), releaseKey),
 			[]string{"--digest", edgeDigest("e"), "--from", "v1.6.0", "--from-digest", edgeDigest("a"), "--channel", "beta"}, "refusing to upgrade: v1.5.0 is older than the running v1.6.0"},
 		{"a running digest its release does not sign", serveRelease(t, testEdge(), releaseKey),
-			[]string{"--digest", edgeDigest("e"), "--from", "v1.4.0", "--from-digest", edgeDigest("b"), "--channel", "beta"}, "the running release: release v1.4.0 signs the edge image " + edgeDigest("a") + ", not " + edgeDigest("b")},
+			[]string{"--digest", edgeDigest("e"), "--from", "v1.4.0", "--from-digest", edgeDigest("b"), "--channel", "beta"}, "the running release v1.4.0 signs the edge image " + edgeDigest("a") + ", not the running " + edgeDigest("b") + "; pin the edge to the index digest " + edgeDigest("a")},
 		{"a running release that cannot be fetched", serveRelease(t, testEdge(), releaseKey),
 			[]string{"--digest", edgeDigest("e"), "--from", "v1.2.0", "--from-digest", edgeDigest("a"), "--channel", "beta"}, "the running release: "},
 		{"a step newer than the release", serveRelease(t, func() *selfupdate.Edge {
@@ -247,22 +255,52 @@ func TestVersionJSONCarriesTheBuild(t *testing.T) {
 	}
 }
 
-// A binary whose stamped build disagrees with its signed manifest, such as
-// an image built without RELEASE_BUILD, must not order releases: as build
-// 0 it would take any older numbered release.
-func TestReleaseCheckRefusesABinaryWhoseBuildIsNotItsReleases(t *testing.T) {
+// A running release pruned from GitHub still orders from the copy of its
+// signed manifest the updater saved; a saved copy that does not verify is
+// refused.
+func TestReleaseCheckOrdersFromASavedManifest(t *testing.T) {
 	edge := &selfupdate.Edge{Image: "ghcr.io/3xdevops/aether-edge", ImageDigest: edgeDigest("e"),
 		StoreSchema: 4, StoreCompatFloor: 3, Protocol: selfupdate.EdgeProtocol{Version: 2, MinVersion: 1},
 		MinUpgradeFrom: "v0.5.0", ManualSteps: []selfupdate.ManualStep{}}
 	fetch := serveManifests(t, releaseKey,
 		selfupdate.Manifest{Version: "v0.9.0-beta.1", Channel: "beta", Build: 300, Edge: edge},
-		selfupdate.Manifest{Version: "v0.9.0-beta.5", Channel: "beta", Build: 430, Edge: edge})
-	v, b := version.Version, version.Build
-	t.Cleanup(func() { version.Version, version.Build = v, b })
-	version.Version, version.Build = "v0.9.0-beta.5", "0"
-	err := releaseCheck([]string{"--tag", "v0.9.0-beta.1", "--digest", edgeDigest("e"), "--from", "v0.9.0-beta.5",
-		"--from-digest", edgeDigest("e"), "--channel", "beta"}, fetch, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "this binary is v0.9.0-beta.5 build 0 hotfix 0, but its signed aether-release.json says build 430 hotfix 0") {
-		t.Fatalf("err = %v, want the stamp mismatch refused", err)
+		selfupdate.Manifest{Version: "v0.9.0-beta.6", Channel: "beta", Build: 440, Edge: edge})
+	data, sig := signManifest(t, releaseKey, selfupdate.Manifest{Version: "v0.9.0-nightly.12", Channel: "nightly", Build: 430, Edge: edge})
+	saved := filepath.Join(t.TempDir(), "v0.9.0-nightly.12.json")
+	check := func(tag string) error {
+		return releaseCheck([]string{"--tag", tag, "--digest", edgeDigest("e"), "--from", "v0.9.0-nightly.12",
+			"--from-digest", edgeDigest("e"), "--from-manifest", saved, "--channel", "beta"}, fetch, &bytes.Buffer{})
+	}
+	for _, c := range []struct {
+		data []byte
+		tag  string
+		want string
+	}{
+		{data, "v0.9.0-beta.6", ""},
+		{data, "v0.9.0-beta.1", "refusing to upgrade: v0.9.0-beta.1 (build 300) is older than the running v0.9.0-nightly.12 (build 430)"},
+		{bytes.Replace(data, []byte("430"), []byte("200"), 1), "v0.9.0-beta.1", "is not signed by a trusted release key"},
+	} {
+		if err := os.WriteFile(saved, c.data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(saved+".sig", sig, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err := check(c.tag)
+		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("to %s: err = %v, want %q", c.tag, err, c.want)
+		}
+	}
+	if err := os.WriteFile(saved, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := check("v0.9.0-beta.6"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := check("v0.9.0-beta.6"); err == nil || !strings.Contains(err.Error(), "the running release: ") {
+		t.Errorf("without the saved manifest: err = %v, want it refused", err)
 	}
 }

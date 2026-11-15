@@ -69,6 +69,7 @@ nightly | beta | stable | latest) ;;
 *) die "the channel is nightly, beta, stable or latest, got '$channel'; set AETHER_EDGE_UPDATE_CHANNEL in $config or pass --channel" ;;
 esac
 state_dir="${AETHER_EDGE_UPDATE_STATE:-/var/lib/aether-edge-update}"
+releases="$state_dir/releases"
 compose_dir="${AETHER_EDGE_UPDATE_COMPOSE_DIR:-/opt/aether-edge}"
 digest_file="${AETHER_EDGE_UPDATE_DIGEST_FILE:-$compose_dir/.env}"
 relay_url="${AETHER_EDGE_UPDATE_RELAY_URL:-}"
@@ -230,6 +231,52 @@ predates_channels() {
 	printf '%s\n' "$1" | jq -e '.build == null and .hotfix == null' >/dev/null
 }
 
+# Runs release-check from image $1 for release $2 as digest $3, upgrading
+# from release $4 as digest $5. With a file name $6 it reads the signed
+# manifest of $4 from $releases, which the container's user reads through
+# a read-only mount; without one it downloads it.
+run_release_check() {
+	if [ -z "${6:-}" ]; then
+		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json \
+			--channel "$channel" --from-digest "$5"
+		return
+	fi
+	docker run --rm -v "$releases:/run/aether-edge-update/releases:ro" "$image@$1" release-check \
+		--tag "$2" --digest "$3" --from "$4" --json \
+		--channel "$channel" --from-digest "$5" --from-manifest "/run/aether-edge-update/releases/$6"
+}
+
+# Keeps the signed manifest of release $2, image digest $3, as
+# $releases/$2.json with its .sig: the release may be pruned from GitHub
+# while the edge runs it, and release-check orders by it. A download is
+# kept only once release-check from image $1 verified it names $3. Sets
+# kept to the file name, or to nothing when there is no copy and none can
+# be downloaded. Fails only when release-check refuses the download; exit
+# 2 is an image without release-check.
+keep_manifest() {
+	kept="$2.json"
+	[ ! -f "$releases/$kept" ] || [ ! -f "$releases/$kept.sig" ] || return 0
+	kept=""
+	url="https://github.com/3xDevOps/Aether/releases/download/$2/aether-release.json"
+	mkdir -p "$releases"
+	chmod 0755 "$releases"
+	if ! curl -fsS --max-time 30 -o "$releases/$2.new.json" "$url" ||
+		! curl -fsS --max-time 30 -o "$releases/$2.new.json.sig" "$url.sig"; then
+		rm -f "$releases/$2.new.json" "$releases/$2.new.json.sig"
+		say "cannot download the signed manifest of $2 to keep it in $releases"
+		return 0
+	fi
+	chmod 0644 "$releases/$2.new.json" "$releases/$2.new.json.sig"
+	run_release_check "$1" "$2" "$3" "$2" "$3" "$2.new.json" >/dev/null && rc=0 || rc=$?
+	if [ "$rc" != 0 ] && [ "$rc" != 3 ]; then
+		rm -f "$releases/$2.new.json" "$releases/$2.new.json.sig"
+		[ "$rc" = 2 ] || say "release-check refused the signed manifest of $2"
+		return "$rc"
+	fi
+	mv -f "$releases/$2.new.json.sig" "$releases/$2.json.sig" && mv -f "$releases/$2.new.json" "$releases/$2.json"
+	kept="$2.json"
+}
+
 # Runs release-check from image $1, release $4, whose version --json is
 # $5, for release $2 as digest $3. It refuses a release this host's
 # channel does not take or that is not newer by the build numbers both
@@ -237,10 +284,16 @@ predates_channels() {
 release_check() {
 	if predates_channels "$5"; then
 		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json
-	else
-		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json \
-			--channel "$channel" --from-digest "$1"
+		return
 	fi
+	case "$4" in
+	'' | .* | *[!A-Za-z0-9.+_-]*)
+		say "$image@$1 reports version '$4', which is not a release tag"
+		return 1
+		;;
+	esac
+	keep_manifest "$1" "$4" "$1" || return
+	run_release_check "$1" "$2" "$3" "$4" "$1" "$kept"
 }
 
 # Verifies the running digest $1 as an update verifies a new one, so that
@@ -587,6 +640,9 @@ update() {
 	to_json="$(docker run --rm --network none "$image@$new" version --json)" || die "aether-edge version --json failed in $image@$new"
 	got="$(printf '%s\n' "$to_json" | jq -r .version)"
 	[ "$got" = "$new_version" ] || die "$image@$new reports version $got but is labelled $new_version"
+	if ! predates_channels "$from_json" && ! predates_channels "$to_json"; then
+		keep_manifest "$cur" "$new_version" "$new" || die "nothing changed"
+	fi
 	printf '%s\n' "$from_json" >"$state_dir/from.json"
 	printf '%s\n' "$to_json" >"$state_dir/to.json"
 

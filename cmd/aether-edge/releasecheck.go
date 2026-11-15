@@ -7,13 +7,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
-const releaseCheckUsage = "usage: aether-edge release-check --tag <tag> --digest sha256:<digest> --from <tag> --from-digest sha256:<digest> --channel <nightly|beta|stable|latest> [--json]"
+const releaseCheckUsage = "usage: aether-edge release-check --tag <tag> --digest sha256:<digest> --from <tag> --from-digest sha256:<digest> [--from-manifest <file>] --channel <nightly|beta|stable|latest> [--json]"
 
 // channelLatest follows the image GitHub's Latest release publishes, with
 // no promotion attestation. Latest is never a nightly, so it refuses one:
@@ -42,8 +43,9 @@ type releaseReport struct {
 // newer than --from by build order, and reports whether the upgrade to it
 // must hold. The running release's build comes from --from's signed
 // manifest, which must name --from-digest, never from what an image
-// claims. A --tag equal to --from checks the running release itself, which
-// needs neither refusal.
+// claims; --from-manifest reads a saved copy, so a release that has since
+// been pruned still orders. A --tag equal to --from checks the running
+// release itself, which needs neither refusal.
 func releaseCheck(args []string, fetch func(context.Context, string) (selfupdate.Manifest, error), out io.Writer) error {
 	fs := flag.NewFlagSet("aether-edge release-check", flag.ContinueOnError)
 	tag := fs.String("tag", "", "release tag to check")
@@ -51,6 +53,7 @@ func releaseCheck(args []string, fetch func(context.Context, string) (selfupdate
 	from := fs.String("from", "", "release tag the edge runs now (required); whether that release can open the database\n"+
 		"after the upgrade migrates it is not checked here: run aether-edge schema --json with its image")
 	fromDigest := fs.String("from-digest", "", "index digest of the edge image the edge runs now (required)")
+	fromManifest := fs.String("from-manifest", "", "saved "+selfupdate.ManifestName+" of the --from release, with its signature in <file>.sig; verified as a download is, and read instead of downloading it")
 	channel := fs.String("channel", "", "release channel the host follows: nightly, beta, stable or latest (required)")
 	asJSON := fs.Bool("json", false, "print the report as JSON")
 	if err := fs.Parse(args); err != nil {
@@ -67,18 +70,30 @@ func releaseCheck(args []string, fetch func(context.Context, string) (selfupdate
 	default:
 		return fmt.Errorf("--channel %q is not nightly, beta, stable or latest", *channel)
 	}
-	m, err := signedEdge(fetch, *tag, *digest)
+	if *fromManifest != "" {
+		download := fetch
+		fetch = func(ctx context.Context, name string) (selfupdate.Manifest, error) {
+			if name != *from {
+				return download(ctx, name)
+			}
+			return readManifest(*fromManifest, name)
+		}
+	}
+	m, err := signedEdge(fetch, *tag)
 	if err != nil {
 		return err
 	}
+	if m.Edge.ImageDigest != *digest {
+		return fmt.Errorf("release %s signs the edge image %s, not %s; do not run it", *tag, m.Edge.ImageDigest, *digest)
+	}
 	if *tag != *from {
 		var running selfupdate.Manifest
-		if running, err = signedEdge(fetch, *from, *fromDigest); err != nil {
+		if running, err = signedEdge(fetch, *from); err != nil {
 			return fmt.Errorf("the running release: %w", err)
 		}
-		if self := selfupdate.Running(); self.Version == *from && (self.Build != running.Build || self.Hotfix != running.Hotfix) {
-			return fmt.Errorf("this binary is %s build %d hotfix %d, but its signed %s says build %d hotfix %d; do not trust it to order releases",
-				*from, self.Build, self.Hotfix, selfupdate.ManifestName, running.Build, running.Hotfix)
+		if running.Edge.ImageDigest != *fromDigest {
+			return fmt.Errorf("the running release %s signs the edge image %s, not the running %s; pin the edge to the index digest %s",
+				*from, running.Edge.ImageDigest, *fromDigest, running.Edge.ImageDigest)
 		}
 		switch {
 		case *channel == channelLatest && m.Channel == selfupdate.ChannelNightly:
@@ -144,9 +159,8 @@ func writeReleaseReport(out io.Writer, r releaseReport, from string) error {
 	return tw.Flush()
 }
 
-// signedEdge fetches tag's signed manifest and checks its edge section
-// names digest as the edge image.
-func signedEdge(fetch func(context.Context, string) (selfupdate.Manifest, error), tag, digest string) (selfupdate.Manifest, error) {
+// signedEdge fetches tag's signed manifest and checks its edge section.
+func signedEdge(fetch func(context.Context, string) (selfupdate.Manifest, error), tag string) (selfupdate.Manifest, error) {
 	m, err := fetch(context.Background(), tag)
 	if err != nil {
 		return selfupdate.Manifest{}, err
@@ -157,8 +171,23 @@ func signedEdge(fetch func(context.Context, string) (selfupdate.Manifest, error)
 	if err = m.Edge.Validate(tag); err != nil {
 		return selfupdate.Manifest{}, fmt.Errorf("release %s: %w", tag, err)
 	}
-	if m.Edge.ImageDigest != digest {
-		return selfupdate.Manifest{}, fmt.Errorf("release %s signs the edge image %s, not %s; do not run it", tag, m.Edge.ImageDigest, digest)
+	return m, nil
+}
+
+// readManifest verifies the manifest saved at path, with its signature at
+// path.sig, as tag's.
+func readManifest(path, tag string) (selfupdate.Manifest, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return selfupdate.Manifest{}, err
+	}
+	sig, err := os.ReadFile(path + ".sig")
+	if err != nil {
+		return selfupdate.Manifest{}, err
+	}
+	m, err := selfupdate.VerifyManifest(data, sig, tag)
+	if err != nil {
+		return selfupdate.Manifest{}, fmt.Errorf("saved %s: %w", path, err)
 	}
 	return m, nil
 }
