@@ -328,15 +328,23 @@ func (c *Checker) latest(ctx context.Context) (Manifest, error) {
 		return Manifest{}, err
 	}
 	m, marks, err := FollowChannel(ctx, c.baseURL, c.channel, st.Pointers)
-	if err != nil || maps.Equal(marks, st.Pointers) {
+	if err != nil {
 		return m, err
 	}
-	return m, c.raiseMark(marks[c.channel])
+	// Only a verified pointer leaves a mark. Another process may have
+	// raised the mark since the read above, so even an unchanged one is
+	// checked again under the lock.
+	if got, ok := marks[c.channel]; ok {
+		if err := c.raiseMark(got); err != nil {
+			return Manifest{}, err
+		}
+	}
+	return m, nil
 }
 
 // raiseMark records got as the channel's mark. Other processes share the
 // file, so it re-reads it under a lock and refuses got when one of them
-// has meanwhile accepted a higher pointer.
+// has meanwhile accepted a higher pointer; an equal mark is left as it is.
 func (c *Checker) raiseMark(got Mark) error {
 	if err := os.MkdirAll(filepath.Dir(c.statePath), 0o700); err != nil {
 		return fmt.Errorf("save update state: %w", err)
@@ -355,8 +363,12 @@ func (c *Checker) raiseMark(got Mark) error {
 	if err != nil {
 		return err
 	}
-	if seen, ok := st.Pointers[c.channel]; ok && got.below(seen) {
+	seen, ok := st.Pointers[c.channel]
+	switch {
+	case ok && got.below(seen):
 		return replayed(c.channel, got, seen)
+	case ok && got == seen:
+		return nil
 	}
 	st.Pointers = maps.Clone(st.Pointers)
 	if st.Pointers == nil {

@@ -112,3 +112,23 @@ func TestChannelCheckerNeverLowersAMarkAnotherProcessRaised(t *testing.T) {
 		t.Fatalf("state = %+v, %v; want beta raised to 501 and stable kept", st, err)
 	}
 }
+
+// A pointer equal to the mark read before the fetch is still checked under
+// the lock: another process may have raised the mark meanwhile.
+func TestChannelCheckerRefusesAReplayAnotherProcessOvertook(t *testing.T) {
+	setVersion(t, "v0.9.0-beta.1", "abc1234")
+	f, srv := newFakeRelease(t, "v0.9.0-beta.1", testAssets)
+	f.builds = map[string]Release{"v0.9.0-beta.1": {Channel: ChannelBeta, Build: 400}}
+	f.setPointer(t, "v0.9.0-beta.1", 400)
+	state := filepath.Join(t.TempDir(), "update.json")
+	if err := os.WriteFile(state, []byte(`{"pointers": {"beta": {"build": 400, "hotfix": 0}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.onPointer = func() {
+		_ = os.WriteFile(state, []byte(`{"pointers": {"beta": {"build": 412, "hotfix": 0}}}`), 0o600)
+	}
+	got, err := NewChannelChecker(srv.URL, time.Hour, ChannelBeta, state).CheckFresh(t.Context())
+	if want := "channel pointer beta.json names build 400, below build 412 seen before"; err == nil || err.Error() != want || got.Latest != "" {
+		t.Fatalf("check = %+v, %v; want %q", got, err, want)
+	}
+}
