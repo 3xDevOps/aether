@@ -115,7 +115,7 @@ run() {
 	set +e
 	rm -rf "$tmp/pair"
 	mkdir "$tmp/pair"
-	PATH="$bin:$PATH" STATE="$state" tmp_dir="$state/tmp" GITHUB_REPOSITORY=3xDevOps/Aether \
+	PATH="$bin:$PATH" STATE="$state" tmp_dir="$state/tmp" GITHUB_REPOSITORY=3xDevOps/Aether GITHUB_RUN_ID=4242 \
 		RELEASE_POINTER="$bin/release-pointer" sh "$script_dir/publish-pointer.sh" "$@" "$tmp/pair" >"$tmp/out" 2>&1
 	got=$?
 	set -e
@@ -139,6 +139,7 @@ reset
 run 1 beta v0.9.0-beta.2 "$dist"
 assert_out "channels has no beta.json. A missing pointer is not a first one"
 assert_out "gh run download <run-id> --repo 3xDevOps/Aether -n pointer-beta -D pair"
+assert_out "once it has expired, a repository admin removes what is left of beta.json and re-signs it with first-pointer"
 refute_log "release-pointer"
 refute_log "release upload"
 
@@ -175,7 +176,7 @@ echo "beta v0.9.0-beta.1" >"$state/assets/beta.json"
 echo "sig v0.9.0-beta.1" >"$state/assets/beta.json.sig"
 echo 99 >"$state/fail"
 run 1 beta v0.9.0-beta.2 "$dist"
-assert_out "uploading beta.json failed 3 times and channels may hold half a pair. This run's signed pair is the pointer-beta artifact"
+assert_out "uploading beta.json failed 3 times and channels may hold half a pair. This run's signed pair is its pointer-beta artifact; restore it: gh run download 4242 --repo 3xDevOps/Aether -n pointer-beta"
 [ "$(grep -c "release upload" "$state/log")" -eq 3 ]
 grep -qx "sig v0.9.0-beta.2" "$tmp/pair/beta.json.sig"
 

@@ -33,7 +33,11 @@ repo="${GITHUB_REPOSITORY:?publish-pointer: GITHUB_REPOSITORY must name the repo
 tool="${RELEASE_POINTER:?publish-pointer: RELEASE_POINTER must name the built release-pointer command}"
 name="$channel.json"
 public="https://github.com/$repo/releases/download/channels"
-restore="gh run download <run-id> --repo $repo -n pointer-$channel -D pair && gh release upload channels --repo $repo --clobber pair/$name pair/$name.sig"
+# The command that restores run $1's pointer-<channel> artifact.
+restore() {
+	echo "gh run download $1 --repo $repo -n pointer-$channel -D pair && gh release upload channels --repo $repo --clobber pair/$name pair/$name.sig"
+}
+expired="The artifact lasts 90 days; once it has expired, a repository admin removes what is left of $name and re-signs it with first-pointer for the release it named or one above it, never below"
 
 fail() {
 	echo "publish-pointer: $1" >&2
@@ -61,14 +65,14 @@ assets=$(printf '%s' "$release" | jq -r '[.assets[].name | select(. == $n or . =
 case "$assets:$first" in
 ":1") set -- -first ;;
 ":")
-	fail "channels has no $name. A missing pointer is not a first one: a failed upload or a deletion may have removed a higher one, and installs that saw it refuse anything lower. Restore the last good pair from the pointer-$channel artifact of the run that last moved it ($restore), or, only when the channel has never had a pointer, run with the first-pointer input"
+	fail "channels has no $name. A missing pointer is not a first one: a failed upload or a deletion may have removed a higher one, and installs that saw it refuse anything lower. Restore the last good pair from the pointer-$channel artifact of the run that last moved it ($(restore '<run-id>')). $expired. Only when the channel has never had a pointer, run with the first-pointer input"
 	;;
 "$name $name.sig:1") fail "channels already has $name; first-pointer is only for a channel without one" ;;
 "$name $name.sig:")
 	gh release download channels --pattern "$name" --pattern "$name.sig" --dir "$tmp/current"
 	set -- -current "$tmp/current/$name"
 	;;
-*) fail "channels holds $assets for $name; it needs both $name and $name.sig. Restore the last good pair from the pointer-$channel artifact of the run that last moved it: $restore" ;;
+*) fail "channels holds $assets for $name; it needs both $name and $name.sig. Restore the last good pair from the pointer-$channel artifact of the run that last moved it: $(restore '<run-id>'). $expired" ;;
 esac
 
 "$tool" -channel "$channel" -tag "$tag" -manifest "$dist/aether-release.json" ${if_above:+"$if_above"} "$@" -out "$pair"
@@ -83,7 +87,7 @@ fi
 attempt=1
 until gh release upload channels --clobber "$pair/$name" "$pair/$name.sig"; do
 	[ "$attempt" -lt 3 ] ||
-		fail "uploading $name failed 3 times and channels may hold half a pair. This run's signed pair is the pointer-$channel artifact; restore it: $restore"
+		fail "uploading $name failed 3 times and channels may hold half a pair. This run's signed pair is its pointer-$channel artifact; restore it: $(restore "${GITHUB_RUN_ID:-<run-id>}")"
 	attempt=$((attempt + 1))
 	sleep 10
 done

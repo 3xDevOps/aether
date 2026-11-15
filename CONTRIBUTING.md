@@ -509,6 +509,15 @@ A failure before publishing leaves at most a draft: fix the cause and run
 `gh run rerun <session-id> --failed`. Published assets are never replaced, so a
 bad published release needs a new tag.
 
+A workflow that moves a channel pointer (`<channel>.json` on the
+`channels` prerelease) keeps the pair it signed as the `pointer-<channel>`
+artifact for 90 days. If an upload leaves half a pair, restore that
+artifact with the `gh run download ... && gh release upload channels
+--clobber ...` command the failed run prints. Once it has expired, remove
+what is left of the pointer and re-sign it with `first-pointer` for the
+release it named or one above it, never below: installs refuse a pointer
+lower than one they have seen.
+
 <details>
 <summary>Edge releases and the signing key</summary>
 
