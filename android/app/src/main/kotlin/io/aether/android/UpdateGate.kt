@@ -87,7 +87,7 @@ class UpdateGate(
             val read = installFacts(context)
             val answer =
                 try {
-                    gateAnswer(post(call, if (refresh) "{\"refresh\":true}" else "{}"))
+                    gateAnswer(postGateway(call, if (refresh) "{\"refresh\":true}" else "{}"))
                 } catch (e: IOException) {
                     Result.failure(e)
                 }
@@ -160,7 +160,7 @@ class UpdateGate(
     }
 }
 
-private fun post(call: GatewayCall, body: String): String {
+fun postGateway(call: GatewayCall, body: String): String {
     val connection = URL(call.url).openConnection() as HttpURLConnection
     try {
         connection.requestMethod = "POST"

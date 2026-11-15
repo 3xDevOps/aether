@@ -57,6 +57,27 @@ fun parseUpdateCheck(line: String): UpdateCheck? {
     return UpdateCheck(version, latest, available == "true")
 }
 
+private val DESCRIBE_TAIL = Regex("-[0-9]+-g[0-9a-f]{4,}(-dirty)?$")
+
+/**
+ * The check line for an `update.check` [body] the gateway answered. The
+ * app only moves to its server's release: the gateway's target counts when
+ * it is that release, and any newer one on the release channel waits for
+ * the server to update first. The run is a failure when [body] is not a
+ * check or the gateway could not reach the server, which says nothing
+ * about this app.
+ */
+fun serverReleaseCheck(body: String): CheckRun {
+    val check = parseGateCheck(body) ?: return CheckRun(null, "update.check answered: ${body.trim()}")
+    if (check.serverVersion.isEmpty()) {
+        return CheckRun(null, "update.check did not reach the server: ${check.serverError}")
+    }
+    val offered = check.targetVersion.takeIf { it == check.serverVersion.replace(DESCRIBE_TAIL, "") }.orEmpty()
+    val latest = offered.ifEmpty { check.clientVersion }
+    val line = "{\"version\":\"${check.clientVersion}\",\"latest\":\"$latest\",\"update_available\":${offered.isNotEmpty()}}"
+    return CheckRun(line, "")
+}
+
 /**
  * Whether to run a check now: once the next one is due, failed or not, when
  * the clock went back, or once the app was updated after the last one.

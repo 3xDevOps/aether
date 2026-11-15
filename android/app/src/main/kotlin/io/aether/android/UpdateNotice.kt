@@ -22,9 +22,11 @@ import kotlin.random.Random
 private const val CHECK_TIMEOUT_SECONDS = 30L
 
 /**
- * The banner that says a newer Aether release is out, in either mode. The
- * bundled CLI's `update --check --json` decides that, so the release lookup
- * and version ordering are the desktop's. Its button opens Google Play or
+ * The banner that says a newer Aether release is out, in either mode.
+ * Connected through the gateway, the server's release from its
+ * `update.check` decides that, as the update gate does. Otherwise the
+ * bundled CLI's `update --check --json` does, so the release lookup and
+ * version ordering are the desktop's. Its button opens Google Play or
  * the release APK in the browser; this app downloads and installs nothing.
  * Once the last answer is a day old, a failed check shows as one line.
  */
@@ -66,7 +68,11 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
         }
     }
 
-    fun resume() {
+    /**
+     * [gatewayUrl] is the running gateway's handshake URL. [awaitGateway]
+     * says one is on its way, so no check is made before it is up.
+     */
+    fun resume(gatewayUrl: String?, awaitGateway: Boolean) {
         val stored = activity.storedUpdate()
         render(stored)
         if (check?.isDone == false) return
@@ -79,8 +85,9 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
                     facts = read
                     render(activity.storedUpdate())
                 }
+                if (awaitGateway && gatewayUrl == null) return@submit
                 if (checkDue(System.currentTimeMillis(), stored, read.updatedAt)) {
-                    val run = runCheck(context)
+                    val run = gatewayUrl?.let(::gatewayCheck) ?: runCheck(context)
                     main.post {
                         if (destroyed) return@post
                         val next = recordCheck(activity, run, read.updatedAt)
@@ -124,6 +131,20 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
 
 /** What one run of `aether update --check --json` printed: the check line, else why there is none. */
 class CheckRun(val line: String?, val error: String)
+
+/**
+ * The check of the server the gateway at [handshakeUrl] connects to, or
+ * null when that is not a gateway URL. Blocks; never call it on the main
+ * thread.
+ */
+fun gatewayCheck(handshakeUrl: String): CheckRun? {
+    val call = gatewayCall(handshakeUrl, "update.check") ?: return null
+    return try {
+        serverReleaseCheck(postGateway(call, "{}"))
+    } catch (e: IOException) {
+        CheckRun(null, e.message ?: e.toString())
+    }
+}
 
 /**
  * Stores [run] as the latest check and returns what was stored. Main
