@@ -124,8 +124,7 @@ run)
 			[ "$*" = "$want" ] || { echo "docker stub: release-check from $d got '$*', not $want" >&2; exit 2; }
 			keep="$AETHER_EDGE_UPDATE_STATE/releases"
 			if [ -n "$saved" ]; then
-				saved="$keep/${saved#/run/aether-edge-update/releases/}"
-				[ "$(cat "$saved")" = "signed manifest of $from" ] ||
+				[ "$(cat "$keep/${saved#/run/aether-edge-update/releases/}")" = "signed manifest of $from" ] ||
 					{ echo "aether-edge: the running release: saved $saved: aether-release.json for $from is not signed by a trusted release key; do not install it" >&2; exit 1; }
 			fi
 			for r in "$tag" "$from"; do
@@ -297,6 +296,7 @@ EOF
 cat >"$bin/chown" <<'EOF'
 #!/bin/sh
 printf 'chown %s\n' "$*" >>"$CMD_LOG"
+[ ! -f "$WORLD/chown-fails" ] || { echo "chown: changing ownership of '$2': Operation not permitted" >&2; exit 1; }
 EOF
 
 cat >"$bin/flock" <<'EOF'
@@ -905,9 +905,19 @@ mkdir -p "$state/releases"
 echo tampered >"$state/releases/v1.0.0.json"
 echo c2ln >"$state/releases/v1.0.0.json.sig"
 run 1
-assert_out "saved $state/releases/v1.0.0.json: aether-release.json for v1.0.0 is not signed by a trusted release key"
+assert_out "saved /run/aether-edge-update/releases/v1.0.0.json: aether-release.json for v1.0.0 is not signed by a trusted release key"
+assert_out "the kept signed manifest of the running v1.0.0 does not verify; delete $state/releases/v1.0.0.json and $state/releases/v1.0.0.json.sig, and the next run downloads them again"
 refute "compose"
 assert_digest "$A"
+rm "$state/releases/v1.0.0.json" "$state/releases/v1.0.0.json.sig"
+run 0
+assert_digest "$B"
+# The edge's user must own the directory release-check keeps them in.
+reset
+touch "$world/chown-fails"
+run 1
+assert_out "chown 65532:65532 $state/releases failed; the edge's user, uid 65532, must write the signed manifests release-check keeps there"
+refute "docker"
 
 reset
 touch "$world/backup-fails"

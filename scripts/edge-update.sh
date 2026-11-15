@@ -243,7 +243,8 @@ release_tag() {
 # channel does not take or that is not newer by the build numbers both
 # signed manifests carry. It keeps each manifest it verified in $releases,
 # which the container's user writes through a mount, and reads $4's from
-# there when it is kept: GitHub may prune a release the edge still runs.
+# there when it is kept: GitHub may prune a release the edge still runs. A
+# kept copy that no longer verifies is named, to be deleted.
 release_check() {
 	if predates_channels "$5"; then
 		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json
@@ -253,14 +254,16 @@ release_check() {
 		say "$image@$1 reports version '$4', which is not a release tag"
 		return 1
 	fi
-	mkdir -p "$releases"
-	chown 65532:65532 "$releases"
-	chmod 0755 "$releases"
 	kept=""
 	[ ! -f "$releases/$4.json" ] || [ ! -f "$releases/$4.json.sig" ] || kept="--from-manifest=/run/aether-edge-update/releases/$4.json"
 	docker run --rm -v "$releases:/run/aether-edge-update/releases" "$image@$1" release-check \
 		--tag "$2" --digest "$3" --from "$4" --json --channel "$channel" --from-digest "$1" \
-		--keep-manifests /run/aether-edge-update/releases ${kept:+"$kept"}
+		--keep-manifests /run/aether-edge-update/releases ${kept:+"$kept"} 2>"$state_dir/release-check.err" && rc=0 || rc=$?
+	cat "$state_dir/release-check.err" >&2
+	if [ -n "$kept" ] && grep -q '^aether-edge: the running release: saved ' "$state_dir/release-check.err"; then
+		say "the kept signed manifest of the running $4 does not verify; delete $releases/$4.json and $releases/$4.json.sig, and the next run downloads them again"
+	fi
+	return "$rc"
 }
 
 # Verifies the running digest $1 as an update verifies a new one, so that
@@ -674,6 +677,10 @@ if ! flock -n 9; then
 	[ "$mode" != rollback ] && [ "$manual_steps_done" = 0 ] || exit 1
 	exit 0
 fi
+mkdir -p "$releases"
+chmod 0755 "$releases"
+chown 65532:65532 "$releases" ||
+	die "chown 65532:65532 $releases failed; the edge's user, uid 65532, must write the signed manifests release-check keeps there"
 cd "$compose_dir"
 
 state=idle kind=update from_digest="" from_version="" to_digest="" to_version=""

@@ -46,7 +46,8 @@ type releaseReport struct {
 // manifest, which must name --from-digest, never from what an image
 // claims; --from-manifest reads a saved copy, so a release that has since
 // been pruned still orders, and --keep-manifests saves the manifests it
-// downloads, once verified. A --tag equal to --from checks the running
+// downloads once verified: the running release's, and --tag's when it is
+// not refused. A --tag equal to --from checks the running
 // release itself, which needs neither refusal.
 func releaseCheck(args []string, fetch fetchSigned, out io.Writer) error {
 	fs := flag.NewFlagSet("aether-edge release-check", flag.ContinueOnError)
@@ -83,19 +84,17 @@ func releaseCheck(args []string, fetch fetchSigned, out io.Writer) error {
 			return m, nil, nil, err
 		}
 	}
-	m, data, sig, err := signedEdge(fetch, *tag)
+	m, tagData, tagSig, err := signedEdge(fetch, *tag)
 	if err != nil {
 		return err
 	}
 	if m.Edge.ImageDigest != *digest {
 		return fmt.Errorf("release %s signs the edge image %s, not %s; do not run it", *tag, m.Edge.ImageDigest, *digest)
 	}
-	if err = keepManifest(*keepDir, *tag, data, sig); err != nil {
-		return err
-	}
 	before := func(boundary string) (bool, error) { return selfupdate.Behind(*from, boundary), nil }
 	if *tag != *from {
 		var running selfupdate.Manifest
+		var data, sig []byte
 		if running, data, sig, err = signedEdge(fetch, *from); err != nil {
 			return fmt.Errorf("the running release: %w", err)
 		}
@@ -120,6 +119,9 @@ func releaseCheck(args []string, fetch fetchSigned, out io.Writer) error {
 		if running.Build > 0 {
 			before = buildBefore(fetch, running)
 		}
+	}
+	if err = keepManifest(*keepDir, *tag, tagData, tagSig); err != nil {
+		return err
 	}
 	r := releaseReport{Version: m.Version, Commit: m.Commit, Edge: *m.Edge,
 		ApplicableSteps: []selfupdate.ManualStep{}, Reasons: []string{}}

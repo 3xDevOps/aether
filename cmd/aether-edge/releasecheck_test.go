@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -368,15 +369,16 @@ func TestReleaseCheckOrdersUpgradeBoundariesByBuild(t *testing.T) {
 	}
 }
 
-// --keep-manifests saves exactly the bytes release-check verified, and
-// nothing for a release it refused before that.
+// --keep-manifests saves exactly the bytes release-check verified: the
+// running release's, and the new release's only when it is not refused.
 func TestReleaseCheckKeepsTheManifestsItVerified(t *testing.T) {
 	edge := &selfupdate.Edge{Image: "ghcr.io/3xdevops/aether-edge", ImageDigest: edgeDigest("e"),
 		StoreSchema: 4, StoreCompatFloor: 3, Protocol: selfupdate.EdgeProtocol{Version: 2, MinVersion: 1},
 		MinUpgradeFrom: "v0.5.0", ManualSteps: []selfupdate.ManualStep{}}
 	fetch := serveManifests(t, releaseKey,
 		selfupdate.Manifest{Version: "v0.9.0-beta.1", Channel: "beta", Build: 405, Edge: edge},
-		selfupdate.Manifest{Version: "v0.9.0-beta.2", Channel: "beta", Build: 412, Edge: edge})
+		selfupdate.Manifest{Version: "v0.9.0-beta.2", Channel: "beta", Build: 412, Edge: edge},
+		selfupdate.Manifest{Version: "v0.8.9-beta.1", Channel: "beta", Build: 300, Edge: edge})
 	dir := t.TempDir()
 	check := func(digest string, extra ...string) error {
 		return releaseCheck(append([]string{"--tag", "v0.9.0-beta.2", "--digest", digest, "--from", "v0.9.0-beta.1",
@@ -387,6 +389,17 @@ func TestReleaseCheckKeepsTheManifestsItVerified(t *testing.T) {
 	}
 	if names, _ := filepath.Glob(filepath.Join(dir, "*")); len(names) != 0 {
 		t.Fatalf("kept %v for a refused release", names)
+	}
+	err := releaseCheck([]string{"--tag", "v0.8.9-beta.1", "--digest", edgeDigest("e"), "--from", "v0.9.0-beta.1",
+		"--from-digest", edgeDigest("e"), "--channel", "beta", "--keep-manifests", dir}, fetch, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "is older than the running") {
+		t.Fatalf("err = %v, want the older release refused", err)
+	}
+	if _, err = os.Stat(filepath.Join(dir, "v0.8.9-beta.1.json")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("kept the refused v0.8.9-beta.1: %v", err)
+	}
+	if _, err = readManifest(filepath.Join(dir, "v0.9.0-beta.1.json"), "v0.9.0-beta.1"); err != nil {
+		t.Errorf("the running release is not kept: %v", err)
 	}
 	if err := check(edgeDigest("e")); err != nil {
 		t.Fatal(err)
