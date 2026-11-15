@@ -371,9 +371,12 @@ func TestChannelCheckWithAnUnmovedMarkSurvivesAFailedWrite(t *testing.T) {
 func TestUpdateWithNoVersionDoesNotWaitOnAHungCheck(t *testing.T) {
 	feed := &firstCallHangs{gate: make(chan struct{}), entered: make(chan struct{})}
 	svc := newCheckService(t, t.TempDir(), feed, time.Now)
-	go svc.runCheck(context.Background())
+	checked := make(chan struct{})
+	go func() { svc.runCheck(context.Background()); close(checked) }()
 	<-feed.entered
-	t.Cleanup(func() { close(feed.gate) })
+	// Registered after the state directory, so it runs first: the hung
+	// check finishes writing check.json before the directory is removed.
+	t.Cleanup(func() { close(feed.gate); <-checked })
 	done := make(chan error, 1)
 	go func() { _, err := svc.resolveTag(t.Context(), ""); done <- err }()
 	select {
