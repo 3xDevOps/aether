@@ -30,6 +30,10 @@ on:
         description: Hotfix count on top of build
         type: number
         default: 0
+      pointer:
+        description: Channel whose pointer to move to this release once it is published; empty for none. The caller must run in the channels concurrency group
+        type: string
+        default: ''
     secrets:
       AETHER_RELEASE_SIGNING_KEY:
         required: false
@@ -52,6 +56,10 @@ env:
   TAG: ${{ inputs.tag }}
   COMMIT: ${{ inputs.commit }}
   TOOLS_COMMIT: ${{ inputs.tools-commit }}
+  CHANNEL: ${{ inputs.channel }}
+  BUILD: ${{ inputs.build }}
+  HOTFIX: ${{ inputs.hotfix }}
+  POINTER: ${{ inputs.pointer }}
 
 jobs:
   # Every other job needs this one, so no input reaches a build, a tag or
@@ -61,11 +69,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # The same rules release-manifest and android-version-code.sh apply,
+      # checked before anything is built or pushed.
       - name: Validate the inputs
-        env:
-          CHANNEL: ${{ inputs.channel }}
-          BUILD: ${{ inputs.build }}
-          HOTFIX: ${{ inputs.hotfix }}
         run: |
           fail() {
             echo "::error::$1"
@@ -78,6 +84,21 @@ jobs:
           case $CHANNEL in '' | nightly | beta | stable) ;; *) fail "channel $CHANNEL is not nightly, beta or stable" ;; esac
           [[ $BUILD =~ ^(0|[1-9][0-9]*)$ ]] || fail "build $BUILD is not a non-negative integer"
           [[ $HOTFIX =~ ^(0|[1-9][0-9]*)$ ]] || fail "hotfix $HOTFIX is not a non-negative integer"
+          [ "$BUILD" -le 19999999 ] || fail "build $BUILD is above 19999999"
+          [ "$HOTFIX" -le 99 ] || fail "hotfix $HOTFIX is above 99"
+          case $CHANNEL in
+          '') [ "$BUILD $HOTFIX" = "0 0" ] || fail "build $BUILD and hotfix $HOTFIX need a channel" ;;
+          *)
+            [ "$BUILD" -ge 1 ] || fail "channel $CHANNEL needs a positive build"
+            if [[ $TAG =~ -nightly\.[1-9][0-9]*$ ]]; then form=nightly
+            elif [[ $TAG =~ -beta\.[1-9][0-9]*$ ]]; then form=beta
+            elif [[ $TAG == *-* ]]; then form=none
+            else form=stable
+            fi
+            [ "$form" = "$CHANNEL" ] || fail "channel $CHANNEL does not match $TAG"
+            ;;
+          esac
+          case $POINTER in '' | nightly | beta | stable) ;; *) fail "pointer $POINTER is not nightly, beta or stable" ;; esac
 
   # Each architecture runs the exact image it publishes on a native headless
   # Ubuntu host. No QEMU or host-installed Chromium changes the sandbox proof.
@@ -272,6 +293,8 @@ jobs:
           build-args: |
             VERSION=${{ inputs.tag }}
             COMMIT=${{ steps.commit.outputs.short }}
+            RELEASE_BUILD=${{ inputs.build }}
+            RELEASE_HOTFIX=${{ inputs.hotfix }}
           tags: ${{ steps.edge-meta.outputs.tags }}
           labels: ${{ steps.edge-meta.outputs.labels }}
       - name: Smoke-test the edge image
@@ -524,7 +547,7 @@ jobs:
           platform="$TARGET_OS/$TARGET_ARCH"
           linux=
           if [ "$TARGET_OS" = linux ]; then linux=$platform; fi
-          make release-binaries VERSION="$TAG" \
+          make release-binaries VERSION="$TAG" RELEASE_BUILD="$BUILD" RELEASE_HOTFIX="$HOTFIX" \
             SERVER_PLATFORMS="$linux" EDGE_PLATFORMS="$linux" CLI_PLATFORMS="$platform"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -677,7 +700,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_GRADLE_HOME: ${{ github.workspace }}/.gradle-cache
         run: |
-          make android VERSION="$TAG"
+          make android VERSION="$TAG" RELEASE_BUILD="$BUILD" RELEASE_HOTFIX="$HOTFIX"
           test -s dist/aether-android.apk
           test -s dist/aether-android.aab
       - name: Remove the signing keystore
@@ -1008,24 +1031,25 @@ jobs:
             exit 1
           fi
       # After the downloads, so nothing they wrote can replace the tool.
-      - name: Build the tools commit's release-manifest
-        run: go build -o "$RUNNER_TEMP/release-manifest" ./internal/selfupdate/cmd/release-manifest
-      # CHANNEL, BUILD and HOTFIX are unused until release-manifest takes
-      # -channel, -build and -hotfix.
+      - name: Build the tools commit's release-manifest and release-pointer
+        run: |
+          go build -o "$RUNNER_TEMP/release-manifest" ./internal/selfupdate/cmd/release-manifest
+          go build -o "$RUNNER_TEMP/release-pointer" ./scripts/release-pointer
       - name: Write checksums and sign the manifest
         working-directory: ${{ runner.temp }}/dist
         env:
           AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
           STORE_SCHEMA: ${{ needs.release-values.outputs.store-schema }}
-          CHANNEL: ${{ inputs.channel }}
-          BUILD: ${{ inputs.build }}
-          HOTFIX: ${{ inputs.hotfix }}
         run: |
           assets=(*)
           sha256sum "${assets[@]}" > checksums.txt
           sha256sum --check --strict checksums.txt
+          order=()
+          if [ -n "$CHANNEL" ]; then
+            order=(-channel "$CHANNEL" -build "$BUILD" -hotfix "$HOTFIX")
+          fi
           "$RUNNER_TEMP/release-manifest" \
-            -version "$TAG" -commit "$COMMIT" -store-schema "$STORE_SCHEMA" \
+            -version "$TAG" -commit "$COMMIT" -store-schema "$STORE_SCHEMA" "${order[@]}" \
             -images "$RUNNER_TEMP/values/images.json" -out . "${assets[@]}"
           diff -u <(printf '%s\n' "${assets[@]}" checksums.txt aether-release.json aether-release.json.sig | sort) \
             <(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
@@ -1033,6 +1057,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: sh scripts/publish-release.sh "$TAG" "$RUNNER_TEMP/dist"
+      - name: Move the channel pointer
+        if: inputs.pointer != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
+          RELEASE_POINTER: ${{ runner.temp }}/release-pointer
+        run: sh scripts/publish-pointer.sh "$POINTER" "$TAG" "$RUNNER_TEMP/dist"
 
   # latest moves only after the release is published, to the index
   # edge-manifest already pushed, so a release that fails earlier leaves it
