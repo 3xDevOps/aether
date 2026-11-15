@@ -22,6 +22,12 @@ old updater cannot be told about the change: the signed manifest
 `aether-release.json`, the release file names, and the names an old binary
 uses after a rollback.
 
+Terms used below. A **shim** is a change that makes the software accept a
+new name before anything uses it. The server's **update trial** starts the
+new binary and, if it fails its checks, puts the old binary and database
+back (`internal/serverupdate/trial.go`). An **address pair** is the two
+addresses an edge serves: one for sign-in pages, one for the relay.
+
 ## Inventory
 
 Counted on `main` at `57ac19ecb`. 2,107 of 3,364 files contain `aether` in
@@ -60,7 +66,8 @@ Coding Agents" (ChatGPT listing), "Ask Aether". "Enhanced", "Standard" and
 | `AETHER_*` variables | 145 distinct, about 55 test-only | installer `scripts/install.sh:29-48`; CLI `internal/cli/config.go:204`; set inside sessions `internal/coordtransport/paths.go:33-49`; edge `cmd/aether-edge/options.go:63-93` |
 | MCP server name and tools | `aether` and 55 `aether_*` tools | `internal/mcpbridge/mcpbridge.go:28`, `internal/mcpbridge/tools.go:20-25`, `internal/ops/` |
 | systemd units | 6 | `packaging/systemd/aether-server.service`, `aether.slice`, four `aether-edge*` units |
-| Paths | about 12 | `/etc/aether/server.conf`, `/var/lib/aether`, `~/.config/aether/config.json`, `~/.ssh/aether_config`, `/run/aether`, `/aether-cache` |
+| Sync daemon service | 3 names | systemd user unit and Windows scheduled task `aether-daemon`, launchd label `com.aether.daemon` (`internal/syncd/service.go:9,87`) |
+| Paths | about 16 | `/etc/aether/server.conf`, `/etc/aether/aether-server.env`, `/var/lib/aether`, `/etc/aether-edge/`, `/var/lib/aether-edge`, the CLI's config directory (`~/.config/aether`, `~/Library/Application Support/aether`, `%AppData%\aether`; `internal/cli/config.go:204-218`), `~/.ssh/aether_config`, `/run/aether`, `/aether-cache` |
 | Git names | branch prefix, about 12 ref names, 5 config keys, remote `aether` | `internal/gitengine/slug.go:62`, `internal/gitengine/snapshot_retention.go:16-20`, `internal/gitengine/checkout.go:22-24`, `internal/localops/pull.go:97` |
 | Hook files in agent homes | 3 file names | `internal/coordcli/hook_install.go:180-201` |
 | Install scripts | 2 | `scripts/install.sh`, `scripts/install.ps1`, fetched from `raw.githubusercontent.com/3xDevOps/Aether/main/scripts/` |
@@ -82,6 +89,8 @@ About 120 names.
 | SSH banner and subsystems | 1 and 10 | `internal/cli/dial.go:23`, `internal/sshd/clientgate.go:20`, `internal/protocol/protocol.go:19` |
 | Signing context strings | 7 | `internal/edge/proto/enroll.go:18`, `grant.go:38`, `connector.go:57,75`, `internal/store/device.go:24`, `internal/connector/connector.go:361` |
 | HTTP headers | 5 | `internal/edge/proto/api.go:69,75` |
+| Edge metric names | `aether_edge_*` | `cmd/aether-edge/metrics.go:204` |
+| Connector resource address | 1 per server | each server binds connector tokens to `<its edge address>/mcp` (`internal/connector/connector.go:156-160`, `authorize.go:186`) |
 | Server state on disk | about 8 | `/var/lib/aether`, `aether.db` (`internal/disk/disk.go:86`), `aether.db.pre-update` (`internal/serverupdate/trial.go:70`), unit name (`internal/serversetup/unit.go:11`) |
 | Docker labels, names, networks | about 14 | `internal/runtime/docker.go:31-44`, `internal/runtime/docker_network.go:16,22`, local image prefix `aether/` (`internal/runtime/docker_image.go:19-24`) |
 | VM names | 4, plus the guest API | `internal/runtime/vm/unit.go:28`, `internal/runtime/vm/network.go:34-38`, `internal/guest/guestpb/` |
@@ -107,28 +116,24 @@ product code and packaging, the rest in tests. The hostnames in use:
 
 | Hostname | Serves | Named in |
 | --- | --- | --- |
-| `onaether.dev` | the website | aether-web `src/lib/seo.ts:13-15`, both connector listings |
+| `onaether.dev` | the website | both connector listings |
 | `edge.onaether.dev` | the hosted edge's relay, its connector endpoint `/mcp`, device approval `/device` | the two compiled defaults above, `scripts/install.sh:743`, 2 listings, 57 doc lines |
 | `auth.onaether.dev` | the hosted edge's sign-in, Devices, Servers and Account pages | docs only; set on the edge host through `AETHER_EDGE_SIGNIN_ORIGIN` |
 | `team@onaether.dev` | contact mail | `docs/privacy.md:15`, `docs/legal/`, both listings |
-| `aethercloud.dev` | a redirect to `onaether.dev` | nowhere in either repository |
 
-### aether-web
+### The website
 
-On its `main`: 585 of 804 files contain the name. 498 of them are a copy of
-the dashboard under `src/vendor/aether`, refreshed by
-`scripts/sync-aether.ts`. The site's own 87 files hold the name in copy,
-`src/lib/seo.ts:13-17` (site address, host, contact), `src/lib/theme.ts:101`
-(repository link, also the source of the release lookup),
-`public/aether-mark-*.png`, `wrangler.jsonc` and `package.json`
-(`aether-web`). The new logo is on `main` as four SVG files under
-`public/cloudfield/`. Draft pull request 48 there already carries a
-Cloudfield rebrand of the site.
+The website is built from a separate repository. It carries the name in its
+copy, its address in its metadata, the install command, a link to this
+repository, the old mark, and a copy of the dashboard that it shows as a
+demo. Its inventory and pull requests are kept in that repository.
 
 ## What stays `aether`
 
-None of these is shown to a person in normal use. All are read by a program
-that may be older or newer than the one that wrote them.
+Each is read by a program that may be older or newer than the one that
+wrote it. Operators do meet some of them (`/etc/aether/server.conf`,
+`/var/lib/aether`, `docker ps`, the release page); the docs name them as
+they are.
 
 - `aether-release.json`, its `.sig`, `checksums.txt` and the 15 binary file
   names of a release.
@@ -143,8 +148,14 @@ that may be older or newer than the one that wrote them.
 - In-container paths `/run/aether`, `/opt/aether`, `/aether-cache`.
 - Edge cookies, dashboard storage keys and service-worker message types.
   Renaming them signs everyone out for nothing.
-- The edge image name, its binary and service name `aether-edge`, and the
-  promotion predicate type.
+- The edge image name, its binary, container and service name
+  `aether-edge`, its paths and metric names `aether_edge_*`, and the
+  promotion predicate type
+  `https://github.com/3xDevOps/aether/edge-promotion/v1`, which is an
+  opaque string and does not follow the repository's name.
+- The sync daemon's service names: `aether-daemon` and `com.aether.daemon`.
+- The connector address `https://edge.onaether.dev/mcp` in the Claude and
+  ChatGPT listings ([The domain move](#the-domain-move)).
 - The Android application id and the desktop app id
   ([decision 5](#5-android-application-id)).
 
@@ -156,25 +167,30 @@ finds updates the same way: it follows
 `aether-release.json` and its signature for that tag, then downloads files
 by their compiled-in names (`internal/selfupdate/manifest.go:216-247`).
 There is no stepping: an old install always jumps to the newest release, so
-no "bridge release" can exist once a newer one is published.
+no "bridge release" can exist once a newer one is published. An install
+that already has release-channels pull request 2 reads the signed channel
+pointers under `releases/download/channels/` instead; those follow the same
+redirect after a repository rename.
 
 | Name | How an old install keeps working | How the new name arrives | When the old one goes |
 | --- | --- | --- | --- |
 | Release repository | GitHub redirects `releases/latest`, release downloads, the API and raw file addresses of a renamed repository. The updater follows redirects (`internal/selfupdate/selfupdate.go:41-53`), as do `curl -L` in `install.sh:340` and `install.ps1` | After the rename, `Repo` and the installer defaults change to the new name | Never: the old repository name must never be reused |
 | Release files and manifest | Unchanged names | Not renamed | Never |
-| Binaries on a server | The updater writes over the files it finds, so an existing host keeps `/usr/local/bin/aether` and `aether-server` | New binaries also answer to `cloudfield`, `cloudfield-server`, `cloudfield-edge` and `cloudfield-internal`. On an existing host the new names are symlinks to the old files. A new install gets real files under the new names and symlinks under the old ones | Never on a host that has them |
-| Server unit | An old binary that returns after a failed update trial runs `systemctl restart aether-server` (`internal/serverupdate/host.go:68,96`), so that unit name must keep resolving | The unit gains `Alias=cloudfield-server.service`. A new install gets `cloudfield-server.service` with `Alias=aether-server.service`. New code finds its own unit from its cgroup instead of a fixed name | Never on a host that has it |
-| `aether-internal` in sessions | The mount target is fixed when a container is created. Hook files in member homes call `/usr/local/bin/aether-internal` | New containers get both paths. Prompts name `cloudfield-internal` only in a container that has it | Never |
-| `AETHER_*` read by a program | Still read | The reader takes `CLOUDFIELD_X`, then `AETHER_X`. Both set to different values is an error naming both | At 1.0, with a startup error that names the new variable |
-| `AETHER_*` set inside sessions | Still set | The server sets both names to the same value | Never |
-| `~/.config/aether` | Still read | The CLI uses `~/.config/cloudfield` when it exists, else the old directory. It never moves the directory, because an older CLI on the same machine would lose its links | Never |
+| Binaries on a server or client | The updater writes over the files it finds. Every host, old or new, keeps the real files `aether` and `aether-server` | `cloudfield` and `cloudfield-server` are symlinks to them, created by the installer and by the updater. On Windows, where a per-user install cannot create symlinks, `cloudfield.cmd` calls `aether.exe`. One layout everywhere means a downgrade to any old release still finds its files | Never |
+| Server unit | An old binary that returns after a failed update trial runs `systemctl restart aether-server` (`internal/serverupdate/host.go:68,96`). The unit file stays `aether-server.service` with its text unchanged, on every host | The installer and the updater, both running as root, link `/etc/systemd/system/cloudfield-server.service` to it and reload systemd. Printed and documented `systemctl` lines say `cloudfield-server` only once that is in a stable release | Never |
+| `aether-internal` in sessions | The path is fixed when a container is created. Hook and plugin files in member homes call `/usr/local/bin/aether-internal`, and a home is shared with containers made by any server version | New containers also get `/usr/local/bin/cloudfield-internal`. Prompts name it only in a container that has it. Everything written into a home keeps calling the old path | Never |
+| `AETHER_*` read by a program | Still read | The reader takes `CLOUDFIELD_X` when set, else `AETHER_X` | Never |
+| `AETHER_*` set inside sessions | Still set, under the old name only. Readers accept both, and setting one name keeps an override such as `AETHER_X=… cmd` unambiguous | Docs name the variable `AETHER_RUN_ID` and its siblings as they are | n/a |
+| Variables in a host's env files | An edge host or server that rolls back runs a binary that reads `AETHER_*` only | The docs keep `AETHER_*` for `/etc/aether/aether-server.env`, `/etc/aether-edge/aether-edge.env` and the edge updater's file until the release that reads both names is the oldest a rollback can reach | n/a |
+| The CLI's config directory | Still read | The CLI uses the `cloudfield` directory when it exists, else the old one. It never moves the directory, because an older CLI on the same machine would lose its links | Never |
 | Hosted edge address | The edge keeps serving `edge.onaether.dev` and `auth.onaether.dev`. A server that enrolled there keeps receiving grants issued in that name | [The domain move](#the-domain-move) | Not while the hosted edge exists |
-| Edge update signer | An edge host's `edge-update.sh` accepts promotions signed by a workflow in `3xDevOps/aether` only | A script that accepts that identity and the renamed repository's, published and installed on every edge host **before** the repository is renamed | When no edge host runs the old script |
+| Connector address | A server accepts connector tokens only for `<its edge address>/mcp` | A server learns every address of its edge and accepts each; the listings keep the old address | [The domain move](#the-domain-move) |
+| Edge update signer | An edge host's `edge-update.sh` accepts promotions signed by a workflow in `3xDevOps/aether` only | A script that accepts that identity and the renamed repository's, published and installed on every edge host **before** the repository is renamed. `promote-edge.yml` gets the same pair, because after the rename it must still verify images attested before it (`.github/workflows/promote-edge.yml:187-188,253-254`) | When no edge host runs the old script |
 | Container images | Each server pulls the image tagged with its own version, already published. Packages belong to the organisation, not the repository | Not renamed | Never deleted |
 | Link scheme `aether://` | Old apps handle `aether://` only, so the edge keeps emitting it | The desktop and Android apps also register `cloudfield://` | Never emitted less |
 | Branch prefix `aether/run-` | Existing sessions and open pull requests keep their branches | The server accepts both prefixes everywhere; new sessions get `cloudfield/run-` ([decision 8](#8-names-people-see-inside-sessions)) | Never |
 | MCP server and tool names | Unchanged | [Decision 8](#8-names-people-see-inside-sessions) | n/a |
-| Desktop product name | The app's data directory is named after it | The new app uses the old data directory when the new one does not exist. The CLI looks for the app under both names | Never |
+| Desktop product name | The app's data directory, bundle name and install folder are named after it | The new app uses the old data directory when the new one does not exist. `aether gui` finds, stops and rebuilds the app under either name. On a machine that has the old app it installs the new one beside it and removes the old one after the new one has started once; a Dock or taskbar pin has to be made again | Never |
 
 Two failures to design against, both found in the code:
 
@@ -186,8 +202,10 @@ Two failures to design against, both found in the code:
   `filepath.Join(dir, name)` (`internal/selfupdate/update.go:181-187`,
   `internal/serverupdate/apply.go:218`). On a host where `aether` is a
   symlink to `cloudfield`, an update would replace the symlink with a file
-  and leave `cloudfield` stale. This is fixed before any install lays out
-  new names (pull request 2).
+  and leave `cloudfield` stale, and no fix can reach a release already
+  published. So the real files keep the old names on every host, and only
+  the symlinks carry the new ones. Pull request 2 makes the updater create
+  them and never write through one.
 
 ## Phases
 
@@ -198,13 +216,15 @@ published release.
 
 Nothing a person sees changes. One release carries:
 
-- the updater fix above;
-- the server binary answering to `cloudfield-internal`, new containers
-  getting both in-container paths, the unit alias and own-unit lookup;
-- the variable rule: read new then old, set both inside sessions;
-- the edge serving several address pairs
-  ([The domain move](#the-domain-move)), deployed with the old pair only;
-- `edge-update.sh` accepting both signer identities;
+- the updater creating the new-name symlinks and the unit link;
+- the server binary answering to `cloudfield-internal`, and new containers
+  getting both in-container paths;
+- the variable rule: read the new name, else the old;
+- the edge serving several address pairs, and the server's connector
+  accepting each ([The domain move](#the-domain-move)), deployed with the
+  old pair only;
+- `edge-update.sh` and `promote-edge.yml` accepting both signer
+  identities;
 - the server and CLI accepting `cloudfield/run-` branches;
 - the desktop and Android apps registering `cloudfield://`, and the
   desktop data-directory fallback.
@@ -217,32 +237,36 @@ Cloudfield. Commands, variables and addresses in that copy are still the old
 ones; the docs say so in one line at the top of
 [docs/install.md](../install.md).
 
-The sweep is four pull requests by area, each made with a scripted replace
-checked against [What stays `aether`](#what-stays-aether), each merged the
-day it opens because it conflicts with every open pull request in its
-area. A last pull request adds a check to `scripts/public-audit.sh` that
-fails on the old name outside an allowlist of kept identifiers, so later
-work cannot bring it back.
+The sweep is five pull requests by area, each made with a scripted replace
+checked against [What stays `aether`](#what-stays-aether). Each conflicts
+with every open pull request in its area, so it is rebased and merged
+before other work there. A last pull request adds a check to
+`scripts/public-audit.sh` that fails on the capitalised old name in copy:
+dashboard strings, edge page templates and listings. It widens to docs
+after phase 3. The existing pattern at `scripts/public-audit.sh:56` is not
+touched.
 
 Needs from phase 0: the desktop data-directory fallback.
 
 ### Phase 2: the domain
 
 [The domain move](#the-domain-move). Needs from phase 0: the multi-address
-edge, deployed.
+edge and connector. The hosted edge follows the stable channel, so this
+phase starts once the release that carries them is stable and promoted to
+the edge's `:stable` image.
 
 ### Phase 3: the names people type
 
-Installers and the CLI create the new command names. Docs, help text and
-agent prompts use `cloudfield`, `cloudfield-server`, `cloudfield-internal`
-and `CLOUDFIELD_*`. Old names keep working and are no longer documented,
-except in one table in [docs/install.md](../install.md) that maps old to
-new.
+Docs, help text and agent prompts use `cloudfield`, `cloudfield-server`,
+`cloudfield-internal` and, for variables set in a shell, `CLOUDFIELD_*`.
+Old names keep working and are no longer documented, except in one table
+in [docs/install.md](../install.md) that maps old to new.
 
-Needs from phase 0: the updater fix, both in-container paths, the unit
-alias, the variable rule, all in a **stable** release. After the first
-stable exists, an old install reaches only stable releases through
-`releases/latest`.
+Needs from phase 0: the symlinks, the unit link, both in-container paths
+and the variable rule, all in a **stable** release. After the first stable
+exists, an old install reaches only stable releases through
+`releases/latest`, and a documented command must exist on every host that
+has updated.
 
 ### Phase 4: the repositories
 
@@ -253,8 +277,11 @@ The owner renames both repositories. Before the rename:
 - no release is between its publication and its edge promotion;
 - release-channels pull requests 6 and 7 are merged.
 
-After it, one pull request changes the repository name wherever it is
-written, and one changes the Go module path
+In the same hour, one pull request changes the repository name wherever it
+is written, except the promotion predicate type. The website's repository
+link changes in that hour too: its GitHub statistics come from a search by
+repository name, and search does not follow a rename. The Go module path
+follows in its own pull request
 ([decision 1](#1-how-deep-the-rename-goes)).
 
 Conditions that hold from then on: the old repository names are never
@@ -275,7 +302,7 @@ New sessions get `cloudfield/run-` branches. MCP names change as
 | --- | --- |
 | `cloudfield.ai` serving the website | the site's canonical address |
 | `edge.cloudfield.ai` and `auth.cloudfield.ai` resolving to the hosted edge | the edge obtains its own certificates, which needs the names to resolve to it first |
-| A second GitHub OAuth app with the callback `https://auth.cloudfield.ai/signin/github/callback` | an OAuth app has one callback address (`internal/edge/service/oauth.go:34,53`). Edge accounts are keyed by GitHub user id (`:228-229`), so both apps sign the same person into the same account |
+| A second GitHub OAuth app with the callback `https://auth.cloudfield.ai/signin/github/callback`, and its secret on the edge host | an OAuth app has one callback address (`internal/edge/service/oauth.go:34,53`). Edge accounts are keyed by GitHub user id (`:228-229`), so both apps sign the same person into the same account |
 | `team@cloudfield.ai` receiving mail, with SPF, DKIM and DMARC | the contact address in the privacy pages and listings |
 | The OpenAI domain challenge for the new relay host | [docs/chatgpt-plugin.md](../chatgpt-plugin.md) |
 
@@ -290,18 +317,36 @@ and checks that every grant names that address as issuer
 (`internal/edge/agent/relay.go:35-36`). So the address cannot simply move,
 and a redirect cannot help.
 
-The change, one pull request:
+The edge change, one pull request:
 
-- The edge takes an ordered list of address pairs. The first is primary.
+- The edge takes a list of address pairs in a new setting. The two
+  existing settings keep naming the old pair, so an edge host that rolls
+  back to an older image still serves it. The edge's upgrade record
+  (`packaging/edge/upgrade.json`) raises the rollback floor to this
+  release once a second pair is configured.
 - A request is served by the pair its host belongs to: sign-in pages,
-  connector metadata, cookies, join links and the 421 text.
+  connector metadata, cookies, join links, certificates
+  (`cmd/aether-edge/main.go:227`) and the 421 text. No pair is preferred.
 - A server's registration records the address it enrolled at. Every grant
   for that server names that address as issuer, whichever address the
-  client came in on. Servers and clients therefore move independently.
-- Connector tokens stay bound to the address they were issued on. A
-  connector registered at `https://edge.onaether.dev/mcp` keeps working
-  unchanged.
-- One OAuth app per sign-in address.
+  client came in on.
+- One OAuth app, with its own secret file, per sign-in address.
+- The edge tells each server its full list of relay addresses, and counts
+  enrolled servers, device sign-ins and connector calls per address.
+
+That is not enough for connectors. A **server** binds every connector
+token to `<its edge address>/mcp`: it refuses any other resource
+(`internal/connector/authorize.go:186`), stamps that address as issuer
+(`:499`) and refuses a token stored for another
+(`internal/connector/token.go:77,132`). So a connector that Claude or
+ChatGPT registered at the old address fails against a server that moved,
+and a connector at the new address fails against a server that has not.
+The server change, one pull request:
+
+- The connector accepts the resource address of every relay address its
+  edge announced, keeps each token bound to the address it was issued
+  for, and answers metadata in the address the client used.
+- A server that moves keeps accepting the address it moved from.
 
 The edge's key does not change, and a server pins that key per edge, not per
 address (`internal/edge/agent/state.go:127`), so re-enrolling at the new
@@ -309,24 +354,35 @@ address keeps the pin.
 
 ### Order of the switch
 
-Each step is reversible until step 6.
+Each step can be undone.
 
 1. Create the DNS names, the OAuth app, the mailbox and its mail records.
-2. Website: merge the aether-web rebrand with the site address set to
-   `https://cloudfield.ai`, attach `cloudfield.ai` to the site, and check
-   it. Then turn `onaether.dev` into a redirect to the same path on
-   `cloudfield.ai`, and point `aethercloud.dev` at `cloudfield.ai` too.
+2. Website: publish the rebranded site with its address set to
+   `https://cloudfield.ai`, attach `cloudfield.ai` to it, and check it.
+   Then turn `onaether.dev` into a redirect to the same path on
+   `cloudfield.ai`.
 3. Edge: deploy the multi-address release with only the old pair. Nothing
    changes.
-4. Add the new pair second. Test: enroll a server at the new address, reach
-   it from a CLI signed in at the old one, and use a connector at both.
-5. Make the new pair primary. The old pair keeps serving.
-6. Release with `https://edge.cloudfield.ai` as the default for **new**
+4. Add the new pair. Test both directions: a server enrolled at the old
+   address reached from a CLI signed in at the new one, and the reverse;
+   a connector at each address against a server enrolled at the other; a
+   join link and a claim code from each.
+5. Release with `https://edge.cloudfield.ai` as the default for **new**
    setups, `cloudfield-server edge move <address>` for existing servers,
-   the new hostnames in the docs, and both listings resubmitted with the new
-   connector address. `aether-server setup` writes the address into
-   `/etc/aether/server.conf` (`cmd/aether-server/setup.go:363-368`), so an
-   existing server keeps the old one until an admin moves it.
+   and the new hostnames in the docs. `aether-server setup` writes the
+   address into `/etc/aether/server.conf`
+   (`cmd/aether-server/setup.go:363-368`), so an existing server keeps the
+   old one until an admin moves it. Code that treats the default address
+   specially (`cmd/aether-server/install.go:364`,
+   `internal/sshd/server.go:398`, `cmd/aether-server/setup.go:369`) treats
+   both hosted addresses alike.
+6. The Claude and ChatGPT listings keep `https://edge.onaether.dev/mcp`.
+   A server older than the connector change accepts no other address, and
+   the directory sends every user to one address. The listings move to the
+   new address when the per-address counters show no connector calls
+   reaching servers below that release. Their name and description change
+   in phase 1, which needs a directory re-review
+   ([decision 11](#11-first-release-and-directory-listings)).
 
 ### How the old hostnames keep working
 
@@ -337,47 +393,43 @@ Each step is reversible until step 6.
 - `edge.onaether.dev` and `auth.onaether.dev` stay served by the hosted
   edge. Retiring them cuts off every server that has not moved, every CLI
   link made there, every connector registered there and every printed join
-  link. They are retired only if per-address counters on the edge
-  (enrolled servers, device sign-ins, connector calls) read zero for a set
-  period, and the recommendation is not to.
+  link. They are retired only if the per-address counters read zero for a
+  set period, and the recommendation is not to.
 - `team@onaether.dev` keeps receiving.
 - A self-hosted edge uses its operator's own addresses and is not affected.
 
-## aether-web and the logo
+## The website and the logo
 
-- The site's rebrand continues in its draft pull request 48. It must set
-  `SITE_URL`, `SITE_HOST` and `CONTACT_EMAIL` in `src/lib/seo.ts`, replace
-  `public/aether-mark-*.png` and the icon and social images under
-  `src/app/`, and reword `llms.txt` and `agents.txt`, which today tell
-  crawlers "this is the Aether published at onaether.dev".
-- The install command and the repository link (`src/lib/content.ts:3`,
-  `src/lib/theme.ts:101`) change after phase 4. Until then they work
-  unchanged, and after it through GitHub's redirect.
-- `src/vendor/aether` is re-synced after phase 1 lands in the dashboard,
-  and the site's dashboard screenshots are re-shot then.
-- The Worker name `aether-web` and the package name are not shown to
-  anyone and stay.
+The website's rebrand is planned and built in its own repository. What
+this plan needs from it:
 
-Logo hand-off. `aether-web/public/cloudfield/` is the source: `cloudfield-mark.svg`,
-`cloudfield-logo.svg`, `cloudfield-logo-for-light-backgrounds.svg` and
-`cloudfield-logo-small.svg`. Every icon this repository ships is generated
-from `web/public/aether-mark.png` by `scripts/make-icons.py`
-([CONTRIBUTING.md](../../CONTRIBUTING.md)): the dashboard's `web/public/icons/`,
-the desktop's `desktop/build/icon.ico` and `desktop/build/icons/`, the
-Android launcher `mipmap-*` and the Play feature graphic.
+- the site's address, contact address and crawler files (`llms.txt`,
+  `agents.txt`) name Cloudfield and `cloudfield.ai` before `onaether.dev`
+  becomes a redirect;
+- the install command and the repository link change in the hour of the
+  repository rename ([Phase 4](#phase-4-the-repositories));
+- its copy of the dashboard is refreshed, and its screenshots re-shot,
+  after phase 1 lands here.
 
-1. Copy `cloudfield-mark.svg` into `web/public/` and point
-   `scripts/make-icons.py` at it. The script writes the wordmark
-   (`FEATURE_WORDMARK`, `:100`) and the tagline into the Play graphic.
+The logo's author delivers the mark and three logo variants as SVG. Every
+icon this repository ships is generated from `web/public/aether-mark.png`
+by `scripts/make-icons.py` ([CONTRIBUTING.md](../../CONTRIBUTING.md)): the
+dashboard's `web/public/icons/`, the desktop's `desktop/build/icon.ico` and
+`desktop/build/icons/`, the Android launcher `mipmap-*` and the Play
+feature graphic.
+
+1. Add the mark to `web/public/` and point `scripts/make-icons.py` at it.
+   The script also writes the wordmark (`FEATURE_WORDMARK`, `:100`) and the
+   tagline into the Play graphic.
 2. Run it and commit what it writes.
 3. Redraw by hand what the script does not make: the Android notification
-   icon `ic_stat_aether.xml` (traced from the mark), `docs/assets/aether-banner.svg`
-   and `docs/media/aether-mark.png`.
+   icon `ic_stat_aether.xml` (traced from the mark),
+   `docs/assets/aether-banner.svg` and `docs/media/aether-mark.png`.
 
 The mark has to work in three places the old one was drawn for: as a
 single-colour mask (the dashboard top bar and the Android notification
 icon), inside a maskable icon's safe zone, and at 16 pixels. If it does
-not, the fix goes back to the logo session, not into the script. The
+not, the fix goes back to the logo's author, not into the script. The
 dashboard, desktop and Android changes each get the design review loop.
 
 ## Sequencing with work in flight
@@ -391,9 +443,10 @@ request 943 and its eleven implementation pull requests.
   `beta.json`, `stable.json`, `nightly.json`, `release_channel`. Their
   address contains the repository name and follows GitHub's redirect.
 - It names one new secret, `AETHER_NIGHTLY_SIGNING_KEY`, which does not
-  exist yet. Create it as `NIGHTLY_SIGNING_KEY`.
+  exist yet. That plan should name it `NIGHTLY_SIGNING_KEY` before its
+  pull request 9 creates it.
 - Its pull requests 1, 2 and 6 rework `internal/selfupdate` and
-  `release.yml`. The updater fix (pull request 2 here) lands after its 1
+  `release.yml`. The updater change (pull request 2 here) lands after its 1
   and 2. Nothing here touches `release.yml`, because no release file is
   renamed.
 - Its pull request 8 edits `scripts/edge-update.sh`. The two-identity
@@ -401,8 +454,10 @@ request 943 and its eleven implementation pull requests.
   copy the script once.
 - `v0.8.7`, the first stable, ships as Aether. Cloudfield starts with the
   `v0.9.0` line: phase 0 and phase 1 land as nightlies, and `v0.9.0` is the
-  first stable that says Cloudfield. Phase 3 needs phase 0 in a stable
-  release, so it ships in `v0.9.1` or later.
+  first stable that says Cloudfield
+  ([decision 11](#11-first-release-and-directory-listings)). Phase 3 needs
+  phase 0 in a stable release, so it lands on `main` after `v0.9.0` and
+  ships in `v0.10.0`; `v0.9.1` would be a hotfix cut from `release/0.9`.
 - Its pull requests 4 and 11 add dashboard copy and docs that say Aether.
   The phase 1 sweep runs after them, and the name check keeps later ones
   clean.
@@ -422,9 +477,11 @@ in a published release yet. All are read only by programs, so by
   `internal/guest` or `internal/vmimage` while that stack is open. Its
   work item 12 (wording) uses the new name.
 - Its helper is the server binary run as `aether-internal`, so the
-  `cloudfield-internal` alias covers it with no change there.
-- Its work item 10 rewrites install and update. The phase 3 installer
-  change lands after it.
+  `cloudfield-internal` name is answered with no change there. A VM has no
+  bind mounts, so its work item 3 or 7 has to create both in-VM paths.
+- Its work item 10 owns `cmd/aether-server` and `internal/serversetup`, and
+  item 7 owns mounts. Pull requests 2 and 3 here touch the same files and
+  are agreed with that stack's lead before they open.
 
 ## Decisions for the owner
 
@@ -433,7 +490,7 @@ in a published release yet. All are read only by programs, so by
 | Option | What changes | Cost |
 | --- | --- | --- |
 | A. Brand only | Copy, docs, logos, app names, website, domain | Phases 1 and 2, plus the edge shim. People install Cloudfield and type `aether` |
-| B. Brand, commands, variables | A, plus new command names, `CLOUDFIELD_*`, new unit name on new installs, both link schemes | All phases. About 24 pull requests. Old names stay as aliases |
+| B. Brand, commands, variables | A, plus new command names, `CLOUDFIELD_*`, a second unit name, both link schemes | All phases. 24 pull requests. Old names stay as aliases |
 | C. Everything | B, plus release files, images, data paths, app ids, wire names | Doubles every release, adds migrations of `/var/lib/aether` and the database with rollback risk, and makes a second Android and desktop app |
 
 Recommendation: **B**, plus the Go module path as the last step. The module
@@ -444,23 +501,24 @@ a quiet hour on `main`. Not C: nothing in it is visible to a person.
 
 | Option | Cost |
 | --- | --- |
-| `cloudfield`, `cloudfield-server`, `cloudfield-edge`, `cloudfield-internal` | Ten characters to type |
+| `cloudfield`, `cloudfield-server`, `cloudfield-internal` | Ten characters to type |
 | A short name such as `cf` | `cf` is already the Cloud Foundry CLI and Cloudflare's CLI |
 | Keep `aether` | Depth A |
 
-Recommendation: the full names, no short alias shipped.
+Recommendation: the full names, no short alias shipped. The edge command
+stays `aether-edge`: it runs inside the edge's container, and the updater
+script on every edge host calls it by that name.
 
 ### 3. Old command names
 
 | Option | Cost |
 | --- | --- |
-| Keep as aliases with no end date | A symlink per binary. Nothing to enforce |
-| Remove at 1.0 | Breaks scripts, hook files in member homes and the unit of any host installed before the rename. Needs a migration command and a floor on downgrades |
-| Remove after one release | Breaks every host that skips that release |
+| Old names stay the real files; new names are links, with no end date | People see `aether-server` in `ps` and in `/usr/local/bin`. Nothing to enforce, and any downgrade works |
+| New installs get real files under the new names | A downgrade to a release from before the rename writes through the links and corrupts the layout. Needs a floor on downgrades in both updaters and the install script |
+| Remove old names at 1.0 | Breaks scripts, hook files in member homes and every host installed before the rename. Needs a migration command |
 
-Recommendation: no end date for command names, in-container paths and the
-variables the server sets inside sessions. `AETHER_*` variables an operator
-sets stop being read at 1.0, with an error naming the replacement.
+Recommendation: the first, for command names, in-container paths and
+`AETHER_*` variables alike.
 
 ### 4. Spelling
 
@@ -509,10 +567,10 @@ becomes something users read.
 
 ### 7. Repository names and the old domain
 
-Recommendation: `cloudfield` and `cloudfield-web`, in the same organisation.
-Never create a repository at an old name again. Keep `onaether.dev` and
-`aethercloud.dev` registered with no end date, and keep the old edge
-addresses served while the hosted edge exists.
+Recommendation: `cloudfield` for this repository, in the same organisation.
+Never create a repository at an old name again. Keep `onaether.dev`
+registered with no end date, and keep the old edge addresses served while
+the hosted edge exists.
 
 ### 8. Names people see inside sessions
 
@@ -543,11 +601,23 @@ address is exactly the old default moves by itself when the edge tells it
 the preferred address. Recommendation: the command first. Add the automatic
 move in a later release if the counters show servers staying behind.
 
+### 11. First release and directory listings
+
+- **Which release first says Cloudfield.** Options: `v0.8.7`, the first
+  stable, which delays it until phases 0 and 1 are merged; or `v0.9.0`,
+  which lets `v0.8.7` ship now as Aether. Recommendation: `v0.9.0`.
+- **Claude and ChatGPT directories.** A new name, title and description
+  need a re-review by each directory, with a lead time the project does
+  not control. Options: resubmit at phase 1 with the old connector
+  address; or leave the listings as Aether until the connector address can
+  move too. Recommendation: resubmit at phase 1.
+
 ## To verify before building
 
 Stated by the design and not yet tested:
 
-- systemd accepts every `systemctl` verb the updater uses on a unit alias.
+- systemd accepts `show` and `restart` on a unit name that is a link made
+  by hand rather than by `systemctl enable`.
 - GitHub requires a second OAuth app for a second callback host.
 - A repository rename leaves the organisation's container packages and
   their Actions access unchanged.
@@ -555,8 +625,6 @@ Stated by the design and not yet tested:
 - With release-channels pull request 7, a promotion called through
   `workflow_call` still carries `promote-edge.yml@refs/heads/main` as its
   identity.
-- `promote-edge.yml` after the rename can verify an image attested before
-  it.
 - A server's bare repositories get the two-prefix hook when the server
   starts, not only when a repository is created.
 
@@ -565,92 +633,103 @@ Stated by the design and not yet tested:
 Each is one session. Phase and dependencies are in brackets.
 
 1. `docs(plans)`: this plan.
-2. `fix(selfupdate)`: resolve companion binaries through symlinks and keep
-   the release file name apart from the name on disk. `internal/selfupdate/update.go`,
-   `internal/serverupdate/apply.go`, `serverupdate.go`, `trial.go`.
-   [0; after release-channels 1 and 2]
-3. `feat(server)`: answer to `cloudfield-internal`, mount both in-container
-   paths, unit alias, own-unit lookup. `cmd/aether-server/main.go`,
-   `internal/coordtransport/paths.go`, `internal/runtime/mounts.go`,
-   `internal/serversetup/unit.go`, `internal/serverupdate/host.go`,
-   `internal/localgw/update.go`, `packaging/systemd/aether-server.service`. [0]
-4. `feat(envname)`: read `CLOUDFIELD_*` then `AETHER_*`; set both inside
-   sessions. New `internal/envname`; `internal/cli/config.go`,
-   `cmd/aether-server/main.go`, `cmd/aether-edge/options.go`, `main.go`,
-   `metrics.go`, `data.go`, `internal/coordtransport/paths.go`,
-   `internal/scheduler/scheduler.go`, `environment.go`,
+2. `feat(selfupdate)`: the updater creates `cloudfield` and
+   `cloudfield-server` symlinks beside the real files and the
+   `cloudfield-server.service` link, and never writes through a symlink.
+   `internal/selfupdate/update.go`, `internal/serverupdate/apply.go`,
+   `serverupdate.go`, `host.go`, `cmd/aether/update.go`,
+   `cmd/aether-server/update.go`. [0; after release-channels 1 and 2;
+   agreed with micro VM item 10]
+3. `feat(server)`: answer to `cloudfield-internal`; mount and reserve both
+   in-container paths. `cmd/aether-server/main.go`,
+   `internal/coordtransport/paths.go`, `internal/runtime/mounts.go`.
+   [0; agreed with micro VM items 3 and 7]
+4. `feat(envname)`: read `CLOUDFIELD_*`, else `AETHER_*`. New
+   `internal/envname`; `internal/cli/config.go`, `cmd/aether-server/main.go`,
+   `cmd/aether-edge/options.go`, `main.go`, `metrics.go`, `data.go`,
    `internal/selfupdate/selfupdate.go`, `scripts/install.sh`,
-   `install.ps1`, `install-sysbox.sh`, `desktop/main.js`,
-   `android/.../Gateway.kt`, `UpdateCheck.kt`. [0]
-5. `feat(edge)`: serve several address pairs; a grant's issuer is the
-   address its server enrolled at; one OAuth app per sign-in address.
-   `cmd/aether-edge/options.go`, `internal/edge/service/service.go`,
-   `universal.go`, `pages.go`, `oauth.go`, `internal/edge/relay/control.go`,
-   `connect.go`, `internal/edge/store`, `packaging/edge/`, `docs/edge.md`. [0]
-6. `feat(edge)`: `edge-update.sh` accepts both signer identities, with a
-   manual step that makes hosts stop until the script is copied again.
-   `scripts/edge-update.sh`, `edge-update-test.sh`,
+   `install.ps1`, `install-sysbox.sh`, `scripts/edge-update.sh`,
+   `desktop/main.js`, `android/.../Gateway.kt`, `UpdateCheck.kt`. [0]
+5. `feat(edge)`: serve several address pairs from a new setting; a grant's
+   issuer is the address its server enrolled at; one OAuth app per sign-in
+   address; announce the relay addresses to servers; per-address counters.
+   `cmd/aether-edge/options.go`, `main.go`, `metrics.go`,
+   `internal/edge/service/service.go`, `universal.go`, `pages.go`,
+   `oauth.go`, `internal/edge/relay/control.go`, `connect.go`,
+   `internal/edge/proto`, `internal/edge/store`,
+   `packaging/systemd/aether-edge.service`, `packaging/edge/`,
+   `docs/edge.md`. [0]
+6. `feat(connector)`: the server's connector accepts every relay address
+   its edge announced and keeps each token bound to its own.
+   `internal/connector/connector.go`, `authorize.go`, `token.go`,
+   `internal/sshd/connector.go`, `internal/edge/agent`. [0; after 5]
+7. `feat(edge)`: `edge-update.sh` and `promote-edge.yml` accept both
+   signer identities, with a manual step that makes hosts stop until the
+   script is copied again. `scripts/edge-update.sh`,
+   `edge-update-test.sh`, `.github/workflows/promote-edge.yml`,
    `packaging/edge/upgrade.json`, `internal/edge/edgetest/testdata/`,
-   `docs/edge.md`. [0; with or after release-channels 8]
-7. `feat(gitengine)`: accept `cloudfield/run-` branches beside
+   `docs/edge.md`. [0; with or after release-channels 7 and 8]
+8. `feat(gitengine)`: accept `cloudfield/run-` branches beside
    `aether/run-`. `internal/gitengine/slug.go`, `engine.go`,
    `transport.go`. [0]
-8. `feat(desktop)`: register `cloudfield://`, fall back to the old data
-   directory, find the app under both names. `desktop/electron-builder.yml`,
-   `desktop/main.js`, `internal/localops/desktop.go`. [0]
-9. `feat(android)`: register `cloudfield://`.
-   `android/app/src/main/AndroidManifest.xml`, `DeepLink.kt`. [0]
-10. `feat(dashboard)`: Cloudfield name, mark and icons. `web/src/` copy,
+9. `feat(desktop)`: register `cloudfield://`, fall back to the old data
+   directory, find, stop and rebuild the app under either name.
+   `desktop/electron-builder.yml`, `desktop/main.js`,
+   `internal/localops/desktop.go`, `rebuild.go`,
+   `internal/localgw/rebuild.go`, `scripts/install.ps1`. [0]
+10. `feat(android)`: register `cloudfield://`.
+    `android/app/src/main/AndroidManifest.xml`, `DeepLink.kt`. [0]
+11. `feat(dashboard)`: Cloudfield name, mark and icons. `web/src/` copy,
     `web/src/app/layout.tsx`, `manifest.ts`, `web/public/sw.js`,
     `web/public/` mark and `icons/`, `scripts/make-icons.py`, unit and
     end-to-end tests. Design review. [1; after release-channels 4]
-11. `feat(cli)`: Cloudfield in CLI, server and edge messages, edge pages,
-    assistant instructions, skill and hook text, connector title. Strings
-    in `cmd/`, `internal/cli`, `scheduler`, `assistant`,
+12. `feat(cli)`: Cloudfield in CLI, server and edge messages, edge pages,
+    assistant instructions, skill text, connector title. Strings in
+    `cmd/`, `internal/cli`, `scheduler`, `assistant`,
     `edge/service/templates`, `coordhooks`, `coordcli`, `ops`, `connector`,
     `mcpbridge`, and their tests. Not `internal/runtime/vm`,
     `internal/guest`, `internal/vmimage`. [1]
-12. `feat(desktop)`: product name, dialogs and icons; Windows resources.
+13. `feat(desktop)`: product name, dialogs and icons; Windows resources.
     `desktop/electron-builder.yml`, `package.json`, `main.js`,
     `desktop/build/`, `packaging/windows/versioninfo.json`,
-    `scripts/update-smoke.ps1`. Design review. [1; after 8]
-13. `feat(android)`: app name, strings, launcher and notification icons,
+    `scripts/update-smoke.ps1`. Design review. [1; after 9 is released]
+14. `feat(android)`: app name, strings, launcher and notification icons,
     Play listing. `android/app/src/main/res/`, `android/listing/`. Design
     review. [1]
-14. `docs`: Cloudfield in `README.md`, `CONTRIBUTING.md`, `AGENTS.md`,
+15. `docs`: Cloudfield in `README.md`, `CONTRIBUTING.md`, `AGENTS.md`,
     `CLAUDE.md`, `AI_POLICY.md`, `docs/*.md`, `docs/legal/`,
-    `docs/assets/`, `docs/media/`, `packaging/claude-connector/`,
-    `packaging/chatgpt-plugin/` (names only). Not `docs/plans/`.
-    [1; after release-channels 11]
-15. `build`: fail `make public-audit` on the old name outside an allowlist.
-    `scripts/public-audit.sh`, plus whatever the check still finds. [1; last]
-16. aether-web: finish draft pull request 48 with the site address, contact
-    and logo; re-sync `src/vendor/aether` after 10. [2]
+    `docs/assets/`, `docs/media/`, and the name and description in
+    `packaging/claude-connector/` and `packaging/chatgpt-plugin/`. Not
+    `docs/plans/`. [1; after release-channels 11]
+16. `build`: fail `make public-audit` on the capitalised old name in
+    dashboard strings, edge templates and listings.
+    `scripts/public-audit.sh`. [1; last]
 17. `feat(edge)`: `edge.cloudfield.ai` as the default for new setups,
-    `edge move`, new hostnames in docs and listings.
-    `internal/edge/agent/agent.go`, `internal/edge/client/edgeclient.go`,
-    `cmd/aether-server/edge.go`, `setup.go`, `scripts/install.sh`,
-    `install-test.sh`, `docs/*.md`, `docs/legal/`, `packaging/`.
-    [2; after the owner's steps 1 to 5]
-18. `feat(cli)`: installers and the CLI create the new command names; new
-    installs get `cloudfield-server.service`. `scripts/install.sh`,
-    `install.ps1`, `cmd/aether/update.go`, `internal/macinstall`,
-    `internal/serversetup/unit.go`, `cmd/aether-server/install.go`.
-    [3; after 2, 3 and 4 are in a stable release, and after micro VM item 10]
-19. `feat(server)`: prompts, role cards and hooks name
-    `cloudfield-internal` in containers that have it. `internal/coordhooks/`,
-    `internal/coordcli/`, `internal/harness/`,
-    `internal/scheduler/acp_driver.go`. [3]
+    `edge move`, both hosted addresses treated alike, new hostnames in
+    docs. `internal/edge/agent/agent.go`,
+    `internal/edge/client/edgeclient.go`, `cmd/aether-server/edge.go`,
+    `setup.go`, `install.go`, `internal/sshd/server.go`,
+    `scripts/install.sh`, `install-test.sh`, `docs/*.md`, `docs/legal/`.
+    [2; after steps 1 to 4 of the switch]
+18. `feat(cli)`: installers create the new command names and the unit
+    link; printed `systemctl` lines use the new name. `scripts/install.sh`,
+    `install.ps1`, `internal/macinstall`, `cmd/aether-server/install.go`,
+    `internal/localgw/update.go`. [3; after 2, 3 and 4 are in a stable
+    release]
+19. `feat(server)`: prompts and role cards name `cloudfield-internal` in
+    containers that have it. Hook and plugin files written into homes keep
+    the old path. `internal/coordhooks/guide.go`, `internal/coordcli/`,
+    `internal/harness/`, `internal/scheduler/acp_driver.go`. [3]
 20. `docs`: new commands and `CLOUDFIELD_*` in docs, help and usage text,
-    and the dashboard's copyable prompt; the old-to-new table. `docs/*.md`,
-    usage strings in `cmd/`, `web/src/lib/config-prompt.ts`; the install
-    command in aether-web. [3]
-21. Owner: rename both repositories. [4]
-22. `refactor`: the repository name where it is written.
-    `internal/selfupdate/selfupdate.go`, `scripts/install.sh`,
-    `install.ps1`, `android/.../UpdateTarget.kt`,
-    `internal/serversetup/unit.go`, `internal/push/webpush.go`, docs links,
-    `README.md` badges; `src/lib/theme.ts` in aether-web. [4]
+    and the dashboard's copyable prompt; the old-to-new table; widen the
+    name check to docs. `docs/*.md`, usage strings in `cmd/`,
+    `web/src/lib/config-prompt.ts`, `scripts/public-audit.sh`. [3]
+21. Owner: rename the repositories. [4]
+22. `refactor`: the repository name where it is written, except the
+    promotion predicate type. `internal/selfupdate/selfupdate.go`,
+    `scripts/install.sh`, `install.ps1`, `android/.../UpdateTarget.kt`,
+    `internal/serversetup/unit.go`, `internal/push/webpush.go`, docs
+    links, `README.md` badges. [4; the hour of 21]
 23. `refactor`: Go module path, with `go.mod`, `Makefile`, `.golangci.yml`,
     `.github/workflows/ci-suite.yml`, `windows-install.yml`,
     `images/edge/Dockerfile`, `scripts/deploy.sh`, and regenerated
@@ -658,4 +737,6 @@ Each is one session. Phase and dependencies are in brackets.
 24. `feat(gitengine)`: new sessions get `cloudfield/run-` branches and the
     `cloudfield` remote. `internal/gitengine/slug.go`,
     `internal/localops/pull.go`, `push.go`, `compare.go`,
-    `cmd/aether/daemon.go`. [5; after 7 is in a stable release]
+    `cmd/aether/daemon.go`. [5; after 8 is in a stable release]
+
+The website's pull requests are listed in its own repository.
