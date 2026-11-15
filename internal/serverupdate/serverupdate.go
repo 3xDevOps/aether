@@ -445,7 +445,7 @@ func (s *Service) resolveTag(ctx context.Context, tag string) (string, error) {
 		s.check.Pointers = marks
 		st := s.check
 		s.checkMu.Unlock()
-		s.persistCheck(st)
+		err = s.persistCheck(st)
 	}
 	s.runMu.Unlock()
 	if errors.Is(err, selfupdate.ErrNoRelease) {

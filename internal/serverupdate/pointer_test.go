@@ -299,10 +299,34 @@ func TestUpdateWithNoVersionRecordsTheChannelMark(t *testing.T) {
 	rel := channelHost(t)
 	dir := t.TempDir()
 	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.2", 412), releasetest.Key)
-	_, _ = channelService(t, dir, rel.URL, "beta").resolveTag(t.Context(), "")
+	svc := channelService(t, dir, rel.URL, "beta")
+	_, _ = svc.resolveTag(t.Context(), "")
+	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.1", 380), releasetest.Key)
+	if _, err := svc.resolveTag(t.Context(), ""); err == nil || err.Error() != "channel pointer beta.json names build 380, below build 412 seen before" {
+		t.Fatalf("second update with no version after a replay = %v, want it refused", err)
+	}
 	rel.SetPointer("beta", nil, nil)
 	st := channelService(t, dir, rel.URL, "beta").runCheck(t.Context())
 	if !strings.Contains(st.Error, "404") || rel.Requests("/releases/latest") != 0 {
 		t.Fatalf("check after the pointer went = %+v with %d Latest requests, want a failed check and none", st, rel.Requests("/releases/latest"))
+	}
+}
+
+// A channel mark that cannot be written would be lost on restart, so the
+// check that raised it fails and offers nothing.
+func TestChannelCheckFailsWhenItsMarkCannotBeSaved(t *testing.T) {
+	rel := channelHost(t)
+	dir := t.TempDir()
+	svc := channelService(t, dir, rel.URL, "beta")
+	if err := os.Mkdir(filepath.Join(dir, "check.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.2", 412), releasetest.Key)
+	st := svc.runCheck(t.Context())
+	if !strings.Contains(st.Error, "record the release check") || st.Failures != 1 || st.LatestVersion != "" {
+		t.Fatalf("check = %+v, want it failed with nothing offered", st)
+	}
+	if _, err := svc.resolveTag(t.Context(), ""); err == nil || !strings.Contains(err.Error(), "record the release check") {
+		t.Fatalf("update with no version = %v, want the write failure", err)
 	}
 }

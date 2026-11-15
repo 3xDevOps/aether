@@ -160,23 +160,39 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 		st.NextAt = now.Add(jitter(backoff(st.Failures)))
 		slog.Warn("serverupdate: release check failed", "error", err, "retry_at", st.NextAt)
 	}
+	if werr := s.persistCheck(st); werr != nil {
+		slog.Warn("serverupdate: persist release check", "error", werr)
+		if s.cfg.Channel != "" && st.Error == "" {
+			// A channel mark only in memory is gone after a restart, so the
+			// check that found it fails, offers nothing new and keeps the
+			// marks on disk.
+			failed := s.check
+			failed.CheckedAt = now
+			failed.Error = werr.Error()
+			failed.Failures++
+			failed.NextAt = now.Add(jitter(backoff(failed.Failures)))
+			st = failed
+		}
+	}
 	s.checkMu.Lock()
 	s.check = st
 	s.checkMu.Unlock()
-	s.persistCheck(st)
 	return st
 }
 
 // persistCheck saves st to check.json, unless the file could not be read.
-func (s *Service) persistCheck(st checkState) {
+func (s *Service) persistCheck(st checkState) error {
 	if s.stateErr != nil {
-		return
+		return nil
 	}
-	if data, merr := json.Marshal(st); merr == nil {
-		if werr := selfupdate.WriteFileAtomic(checkPath(s.cfg.StateDir), data); werr != nil {
-			slog.Warn("serverupdate: persist release check", "error", werr)
-		}
+	data, err := json.Marshal(st)
+	if err == nil {
+		err = selfupdate.WriteFileAtomic(checkPath(s.cfg.StateDir), data)
 	}
+	if err != nil {
+		return fmt.Errorf("serverupdate: record the release check: %w", err)
+	}
+	return nil
 }
 
 // latest asks for the newest release: through Config.Channel's signed
