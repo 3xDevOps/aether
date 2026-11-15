@@ -19,7 +19,10 @@ export type UpdateTarget =
   | { state: 'check_failed'; error: string; checkedAt?: string; version?: string; unread?: boolean }
   | { state: 'available'; version: string; latest: string; notesUrl?: string }
   | ({ state: 'required' } & UpgradeRequired)
-  | { state: 'scheduled'; latest: string; by: string }
+  | { state: 'scheduled'; latest: string; by: string; byServer?: boolean }
+  // The server runs a build above its channel's newest and stays on it
+  // until the channel reaches it.
+  | { state: 'channel_wait'; version: string; build?: number; channel: string; latest: string; latestBuild?: number }
   | { state: 'applying'; latest: string; step?: string }
   | { state: 'restarting'; latest: string }
   | { state: 'ready_to_restart'; latest: string }
@@ -280,6 +283,9 @@ export function clientTarget(s: RootState): UpdateTarget {
   return { state: 'unknown' }
 }
 
+/** The actor of an update the server scheduled itself (internal/serverupdate). */
+const serverActor = 'server'
+
 function lastError(s: RootState): string {
   return s.serverUpdate?.error || s.serverUpdate?.last?.detail || s.serverUpdateError || ''
 }
@@ -294,7 +300,7 @@ export function serverTarget(s: RootState, now: number): UpdateTarget {
   const isBehind = status ? status.update_available : (s.update?.server_behind ?? false)
   switch (progress?.phase) {
     case 'scheduled':
-      return { state: 'scheduled', latest: target, by: progress.actor_id ?? '' }
+      return { state: 'scheduled', latest: target, by: progress.actor_id ?? '', byServer: progress.actor_id === serverActor }
     case 'preflight':
     case 'applying':
     case 'restarting':
@@ -317,11 +323,21 @@ export function serverTarget(s: RootState, now: number): UpdateTarget {
   }
   // A cancel's own answer outranks the snapshot read before it.
   if (status?.pending && progress?.phase !== 'cancelled') {
-    return { state: 'scheduled', latest: status.pending.version, by: status.pending.requested_by }
+    return { state: 'scheduled', latest: status.pending.version, by: status.pending.requested_by, byServer: status.pending.by_server }
   }
   if (isBehind && status?.phase === 'failed') return { state: 'failed', latest: target, error: lastError(s) }
   if (isBehind && status?.phase === 'rolled_back') return { state: 'rolled_back', latest: target, error: lastError(s) }
   if (s.serverChecking) return { state: 'checking', version: running }
+  if (status?.channel_wait && latest) {
+    return {
+      state: 'channel_wait',
+      version: running,
+      build: status.server_build,
+      channel: status.channel ?? '',
+      latest,
+      latestBuild: status.latest_build,
+    }
+  }
   if (isBehind && latest) return { state: 'available', version: running, latest, notesUrl: status?.notes_url }
   if (s.serverUpdateError) {
     return { state: 'check_failed', error: s.serverUpdateError, checkedAt: status?.checked_at, version: running, unread: true }
@@ -343,14 +359,24 @@ function core(version: string): string {
  * The server runs an older release than this client. The server refuses
  * only clients older than itself, so this is not a refusal: it is the
  * reverse direction, where new client features have no server to serve them.
+ * Both sides' signed builds decide when both report one, as the server's
+ * gate does; otherwise the release version does.
  */
 export function serverTooOld(
   update: UpdateStatus | null,
   serverVersion = '',
+  serverBuild?: { build?: number; hotfix?: number },
 ): { client: string; server: string } | null {
   // `server.info` is re-read on every reconnect; `update.check` only on its own poll.
   const running = serverVersion || update?.server_version
   if (!update || !running) return null
+  const clientBuild = update.cli_build ?? 0
+  const build = (serverBuild ? serverBuild.build : update.server_build) ?? 0
+  if (clientBuild > 0 && build > 0) {
+    const hotfix = (serverBuild ? serverBuild.hotfix : update.server_hotfix) ?? 0
+    const ahead = clientBuild !== build ? clientBuild > build : (update.cli_hotfix ?? 0) > hotfix
+    return ahead ? { client: update.cli.version, server: running } : null
+  }
   const client = core(update.cli.version)
   const server = core(running)
   if (!client || !server) return null

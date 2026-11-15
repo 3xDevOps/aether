@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { rootCommand, useSysbox } from '@/lib/use-sysbox'
 import { workspaceRuns } from '@/routes/board/selectors'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
+import { ReleaseChannelSection } from '@/routes/settings/release-channel'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin, useIsSuperAdmin, useSelf, useStateContext } from '@/store/hooks'
 
@@ -110,6 +111,7 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
           control={<Button size="sm" variant="secondary" onClick={() => navigate('insights', { tab: 'system' })}>Open Insights › System</Button>}
         />
       </SettingsSection>
+      <ReleaseChannelSection client={client} />
       {admin && (caps.hasMethod('server.sysbox.status') || caps.hasMethod('run.release') || caps.hasMethod('server.run_limits')) && (
         <SettingsSection title="Admin" scope="Server · admins">
           {superAdmin && <RunLimitsRow client={client} />}

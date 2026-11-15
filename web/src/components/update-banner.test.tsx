@@ -236,6 +236,38 @@ describe('the server update banner', () => {
     ).toBeTruthy()
   })
 
+  test('a server above its channel says it stays on its build, not that it is up to date or behind', async () => {
+    const waiting = serverUpdateStatus({
+      server_version: 'v0.9.0-nightly.12',
+      server_build: 412,
+      channel: 'beta',
+      latest: 'v0.9.0-beta.1',
+      latest_version: 'v0.9.0-beta.1',
+      latest_build: 380,
+      channel_wait: true,
+    })
+    for (const self of [alice, bob]) {
+      const client = seedServer({ self, status: waiting })
+      const view = render(<UpdateHost client={client} />)
+      expect(await screen.findByText('The server stays on v0.9.0-nightly.12 (build 412) until the beta channel reaches it.')).toBeTruthy()
+      expect(screen.getByText('The beta channel is at v0.9.0-beta.1 (build 380). The server never installs an older build.')).toBeTruthy()
+      expect(screen.queryByText(/is up to date/)).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+      view.unmount()
+    }
+  })
+
+  test('an update the server scheduled itself is not attributed to a member', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({
+        update_available: true,
+        pending: { version: 'v1.3.0', requested_by: 'server', requested_at: '2026-08-14T10:06:00Z', by_server: true },
+      }),
+    })
+    render(<UpdateHost client={client} />)
+    expect(await screen.findByText('Scheduled by the server, applies when no session is active.')).toBeTruthy()
+  })
+
   test('Update when idle schedules, and the banner then offers Cancel', async () => {
     const client = seedServer()
     render(<UpdateHost client={client} />)

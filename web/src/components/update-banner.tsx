@@ -350,6 +350,17 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
       />
     )
   }
+  if (target.state === 'channel_wait') {
+    const stays = `${target.version}${target.build ? ` (build ${target.build})` : ''}`
+    const at = `${target.latest}${target.latestBuild ? ` (build ${target.latestBuild})` : ''}`
+    return (
+      <StatusRow
+        Icon={ServerCog}
+        headline={`The server stays on ${stays} until the ${target.channel} channel reaches it.`}
+        detail={`The ${target.channel} channel is at ${at}. The server never installs an older build.`}
+      />
+    )
+  }
   if (target.state === 'required' || target.state === 'ready_to_restart') return null
   const latest = target.latest
   if (target.state === 'available' && dismissed === latest) return null
@@ -405,7 +416,8 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const capable = status?.capable ?? false
   const active = activeRunCount(runs, pausedRuns)
   const waiting = waitingLine(status?.waiting)
-  const scheduledBy = target.state === 'scheduled' ? memberName({ members, mergedInto }, target.by) : ''
+  const scheduledBy =
+    target.state === 'scheduled' ? (target.byServer ? 'the server' : memberName({ members, mergedInto }, target.by)) : ''
   const offer = target.state === 'available' || target.state === 'failed' || target.state === 'rolled_back'
 
   return (

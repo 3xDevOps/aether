@@ -635,6 +635,9 @@ export interface ServerInfo {
   time: string
   member: Member
   tailnet_hostname?: string
+  /** The server release's signed build and hotfix; absent for a release from before channels. */
+  build?: number
+  hotfix?: number
   /** Absent on servers that predate feature advertising. */
   features?: string[]
   tailnet_identity_auth?: boolean
@@ -1901,6 +1904,11 @@ export interface UpdateStatus {
   cli: UpdateCheck
   /** Empty when the server did not answer; server_error then says why. */
   server_version: string
+  /** The signed builds of this CLI and of the server; absent for a release from before channels. */
+  cli_build?: number
+  cli_hotfix?: number
+  server_build?: number
+  server_hotfix?: number
   server_behind: boolean
   /** The CLI half is still answered in full when the SSH hop is down. */
   server_error?: string
@@ -1974,6 +1982,8 @@ export interface PendingServerUpdate {
   version: string
   requested_by: string
   requested_at: string
+  /** The server scheduled it itself, when its release check found a newer build on its channel. */
+  by_server?: boolean
 }
 
 /** What a pending update is still waiting for. Paused runs are reported
@@ -1997,6 +2007,19 @@ export interface ServerUpdateAttempt {
  * `manual_commands` says what to run on the server host. */
 export interface ServerUpdateStatus {
   server_version: string
+  /** Builds are the signed (build, hotfix) of a release, absent for one from before channels. */
+  server_build?: number
+  server_hotfix?: number
+  /** The release channel the server follows; absent on servers from before channels. */
+  channel?: ReleaseChannel
+  /** The server has not chosen a channel yet and follows beta. */
+  channel_pending?: boolean
+  /** The running build is above the channel's: the server stays on it until the channel reaches it. */
+  channel_wait?: boolean
+  /** The newest release on `channel`; empty until a check on it has run. */
+  latest_channel?: string
+  latest_build?: number
+  latest_hotfix?: number
   latest?: string
   update_available: boolean
   capable: boolean
@@ -2019,6 +2042,31 @@ export interface ServerUpdateStatus {
   error?: string
   from_version?: string
   to_version?: string
+}
+
+export type ReleaseChannel = 'stable' | 'beta' | 'nightly'
+
+/** A release and its place in the release order; build 0 is a release from before channels. */
+export interface ReleaseBuild {
+  version: string
+  channel?: string
+  build: number
+  hotfix?: number
+}
+
+/** server.release_channel_set. With `dry_run` it saves nothing and says what saving would do. */
+export interface ServerReleaseChannelSet {
+  channel: ReleaseChannel
+  previous: ReleaseChannel
+  saved: boolean
+  running: ReleaseBuild
+  /** The newest release on `channel`; absent when it could not be read, and `target_error` says why. */
+  target?: ReleaseBuild
+  target_error?: string
+  /** `running` is above `target`: the server stays on its build until the channel reaches it. */
+  wait: boolean
+  /** The pending update the change retires because the new channel does not take its release. */
+  retired?: string
 }
 
 /** server.sysbox.status and server.sysbox.install: whether runs can use
