@@ -2675,7 +2675,9 @@ The desktop launch panel has **Open in a new window** beside its close control.
 It opens this same form in a separate window with the current task and launch
 choices, then collapses the original panel. **Launch** there starts one
 session, closes the pop-out and opens that session in the original dashboard.
-A refused launch keeps the pop-out open with the server's error. If the browser
+Closing the pop-out without launching returns its latest draft to the original
+form. Opening **New session** again while the pop-out is open focuses it. A
+refused launch keeps the pop-out open with the server's error. If the browser
 blocks the window, the original form stays open.
 
 On desktop, clicking outside the form or pressing **Escape** slides it away

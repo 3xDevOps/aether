@@ -99,20 +99,24 @@ export function App() {
       if (!result) return
       const state = useStore.getState()
       if (result.type === 'returned') {
-        if (state.launchDraft?.id === result.draft.id) {
-          state.setLaunchDraft(result.draft)
-          useStore.setState({ launchDraftRevision: state.launchDraftRevision + 1 })
+        if (state.launchDraftPopout?.draftID === result.draft.id) {
+          if (state.identityKey === state.launchDraftPopout.identityKey && state.launchDraft?.id === result.draft.id) {
+            state.setLaunchDraft(result.draft)
+            useStore.setState({ launchDraftRevision: state.launchDraftRevision + 1 })
+          }
+          state.setLaunchDraftPopout(null)
         }
-        state.setLaunchDraftPopoutActive(false)
         return
       }
       if (result.type === 'discarded') {
-        if (state.launchDraft?.id === result.draftID) state.setLaunchDraft(null)
-        state.setLaunchDraftPopoutActive(false)
+        if (state.launchDraftPopout?.draftID === result.draftID) {
+          if (state.launchDraft?.id === result.draftID && state.identityKey === state.launchDraftPopout.identityKey) state.setLaunchDraft(null)
+          state.setLaunchDraftPopout(null)
+        }
         return
       }
       if (state.launchDraft?.id === result.draftID) state.setLaunchDraft(null)
-      state.setLaunchDraftPopoutActive(false)
+      if (state.launchDraftPopout?.draftID === result.draftID) state.setLaunchDraftPopout(null)
       void api.runGet(result.runID).then((run) => {
         useStore.getState().upsertRun(run)
         useStore.getState().navigate('run', { runId: run.id })

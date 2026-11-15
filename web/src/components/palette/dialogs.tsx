@@ -12,6 +12,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronRight } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { focusLaunchPopout } from '@/lib/launch-popout'
 import { useIsMobile } from '@/lib/breakpoints'
 import { useLingering } from '@/components/ui/slide-out'
 import { useStore } from '@/store'
@@ -20,7 +21,7 @@ export function PaletteDialogs() {
   const dialog = useStore((s) => s.paletteDialog)
   const identity = useStore((s) => s.identityKey)
   const draft = useStore((s) => s.launchDraft)
-  const launchPopoutActive = useStore((s) => s.launchDraftPopoutActive)
+  const launchPopout = useStore((s) => s.launchDraftPopout)
   const draftRevision = useStore((s) => s.launchDraftRevision)
   const collapsed = useStore((s) => s.sidebarCollapsed)
   const phone = useIsMobile()
@@ -28,7 +29,13 @@ export function PaletteDialogs() {
   useLayoutEffect(() => setSidebar(document.getElementById('sidebar')), [collapsed, phone])
   const active = dialog === 'launch' || draft !== null
   const retained = useLingering(active)
-  const launchOpen = dialog === 'launch'
+  const popoutActive = !!draft && launchPopout?.identityKey === identity && launchPopout.draftID === draft.id
+  useLayoutEffect(() => {
+    if (!popoutActive || dialog !== 'launch') return
+    focusLaunchPopout()
+    useStore.getState().closePaletteDialog()
+  }, [dialog, popoutActive])
+  const launchOpen = dialog === 'launch' && !popoutActive
   const launchShown = useLingering(launchOpen)
   // Discarding starts a fresh form even if its closing slide has not finished.
   const opened = useRef({ open: false, count: 0 })
@@ -38,7 +45,7 @@ export function PaletteDialogs() {
     <>
       {/* A different member's launch starts over from their own accounts and saved choices. */}
       {retained && <LaunchDialog key={`${identity ?? ''}:${opened.current.count}:${draftRevision}`} open={launchOpen} visible={launchShown} />}
-      {!phone && !launchShown && draft && !launchPopoutActive && createPortal(
+      {!phone && !launchShown && draft && !popoutActive && createPortal(
         <Button
           variant="secondary"
           size="icon"

@@ -17,6 +17,7 @@ directories:
 
 files:
   - main.js
+  - launch-popout.js
   - cli-binding.js
   - notify.js
   - sidecar-exit.js

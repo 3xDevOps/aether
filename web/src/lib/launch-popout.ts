@@ -6,22 +6,34 @@ type PopoutMessage =
   | { source: 'aether-launch-popout'; type: 'launched'; draftID: string; runID: string }
 
 const popouts = new WeakSet<object>()
+let activePopout: WindowProxy | null = null
 
-export function launchPopoutURL(href: string, draft: LaunchDraft): string {
+export function launchPopoutURL(href: string, draft: LaunchDraft, token?: string | null): string {
   const url = new URL(href)
   for (const key of ['run', 'view', 'agent', 'repo', 'page', 'id', 'watch', 'entry', 'assistant', 'card', 'new', 'prompt', 'popout']) {
     url.searchParams.delete(key)
   }
   url.searchParams.set('new', '1')
   url.searchParams.set('popout', '1')
+  if (token) url.searchParams.set('token', token)
   url.hash = new URLSearchParams([['launch-draft', JSON.stringify(draft)]]).toString()
   return url.toString()
 }
 
-export function openLaunchPopout(href: string, draft: LaunchDraft): boolean {
-  const popup = window.open(launchPopoutURL(href, draft), '_blank', 'popup,width=1280,height=840')
+export function openLaunchPopout(href: string, draft: LaunchDraft, token?: string | null): boolean {
+  const popup = window.open(launchPopoutURL(href, draft, token), '_blank', 'popup,width=1280,height=840')
   if (!popup) return false
+  activePopout = popup
   popouts.add(popup)
+  return true
+}
+
+export function focusLaunchPopout(): boolean {
+  if (!activePopout || activePopout.closed) {
+    activePopout = null
+    return false
+  }
+  activePopout.focus()
   return true
 }
 
@@ -56,14 +68,17 @@ export function receiveLaunchPopoutMessage(event: MessageEvent): PopoutMessage |
     const draft = parseLaunchDraft(JSON.stringify(value.draft))
     if (!draft) return null
     popouts.delete(event.source)
+    if (activePopout === event.source) activePopout = null
     return { source: 'aether-launch-popout', type: 'returned', draft }
   }
   if (value.type === 'discarded' && typeof value.draftID === 'string' && value.draftID !== '') {
     popouts.delete(event.source)
+    if (activePopout === event.source) activePopout = null
     return value as PopoutMessage
   }
   if (value.type === 'launched' && typeof value.draftID === 'string' && value.draftID !== '' && typeof value.runID === 'string' && value.runID !== '') {
     popouts.delete(event.source)
+    if (activePopout === event.source) activePopout = null
     return value as PopoutMessage
   }
   return null

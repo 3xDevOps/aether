@@ -371,6 +371,10 @@ function bearer(): string | null {
   return window.sessionStorage.getItem(tokenKey)
 }
 
+export function currentGatewayToken(): string | null {
+  return bearer()
+}
+
 async function call<T>(method: string, params: unknown = {}, signal?: AbortSignal, keepalive = false): Promise<T> {
   const token = bearer()
   const res = await fetch(`${API_BASE}/${method}`, {

@@ -21,8 +21,8 @@ const draft: LaunchDraft = {
 afterEach(() => vi.restoreAllMocks())
 
 it('opens a clean launch URL with the complete draft in its fragment', () => {
-  const url = new URL(launchPopoutURL('http://localhost/?token=t&run=run_1&view=changes&prompt=secret', draft))
-  expect(url.searchParams.get('token')).toBe('t')
+  const url = new URL(launchPopoutURL('http://localhost/?run=run_1&view=changes&prompt=secret', draft, 'gateway-token'))
+  expect(url.searchParams.get('token')).toBe('gateway-token')
   expect(url.searchParams.get('run')).toBeNull()
   expect(url.searchParams.get('prompt')).toBeNull()
   expect(url.searchParams.get('new')).toBe('1')

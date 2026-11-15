@@ -19,7 +19,7 @@ import { ExternalLink, LoaderCircle, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { SlideOut } from '@/components/ui/slide-out'
-import { api } from '@/lib/api'
+import { api, currentGatewayToken } from '@/lib/api'
 import { useClock } from '@/lib/clock'
 import { mobileScreen, useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
@@ -178,7 +178,7 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
 
   useEffect(() => {
     const state = useStore.getState()
-    if (ended.current || handedOff.current || state.launchDraftPopoutActive || state.identityKey !== identityKey || (!open && state.launchDraft?.id !== draftID)) return
+    if (ended.current || handedOff.current || state.identityKey !== identityKey || (!open && state.launchDraft?.id !== draftID)) return
     const failure = state.setLaunchDraft(currentDraft, !launchDraftError)
     if (failure && !storageFailed.current) toast.error(`Draft could not be saved in this browser: ${failure}`)
     storageFailed.current = failure !== null
@@ -226,12 +226,12 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
   }
 
   const popOut = () => {
-    if (!openLaunchPopout(window.location.href, currentDraft)) {
+    if (!openLaunchPopout(window.location.href, currentDraft, currentGatewayToken())) {
       toast.error('Could not open New session in a new window. Allow pop-ups for this site and try again.')
       return
     }
     handedOff.current = true
-    useStore.getState().setLaunchDraftPopoutActive(true)
+    useStore.getState().setLaunchDraftPopout({ identityKey, draftID })
     collapse()
   }
 
@@ -458,6 +458,7 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
             label="Open in a new window"
             className="absolute top-2 right-10"
             onClick={popOut}
+            disabled={launching}
           >
             <ExternalLink />
           </Button>
