@@ -102,7 +102,7 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
     <SettingsSection title="Release channel" scope={canSet ? 'Server · super admin' : 'Server'}>
       <SettingRow
         id="release-channel"
-        label="Release channel"
+        label="Channel"
         help={[
           'The server, this computer\'s app and the CLI follow it; the Android app follows its server.',
           canSet ? '' : 'Only a super admin can change it.',
