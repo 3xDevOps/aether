@@ -372,16 +372,16 @@ ntfy, then turn on **Notify this device when a session needs me** in the
 dashboard's Settings ([networking.md](networking.md#in-the-android-app)).
 
 About once an hour, when you bring it to the front, the app checks for a
-release and shows a banner. In **Aether Edge** mode it offers
-the release the server runs, from the gateway's `update.check`, and nothing
-newer until the server updates. In **Tailscale** mode it runs the bundled
-CLI's check, which follows the `config.json` that CLI has, and `stable`
-(`beta` until the first stable exists) when it has none. **Download update** fetches the new APK; open it
-and Android installs it over the app, keeping your data. A Google Play install
-gets **Open Google Play** once a stable release is 7 days old; Play carries no beta or nightly. In **Aether Edge**
-mode the server refuses an older app: a screen such as `This app (v0.7.0) is
-too old for the server (v0.8.0 needs v0.8.0 or newer).` stays until you
-install the update it links.
+release and shows a banner. In **Aether Edge** mode it offers the release the
+server runs, from the gateway's `update.check`, and nothing newer until the
+server updates. In **Tailscale** mode it runs the bundled CLI's check, which
+follows the `config.json` that CLI has, and `stable` (`beta` until the first
+stable exists) when it has none. **Download update** fetches the new APK; open
+it and Android installs it over the app, keeping your data. A Google Play
+install gets **Open Google Play** once a stable release is 7 days old; Play
+carries no beta or nightly. In **Aether Edge** mode the server refuses an older
+app: a screen such as `This app (v0.7.0) is too old for the server (v0.8.0
+needs v0.8.0 or newer).` stays until you install the update it links.
 
 Android installs an APK over the app only when both carry the same signing
 key; uninstall an APK you built from a checkout first. The release key's
