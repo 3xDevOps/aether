@@ -113,6 +113,13 @@ func (s *Service) Start(ctx context.Context) error {
 	s.loop.Add(1)
 	go func() {
 		defer s.loop.Done()
+		// A restart keeps the check state but not the display pointers;
+		// with the next check hours away, they are fetched once now.
+		if cur := s.current(); cur.Channel != "" && cur.NextAt.After(s.cfg.Now()) {
+			showCtx, cancel := context.WithTimeout(ctx, checkTimeout)
+			s.showPointers(showCtx, cur, true)
+			cancel()
+		}
 		for {
 			s.checkMu.Lock()
 			wait := s.check.NextAt.Sub(s.cfg.Now())
@@ -152,9 +159,17 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	s.run <- struct{}{}
 	defer func() { <-s.run }()
 	if s.checkRuns.Load() != asked {
-		return s.check
+		return s.current()
 	}
 	return s.checkLocked(ctx)
+}
+
+// current is a copy of the check state. Only a holder of run replaces it,
+// but checkSoon and a failed self-schedule move its NextAt under checkMu.
+func (s *Service) current() checkState {
+	s.checkMu.Lock()
+	defer s.checkMu.Unlock()
+	return s.check
 }
 
 // checkLocked is runCheck for a caller holding run. A check whose ctx
@@ -163,10 +178,11 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 func (s *Service) checkLocked(ctx context.Context) checkState {
 	s.checkRuns.Add(1)
 	s.reloadState()
-	st := s.check
+	before := s.current()
+	st := before
 	m, marks, channel, followed, err := s.latest(ctx, st.Pointers)
 	if err != nil && errors.Is(ctx.Err(), context.Canceled) {
-		return s.check
+		return before
 	}
 	st.followed = followed
 	now := s.cfg.Now().UTC()
@@ -193,11 +209,11 @@ func (s *Service) checkLocked(ctx context.Context) checkState {
 	}
 	if werr := s.persistCheck(st); werr != nil {
 		slog.Warn("serverupdate: persist release check", "error", werr)
-		if s.cfg.Releases == nil && st.Error == "" && !maps.Equal(st.Pointers, s.check.Pointers) {
+		if s.cfg.Releases == nil && st.Error == "" && !maps.Equal(st.Pointers, before.Pointers) {
 			// A channel mark only in memory is gone after a restart, so the
 			// check that found it fails, offers nothing new and keeps the
 			// marks on disk.
-			failed := s.check
+			failed := before
 			failed.CheckedAt = now
 			failed.Error = werr.Error()
 			failed.Failures++
@@ -272,16 +288,17 @@ func (s *Service) latest(ctx context.Context, marks selfupdate.Marks) (selfupdat
 
 // published is the verified pointer of every channel, for display: the
 // one followed, accepted, for channel, and each other channel's as
-// FetchPointer verifies it. A pointer that does not verify is left out.
+// FetchPointer verifies it; at start, with no check run yet, the
+// followed channel's too. A pointer that does not verify is left out.
 // Nothing here touches the marks, the channel or what the server takes.
-func (s *Service) published(ctx context.Context, channel string, followed selfupdate.Pointer) map[string]publishedPointer {
+func (s *Service) published(ctx context.Context, channel string, followed selfupdate.Pointer, atStart bool) map[string]publishedPointer {
 	out := map[string]publishedPointer{}
 	if channel == "" {
 		return out
 	}
 	for _, ch := range []string{selfupdate.ChannelNightly, selfupdate.ChannelBeta, selfupdate.ChannelStable} {
 		p := followed
-		if ch != channel {
+		if ch != channel || atStart {
 			var err error
 			if p, err = selfupdate.FetchPointer(ctx, s.cfg.Checker.BaseURL(), ch); err != nil {
 				continue

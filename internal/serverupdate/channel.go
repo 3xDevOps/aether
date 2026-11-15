@@ -59,7 +59,7 @@ const stableMissingChecks = 2
 
 // chooseChannel is the channel a check follows. A server that has not
 // chosen one reads the pointers: stable once stable.json is published and
-// verifies, beta once stable.json has answered 404 at stableMissingChecks
+// verifies, beta once stable.json itself has answered 404 at stableMissingChecks
 // checks in a row. Until then, and on any other answer, such as no
 // network or a pointer that does not verify, it follows beta and asks
 // again at the next check. The caller holds run.
@@ -72,7 +72,7 @@ func (s *Service) chooseChannel(ctx context.Context) (string, error) {
 	switch {
 	case perr == nil:
 		channel = selfupdate.ChannelStable
-	case selfupdate.NotFound(perr):
+	case selfupdate.PointerMissing(perr):
 		if s.stableMissing++; s.stableMissing < stableMissingChecks {
 			return selfupdate.ChannelBeta, nil
 		}
@@ -253,8 +253,8 @@ func (s *Service) checkNow(ctx context.Context) (selfupdate.Release, error) {
 	}
 	st := s.checkLocked(ctx)
 	<-s.run
-	s.showPointers(ctx, st)
 	s.schedule(ctx)
+	s.showPointers(ctx, st, false)
 	if st.Error != "" {
 		return selfupdate.Release{}, errors.New(st.Error)
 	}

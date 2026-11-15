@@ -35,6 +35,11 @@ func (s *Service) Tick(ctx context.Context) {
 	if state.Pending == nil {
 		return
 	}
+	// With release checks off the server applies nothing it scheduled
+	// itself; a member's update still applies.
+	if state.Pending.RequestedBy == ServerActor && !s.checks() {
+		return
+	}
 	// A pending update can only be scheduled by a capable server, but the
 	// row outlives the process: an install moved to unprivileged mode
 	// between the schedule and the restart leaves one that can never

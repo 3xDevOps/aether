@@ -748,7 +748,8 @@ manifest still cancels, and says in `not_declined` (and
 again. `schedule_error` says why the server last failed to schedule the
 newest release by itself; a network failure retries within 5 minutes. A super admin's own `aether server update` ignores the mark.
 `AETHER_NO_UPDATE_CHECK=1` in `/etc/aether/aether-server.env` turns off the
-check and with it these updates.
+check and with it these updates, including one the server scheduled
+before; a member's scheduled update still applies.
 
 ### Release channel
 
@@ -759,7 +760,8 @@ that channel, read from the channel's signed pointer
 ([Verified releases](#verified-releases)). A server that existed before
 channels follows `beta`. A new server chooses at its release checks:
 `stable` when `stable.json` is published and verifies, `beta` once
-`stable.json` has answered 404 at two checks in a row, so one 404 while the
+`stable.json` itself (not its signature) has answered 404 at two checks in
+a row, so one 404 while the
 asset is replaced does not decide it. Until then, and on any other answer,
 such as on a first boot without network, the server follows `beta` and
 `server.update_status` reports `channel_pending`.

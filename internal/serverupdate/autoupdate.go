@@ -99,21 +99,24 @@ func (s *Service) known(v string) selfupdate.Release {
 	return selfupdate.Release{Version: v}
 }
 
-// checkAndSchedule runs a release check, records the display pointers
-// and schedules what it found.
+// checkAndSchedule runs a release check, schedules what it found, then
+// fetches the display pointers, each with its own time budget.
 func (s *Service) checkAndSchedule(ctx context.Context) {
 	checkCtx, cancel := context.WithTimeout(ctx, checkTimeout)
-	s.showPointers(checkCtx, s.runCheck(checkCtx))
+	st := s.runCheck(checkCtx)
 	cancel()
 	scheduleCtx, cancel := context.WithTimeout(ctx, checkTimeout)
-	defer cancel()
 	s.schedule(scheduleCtx)
+	cancel()
+	showCtx, cancel := context.WithTimeout(ctx, checkTimeout)
+	defer cancel()
+	s.showPointers(showCtx, st, false)
 }
 
 // showPointers fetches the display pointers for st's channel outside the
 // check slot.
-func (s *Service) showPointers(ctx context.Context, st checkState) {
-	pointers := s.published(ctx, st.Channel, st.followed)
+func (s *Service) showPointers(ctx context.Context, st checkState, atStart bool) {
+	pointers := s.published(ctx, st.Channel, st.followed, atStart)
 	s.checkMu.Lock()
 	s.pointers = pointers
 	s.checkMu.Unlock()

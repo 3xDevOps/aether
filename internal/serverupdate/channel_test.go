@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -215,5 +216,61 @@ func TestStatusShowsEveryChannelsVerifiedPointer(t *testing.T) {
 	}
 	if !maps.Equal(st.Pointers, before.Pointers) || st.Channel != "beta" || st.LatestVersion != before.LatestVersion {
 		t.Fatalf("a forged display pointer changed the check: %+v, was %+v", st, before)
+	}
+}
+
+// A stable.json whose signature is missing is not a missing stable.json:
+// the server stays unchosen however many checks find it so.
+func TestMissingStableSignatureChoosesNothing(t *testing.T) {
+	rel := channelHost(t)
+	data, _ := releasetest.SignPointer(t, pointer("stable", "v0.9.0", 412), releasetest.Key)
+	rel.SetPointer("stable", data, nil)
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	svc, err := New(Config{Store: db, Bus: newTestBus(t), StateDir: t.TempDir(), Now: time.Now, Checker: selfupdate.NewChecker(rel.URL, time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range stableMissingChecks + 1 {
+		svc.runCheck(t.Context())
+	}
+	if stored, err := db.ReleaseChannel(t.Context()); err != nil || stored != "" {
+		t.Fatalf("stored channel = %q, %v; want none chosen", stored, err)
+	}
+}
+
+// After a restart with its next check hours away, the server shows the
+// channel pointers again without waiting for that check.
+func TestPointersReturnAfterARestart(t *testing.T) {
+	rel := channelHost(t)
+	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.2", 412), releasetest.Key)
+	publishPointer(t, rel, "stable", pointer("stable", "v0.9.0", 412), releasetest.Key)
+	dir := t.TempDir()
+	state := `{"channel":"beta","checked_at":"2026-11-15T10:00:00Z","next_at":"` + time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}`
+	if err := os.WriteFile(filepath.Join(dir, "check.json"), []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setVersion(t, "v0.9.0-beta.1")
+	svc := channelService(t, dir, rel.URL, "beta")
+	if err := svc.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		st, err := svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(st.ChannelPointers) == 2 && st.ChannelPointers["beta"].Version == "v0.9.0-beta.2" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("channel_pointers after a restart = %+v", st.ChannelPointers)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

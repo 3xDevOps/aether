@@ -53,11 +53,12 @@ func ParseBannerVersion(v string) Release {
 	return r
 }
 
-// NotFound reports whether err is a 404 from the release host: an asset,
-// such as a channel pointer, that is not published.
-func NotFound(err error) bool {
+// PointerMissing reports whether err is FetchPointer's 404 for the
+// pointer itself: the channel has no pointer published. A 404 for its
+// signature is not that; the pointer is there and unverifiable.
+func PointerMissing(err error) bool {
 	var status *statusError
-	return errors.As(err, &status) && status.code == http.StatusNotFound
+	return errors.As(err, &status) && status.code == http.StatusNotFound && !strings.HasSuffix(status.url, ".sig")
 }
 
 // LatestRelease is c.Latest's place in the release order.

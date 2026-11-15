@@ -1,6 +1,7 @@
 package serverupdate
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -517,4 +518,60 @@ func (e *env) restart(t *testing.T) *Service {
 		t.Fatal(err)
 	}
 	return svc
+}
+
+// With release checks turned off the server applies nothing it scheduled
+// itself, while a member's update still applies.
+func TestOptOutHoldsTheServersOwnPendingUpdate(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.busy = domain.ServerBusy{Runs: 1}
+	e.svc.checkAndSchedule(t.Context())
+	e.wantPending(t, "v0.9.0-nightly.13", ServerActor)
+	t.Setenv(selfupdate.OptOutEnv, "1")
+	e.busy, e.underSystemd = domain.ServerBusy{}, true
+	e.svc.Tick(t.Context())
+	if got := e.read(t, e.self); got != "the old binary" {
+		t.Fatal("applied the server's own update with release checks off")
+	}
+	e.wantPending(t, "v0.9.0-nightly.13", ServerActor)
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.13", When: protocol.ServerUpdateIdle}); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.Tick(t.Context())
+	if got := e.read(t, e.self); got != newServerBinary {
+		t.Fatal("a member's update did not apply with release checks off")
+	}
+}
+
+// A rollback the preflight refuses declines nothing.
+func TestRefusedRollbackDeclinesNothing(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	setRunning(t, "v0.9.0-nightly.13", 413, 0)
+	e.svc.runCheck(t.Context())
+	e.rel.SetStoreSchema(store.SchemaVersion() - 1)
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{
+		Version: "v0.9.0-nightly.12", When: protocol.ServerUpdateNow, AllowDowngrade: true,
+	}); !errors.Is(err, ErrDowngrade) {
+		t.Fatalf("rollback across a store schema = %v, want refused", err)
+	}
+	if state, err := e.db.GetServerUpdate(t.Context()); err != nil || state.Declined != nil {
+		t.Fatalf("state = %+v, %v; want nothing declined", state, err)
+	}
+}
+
+// A cancel records the build of the release it cancels from its signed
+// manifest, even when the server's last check names another.
+func TestCancelDeclinesThePendingReleasesOwnBuild(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.busy = domain.ServerBusy{Runs: 1}
+	e.svc.runCheck(t.Context())
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.14", When: protocol.ServerUpdateIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel}); err != nil {
+		t.Fatal(err)
+	}
+	if state, err := e.db.GetServerUpdate(t.Context()); err != nil || state.Declined == nil || state.Declined.Build != 414 {
+		t.Fatalf("state = %+v, %v; want nightly.14 declined at 414", state, err)
+	}
 }

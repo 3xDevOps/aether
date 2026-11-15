@@ -430,7 +430,12 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 	if p.AllowDowngrade {
 		// A rollback holds: the server does not schedule the build it
 		// leaves, or the newest it knows of, by itself again. Recorded
-		// first, so a rollback whose mark cannot be kept does not happen.
+		// before the swap, so a rollback whose mark cannot be kept does
+		// not happen, and after a preflight, so a rollback the preflight
+		// refuses declines nothing.
+		if _, err = preflight(ctx, s.plan(pending), tag, true); err != nil {
+			return protocol.ServerUpdateResult{}, nil, err
+		}
 		leaving := s.known(version.Version)
 		s.checkMu.Lock()
 		latest := s.check.latest()
@@ -517,11 +522,12 @@ func (s *Service) latestRecorded(ctx context.Context) (selfupdate.Manifest, stri
 	}
 	defer func() { <-s.run }()
 	s.reloadState()
-	m, marks, channel, _, err := s.latest(ctx, s.check.Pointers)
-	if err != nil || maps.Equal(marks, s.check.Pointers) {
+	cur := s.current()
+	m, marks, channel, _, err := s.latest(ctx, cur.Pointers)
+	if err != nil || maps.Equal(marks, cur.Pointers) {
 		return m, channel, err
 	}
-	st := s.check
+	st := s.current()
 	st.Pointers = marks
 	if err := s.persistCheck(st); err != nil {
 		return selfupdate.Manifest{}, channel, err
