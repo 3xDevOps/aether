@@ -143,6 +143,10 @@ type Service struct {
 
 	mu       sync.Mutex
 	applying bool
+	// committed is set once the update being applied can no longer be
+	// cancelled: from the start of an update applied now, and from the
+	// moment a scheduled one takes its pending row. A cancel then refuses.
+	committed bool
 	// unlock frees the update lock taken with applying.
 	unlock func()
 	// phase and target are the update in progress in this process.
@@ -165,6 +169,10 @@ type Service struct {
 	pointers      map[string]publishedPointer
 	declineNote   string
 	scheduleError string
+	// scheduleFailing is the release whose self-schedule failed
+	// scheduleFails times in a row.
+	scheduleFailing string
+	scheduleFails   int
 	// decideMu serializes what the server schedules by itself with the
 	// cancels, rollbacks and channel changes that decline or retire it. It
 	// is held only around store reads and writes, never the network.
@@ -473,6 +481,9 @@ func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.S
 	}
 	s.decideMu.Lock()
 	defer s.decideMu.Unlock()
+	if v := s.committedTo(); v != "" {
+		return protocol.ServerUpdateResult{}, fmt.Errorf("%w: %s is applying now and can no longer be cancelled", ErrBusy, v)
+	}
 	if state, err = s.cfg.Store.GetServerUpdate(ctx); err != nil {
 		return protocol.ServerUpdateResult{}, err
 	}

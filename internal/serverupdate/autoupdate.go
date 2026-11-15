@@ -140,50 +140,63 @@ func (s *Service) schedule(ctx context.Context) {
 	s.checkMu.Unlock()
 	latest := st.latest()
 	if !s.takes(ctx, st, latest) {
-		s.scheduled(nil, false)
+		s.scheduled(ctx, latest, nil, false)
 		return
 	}
 	pending := store.PendingServerUpdate{Version: latest.Version, RequestedBy: ServerActor, RequestedAt: s.cfg.Now().UTC()}
 	if _, err := preflight(ctx, s.plan(pending), latest.Version, false); err != nil {
 		slog.Warn("serverupdate: not scheduling the newest release", "version", latest.Version, "error", err)
-		s.scheduled(fmt.Errorf("not scheduling %s by itself: %w", latest.Version, err), errors.As(err, new(retryable)))
+		s.scheduled(ctx, latest, fmt.Errorf("not scheduling %s by itself: %w", latest.Version, err), errors.As(err, new(retryable)))
 		return
 	}
 	s.decideMu.Lock()
 	defer s.decideMu.Unlock()
 	if !s.takes(ctx, st, latest) {
-		s.scheduled(nil, false)
+		s.scheduled(ctx, latest, nil, false)
 		return
 	}
 	scheduled, err := s.cfg.Store.SchedulePendingServerUpdate(ctx, pending)
 	if err != nil {
 		slog.Warn("serverupdate: schedule the newest release", "version", latest.Version, "error", err)
-		s.scheduled(fmt.Errorf("not scheduling %s by itself: %w", latest.Version, err), true)
+		s.scheduled(ctx, latest, fmt.Errorf("not scheduling %s by itself: %w", latest.Version, err), true)
 		return
 	}
-	s.scheduled(nil, false)
+	s.scheduled(ctx, latest, nil, false)
 	if scheduled {
 		slog.Info("serverupdate: scheduled the newest release on the channel for the next idle moment", "version", latest.Version, "channel", st.Channel)
 		s.publish(ctx, ServerActor, events.ServerUpdateScheduled, latest.Version, "")
 	}
 }
 
-// scheduled records why the last self-schedule failed, "" when it did
-// not, for server.update_status. A failure worth retrying moves the next
-// check to checkRetry from now rather than the next 6-hourly one.
-func (s *Service) scheduled(err error, retry bool) {
+// scheduled records why the last self-schedule of latest failed, ""
+// when it did not, for server.update_status. Failures of one release are
+// counted: one worth retrying moves the next check to the backoff for
+// that count rather than the next 6-hourly one, and after maxRetries in a
+// row the release is declined, as a failed apply is.
+func (s *Service) scheduled(ctx context.Context, latest selfupdate.Release, err error, retry bool) {
 	s.checkMu.Lock()
-	defer s.checkMu.Unlock()
-	s.scheduleError = ""
 	if err == nil {
+		s.scheduleError, s.scheduleFails = "", 0
+		s.checkMu.Unlock()
 		return
 	}
+	if s.scheduleFailing != latest.Version {
+		s.scheduleFailing, s.scheduleFails = latest.Version, 0
+	}
+	s.scheduleFails++
 	s.scheduleError = err.Error()
-	if next := s.cfg.Now().Add(checkRetry); retry && s.check.NextAt.After(next) {
+	fails := s.scheduleFails
+	if next := s.cfg.Now().Add(backoff(fails)); retry && fails < maxRetries && s.check.NextAt.After(next) {
 		s.check.NextAt = next
 		select {
 		case s.kick <- struct{}{}:
 		default:
+		}
+	}
+	s.checkMu.Unlock()
+	if fails >= maxRetries {
+		if derr := s.decline(ctx, latest); derr != nil {
+			slog.Error("serverupdate: a release that keeps failing to schedule stays eligible", "version", latest.Version, "error", derr)
 		}
 	}
 }
@@ -226,6 +239,7 @@ func (s *Service) takePending(ctx context.Context, pending store.PendingServerUp
 	if scheduled && !s.stillPendingLocked(ctx, pending) {
 		return false
 	}
+	s.setCommitted()
 	if err := s.cfg.Store.SetPendingServerUpdate(ctx, nil); err != nil {
 		slog.Warn("serverupdate: clear the applied pending update", "error", err)
 	}

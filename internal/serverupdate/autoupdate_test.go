@@ -575,3 +575,151 @@ func TestCancelDeclinesThePendingReleasesOwnBuild(t *testing.T) {
 		t.Fatalf("state = %+v, %v; want nightly.14 declined at 414", state, err)
 	}
 }
+
+// Once an update can no longer be stopped, a cancel says so instead of
+// reporting a cancel that changes nothing: an update applied now, and a
+// scheduled one that has taken its pending row.
+func TestCancelRefusesAnUpdateAlreadyCommitted(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.underSystemd = true
+	e.stalled, e.resume = make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.13", When: protocol.ServerUpdateNow})
+		done <- err
+	}()
+	<-e.stalled
+	_, _, err := e.svc.Update(t.Context(), "mem_b", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel})
+	if !errors.Is(err, ErrBusy) || !strings.Contains(err.Error(), "v0.9.0-nightly.13 is applying now and can no longer be cancelled") {
+		t.Fatalf("cancel during an update applied now = %v", err)
+	}
+	close(e.resume)
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	sched := autoEnv(t, selfupdate.ChannelNightly)
+	sched.busy = domain.ServerBusy{Runs: 1}
+	sched.svc.checkAndSchedule(t.Context())
+	pending := sched.pending(t)
+	sched.busy = domain.ServerBusy{}
+	restart, err := sched.svc.apply(t.Context(), *pending, false, true)
+	if err != nil || restart == nil {
+		t.Fatalf("apply = %v", err)
+	}
+	if _, _, err := sched.svc.Update(t.Context(), "mem_b", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("cancel after the scheduled update took its row = %v, want refused", err)
+	}
+	sched.svc.release()
+}
+
+// A release whose self-schedule keeps failing is retried on the backoff,
+// then declined after maxRetries in a row instead of every 5 minutes for
+// ever.
+func TestFailingSelfScheduleBacksOffThenDeclines(t *testing.T) {
+	old := probeRetryDelay
+	probeRetryDelay = 0
+	t.Cleanup(func() { probeRetryDelay = old })
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.setUnavailable("aether-android.apk")
+	for i := range maxRetries {
+		e.svc.checkAndSchedule(t.Context())
+		e.wantPending(t, "", "")
+		st, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
+		if err != nil || !strings.Contains(st.ScheduleError, "not scheduling v0.9.0-nightly.13 by itself") {
+			t.Fatalf("status = %+v, %v; want the schedule error", st, err)
+		}
+		if i < maxRetries-1 {
+			if wait := e.svc.current().NextAt.Sub(e.now); wait != backoff(i+1) {
+				t.Fatalf("after failure %d the next check is in %s, want %s", i+1, wait, backoff(i+1))
+			}
+		}
+	}
+	if state, err := e.db.GetServerUpdate(t.Context()); err != nil || state.Declined == nil || state.Declined.Build != 413 {
+		t.Fatalf("state = %+v, %v; want nightly.13 declined after %d failures", state, err, maxRetries)
+	}
+}
+
+// A swap whose undo fails keeps its record at swapping, so the next start
+// puts the previous binary back instead of running the release as a
+// trial, and a member's update scheduled meanwhile stays pending. A crash
+// between the swap and its commit is rolled back the same way.
+func TestSwapNotCommittedIsRolledBackAtStart(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.busy = domain.ServerBusy{Runs: 1}
+	e.svc.checkAndSchedule(t.Context())
+	e.busy, e.underSystemd = domain.ServerBusy{}, true
+	e.stalled, e.resume = make(chan struct{}), make(chan struct{})
+	done := make(chan struct{})
+	go func() { e.svc.Tick(t.Context()); close(done) }()
+	<-e.stalled
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.14", When: protocol.ServerUpdateIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(e.self + ".prev"); err != nil {
+		t.Fatal(err)
+	}
+	close(e.resume)
+	<-done
+	e.wantPending(t, "v0.9.0-nightly.14", "mem_a")
+	if rec, err := loadRecord(e.state); err != nil || rec == nil || rec.Phase != recordSwapping {
+		t.Fatalf("record = %+v, %v; want it left at swapping", rec, err)
+	}
+	// The previous binary is gone, so this rollback is incomplete; what
+	// matters is that the release is not run as a trial.
+	_, _ = Boot(e.state, e.svc.cfg.Host)
+	if rec, _ := loadRecord(e.state); rec != nil && rec.Phase == recordVerifying {
+		t.Fatal("the next start would run the cancelled release as a trial")
+	}
+
+	crash := autoEnv(t, selfupdate.ChannelNightly)
+	m, err := feed(nil, crash.release.URL).Fetch(t.Context(), "v0.9.0-nightly.13")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = swap(t.Context(), crash.svc.plan(store.PendingServerUpdate{Version: "v0.9.0-nightly.13"}), "v0.9.0-nightly.13", m); err != nil {
+		t.Fatal(err)
+	}
+	if got := crash.read(t, crash.self); got != newServerBinary {
+		t.Fatalf("aether-server = %q after the swap", got)
+	}
+	if _, err = Boot(crash.state, crash.svc.cfg.Host); err != nil {
+		t.Fatal(err)
+	}
+	if got := crash.read(t, crash.self); got != "the old binary" {
+		t.Fatalf("aether-server = %q, want the previous binary back after a crash before the commit", got)
+	}
+}
+
+// A scheduled update that is no longer pending when a session starts
+// during its download is not announced as waiting for the next idle
+// moment.
+func TestCancelledUpdateIsNotRescheduledWhenBusy(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.busy = domain.ServerBusy{Runs: 1}
+	e.svc.checkAndSchedule(t.Context())
+	if p := e.phase(t); p.Phase != events.ServerUpdateScheduled {
+		t.Fatalf("phase = %+v", p)
+	}
+	e.busy = domain.ServerBusy{}
+	e.stalled, e.resume = make(chan struct{}), make(chan struct{})
+	done := make(chan struct{})
+	go func() { e.svc.Tick(t.Context()); close(done) }()
+	<-e.stalled
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel}); err != nil {
+		t.Fatal(err)
+	}
+	e.busy = domain.ServerBusy{Runs: 1}
+	close(e.resume)
+	<-done
+	for {
+		select {
+		case ev := <-e.sub.Events():
+			if p, _ := ev.Payload.(events.ServerUpdatePayload); p.Phase == events.ServerUpdateScheduled {
+				t.Fatalf("announced %+v for a cancelled update", p)
+			}
+		case <-time.After(200 * time.Millisecond):
+			return
+		}
+	}
+}

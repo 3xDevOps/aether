@@ -745,8 +745,12 @@ itself. A cancel or rollback whose mark cannot be saved is refused with
 the error. A cancel whose release's build cannot be read from its signed
 manifest still cancels, and says in `not_declined` (and
 `server.update_status` `decline_note`) that the server may schedule it
-again. `schedule_error` says why the server last failed to schedule the
-newest release by itself; a network failure retries within 5 minutes. A super admin's own `aether server update` ignores the mark.
+again. A cancel is refused once an update is applying past the point of
+no return (`v0.9.0-nightly.13 is applying now and can no longer be
+cancelled`): from the start of `--when now`, and once a scheduled update
+has downloaded. `schedule_error` says why the server last failed to
+schedule the newest release by itself; it retries on a backoff from 5
+minutes, and declines the release after 3 failures in a row. A super admin's own `aether server update` ignores the mark.
 `AETHER_NO_UPDATE_CHECK=1` in `/etc/aether/aether-server.env` turns off the
 check and with it these updates, including one the server scheduled
 before; a member's scheduled update still applies.

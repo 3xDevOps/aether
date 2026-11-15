@@ -56,6 +56,9 @@ func Stage(ctx context.Context, p Plan, tag string) (*Staged, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := commitSwap(p.StateDir, rec); err != nil {
+		return nil, err
+	}
 	return &Staged{Binaries: rec.Binaries, Schema: m.StoreSchema, dir: p.StateDir, rec: rec}, nil
 }
 

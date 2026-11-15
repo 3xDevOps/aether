@@ -122,9 +122,12 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	}
 	// A downgrade is applied by hand, now, so one cut short is not left
 	// pending for an idle moment.
-	if !scheduled && !allowDowngrade {
+	if !scheduled {
 		s.decideMu.Lock()
-		err = s.cfg.Store.SetPendingServerUpdate(ctx, &pending)
+		if !allowDowngrade {
+			err = s.cfg.Store.SetPendingServerUpdate(ctx, &pending)
+		}
+		s.setCommitted()
 		s.decideMu.Unlock()
 		if err != nil {
 			s.release()
@@ -156,18 +159,25 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	slog.Info("serverupdate: binaries replaced", "version", pending.Version, "paths", rec.Binaries)
 	if scheduled && !s.busyNow(ctx).Idle() {
 		if err := unswap(s.cfg.StateDir, rec); err != nil {
-			return nil, s.fail(ctx, pending, fmt.Errorf("a session started during the download, and undoing the swap failed: %w", err))
+			return nil, s.undoFailed(ctx, pending, fmt.Errorf("a session started during the download, and undoing the swap failed: %w", err))
 		}
 		s.release()
-		s.publish(ctx, pending.RequestedBy, events.ServerUpdateScheduled, pending.Version, errBecameBusy.Error())
+		if s.stillPending(ctx, pending) {
+			s.publish(ctx, pending.RequestedBy, events.ServerUpdateScheduled, pending.Version, errBecameBusy.Error())
+		}
 		return nil, errBecameBusy
 	}
 	if !s.takePending(ctx, pending, scheduled) {
 		if err := unswap(s.cfg.StateDir, rec); err != nil {
-			return nil, s.fail(ctx, pending, fmt.Errorf("the update was cancelled or replaced during the download, and undoing the swap failed: %w", err))
+			return nil, s.undoFailed(ctx, pending, fmt.Errorf("the update was cancelled or replaced during the download, and undoing the swap failed: %w", err))
 		}
 		s.release()
 		return nil, errNoLongerPending
+	}
+	// Until here the record says swapping, so a crash before the update
+	// was committed puts the previous binaries back at the next start.
+	if err := commitSwap(s.cfg.StateDir, rec); err != nil {
+		return nil, s.fail(ctx, pending, err)
 	}
 	// The restart runs after the RPC response has been written, by which
 	// point the request context may be on its way out; the restarting
@@ -272,11 +282,36 @@ func swap(ctx context.Context, p Plan, tag string, m selfupdate.Manifest) (*swap
 		}
 		return nil, errors.Join(retryable{fmt.Errorf("download failed: %w", err)}, removeRecord(p.StateDir))
 	}
-	rec.Phase = recordVerifying
-	if err := saveRecord(p.StateDir, rec); err != nil {
-		return nil, errors.Join(err, unswap(p.StateDir, rec))
-	}
 	return rec, nil
+}
+
+// commitSwap moves a swap to verifying: the next start runs the new
+// binary as a trial instead of putting the previous one back.
+func commitSwap(dir string, rec *swapRecord) error {
+	rec.Phase = recordVerifying
+	if err := saveRecord(dir, rec); err != nil {
+		return errors.Join(err, unswap(dir, rec))
+	}
+	return nil
+}
+
+// undoFailed reports a swap that could not be undone. Its record still
+// says swapping, so the next start puts the previous binaries back rather
+// than running the release as a trial. The pending row is retired only
+// while it is still this update's, so a member's replacement stays.
+func (s *Service) undoFailed(ctx context.Context, pending store.PendingServerUpdate, err error) error {
+	s.release()
+	msg := err.Error()
+	s.decideMu.Lock()
+	_, rerr := s.cfg.Store.RetirePendingServerUpdate(ctx, pending, store.ServerUpdateAttempt{
+		Version: pending.Version, Outcome: store.ServerUpdateFailed, Detail: msg, At: s.cfg.Now().UTC(),
+	})
+	s.decideMu.Unlock()
+	if rerr != nil {
+		slog.Error("serverupdate: record a swap that could not be undone", "version", pending.Version, "error", rerr)
+	}
+	s.publish(ctx, pending.RequestedBy, events.ServerUpdateFailed, pending.Version, msg)
+	return err
 }
 
 // unswap puts the previous binaries back and drops the swap record.
@@ -309,6 +344,22 @@ func (s *Service) fail(ctx context.Context, pending store.PendingServerUpdate, e
 	return err
 }
 
+func (s *Service) setCommitted() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.committed = true
+}
+
+// committedTo is the update that can no longer be cancelled, "" when none.
+func (s *Service) committedTo() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.committed {
+		return ""
+	}
+	return s.target
+}
+
 // claim takes the one applying slot, so the RPC path and the idle poll can
 // never download over each other.
 func (s *Service) claim(target string) bool {
@@ -330,7 +381,7 @@ func (s *Service) setPhase(phase string) {
 func (s *Service) release() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.applying, s.phase, s.target = false, "", ""
+	s.applying, s.committed, s.phase, s.target = false, false, "", ""
 	if s.unlock != nil {
 		s.unlock()
 		s.unlock = nil
