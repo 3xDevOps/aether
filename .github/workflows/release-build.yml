@@ -1107,6 +1107,7 @@ jobs:
           name: pointer-${{ inputs.pointer }}
           path: ${{ runner.temp }}/pointer-${{ inputs.pointer }}/
           if-no-files-found: ignore
+          overwrite: true
           retention-days: 90
       - name: Move the channel pointer the release is above
         if: inputs.pointer-if-above != ''
@@ -1123,6 +1124,7 @@ jobs:
           name: pointer-${{ inputs.pointer-if-above }}
           path: ${{ runner.temp }}/pointer-${{ inputs.pointer-if-above }}/
           if-no-files-found: ignore
+          overwrite: true
           retention-days: 90
 
   # latest moves only after the release is published, to the index
