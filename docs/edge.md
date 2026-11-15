@@ -1138,7 +1138,9 @@ updater does the rest.
   its line to try it again.
 - `/var/lib/aether-edge-update/releases/<tag>.json` and `.json.sig` are the signed
   manifest of the release the edge runs, kept so updates still order after GitHub
-  prunes that release (nightlies after 14 days). A copy that does not verify is
+  prunes that release (nightlies after 14 days). An update keeps the new
+  release's copy before it switches; when that download fails, nothing changes
+  and the next run retries. A copy that does not verify is
   refused with `saved <file>: ... is not signed by a trusted release key`; delete
   both files and the next run downloads them again. Without a copy, `release-check`
   downloads the manifest, so an edge whose release was pruned before a copy was

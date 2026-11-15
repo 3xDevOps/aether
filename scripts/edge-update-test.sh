@@ -241,7 +241,8 @@ exit 2
 EOF
 
 # Serves /v1/edge, and each release's manifest and signature unless
-# $WORLD/pruned/<tag> exists.
+# $WORLD/pruned/<tag> exists. Like GitHub, it answers a release asset with
+# a redirect to its download host, which curl follows only with -L.
 cat >"$bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
@@ -250,6 +251,10 @@ case "$*" in
 */releases/download/*)
 	url="${*##* }" file="${*#*-o }" file="${file%% *}" tag="${url#*/releases/download/}"
 	[ ! -f "$WORLD/pruned/${tag%%/*}" ] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
+	case " $* " in
+	*" -L "*) ;;
+	*) echo '<html><body>You are being <a href="https://objects.githubusercontent.com/">redirected</a>.</body></html>' >"$file" && exit 0 ;;
+	esac
 	case "$url" in
 	*.sig) echo c2ln >"$file" ;;
 	*) echo "signed manifest of ${tag%%/*}" >"$file" ;;
@@ -863,7 +868,7 @@ assert_digest "$B"
 # release is pruned from GitHub.
 reset
 run 0
-assert "curl -fsS --max-time 30 -o $state/releases/v1.0.0.new.json https://github.com/3xDevOps/Aether/releases/download/v1.0.0/aether-release.json"
+assert "curl -fsS -L --proto =https --proto-redir =https --max-redirs 5 --max-time 30 -o $state/releases/v1.0.0.new.json https://github.com/3xDevOps/Aether/releases/download/v1.0.0/aether-release.json"
 assert_before "release-check --tag v1.0.0 --digest $A --from v1.0.0 --json --channel stable --from-digest $A --from-manifest /run/aether-edge-update/releases/v1.0.0.new.json" "release-check --tag v1.1.0"
 assert "release-check --tag v1.1.0 --digest $B --from v1.0.0 --json --channel stable --from-digest $A --from-manifest /run/aether-edge-update/releases/v1.0.0.json"
 [ "$(cat "$state/releases/v1.0.0.json")" = "signed manifest of v1.0.0" ] || fail "running manifest not kept"
@@ -875,6 +880,7 @@ echo "$D" >"$world/channel"
 : >"$log"
 run 0
 refute "download/v1.1.0"
+assert "release-check --tag v1.1.0 --digest $B --from v1.1.0 --json --channel stable --from-digest $B --from-manifest /run/aether-edge-update/releases/v1.1.0.json"
 assert "--from v1.1.0 --json --channel stable --from-digest $B --from-manifest /run/aether-edge-update/releases/v1.1.0.json"
 assert_out "now running v1.2.0"
 # Without a kept copy release-check downloads the manifest itself, so a
@@ -888,6 +894,20 @@ refute "from-manifest"
 assert_out "the running release: release v1.0.0 has no signed aether-release.json"
 refute "compose"
 assert_digest "$A"
+# The new release's manifest must be kept before the switch: without it,
+# nothing changes and the next run retries.
+reset
+touch "$world/pruned/v1.1.0"
+run 1
+assert_out "cannot download the signed manifest of v1.1.0 to keep it"
+assert_out "v1.1.0 needs its signed manifest kept before the switch, to order updates once GitHub prunes it; nothing changed, and the next run retries"
+refute "aether-edge backup"
+refute "compose"
+assert_digest "$A"
+refute_denied "$B"
+rm "$world/pruned/v1.1.0"
+run 0
+assert_digest "$B"
 # A kept copy that does not verify is refused, never trusted.
 reset
 mkdir -p "$state/releases"
