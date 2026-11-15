@@ -150,11 +150,8 @@
   stroke-width: 1.5px;
 }
 
-.control-matrix[data-dot-grid-active] {
-  background: none;
-}
-
-.control-matrix[data-dot-grid-active] > .control-matrix-light > .control-matrix-reach {
+.control-matrix[data-dot-grid-active],
+.control-matrix[data-dot-grid-active] > .control-matrix-light > div {
   background: none;
 }
 

@@ -8,13 +8,13 @@ import { useStore } from '@/store'
 
 const run = { id: 'run_1', workspace_id: 'ws_1', member_id: 'mem_1' } as RunRecord
 
-function agent(release: () => void): AgentTerminal {
+function agent(release: () => void, holderProgress?: number): AgentTerminal {
   return {
     localControl: true,
     steerable: true,
     starting: false,
     controlUnavailable: false,
-    takeover: { interaction: undefined, holderProgress: undefined },
+    takeover: { interaction: undefined, holderProgress },
     session: { takeControl: vi.fn(), releaseControl: release, state: { connection: 'live' } },
   } as unknown as AgentTerminal
 }
@@ -94,6 +94,27 @@ it('springs and wakes dots without blocking existing controls', async () => {
   expect(matrix.hasAttribute('data-dot-grid-active')).toBe(false)
   view.unmount()
   expect(frames.size).toBe(0)
+})
+
+function positions(layer: Element | null): string[] {
+  return [...layer!.querySelectorAll('circle:not(.control-matrix-ring)')].map((dot) => `${dot.getAttribute('cx')},${dot.getAttribute('cy')}`)
+}
+
+it('moves the red takeover hold copy with the other dots', async () => {
+  const release = vi.fn()
+  const view = render(<MultiplayerControls run={run} agent={agent(release, 0.4)} onPeople={vi.fn()} />)
+  const strip = screen.getByRole('group', { name: 'Multiplayer controls' })
+  size(strip)
+  fireEvent.pointerMove(strip, { pointerType: 'mouse', clientX: 60, clientY: 12 })
+  tick()
+  const neutral = strip.querySelector('.control-matrix > .control-matrix-grid')
+  expect(positions(neutral).some((point) => point.split(',').some((value) => Number(value) % 6 !== 3))).toBe(true)
+  expect(positions(strip.querySelector('[data-takeover-hold] .control-matrix-grid'))).toEqual(positions(neutral))
+
+  view.rerender(<MultiplayerControls run={run} agent={agent(release)} onPeople={vi.fn()} />)
+  view.rerender(<MultiplayerControls run={run} agent={agent(release, 0.6)} onPeople={vi.fn()} />)
+  await act(async () => {})
+  expect(positions(strip.querySelector('[data-takeover-hold] .control-matrix-grid'))).toEqual(positions(neutral))
 })
 
 it('supports touch drag, cancellation, and keyboard points', async () => {

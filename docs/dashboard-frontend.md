@@ -3159,8 +3159,8 @@ and `TerminalPane` renders it behind the agent terminal's toolbar. The
 component is a neutral dot layer, one `radial-gradient` tile, under a
 colored copy of the same dots. While the strip's dots move, `useDotFade`
 removes these backgrounds and draws each layer's dots as an SVG inside the
-same element, so the clipping, masks, colors and paint order below apply
-unchanged.
+same element, red hold copy included, so the clipping, masks, colors and paint
+order below apply unchanged.
 The bars give each group of text and buttons `.control-matrix-clear`, a 90%
 `--chrome` fill with a blurred shadow of the same colour that hides the dots
 under the group and fades them back in around it. A rule on the matrix's

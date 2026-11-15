@@ -22,11 +22,11 @@ type Dot = {
   vx: number
   vy: number
   burst: number
-  neutral: SVGCircleElement
-  accent: SVGCircleElement
+  circles: SVGCircleElement[]
 }
 
 type Point = { x: number; y: number }
+type Layers = [SVGSVGElement, SVGSVGElement, SVGSVGElement]
 type Pointer = Point & { time: number }
 type Pulse = Point & { started: number }
 type Zone = { left: number; top: number; right: number; bottom: number }
@@ -45,8 +45,9 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
   useEffect(() => {
     const strip = ref.current
     const matrix = strip?.querySelector<HTMLElement>('.control-matrix')
-    const reach = matrix?.querySelector<HTMLElement>('.control-matrix-reach')
-    if (reducedMotion || !strip || !matrix || !reach) return
+    const light = matrix?.querySelector<HTMLElement>('.control-matrix-light')
+    const reach = light?.querySelector<HTMLElement>('.control-matrix-reach')
+    if (reducedMotion || !strip || !matrix || !light || !reach) return
     const host = matrix
 
     let frame = 0
@@ -56,8 +57,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
     let pulse: Pulse | undefined
     let dots: Dot[] = []
     let zones: Zone[] = []
-    let neutralSVG: SVGSVGElement | undefined
-    let accentSVG: SVGSVGElement | undefined
+    let layers: Layers | undefined
     let ring: SVGCircleElement | undefined
     let width = 0
     let height = 0
@@ -94,10 +94,8 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
     }
     const destroyGrid = () => {
       cancel()
-      neutralSVG?.remove()
-      accentSVG?.remove()
-      neutralSVG = undefined
-      accentSVG = undefined
+      layers?.forEach((svg) => svg.remove())
+      layers = undefined
       ring = undefined
       dots = []
       matrix.removeAttribute('data-dot-grid-active')
@@ -110,36 +108,39 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
       element.setAttribute('r', String(radius))
       return element
     }
+    // ControlMatrix mounts its red hold layer only while someone holds to take over.
+    const attachHold = () => {
+      const hold = light.querySelector('.control-matrix-hold')
+      if (layers && hold && layers[2].parentNode !== hold) hold.append(layers[2])
+    }
     const createGrid = () => {
-      if (neutralSVG) return
+      if (layers) return
       const rect = matrix.getBoundingClientRect()
       width = rect.width || rect.right - rect.left
       height = rect.height || rect.bottom - rect.top
       if (width <= 0 || height <= 0) return
       updateZones(rect)
-      neutralSVG = document.createElementNS(SVG_NS, 'svg')
-      neutralSVG.setAttribute('class', 'control-matrix-grid')
-      neutralSVG.setAttribute('aria-hidden', 'true')
-      accentSVG = document.createElementNS(SVG_NS, 'svg')
-      accentSVG.setAttribute('class', 'control-matrix-grid')
-      accentSVG.setAttribute('aria-hidden', 'true')
+      const layer = () => {
+        const svg = document.createElementNS(SVG_NS, 'svg')
+        svg.setAttribute('class', 'control-matrix-grid')
+        return svg
+      }
+      const built: Layers = [layer(), layer(), layer()]
       for (let y = 3; y < height; y += DOT_GAP) {
         for (let x = 3; x < width; x += DOT_GAP) {
-          const neutral = circle('control-matrix-dot', x, y, DOT_RADIUS)
-          const accent = circle('control-matrix-dot', x, y, DOT_RADIUS)
-          neutralSVG.appendChild(neutral)
-          accentSVG.appendChild(accent)
-          dots.push({ x, y, dx: 0, dy: 0, vx: 0, vy: 0, burst: 0, neutral, accent })
+          const circles = built.map((svg) => svg.appendChild(circle('control-matrix-dot', x, y, DOT_RADIUS)))
+          dots.push({ x, y, dx: 0, dy: 0, vx: 0, vy: 0, burst: 0, circles })
         }
       }
-      ring = circle('control-matrix-ring', 0, 0, 0)
-      neutralSVG.appendChild(ring)
-      matrix.insertBefore(neutralSVG, matrix.firstChild)
-      reach.appendChild(accentSVG)
+      ring = built[0].appendChild(circle('control-matrix-ring', 0, 0, 0))
+      matrix.prepend(built[0])
+      reach.append(built[1])
+      layers = built
+      attachHold()
       matrix.setAttribute('data-dot-grid-active', '')
     }
     const schedule = () => {
-      if (!canAnimate() || frame || !neutralSVG) return
+      if (!canAnimate() || frame || !layers) return
       frame = requestAnimationFrame(paint)
     }
     const settle = () => {
@@ -175,12 +176,11 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
         if (Math.abs(dot.dx - targetX) + Math.abs(dot.dy - targetY) + Math.abs(dot.vx) + Math.abs(dot.vy) > 0.025) moving = true
         const x = dot.x + dot.dx
         const y = dot.y + dot.dy
-        dot.neutral.setAttribute('cx', String(x))
-        dot.neutral.setAttribute('cy', String(y))
-        dot.accent.setAttribute('cx', String(x))
-        dot.accent.setAttribute('cy', String(y))
-        dot.neutral.setAttribute('r', String(DOT_RADIUS + dot.burst))
-        dot.accent.setAttribute('r', String(DOT_RADIUS + dot.burst))
+        for (const circle of dot.circles) {
+          circle.setAttribute('cx', String(x))
+          circle.setAttribute('cy', String(y))
+          circle.setAttribute('r', String(DOT_RADIUS + dot.burst))
+        }
       }
       if (pulse) {
         const progress = clamp((now - pulse.started) / RING_DURATION, 0, 1)
@@ -196,7 +196,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
       else settle()
     }
     const pulseAt = (point: Point) => {
-      if (!neutralSVG) createGrid()
+      if (!layers) createGrid()
       else updateZones(host.getBoundingClientRect())
       pulse = { ...point, started: performance.now() }
       for (const dot of dots) {
@@ -258,7 +258,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
           }
         }
       }
-      if (!neutralSVG) createGrid()
+      if (!layers) createGrid()
       pointer = { ...point, time: now }
       schedule()
     }
@@ -268,7 +268,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
       const point = pointOf(event)
       if (!point) return
       if (event.pointerType !== 'mouse') activePointerID = event.pointerId
-      if (!neutralSVG) createGrid()
+      if (!layers) createGrid()
       pulseAt(point)
       pointer = { ...point, time: performance.now() }
     }
@@ -307,7 +307,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
           y: clamp(current.y + (event.key === 'ArrowUp' ? -amount : event.key === 'ArrowDown' ? amount : 0), 0, nextHeight),
         }
         pointer = { ...next, time: performance.now() }
-        if (!neutralSVG) createGrid()
+        if (!layers) createGrid()
       }
       pulseAt(pointer ?? current)
     }
@@ -347,6 +347,8 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
     window.addEventListener('pointerup', up, { passive: true })
     window.addEventListener('pointercancel', cancelPointer, { passive: true })
     document.addEventListener('visibilitychange', visibility)
+    const holdObserver = new MutationObserver(attachHold)
+    holdObserver.observe(light, { childList: true })
     observer?.observe(strip)
     resize?.observe(strip)
     const rect = matrix.getBoundingClientRect()
@@ -361,6 +363,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', cancelPointer)
       document.removeEventListener('visibilitychange', visibility)
+      holdObserver.disconnect()
       observer?.disconnect()
       resize?.disconnect()
       destroyGrid()
