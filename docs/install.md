@@ -372,10 +372,11 @@ ntfy, then turn on **Notify this device when a session needs me** in the
 dashboard's Settings ([networking.md](networking.md#in-the-android-app)).
 
 About once an hour, when you bring it to the front, the app checks for a
-release and shows a banner. In **Aether Edge** mode it offers the release
-the server runs, from the gateway's `update.check`, and nothing newer until
-the server updates; in **Tailscale** mode it reads the `stable` pointer (`beta` until the first stable exists) through
-the bundled CLI. **Download update** fetches the new APK; open it
+release and shows a banner. In **Aether Edge** mode it offers
+the release the server runs, from the gateway's `update.check`, and nothing
+newer until the server updates. In **Tailscale** mode it runs the bundled
+CLI's check, which follows the `config.json` that CLI has, and `stable`
+(`beta` until the first stable exists) when it has none. **Download update** fetches the new APK; open it
 and Android installs it over the app, keeping your data. A Google Play install
 gets **Open Google Play** once a stable release is 7 days old; Play carries no beta or nightly. In **Aether Edge**
 mode the server refuses an older app: a screen such as `This app (v0.7.0) is
@@ -846,7 +847,7 @@ One from `v0.7.0-alpha.12` or older needs one restart by hand:
 `schtasks /End /TN aether-daemon`, then `schtasks /Run /TN aether-daemon`).
 With no linked server, or one that does not answer and was never read, the
 CLI and the desktop app follow `stable`, and `beta` until the first `stable.json`
-exists. A channel read once is kept while the server is down. Each channel's
+exists. A running desktop gateway keeps the last channel it read while the server is down; a one-shot `aether update` does not, and checks stable then. Each channel's
 pointer mark is in `update.json` beside `config.json`.
 `AETHER_NO_UPDATE_CHECK=1` turns off release checks in the CLI and dashboard.
 

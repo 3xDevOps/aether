@@ -57,7 +57,7 @@ fun parseUpdateCheck(line: String): UpdateCheck? {
     return UpdateCheck(version, latest, available == "true")
 }
 
-private val DESCRIBE_TAIL = Regex("-[0-9]+-g[0-9a-f]{4,}(-dirty)?$")
+private val DESCRIBE_TAIL = Regex("-[0-9]+-g[0-9a-f]{4,}(-dirty)?$|-dirty$|\\+.*$")
 
 /**
  * The check line for an `update.check` [body] the gateway answered. The

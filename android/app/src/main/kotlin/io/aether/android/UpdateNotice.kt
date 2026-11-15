@@ -35,6 +35,7 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private var facts: InstallFacts? = null
     private var check: Future<*>? = null
+    private var checkUrl: String? = null
     private var destroyed = false
     private var shown = ""
 
@@ -75,7 +76,9 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
     fun resume(gatewayUrl: String?, awaitGateway: Boolean) {
         val stored = activity.storedUpdate()
         render(stored)
-        if (check?.isDone == false) return
+        // A running check for another gateway must not swallow this one.
+        if (check?.isDone == false && checkUrl == gatewayUrl) return
+        checkUrl = gatewayUrl
         val context = activity.applicationContext
         check =
             executor.submit {

@@ -33,6 +33,14 @@ class ServerReleaseCheckTest {
     }
 
     @Test
+    fun aServerWithBuildMetadataOrABareDirtyMarkMatchesItsReleaseTag() {
+        for (server in listOf("v0.8.7-beta.5+b.412", "v0.8.7-beta.5-dirty")) {
+            val run = serverReleaseCheck(body(serverVersion = server))
+            assertEquals(server, UpdateCheck("v0.8.7-beta.3", "v0.8.7-beta.5", true), parseUpdateCheck(run.line!!))
+        }
+    }
+
+    @Test
     fun aReleaseAheadOfTheServerWaitsForTheServerToUpdateFirst() {
         // The gateway's target is the channel's newest when the server is not ahead of this app.
         val run = serverReleaseCheck(body(version = "v0.8.7-beta.5", serverVersion = "v0.8.7-beta.5", target = "v0.8.7-beta.9"))
