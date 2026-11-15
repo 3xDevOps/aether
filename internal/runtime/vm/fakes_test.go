@@ -264,12 +264,11 @@ func (u *fakeUnits) Start(_ context.Context, name string, argv, properties []str
 
 func (u *fakeUnits) Stop(_ context.Context, name string) error {
 	u.mu.Lock()
-	vmm := u.active[name]
-	delete(u.active, name)
-	u.mu.Unlock()
-	if vmm != nil {
+	defer u.mu.Unlock()
+	if vmm := u.active[name]; vmm != nil {
 		vmm.close()
 	}
+	delete(u.active, name)
 	return nil
 }
 
