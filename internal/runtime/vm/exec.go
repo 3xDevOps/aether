@@ -31,7 +31,7 @@ func processID(kind string) string {
 // A root exec gets sudo's secure_path instead of the VM's PATH, as with
 // Docker.
 func execEnv(rec *record, user string, extra []string) []string {
-	if uid, _, _ := strings.Cut(user, ":"); uid == "0" || uid == "root" {
+	if runtime.RootUser(user) {
 		extra = append(append([]string{}, extra...), runtime.RootPath)
 	}
 	return overrideEnv(rec.Env, extra)

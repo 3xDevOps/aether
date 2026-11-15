@@ -701,7 +701,7 @@ func (d *Docker) exec(ctx context.Context, id ID, cmd []string, workDir, user st
 		AttachStdout: true,
 		AttachStderr: true,
 	}
-	if uid, _, _ := strings.Cut(user, ":"); uid == "0" || uid == "root" {
+	if RootUser(user) {
 		opts.Env = []string{RootPath}
 	}
 	created, err := d.cli.ExecCreate(ctx, string(id), opts)
