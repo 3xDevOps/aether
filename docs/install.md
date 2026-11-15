@@ -803,6 +803,16 @@ updaters install a release only when the signature verifies against a key
 built into the running binary, the manifest names the tag, and each binary
 matches; otherwise they print the error and change nothing. Releases from
 before signing have no manifest, so install those with the install script.
+
+The manifest also signs the release's `channel` (`nightly`, `beta` or
+`stable`), which must match the tag's form (`-nightly.N`, `-beta.N`, none),
+and its `build` and `hotfix` numbers. A release is newer than another when
+its `(build, hotfix)` is higher, whatever the tags say: `v0.9.0-beta.2`
+promoted from build 412 is newer than `v0.9.0-nightly.10` at build 400.
+Releases from before channels carry neither and count as build 0; between
+two of those, the version decides. The server refuses an older build
+without `--allow-downgrade`, and the same build on the same channel; the
+same build under another channel's tag installs.
 The manifest also signs image digests ([edge.md](edge.md#verifying-an-image)).
 
 #### Verify a release by hand

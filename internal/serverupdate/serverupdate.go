@@ -277,7 +277,7 @@ func (s *Service) Status(ctx context.Context, p protocol.ServerUpdateStatusParam
 	check := s.check
 	s.checkMu.Unlock()
 	out.LatestVersion, out.Latest, out.NotesURL, out.CheckError = check.LatestVersion, check.LatestVersion, check.NotesURL, check.Error
-	out.UpdateAvailable = selfupdate.Behind(version.Version, check.LatestVersion)
+	out.UpdateAvailable = selfupdate.Newer(check.latest(), selfupdate.Running())
 	if !check.CheckedAt.IsZero() {
 		out.CheckedAt = check.CheckedAt.UTC().Format(time.RFC3339)
 	}
@@ -432,7 +432,7 @@ func (s *Service) resolveTag(ctx context.Context, tag string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !selfupdate.Behind(version.Version, m.Version) {
+	if !selfupdate.Newer(m.Release(), selfupdate.Running()) {
 		return "", fmt.Errorf("%w: aether-server %s is not older than the latest release %s", ErrUpToDate, version.Version, m.Version)
 	}
 	return m.Version, nil

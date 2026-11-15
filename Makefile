@@ -13,11 +13,19 @@ MODULE  := github.com/3xDevOps/Aether
 # executing. Anything left empty falls back below.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | tr -cd 'A-Za-z0-9.+_-')
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null | tr -cd 'A-Za-z0-9')
+# The release's signed build and hotfix numbers. Anything but one run of
+# digits is dropped without reaching a shell, so a build without them is 0.
+nodigits = $(subst 0,,$(subst 1,,$(subst 2,,$(subst 3,,$(subst 4,,$(subst 5,,$(subst 6,,$(subst 7,,$(subst 8,,$(subst 9,,$(1)))))))))))
+number   = $(if $(and $(filter 1,$(words $(1))),$(if $(call nodigits,$(1)),,1)),$(1))
+BUILD_NUMBER  := $(or $(call number,$(BUILD)),0)
+HOTFIX_NUMBER := $(or $(call number,$(HOTFIX)),0)
 VERSION := $(or $(VERSION),dev)
 COMMIT  := $(or $(COMMIT),unknown)
 LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.Version=$(VERSION) \
-	-X $(MODULE)/internal/version.Commit=$(COMMIT)
+	-X $(MODULE)/internal/version.Commit=$(COMMIT) \
+	-X $(MODULE)/internal/version.Build=$(BUILD_NUMBER) \
+	-X $(MODULE)/internal/version.Hotfix=$(HOTFIX_NUMBER)
 
 DIST := dist
 BUN  := bun

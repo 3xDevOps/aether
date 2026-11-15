@@ -1092,6 +1092,12 @@ signature over it. `aether update`, the dashboard's **Update now** and
 require the manifest's version to match the tag, and check every download
 against it. [install.md](install.md#verified-releases) shows the check by hand.
 
+Nightly releases publish unattended, so a separate list of nightly keys
+verifies only a manifest whose signed `channel` is `nightly`; a leaked
+nightly key cannot produce a beta or stable release. That list is empty
+until the first nightly key ships. A manifest's `channel` must also match its
+tag's form, so a nightly cannot be relabelled beta.
+
 `aether gui build` on Windows checks the desktop app zip the same way, but
 `aether gui build --zip <path>` checks only a local zip's layout: compare it
 with `checksums.txt` first.

@@ -14,6 +14,11 @@ var releaseKeys = mustDecodeKeys(
 	"J+AIq6GUVbRtEQ1ORqKJe3uh9JhvZkEQJQtYpxKbxD8=",
 )
 
+// nightlyKeys sign nightly releases, which publish unattended. A nightly
+// key verifies only a manifest whose signed channel is nightly, so a
+// leaked one cannot produce a beta or stable release.
+var nightlyKeys = mustDecodeKeys()
+
 func mustDecodeKeys(encoded ...string) []ed25519.PublicKey {
 	keys := make([]ed25519.PublicKey, 0, len(encoded))
 	for _, s := range encoded {

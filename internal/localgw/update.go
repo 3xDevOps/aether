@@ -102,7 +102,7 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		return out, nil
 	}
 	out.ServerVersion = info.ServerVersion
-	out.ServerBehind = selfupdate.Behind(info.ServerVersion, check.Latest)
+	out.ServerBehind = selfupdate.Newer(selfupdate.Release{Version: check.Latest}, selfupdate.Release{Version: info.ServerVersion})
 	out.MinClientVersion = info.MinClientVersion
 	out.ClientUpdateRequired = cli.UpgradeRequired(info) != nil
 	return out, nil
@@ -114,7 +114,7 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 // itself. A server that does not answer is not waited for.
 func (g *Gateway) serverFirst(r *http.Request, info protocol.ServerInfoResult, target string) bool {
 	admin := cli.ServerAdmin(info)
-	if target == "" || !cli.ServerFirst(info.ServerVersion, target, admin, true) {
+	if target == "" || !cli.ServerFirst(selfupdate.Release{Version: info.ServerVersion}, selfupdate.Release{Version: target}, admin, true) {
 		return false
 	}
 	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerUpdateStatus, nil)
@@ -145,7 +145,7 @@ func updateTarget(check selfupdate.Check, serverVersion string) string {
 	if check.Dev || check.Disabled {
 		return ""
 	}
-	if core := cli.MatchServer(check.Version, serverVersion); core != "" {
+	if core := cli.MatchServer(selfupdate.Release{Version: check.Version}, selfupdate.Release{Version: serverVersion}); core != "" {
 		return core
 	}
 	if check.UpdateAvailable {

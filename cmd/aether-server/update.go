@@ -201,7 +201,7 @@ func updateTarget(ctx context.Context, baseURL, tag string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !selfupdate.Behind(version.Version, m.Version) {
+	if !selfupdate.Newer(m.Release(), selfupdate.Running()) {
 		return version.Version, nil
 	}
 	return m.Version, nil

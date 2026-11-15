@@ -63,7 +63,7 @@ func (s *Server) upgradeRequired(ctx context.Context) *protocol.Error {
 		client = legacyClientVersion
 	}
 	floor := s.minClientVersion()
-	if !selfupdate.Behind(client, floor) {
+	if !selfupdate.Newer(selfupdate.Release{Version: floor}, selfupdate.Release{Version: client}) {
 		return nil
 	}
 	return protocol.UpgradeRequired(id.clientVersion, s.cfg.release, floor)

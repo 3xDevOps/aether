@@ -108,10 +108,8 @@ func preflight(ctx context.Context, p Plan, tag string, allowDowngrade bool) (se
 	if err != nil {
 		return m, fmt.Errorf("%w: %w", ErrPreflight, retryable{err})
 	}
-	core := version.ReleaseCore(version.Version)
-	if selfupdate.Behind(tag, core) && !allowDowngrade {
-		return m, fmt.Errorf("%w: %s is older than the running %s; pass --allow-downgrade (allow_downgrade) to install it anyway",
-			ErrDowngrade, tag, core)
+	if older := downgrade(selfupdate.Running(), m.Release()); older != nil && !allowDowngrade {
+		return m, fmt.Errorf("%w: %w; pass --allow-downgrade (allow_downgrade) to install it anyway", ErrDowngrade, older)
 	}
 	schema, err := p.Schema(ctx)
 	if err != nil {
@@ -132,6 +130,32 @@ func preflight(ctx context.Context, p Plan, tag string, allowDowngrade bool) (se
 		}
 	}
 	return m, nil
+}
+
+// downgrade is why installing target would not move running forward:
+// running is newer, or target is the same code on the same channel. The
+// same code under another channel's label installs. Two releases from
+// before channels compare by semver against running's release core, so a
+// build past a tag may install that tag.
+func downgrade(running, target selfupdate.Release) error {
+	running.Version = version.ReleaseCore(running.Version)
+	switch {
+	case selfupdate.Newer(running, target):
+		return fmt.Errorf("%s is older than the running %s", label(target), label(running))
+	case selfupdate.SameCode(running, target) && running.Channel == target.Channel:
+		return fmt.Errorf("%s is the same build as the running %s", label(target), label(running))
+	}
+	return nil
+}
+
+func label(r selfupdate.Release) string {
+	switch {
+	case r.Build == 0:
+		return r.Version
+	case r.Hotfix == 0:
+		return fmt.Sprintf("%s (build %d)", r.Version, r.Build)
+	}
+	return fmt.Sprintf("%s (build %d, hotfix %d)", r.Version, r.Build, r.Hotfix)
 }
 
 // probeRetryDelay is the wait before probeAsset asks again after a

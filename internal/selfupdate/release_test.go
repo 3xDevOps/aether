@@ -63,6 +63,9 @@ type fakeRelease struct {
 	// served overrides the bytes sent for an asset, so a download can
 	// disagree with the manifest.
 	served map[string][]byte
+	// builds places a tag on a channel; a tag without one predates
+	// channels.
+	builds map[string]Release
 	// unsigned drops the manifest, the shape of a release still being
 	// published or one from before signing.
 	unsigned bool
@@ -104,7 +107,10 @@ func (f *fakeRelease) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				http.NotFound(w, r)
 				return
 			}
-			data, sig, err := SignManifest(manifestFor(tag, f.assets), testKey)
+			m := manifestFor(tag, f.assets)
+			b := f.builds[tag]
+			m.Channel, m.Build, m.Hotfix = b.Channel, b.Build, b.Hotfix
+			data, sig, err := SignManifest(m, testKey)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return

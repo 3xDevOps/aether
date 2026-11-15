@@ -27,10 +27,18 @@ const checkRetry = 5 * time.Minute
 type checkState struct {
 	CheckedAt     time.Time `json:"checked_at,omitzero"`
 	LatestVersion string    `json:"latest_version,omitempty"`
+	LatestChannel string    `json:"latest_channel,omitempty"`
+	LatestBuild   int       `json:"latest_build,omitempty"`
+	LatestHotfix  int       `json:"latest_hotfix,omitempty"`
 	NotesURL      string    `json:"notes_url,omitempty"`
 	Error         string    `json:"error,omitempty"`
 	Failures      int       `json:"failures,omitempty"`
 	NextAt        time.Time `json:"next_at,omitzero"`
+}
+
+// latest is the newest release the check found, in release order.
+func (st checkState) latest() selfupdate.Release {
+	return selfupdate.Release{Version: st.LatestVersion, Channel: st.LatestChannel, Build: st.LatestBuild, Hotfix: st.LatestHotfix}
 }
 
 func checkPath(dir string) string { return filepath.Join(dir, "check.json") }
@@ -137,6 +145,7 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	switch {
 	case err == nil:
 		st.LatestVersion, st.NotesURL, st.Error, st.Failures = m.Version, m.NotesURL, "", 0
+		st.LatestChannel, st.LatestBuild, st.LatestHotfix = m.Channel, m.Build, m.Hotfix
 		st.NextAt = now.Add(jitter(checkInterval))
 	case errors.Is(err, selfupdate.ErrNoRelease):
 		// The newest release has not published its signed manifest yet:

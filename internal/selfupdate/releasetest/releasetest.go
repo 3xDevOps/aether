@@ -41,6 +41,7 @@ type Release struct {
 	served      map[string][]byte
 	unsigned    bool
 	storeSchema int
+	builds      map[string]selfupdate.Release
 	requests    map[string]int
 }
 
@@ -75,6 +76,7 @@ func newRelease(latest string, assets map[string][]byte) *Release {
 		assets:      assets,
 		served:      map[string][]byte{},
 		storeSchema: store.SchemaVersion(),
+		builds:      map[string]selfupdate.Release{},
 		requests:    map[string]int{},
 	}
 }
@@ -103,6 +105,14 @@ func (r *Release) SetStoreSchema(n int) {
 	r.storeSchema = n
 }
 
+// SetBuild publishes tag on channel with the given build and hotfix; a tag
+// without one is a release from before channels.
+func (r *Release) SetBuild(tag, channel string, build, hotfix int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.builds[tag] = selfupdate.Release{Channel: channel, Build: build, Hotfix: hotfix}
+}
+
 // Tamper serves body for the asset name while the manifest keeps
 // describing the original.
 func (r *Release) Tamper(name string, body []byte) {
@@ -121,6 +131,9 @@ func (r *Release) Requests(path string) int {
 func (r *Release) manifest(tag string) selfupdate.Manifest {
 	m := selfupdate.Manifest{
 		Schema:      selfupdate.ManifestSchema,
+		Channel:     r.builds[tag].Channel,
+		Build:       r.builds[tag].Build,
+		Hotfix:      r.builds[tag].Hotfix,
 		Version:     tag,
 		Commit:      "0123456789abcdef0123456789abcdef01234567",
 		PublishedAt: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC),

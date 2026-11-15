@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -308,5 +309,102 @@ func TestProbeAssetAsksForTheUncompressedBody(t *testing.T) {
 	t.Cleanup(srv.Close)
 	if err := probeAsset(t.Context(), srv.URL, 5); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func setRunning(t *testing.T, tag string, build, hotfix int) {
+	t.Helper()
+	setVersion(t, tag)
+	oldBuild, oldHotfix := version.Build, version.Hotfix
+	version.Build, version.Hotfix = strconv.Itoa(build), strconv.Itoa(hotfix)
+	t.Cleanup(func() { version.Build, version.Hotfix = oldBuild, oldHotfix })
+}
+
+// The preflight orders releases by their signed (build, hotfix), not by the
+// tag: a beta promoted from a later nightly sorts below that nightly by
+// semver, and the same code may install under another channel's label but
+// never twice under one.
+func TestPreflightOrdersReleasesByBuild(t *testing.T) {
+	type release struct {
+		tag, channel  string
+		build, hotfix int
+	}
+	for _, tc := range []struct {
+		name            string
+		running, target release
+		refused         string
+	}{
+		{name: "beta from a later nightly",
+			running: release{"v0.9.0-nightly.10", "nightly", 400, 0}, target: release{"v0.9.0-beta.2", "beta", 412, 0}},
+		{name: "earlier nightly over a later beta",
+			running: release{"v0.9.0-beta.2", "beta", 412, 0}, target: release{"v0.9.0-nightly.10", "nightly", 400, 0},
+			refused: "v0.9.0-nightly.10 (build 400) is older than the running v0.9.0-beta.2 (build 412)"},
+		{name: "relabel onto another channel",
+			running: release{"v0.9.0-nightly.12", "nightly", 412, 0}, target: release{"v0.9.0-beta.2", "beta", 412, 0}},
+		{name: "relabel on the same channel",
+			running: release{"v0.9.0-beta.2", "beta", 412, 0}, target: release{"v0.9.0-beta.3", "beta", 412, 0},
+			refused: "v0.9.0-beta.3 (build 412) is the same build as the running v0.9.0-beta.2 (build 412)"},
+		{name: "hotfix above its stable",
+			running: release{"v0.9.0", "stable", 412, 0}, target: release{"v0.9.1", "stable", 412, 1}},
+		{name: "stable below its hotfix",
+			running: release{"v0.9.1", "stable", 412, 1}, target: release{"v0.9.0", "stable", 412, 0},
+			refused: "v0.9.0 (build 412) is older than the running v0.9.1 (build 412, hotfix 1)"},
+		{name: "a release from before channels",
+			running: release{"v0.9.0-beta.2", "beta", 412, 0}, target: release{"v0.8.7-beta.14", "", 0, 0},
+			refused: "v0.8.7-beta.14 is older than the running v0.9.0-beta.2 (build 412)"},
+		{name: "the first release with a build",
+			running: release{"v0.8.7-beta.14", "", 0, 0}, target: release{"v0.8.7", "stable", 412, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setRunning(t, tc.running.tag, tc.running.build, tc.running.hotfix)
+			e := newEnv(t, false)
+			e.rel.SetBuild(tc.target.tag, tc.target.channel, tc.target.build, tc.target.hotfix)
+			err := e.updateNow(t, protocol.ServerUpdateParams{Version: tc.target.tag})
+			if tc.refused == "" {
+				if err != nil {
+					t.Fatalf("update to %s: %v", tc.target.tag, err)
+				}
+				if got := e.read(t, e.self); got != newServerBinary {
+					t.Fatalf("aether-server = %q, want %s installed", got, tc.target.tag)
+				}
+				return
+			}
+			if !errors.Is(err, ErrDowngrade) || !strings.Contains(err.Error(), tc.refused) {
+				t.Fatalf("err = %v, want a downgrade refusal naming %q", err, tc.refused)
+			}
+			if got := e.read(t, e.self); got != "the old binary" {
+				t.Fatalf("aether-server = %q, want it untouched", got)
+			}
+			if err := e.updateNow(t, protocol.ServerUpdateParams{Version: tc.target.tag, AllowDowngrade: true}); err != nil {
+				t.Fatalf("allowed downgrade: %v", err)
+			}
+		})
+	}
+}
+
+// allow_downgrade lowers the build but never the store schema.
+func TestALowerBuildWithAnOlderStoreSchemaIsAlwaysRefused(t *testing.T) {
+	setRunning(t, "v0.9.0-beta.2", 412, 0)
+	e := newEnv(t, false)
+	e.rel.SetBuild("v0.9.0-nightly.10", "nightly", 400, 0)
+	e.rel.SetStoreSchema(store.SchemaVersion() - 1)
+	err := e.updateNow(t, protocol.ServerUpdateParams{Version: "v0.9.0-nightly.10", AllowDowngrade: true})
+	if !errors.Is(err, ErrDowngrade) || !strings.Contains(err.Error(), "this database is at schema") {
+		t.Fatalf("err = %v, want the schema refusal", err)
+	}
+}
+
+// The background check reports an update by build order.
+func TestStatusReportsAnUpdateByBuild(t *testing.T) {
+	setRunning(t, "v0.9.0-nightly.10", 400, 0)
+	feed := &fakeFeed{}
+	feed.set(selfupdate.Manifest{Version: "v0.9.0-beta.2", Channel: "beta", Build: 412}, nil)
+	svc := newCheckService(t, t.TempDir(), feed, time.Now)
+	got, err := svc.Status(t.Context(), protocol.ServerUpdateStatusParams{Refresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.UpdateAvailable {
+		t.Fatalf("status = %+v, want v0.9.0-beta.2 (build 412) offered over v0.9.0-nightly.10 (build 400)", got)
 	}
 }
