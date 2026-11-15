@@ -613,8 +613,8 @@ only the release keys built into it.
 
 It refuses to start while a container named `aether-edge` exists, removes
 everything it creates, and takes about two minutes with warm caches. CI runs
-it in `edge-image.yml` in the merge queue and on `main`, and in `release.yml`
-before a release publishes.
+it in `edge-image.yml` in the merge queue and on `main`, and in
+`release-build.yml` before a release publishes.
 
 ## Dashboard component tests
 

@@ -482,11 +482,14 @@ git push origin v0.8.0
 Push tags one at a time: GitHub starts no workflow when more than three are
 pushed at once. Do not create the GitHub release yourself.
 `.github/workflows/release.yml` runs only when the tag's pusher is a
-repository admin and `AETHER_RELEASE_SIGNING_KEY` is set. It builds every
-binary, the Windows desktop zips, the signed Android app, the guest kernel
-for session VMs and the browser, edge and standard images from the tag's
-commit, runs the edge upgrade qualification and a Defender scan, and uploads
-the assets to a draft. After
+repository admin and `AETHER_RELEASE_SIGNING_KEY` is set, and calls
+`.github/workflows/release-build.yml`. That builds every binary, the Windows
+desktop zips, the signed Android app, the guest kernel for session VMs and
+the browser, edge and standard images from the tag's commit, and runs the
+edge upgrade qualification and a Defender scan. Its `release` job alone
+holds the signing key: it checks out `main`, checks that the assets were
+built from the tag's commit, signs them with `main`'s `release-manifest`
+and uploads them to a draft with `main`'s `scripts/publish-release.sh`. After
 checking them against the signed manifest it publishes a normal release,
 not a GitHub prerelease, because the installers and update checks read
 `/releases/latest`, which skips prereleases. Only a release whose signed
