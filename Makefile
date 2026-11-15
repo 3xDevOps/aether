@@ -129,12 +129,15 @@ ANDROID_RUN = docker run --rm \
 # Android installs an update only when its versionCode is above the installed
 # one, so the number has to rise with every release. A commit count does not,
 # across branches: a hotfix tagged off a shorter branch scores below the
-# release it fixes. scripts/android-version-code.sh derives it from the tag
-# instead and carries the formula and its ceilings. An unsigned or debug APK
-# can never install over a release, so an untagged tree builds code 1 rather
-# than failing; a signed build refuses a tag the script cannot parse, in the
-# recipe below. Assigned lazily - only `android` reads it.
-ANDROID_VERSION_CODE = $(or $(shell sh scripts/android-version-code.sh '$(VERSION)' 2>/dev/null),1)
+# release it fixes. scripts/android-version-code.sh derives it from the tag,
+# or from RELEASE_BUILD and RELEASE_HOTFIX when either is set, and carries
+# the formulas and their ceilings. An unsigned or debug APK can never install
+# over a release, so an untagged tree builds code 1 rather than failing; a
+# signed build, or one given a build, refuses a tag or build the script
+# cannot use, in the recipe below. Assigned lazily - only `android` reads it.
+ANDROID_BUILD_ARGS = $(if $(filter-out 0,$(BUILD_NUMBER) $(HOTFIX_NUMBER)),'$(BUILD_NUMBER)' '$(HOTFIX_NUMBER)')
+ANDROID_CODE_ARGS = '$(VERSION)' $(ANDROID_BUILD_ARGS)
+ANDROID_VERSION_CODE = $(or $(shell sh scripts/android-version-code.sh $(ANDROID_CODE_ARGS) 2>/dev/null),1)
 
 # versionName is a label Android never compares, but Play prints it in the
 # store listing and Android prints it in the phone's app info, where the tag's
@@ -345,7 +348,7 @@ android: android-cli
 		echo 'make android: ANDROID_KEYSTORE_FILE does not name a file: $(ANDROID_KEYSTORE_FILE)' >&2; \
 		exit 1; \
 	fi
-	@[ -z '$(ANDROID_SIGNING)' ] || sh scripts/android-version-code.sh '$(VERSION)' >/dev/null
+	@[ -z '$(ANDROID_SIGNING)$(ANDROID_BUILD_ARGS)' ] || sh scripts/android-version-code.sh $(ANDROID_CODE_ARGS) >/dev/null
 	$(ANDROID_RUN) $(ANDROID_SIGNING) $(ANDROID_IMAGE) \
 		./gradlew --console=plain test assembleRelease bundleRelease \
 			'-PaetherVersionName=$(ANDROID_VERSION_NAME)' -PaetherVersionCode=$(ANDROID_VERSION_CODE)
