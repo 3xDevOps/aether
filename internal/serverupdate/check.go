@@ -39,8 +39,8 @@ type checkState struct {
 	Pointers selfupdate.Marks `json:"pointers,omitempty"`
 	// Channel is the release channel the latest fields were found on.
 	Channel string `json:"channel,omitempty"`
-	// Published is each channel's verified pointer at this check.
-	Published map[string]publishedPointer `json:"published,omitempty"`
+	// followed is the pointer this check accepted, zero when none.
+	followed selfupdate.Pointer
 }
 
 // forget drops the latest fields, which a check on another channel than
@@ -86,6 +86,10 @@ func backoff(n int) time.Duration {
 	return min(d, checkInterval)
 }
 
+// checkTimeout bounds one background check with what it schedules, so a
+// stalled release host fails it instead of holding the check.
+const checkTimeout = time.Minute
+
 // refreshEvery is the least time between the checks that
 // server.update_status refresh can force, since any member may call it.
 const refreshEvery = time.Minute
@@ -123,7 +127,9 @@ func (s *Service) Start(ctx context.Context) error {
 				continue
 			case <-timer.C:
 			}
-			s.checkAndSchedule(ctx)
+			checkCtx, cancel := context.WithTimeout(ctx, checkTimeout)
+			s.checkAndSchedule(checkCtx)
+			cancel()
 		}
 	}()
 	return nil
@@ -154,19 +160,17 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 }
 
 // checkLocked is runCheck for a caller holding run. A check whose ctx
-// ended is not recorded: the request went away, the release host did not
-// fail.
+// was cancelled is not recorded: the request went away, the release host
+// did not fail. One past its deadline is a failed check.
 func (s *Service) checkLocked(ctx context.Context) checkState {
 	s.checkRuns.Add(1)
 	s.reloadState()
 	st := s.check
 	m, marks, channel, followed, err := s.latest(ctx, st.Pointers)
-	if err != nil && ctx.Err() != nil {
+	if err != nil && errors.Is(ctx.Err(), context.Canceled) {
 		return s.check
 	}
-	if channel != "" {
-		st.Published = s.published(ctx, channel, followed)
-	}
+	st.followed = followed
 	now := s.cfg.Now().UTC()
 	st.CheckedAt, st.Pointers = now, marks
 	if st.Channel != channel {
@@ -274,6 +278,9 @@ func (s *Service) latest(ctx context.Context, marks selfupdate.Marks) (selfupdat
 // Nothing here touches the marks, the channel or what the server takes.
 func (s *Service) published(ctx context.Context, channel string, followed selfupdate.Pointer) map[string]publishedPointer {
 	out := map[string]publishedPointer{}
+	if channel == "" {
+		return out
+	}
 	for _, ch := range []string{selfupdate.ChannelNightly, selfupdate.ChannelBeta, selfupdate.ChannelStable} {
 		p := followed
 		if ch != channel {

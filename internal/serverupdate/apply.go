@@ -49,7 +49,7 @@ func (s *Service) Tick(ctx context.Context) {
 	}
 	restart, err := s.apply(ctx, *state.Pending, false, true)
 	if err != nil {
-		if !errors.Is(err, ErrBusy) && !errors.Is(err, ErrHeld) && !errors.Is(err, errBecameBusy) {
+		if !errors.Is(err, ErrBusy) && !errors.Is(err, ErrHeld) && !errors.Is(err, errBecameBusy) && !errors.Is(err, errNoLongerPending) {
 			slog.Error("serverupdate: scheduled update failed", "version", state.Pending.Version, "error", err)
 		}
 		return
@@ -126,6 +126,10 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdatePreflight, pending.Version, "")
 	plan := s.plan(pending)
 	m, err := preflight(ctx, plan, pending.Version, allowDowngrade)
+	if err == nil && scheduled && !s.stillPending(ctx, pending) {
+		s.release()
+		return nil, errNoLongerPending
+	}
 	if err == nil && scheduled {
 		err = s.stillTaken(ctx, pending, m)
 	}
@@ -159,6 +163,10 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	restartCtx := context.WithoutCancel(ctx)
 	return func() { s.restart(restartCtx, pending, rec) }, nil
 }
+
+// errNoLongerPending is a scheduled update cancelled or replaced during
+// its preflight.
+var errNoLongerPending = errors.New("the scheduled update was cancelled or replaced during its preflight")
 
 // errBecameBusy is a scheduled update undone because the server stopped
 // being idle while the release downloaded.
@@ -219,6 +227,8 @@ func swap(ctx context.Context, p Plan, tag string, m selfupdate.Manifest) (*swap
 		Phase:       recordSwapping,
 		FromVersion: version.Version,
 		ToVersion:   tag,
+		ToBuild:     m.Build,
+		ToHotfix:    m.Hotfix,
 		RequestedBy: p.RequestedBy,
 		Binaries:    []string{p.Self},
 		At:          p.Now().UTC(),
@@ -371,6 +381,11 @@ func (s *Service) undo(ctx context.Context, pending store.PendingServerUpdate, r
 		slog.Error("serverupdate: write the swap record", "error", err)
 	}
 	s.release()
+	if pending.RequestedBy == ServerActor {
+		if err := s.decline(ctx, selfupdate.Release{Version: rec.ToVersion, Build: rec.ToBuild, Hotfix: rec.ToHotfix}); err != nil {
+			slog.Error("serverupdate: a rolled-back update stays eligible", "version", rec.ToVersion, "error", err)
+		}
+	}
 	s.record(ctx, pending.Version, store.ServerUpdateRolledBack, detail)
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdateRolledBack, pending.Version, detail)
 }

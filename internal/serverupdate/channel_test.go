@@ -185,8 +185,9 @@ func TestStatusShowsEveryChannelsVerifiedPointer(t *testing.T) {
 	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.2", 412), releasetest.Key)
 	publishPointer(t, rel, "stable", pointer("stable", "v0.9.0", 412), releasetest.Key)
 	svc := channelService(t, t.TempDir(), rel.URL, "beta")
-	if st := svc.runCheck(t.Context()); st.Error != "" {
-		t.Fatal(st.Error)
+	svc.checkAndSchedule(t.Context())
+	if svc.check.Error != "" {
+		t.Fatal(svc.check.Error)
 	}
 	got, err := svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
@@ -207,9 +208,10 @@ func TestStatusShowsEveryChannelsVerifiedPointer(t *testing.T) {
 	}
 	publishPointer(t, rel, "stable", pointer("stable", "v0.9.0", 999), forger)
 	before := svc.check
-	st := svc.runCheck(t.Context())
-	if _, ok := st.Published["stable"]; ok || st.Error != "" || len(st.Published) != 2 {
-		t.Fatalf("check with a forged stable.json = %+v, want stable left out and no error", st)
+	svc.checkAndSchedule(t.Context())
+	st := svc.check
+	if _, ok := svc.pointers["stable"]; ok || st.Error != "" || len(svc.pointers) != 2 {
+		t.Fatalf("check with a forged stable.json = %+v, pointers %+v, want stable left out and no error", st, svc.pointers)
 	}
 	if !maps.Equal(st.Pointers, before.Pointers) || st.Channel != "beta" || st.LatestVersion != before.LatestVersion {
 		t.Fatalf("a forged display pointer changed the check: %+v, was %+v", st, before)

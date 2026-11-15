@@ -733,8 +733,9 @@ pending update `by_server`, and the timeline names `server` as its actor.
 It never replaces an update a member scheduled, and never schedules a
 release from before channels or one the preflight refuses. It schedules
 nothing while it has not chosen its channel, or when it runs a build from
-source (a version past a tag, or dirty); `server.update_status` still
-offers the release. A super admin's `--cancel`, an `--allow-downgrade`
+source (no signed build number, a version past a tag, or dirty);
+`server.update_status` still offers the release. An update the server
+scheduled that rolls back is declined like a failed one. A super admin's `--cancel`, an `--allow-downgrade`
 update, and a scheduled update that fails (after 3 tries for a network
 error) mark that build declined in the database; `server.update_status`
 shows it as `declined`, and the server schedules only a higher build by

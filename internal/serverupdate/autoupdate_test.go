@@ -273,9 +273,11 @@ func TestDeclineSurvivesCheckStateAndRestart(t *testing.T) {
 	}
 }
 
-// A cancel that arrives while the server is scheduling waits for it and
-// then cancels what it scheduled, so the scheduling cannot undo it.
-func TestCancelDuringSchedulingHolds(t *testing.T) {
+// A rollback's or cancel's decline while the server's scheduling waits on
+// the network does not wait for it, and the scheduling, deciding again
+// afterwards, schedules nothing. A cancel while a check holds the slot
+// returns at once too.
+func TestDeclineDuringSchedulingHolds(t *testing.T) {
 	e := autoEnv(t, selfupdate.ChannelNightly)
 	e.busy = domain.ServerBusy{Runs: 1}
 	e.svc.runCheck(t.Context())
@@ -285,6 +287,22 @@ func TestCancelDuringSchedulingHolds(t *testing.T) {
 	done := make(chan struct{})
 	go func() { e.svc.schedule(t.Context()); close(done) }()
 	<-probing
+	declined := make(chan error, 1)
+	go func() { declined <- e.svc.decline(t.Context(), e.svc.known("v0.9.0-nightly.13")) }()
+	select {
+	case err := <-declined:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the decline waited on the scheduling's network")
+	}
+	close(resume)
+	<-done
+	e.wantPending(t, "", "")
+
+	e.svc.run <- struct{}{}
+	defer func() { <-e.svc.run }()
 	cancelled := make(chan error, 1)
 	go func() {
 		_, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel})
@@ -292,16 +310,82 @@ func TestCancelDuringSchedulingHolds(t *testing.T) {
 	}()
 	select {
 	case err := <-cancelled:
-		t.Fatalf("the cancel did not wait for the scheduling: %v", err)
-	case <-time.After(100 * time.Millisecond):
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancel waited on a running check")
+	}
+}
+
+// A scheduled update cancelled while its idle moment's preflight runs is
+// not applied.
+func TestCancelDuringTheIdlePreflightHolds(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.busy = domain.ServerBusy{Runs: 1}
+	e.svc.checkAndSchedule(t.Context())
+	e.wantPending(t, "v0.9.0-nightly.13", ServerActor)
+	e.busy, e.underSystemd = domain.ServerBusy{}, true
+	probing, resume := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	e.onRequest = func() { once.Do(func() { close(probing); <-resume }) }
+	done := make(chan struct{})
+	go func() { e.svc.Tick(t.Context()); close(done) }()
+	<-probing
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel}); err != nil {
+		t.Fatal(err)
 	}
 	close(resume)
 	<-done
-	if err := <-cancelled; err != nil {
+	if got := e.read(t, e.self); got != "the old binary" {
+		t.Fatal("a cancelled update was applied")
+	}
+	if state, err := e.db.GetServerUpdate(t.Context()); err != nil || state.Last != nil {
+		t.Fatalf("state = %+v, %v; want the cancel as the only outcome", state, err)
+	}
+}
+
+// An update the server scheduled that rolled back stays declined after an
+// unrelated update replaces the last attempt.
+func TestRolledBackServerUpdateIsDeclined(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	trial := &Trial{dir: e.state, rec: &swapRecord{
+		Phase: recordRolledBack, FromVersion: "v0.9.0-nightly.12", ToVersion: "v0.9.0-nightly.13", ToBuild: 413,
+		RequestedBy: string(ServerActor), Error: "did not start", At: e.now,
+	}}
+	if err := saveRecord(e.state, trial.rec); err != nil {
 		t.Fatal(err)
 	}
+	if err := trial.Commit(t.Context(), e.db, e.bus); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.db.SetLastServerUpdate(t.Context(), store.ServerUpdateAttempt{Version: "v0.9.0-nightly.11", Outcome: store.ServerUpdateFailed, Detail: "x", At: e.now}); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.checkAndSchedule(t.Context())
 	e.wantPending(t, "", "")
-	e.svc.schedule(t.Context())
+}
+
+// A build from source at a clean tag is not a stamped release and never
+// replaces itself.
+func TestUnstampedBuildSchedulesNothing(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	setRunning(t, "v0.9.0-nightly.12", 0, 0)
+	e.svc.checkAndSchedule(t.Context())
+	e.wantPending(t, "", "")
+}
+
+// A version-only declined mark is kept beside a later mark with a build.
+func TestDeclinedVersionSurvivesABuildMark(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	if err := e.svc.decline(t.Context(), selfupdate.Release{Version: "v0.9.0-nightly.14"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.decline(t.Context(), selfupdate.Release{Version: "v0.9.0-nightly.13", Build: 413}); err != nil {
+		t.Fatal(err)
+	}
+	publishPointer(t, e.rel, "nightly", pointer("nightly", "v0.9.0-nightly.14", 414), releasetest.NightlyKey)
+	e.svc.checkAndSchedule(t.Context())
 	e.wantPending(t, "", "")
 }
 

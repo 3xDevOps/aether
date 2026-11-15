@@ -158,6 +158,13 @@ type Service struct {
 	run     chan struct{}
 	checkMu sync.Mutex
 	check   checkState
+	// pointers is each channel's verified pointer at the last check, for
+	// display. Guarded by checkMu.
+	pointers map[string]publishedPointer
+	// decideMu serializes what the server schedules by itself with the
+	// cancels, rollbacks and channel changes that decline or retire it. It
+	// is held only around store reads and writes, never the network.
+	decideMu sync.Mutex
 	// stateErr is why check.json could not be read on a server following a
 	// channel. Starting afresh would drop the channel marks, so every check
 	// fails with it and the file is not overwritten until it reads again.
@@ -436,21 +443,29 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 // cancel clears the pending update. Cancelling nothing is not an error:
 // the caller asked for no pending update and there is none.
 //
-// The cancelled release is declined first, under the slot the server
+// The cancelled release is declined first, with its build read from its
+// manifest when the server does not know it, under the lock the server
 // schedules under, so a cancel whose mark cannot be kept changes nothing
 // and the server cannot schedule the release again in between.
 func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.ServerUpdateResult, error) {
-	release, err := s.hold(ctx)
-	if err != nil {
-		return protocol.ServerUpdateResult{}, err
-	}
-	defer release()
 	state, err := s.cfg.Store.GetServerUpdate(ctx)
 	if err != nil {
 		return protocol.ServerUpdateResult{}, err
 	}
+	var resolved selfupdate.Release
 	if state.Pending != nil {
-		if err := s.declineLocked(ctx, s.known(state.Pending.Version)); err != nil {
+		resolved = s.resolve(ctx, state.Pending.Version)
+	}
+	s.decideMu.Lock()
+	defer s.decideMu.Unlock()
+	if state, err = s.cfg.Store.GetServerUpdate(ctx); err != nil {
+		return protocol.ServerUpdateResult{}, err
+	}
+	if state.Pending != nil {
+		if resolved.Version != state.Pending.Version {
+			resolved = s.known(state.Pending.Version)
+		}
+		if err := raiseDeclined(ctx, s.cfg.Store, resolved); err != nil {
 			return protocol.ServerUpdateResult{}, err
 		}
 	}

@@ -104,7 +104,10 @@ func (s *Service) describeChannel(ctx context.Context, out *protocol.ServerUpdat
 	}
 	running := selfupdate.Running()
 	out.ServerBuild, out.ServerHotfix = running.Build, running.Hotfix
-	for ch, p := range check.Published {
+	s.checkMu.Lock()
+	pointers := s.pointers
+	s.checkMu.Unlock()
+	for ch, p := range pointers {
 		if out.ChannelPointers == nil {
 			out.ChannelPointers = map[string]protocol.ChannelPointer{}
 		}
@@ -168,23 +171,15 @@ func (s *Service) SetChannel(ctx context.Context, actor domain.MemberID, p proto
 		out.Retired = pending.Version
 	}
 	if !p.DryRun {
-		if err := s.cfg.Store.SetReleaseChannel(ctx, p.Channel); err != nil {
+		retired, err := s.saveChannel(ctx, p.Channel, pending, reason)
+		if err != nil {
 			return protocol.ServerReleaseChannelSetResult{}, err
 		}
 		out.Saved = true
-		if pending != nil {
-			detail := fmt.Sprintf("the server moved to the %s channel, which does not take it: %s", p.Channel, reason)
-			retired, rerr := s.cfg.Store.RetirePendingServerUpdate(ctx, *pending, store.ServerUpdateAttempt{
-				Version: pending.Version, Outcome: store.ServerUpdateFailed, Detail: detail, At: s.cfg.Now().UTC(),
-			})
-			switch {
-			case rerr != nil:
-				return protocol.ServerReleaseChannelSetResult{}, rerr
-			case retired:
-				s.publish(ctx, actor, events.ServerUpdateCancelled, pending.Version, detail)
-			default:
-				out.Retired = ""
-			}
+		if retired {
+			s.publish(ctx, actor, events.ServerUpdateCancelled, pending.Version, retiredDetail(p.Channel, reason))
+		} else {
+			out.Retired = ""
 		}
 	}
 	if !s.checks() {
@@ -209,6 +204,23 @@ func (s *Service) SetChannel(ctx context.Context, actor domain.MemberID, p proto
 		out.Wait = Waits(running, target)
 	}
 	return out, nil
+}
+
+// saveChannel saves channel and retires pending, if it is still the
+// pending update, under decideMu, reporting whether it retired it.
+func (s *Service) saveChannel(ctx context.Context, channel string, pending *store.PendingServerUpdate, reason string) (bool, error) {
+	s.decideMu.Lock()
+	defer s.decideMu.Unlock()
+	if err := s.cfg.Store.SetReleaseChannel(ctx, channel); err != nil || pending == nil {
+		return false, err
+	}
+	return s.cfg.Store.RetirePendingServerUpdate(ctx, *pending, store.ServerUpdateAttempt{
+		Version: pending.Version, Outcome: store.ServerUpdateFailed, Detail: retiredDetail(channel, reason), At: s.cfg.Now().UTC(),
+	})
+}
+
+func retiredDetail(channel, reason string) string {
+	return fmt.Sprintf("the server moved to the %s channel, which does not take it: %s", channel, reason)
 }
 
 // untaken is the pending update channel does not take, and why: its
@@ -241,6 +253,7 @@ func (s *Service) checkNow(ctx context.Context) (selfupdate.Release, error) {
 	}
 	st := s.checkLocked(ctx)
 	<-s.run
+	s.showPointers(ctx, st)
 	s.schedule(ctx)
 	if st.Error != "" {
 		return selfupdate.Release{}, errors.New(st.Error)
