@@ -6,9 +6,11 @@ nightly at most every 4 hours. An admin promotes a nightly to beta and a
 beta to stable. One setting on the server picks the channel for the server
 and the apps that connect to it.
 
-**Status:** approved by the owner, 2026-11-15. The decisions dated
-2026-11-14/15 are the owner's. Everything marked *Assumption* is this
-plan's choice and stands unless the owner changes it.
+**Status:** approved by the owner, 2026-11-15, except which channels
+apply updates by themselves ([Open questions](#open-questions)). The
+decisions dated 2026-11-14/15 are the owner's. Everything marked
+*Assumption* is this plan's choice and stands unless the owner changes
+it.
 
 ## Decisions (2026-11-14/15)
 
@@ -41,9 +43,9 @@ plan's choice and stands unless the owner changes it.
 - The first stable is `v0.8.7`, promoted from a beta. Existing installs
   land on beta. New installs default to stable once it exists. Nightlies
   then start at `v0.9.0-nightly.1`.
-- A server on nightly applies updates by itself when idle, like any
-  channel ([Applying updates](#applying-updates)). The project's own
-  server runs nightly.
+- A server on nightly applies updates by itself when idle
+  ([Applying updates](#applying-updates)). The project's own server runs
+  nightly.
 - Nightly assets are pruned after 14 days, except a nightly a waiting
   server may still run ([Pruning](#pruning)). Beta and stable are kept.
 
@@ -96,7 +98,7 @@ that tag. Only Edge has anything like a channel. Android files are under
 | CLI | `aether update`: `--version`, else the linked server's release when the server is ahead (`cmd/aether/update.go:85-93`, `internal/cli/update.go:16`), else `DefaultChecker` → Latest | the user | Follows its default server |
 | Desktop app | `aether gui` runs `DefaultChecker` (`cmd/aether/gui.go:84`); `localgw.updateTarget` prefers the server's release (`internal/localgw/update.go:144-155`). The Electron shell has no updater (`desktop/main.js:285-289`); it is rebuilt after the CLI updates | the dashboard banner or the menu | Follows its default server, through the CLI |
 | Android | Notice: the bundled CLI's `update --check --json` (`UpdateNotice.kt:175-198`), so Latest. Gate: the gateway's `update.check`, offering only the server's release (`GateCheck.kt:66-83`). The APK comes from the release assets, or the Play listing for Play installs (`UpdateTarget.kt:56-62`) | hourly check; the user installs | Follows its server |
-| Edge | `docker pull ghcr.io/3xdevops/aether-edge:$channel`, `AETHER_EDGE_UPDATE_CHANNEL` `stable` or `latest` (`scripts/edge-update.sh:66`, `:497`); `:stable` needs a `promote-edge.yml` attestation (`:516-521`) and `release-check` against the signed manifest (`:523`) | systemd timer, daily | Its own setting, the same three names; the hosted service follows `stable` |
+| Edge | `docker pull ghcr.io/3xdevops/aether-edge:$channel`, `AETHER_EDGE_UPDATE_CHANNEL` `stable` or `latest` (`scripts/edge-update.sh:66`, `:496`); `:stable` needs a `promote-edge.yml` attestation (`:518-520`) and `release-check` against the signed manifest (`:522`) | systemd timer, daily | Its own setting, the same three names; the hosted service follows `stable` |
 | Dashboard banner | Server row from `server.update_status` (`web/src/store/updates.ts:287-333`); client row from the gateway's `update.check` (`:246-273`); the `-32005` gate swaps in `UpdateGate` (`web/src/App.tsx:138-140`) | every 30 minutes and on focus (`web/src/components/update-checks.tsx:18-42`) | Shows the server's channel and the wait state |
 | Install scripts | `/releases/latest`, falling back to the newest complete non-prerelease (`scripts/install.sh:510-520`, `:655-688`; `scripts/install.ps1:312`, `:695-723`); `AETHER_VERSION` pins a tag | the user | Unchanged: Latest is stable once it exists |
 
@@ -398,17 +400,30 @@ the host, prints the same text, and needs `--yes`. It is a flag because
 ### Applying updates
 
 The owner's decision: a server on nightly applies updates by itself when
-idle, like any channel. Today no channel does: the background check only
-records the newest release (`internal/serverupdate/check.go:125`), and a
-super admin schedules each update with `server.update` `idle` or `now`
-(`internal/sshd/serverupdate.go:62`). *Assumption,* for the owner to
+idle, "like any channel". Today no channel does: the background check
+only records the newest release (`internal/serverupdate/check.go:125`),
+and each update starts with a super admin's `server.update` `idle` or
+`now` (`internal/sshd/serverupdate.go:61`). *Assumption,* for the owner to
 confirm before pull request 3 builds it: on every channel, when the check
 finds a release on the server's channel above the running build, the
 server schedules it itself, exactly as `server.update` `idle` would, and
-it applies once no session is working. `AETHER_NO_UPDATE_CHECK=1`, which
-already turns the check off, turns this off with it. The narrower reading
-is that only a nightly server does this and beta and stable servers keep
-waiting for a super admin.
+it applies once no session is working. The narrower reading is that only
+a nightly server does this and beta and stable servers keep waiting for a
+super admin.
+
+Under either reading:
+
+- `AETHER_NO_UPDATE_CHECK=1`, which already turns the check off, turns
+  this off with it.
+- The server never schedules a build a super admin turned down. A
+  `cancel`, an `allow_downgrade` update, and an update recorded failed
+  after its 3 retries (`internal/serverupdate/apply.go:21`) each store
+  that build as declined in `server-update/check.json`. The server
+  schedules by itself only a build above the declined one, so a rollback
+  holds until a newer build ships. A super admin's own `server.update`
+  ignores the mark.
+- The audit log names the server, not a member, as the actor of an update
+  it scheduled.
 
 ### Apps follow their server
 
@@ -450,11 +465,12 @@ and keeps its own mechanism: an Edge host has its own setting,
 default `stable`. Its compat floors (`internal/selfupdate/manifest.go:76-98`)
 already let an older Edge serve newer servers.
 
-The hosted Aether Edge service follows `stable`, the way an Edge host
-does today: its `edge-update.sh` timer pulls `aether-edge:stable`, which
-moves only when an admin runs `promote-edge.yml` for a published stable
-release, and the host installs it only with that run's attestation and a
-passing `release-check`. Nothing on the hosted service changes.
+The hosted Aether Edge service follows `stable`. *Assumption:* it is an
+Edge host like any other, set to `stable` (the repository holds no
+deployment config for it). Its `edge-update.sh` timer pulls
+`aether-edge:stable`, which moves only when an admin runs
+`promote-edge.yml` for a published stable release, and the host installs
+it only with that run's attestation and a passing `release-check`.
 
 - The image tags `:nightly`, `:beta` and `:stable` move with the matching
   pointer. `:latest` keeps following GitHub's Latest
@@ -465,12 +481,34 @@ passing `release-check`. Nothing on the hosted service changes.
   (`promote-edge.yml@refs/heads/main`), which hosts pin
   (`scripts/edge-update.sh:21`) and copy by hand, so they keep verifying.
   Each move publishes the `edge-promotion/v1` attestation naming the
-  channel.
+  channel, which today is always `stable` (`promote-edge.yml:274`).
 - `:stable` keeps its own step: an admin dispatches `promote-edge.yml`
-  for the stable release, as today. Its 24-hour soak, counted from that
-  release's publication and skipped with `soak_override_reason`, stays.
-  It is Edge's own rule and delays no promotion: Promote to stable never
-  waits on it.
+  for the stable release, as today. Its 24-hour soak counts from that
+  release's publication, which is when Promote ran, and
+  `soak_override_reason` skips it. Promote to stable never waits on it.
+  The compat floors let the older Edge serve updated servers meanwhile; a
+  stable that raises them needs the override.
+- `promote-edge.yml` reads today's release layout in four places, each of
+  which changes:
+  - Image attestations are signed by the workflow that ran the attest
+    step. After the split that is `release-build.yml`, not `release.yml`
+    (`promote-edge.yml:188`, `:254`). Pull request 6 accepts
+    `release-build.yml` and, for releases built before it, `release.yml`.
+    A release Promote or `nightly.yml` built has source ref
+    `refs/heads/main`; a pushed tag keeps `refs/tags/<tag>`.
+  - The qualifying run is looked up as a `release.yml` push run for the
+    tag (`:140-145`), and its `edge-qualify` job by name (`:149`). A
+    release Promote or `nightly.yml` built is found through that
+    workflow's run for the commit, and a called job is named
+    `<caller job> / edge-qualify`.
+  - Order comes from `android-version-code.sh "$TAG"` (`:114`,
+    `:219-226`), which cannot order channel releases; it moves to the
+    manifests' `(build, hotfix)` from `release-check`.
+  - The admin check (`:63-72`) and the soak (`:164-172`) apply to
+    `:stable` dispatches only. A call is covered by its caller's rule:
+    Promote's admin check, and for a scheduled nightly the green `main`
+    commit. The `edge-promotion` environment (`:79`) must have no
+    required reviewers, or every nightly waits on a person.
 - A host that changes channel runs an image attested on its old channel,
   which `edge-update.sh:230-233` would refuse. It accepts the running
   image's attestation on any channel; the new image still needs one on
@@ -546,7 +584,12 @@ so pruning it would leave new and gated clients a 404. Pruning therefore
 keeps the nightly a waiting server runs: the newest nightly and every
 nightly whose build is above `stable.json`'s, which covers a server
 waiting for beta too, because beta is never below stable. It prunes
-nothing while `stable.json` cannot be read and verified.
+nothing while `stable.json` cannot be read and verified. Every nightly
+since the last stable is therefore kept, so storage grows with the time
+between stables. A server that stays on a nightly at or below
+`stable.json` for 14 days, because its update check is off or its updates
+keep failing, loses that nightly's assets, and its clients cannot install
+it until the server updates. Accepted.
 
 ### Tests that read the previous tag
 
@@ -588,8 +631,7 @@ It resolves the new tag, `vX.Y.Z-beta.N` (next `N` for that version) or
   commit;
 - a build below the target channel's current pointer.
 
-Its run summary states the days since the beta was cut, as a reminder.
-Nothing enforces a minimum. It then calls `release-build.yml`, which rebuilds every asset
+Its run summary states the days since the beta was cut. It then calls `release-build.yml`, which rebuilds every asset
 from that commit with the new version, runs the edge qualification and
 the Defender scan again, and hands the artifacts to the trusted signer,
 which signs with the release key, publishes, and moves `beta.json` and
@@ -676,9 +718,11 @@ step 1; 5 to 7 must merge before step 3.
    formula; `release-manifest` writes `channel`, `build` and `hotfix`;
    `reconcile_latest` orders by the manifests' build.
 6. `ci`: split `release.yml` into `release-build.yml` with the trusted
-   signer job, no other behavior change; the pointer writer script.
+   signer job, no other behavior change; `promote-edge.yml` accepts its
+   attestations and job names; the pointer writer script.
 7. `ci`: `promote.yml`, calling `promote-edge.yml` through
-   `workflow_call` for `:beta`.
+   `workflow_call` for `:beta`; the `promote-edge.yml` changes under
+   [Edge](#edge) other than pull request 6's.
 8. `feat(edge)`: build order and channel in `release-check` and
    `edge-update.sh`, channel switches, the `nightly` and `beta` tags.
 9. `ci`: `nightly.yml` with "build now", pruning, and the edge-qualify
@@ -686,7 +730,8 @@ step 1; 5 to 7 must merge before step 3.
 10. `ci`: `release/X.Y` hotfix support in `release.yml`,
     `release-ci-check.sh` and `ci.yml`.
 11. `docs`: `CONTRIBUTING.md#releases`, `docs/install.md` (Upgrading),
-    `docs/edge.md`, `docs/security.md`.
+    `docs/edge.md` (including the promotion steps `promote-edge.yml:5-6`
+    points to), `docs/security.md`.
 
 Then the migration steps, run by an admin.
 
