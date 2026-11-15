@@ -43,13 +43,10 @@ const defaultBaseURL = "https://github.com/" + Repo
 // as a failure.
 var ErrNoRelease = errors.New("no release to update to")
 
-// errUnsigned ends the error for a release without a manifest.
-var errUnsigned = errors.New("it predates signed releases or is still being published, and no updater installs it")
-
-// ErrUnsigned is wrapped by a manifest fetch that found no manifest for
-// the tag, as opposed to any other failure: the release predates signed
-// releases, or is still being published.
-var ErrUnsigned = errUnsigned
+// ErrUnsigned ends the error of a manifest fetch that found no manifest
+// for the tag, as opposed to any other failure: the release predates
+// signed releases, or is still being published.
+var ErrUnsigned = errors.New("it predates signed releases or is still being published, and no updater installs it")
 
 // Manifest is a release's verified aether-release.json.
 type Manifest struct {
@@ -235,7 +232,7 @@ func LatestManifestFrom(ctx context.Context, baseURL string) (Manifest, error) {
 		return Manifest{}, err
 	}
 	m, err := fetchManifest(ctx, baseURL, tag)
-	if errors.Is(err, errUnsigned) {
+	if errors.Is(err, ErrUnsigned) {
 		return Manifest{}, fmt.Errorf("%w: %w", ErrNoRelease, err)
 	}
 	return m, err
@@ -267,7 +264,7 @@ func fetchManifest(ctx context.Context, baseURL, tag string) (Manifest, error) {
 func unsigned(tag string, err error) error {
 	var status *statusError
 	if errors.As(err, &status) && status.code == http.StatusNotFound {
-		return fmt.Errorf("release %s has no signed %s (%w): %w", tag, ManifestName, err, errUnsigned)
+		return fmt.Errorf("release %s has no signed %s (%w): %w", tag, ManifestName, err, ErrUnsigned)
 	}
 	return fmt.Errorf("download the %s manifest: %w", tag, err)
 }
