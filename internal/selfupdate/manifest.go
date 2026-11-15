@@ -43,8 +43,10 @@ const defaultBaseURL = "https://github.com/" + Repo
 // as a failure.
 var ErrNoRelease = errors.New("no release to update to")
 
-// errUnsigned ends the error for a release without a manifest.
-var errUnsigned = errors.New("it predates signed releases or is still being published, and no updater installs it")
+// ErrUnsigned ends the error of a manifest fetch that found no manifest
+// for the tag, as opposed to any other failure: the release predates
+// signed releases, or is still being published.
+var ErrUnsigned = errors.New("it predates signed releases or is still being published, and no updater installs it")
 
 // Manifest is a release's verified aether-release.json.
 type Manifest struct {
@@ -230,31 +232,35 @@ func LatestManifestFrom(ctx context.Context, baseURL string) (Manifest, error) {
 		return Manifest{}, err
 	}
 	m, err := fetchManifest(ctx, baseURL, tag)
-	if errors.Is(err, errUnsigned) {
+	if errors.Is(err, ErrUnsigned) {
 		return Manifest{}, fmt.Errorf("%w: %w", ErrNoRelease, err)
 	}
 	return m, err
 }
 
 func fetchManifest(ctx context.Context, baseURL, tag string) (Manifest, error) {
+	m, _, _, err := FetchSignedManifestFrom(ctx, baseURL, tag)
+	return m, err
+}
+
+// FetchSignedManifestFrom is FetchManifestFrom that also returns the exact
+// manifest and signature bytes it verified, for a caller that keeps them.
+func FetchSignedManifestFrom(ctx context.Context, baseURL, tag string) (m Manifest, data, sig []byte, err error) {
 	if !ValidTag(tag) {
-		return Manifest{}, fmt.Errorf("%q is not a release tag", tag)
+		return Manifest{}, nil, nil, fmt.Errorf("%q is not a release tag", tag)
 	}
 	url := baseURL + "/releases/download/" + tag + "/" + ManifestName
-	data, err := fetchSmall(ctx, url)
-	if err != nil {
-		return Manifest{}, unsigned(tag, err)
+	if data, err = fetchSmall(ctx, url); err != nil {
+		return Manifest{}, nil, nil, unsigned(tag, err)
 	}
-	sig, err := fetchSmall(ctx, url+".sig")
-	if err != nil {
-		return Manifest{}, unsigned(tag, err)
+	if sig, err = fetchSmall(ctx, url+".sig"); err != nil {
+		return Manifest{}, nil, nil, unsigned(tag, err)
 	}
-	m, err := VerifyManifest(data, sig, tag)
-	if err != nil {
-		return Manifest{}, err
+	if m, err = VerifyManifest(data, sig, tag); err != nil {
+		return Manifest{}, nil, nil, err
 	}
 	m.baseURL = baseURL
-	return m, nil
+	return m, data, sig, nil
 }
 
 // unsigned names a 404 for the manifest or its signature as a release that
@@ -262,7 +268,7 @@ func fetchManifest(ctx context.Context, baseURL, tag string) (Manifest, error) {
 func unsigned(tag string, err error) error {
 	var status *statusError
 	if errors.As(err, &status) && status.code == http.StatusNotFound {
-		return fmt.Errorf("release %s has no signed %s (%w): %w", tag, ManifestName, err, errUnsigned)
+		return fmt.Errorf("release %s has no signed %s (%w): %w", tag, ManifestName, err, ErrUnsigned)
 	}
 	return fmt.Errorf("download the %s manifest: %w", tag, err)
 }

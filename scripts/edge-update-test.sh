@@ -24,6 +24,9 @@ D=sha256:$(printf '%064d' 0 | tr 0 d)
 
 # World files, per digest under $WORLD/<name>/<digest>:
 #   version     the release the image is (label and version --json)
+#   prebuild    the image predates release channels: no build in
+#               version --json, and release-check takes only --tag,
+#               --digest and --from
 #   label       a version label that differs from version
 #   reports     a version the running container reports instead
 #   supports    the highest database schema the image supports
@@ -61,8 +64,10 @@ backup() {
 	cp "$w/db" "$w/data/backups/$(basename "$1")"
 }
 version_json() {
-	printf '{"version":"%s","commit":"abc","store_schema":%s,"store_compat_floor":%s,"protocol":{"version":1,"min_version":1}}\n' \
-		"$1" "$(get supports "$2" 1)" "$(get floor "$2" "$(get supports "$2" 1)")"
+	order=',"build":0,"hotfix":0'
+	[ ! -f "$w/prebuild/$2" ] || order=""
+	printf '{"version":"%s","commit":"abc"%s,"store_schema":%s,"store_compat_floor":%s,"protocol":{"version":1,"min_version":1}}\n' \
+		"$1" "$order" "$(get supports "$2" 1)" "$(get floor "$2" "$(get supports "$2" 1)")"
 }
 image=ghcr.io/3xdevops/aether-edge
 case "$1" in
@@ -83,7 +88,12 @@ run)
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--volumes-from) [ ! -f "$w/gone" ] || { echo "docker: Error response from daemon: No such container: $2." >&2; exit 125; } ;;
-		-v) [ "$2" = "$w/data:/var/lib/aether-edge" ] || { echo "docker stub: unexpected mount $2" >&2; exit 2; } ;;
+		-v)
+			case "$2" in
+			"$w/data:/var/lib/aether-edge" | "$AETHER_EDGE_UPDATE_STATE/releases:/run/aether-edge-update/releases") ;;
+			*) echo "docker stub: unexpected mount $2" >&2; exit 2 ;;
+			esac
+			;;
 		*@sha256:*) break ;;
 		esac
 		shift
@@ -100,10 +110,40 @@ run)
 	release-check)
 		[ ! -f "$w/no-release-check/$d" ] || { echo "aether-edge: unknown command \"release-check\"" >&2; exit 2; }
 		tag="$3" digest="$5" from="$7"
+		[ "$8" = --json ] || { echo "docker stub: release-check without --json" >&2; exit 2; }
+		shift 8
+		if [ -f "$w/prebuild/$d" ]; then
+			[ $# = 0 ] || { echo "aether-edge: flag provided but not defined: $1" >&2; exit 1; }
+		else
+			keep=/run/aether-edge-update/releases
+			want="--channel $(cat "$w/channel-name") --from-digest $d --keep-manifests $keep"
+			saved=""
+			case "${7:-}" in
+			--from-manifest=*) saved="${7#--from-manifest=}" want="$want --from-manifest=$saved" ;;
+			esac
+			[ "$*" = "$want" ] || { echo "docker stub: release-check from $d got '$*', not $want" >&2; exit 2; }
+			keep="$AETHER_EDGE_UPDATE_STATE/releases"
+			if [ -n "$saved" ]; then
+				[ "$(cat "$keep/${saved#/run/aether-edge-update/releases/}")" = "signed manifest of $from" ] ||
+					{ echo "aether-edge: the running release: saved $saved: aether-release.json for $from is not signed by a trusted release key; do not install it" >&2; exit 1; }
+			fi
+			for r in "$tag" "$from"; do
+				[ -n "$saved" ] && [ "$r" = "$from" ] && continue
+				if [ -f "$w/pruned/$r" ]; then
+					which=""
+					[ "$r" != "$from" ] || [ "$r" = "$tag" ] || which="the running release: "
+					echo "aether-edge: ${which}release $r has no signed aether-release.json (GET https://github.com/3xDevOps/Aether/releases/download/$r/aether-release.json: 404 Not Found)" >&2
+					exit 1
+				fi
+				[ -f "$w/keeps-nothing" ] || { echo c2ln >"$keep/$r.json.sig" && echo "signed manifest of $r" >"$keep/$r.json"; }
+			done
+		fi
 		rc=0 kind=""
 		[ ! -f "$w/release-check" ] || read -r rc kind <"$w/release-check"
+		[ "$rc" != 3 ] || [ "$tag" != "$from" ] || rc=0
 		from="${from:?release-check requires --from}"
 		[ "$rc" != 1 ] || { echo "aether-edge: release $tag signs the edge image sha256:0, not $digest; do not run it" >&2; exit 1; }
+		[ ! -f "$w/refusal" ] || [ "$tag" = "$from" ] || { echo "aether-edge: refusing to upgrade: $(cat "$w/refusal")" >&2; exit 1; }
 		steps='[]' reasons='[]' hold=false reason=""
 		if [ "$rc" = 3 ] && [ "$kind" = min ]; then
 			reason="$tag upgrades only from v1.0.5 or later; upgrade $from to v1.0.5 first"
@@ -251,6 +291,14 @@ statement="$(printf '{"_type":"https://in-toto.io/Statement/v1","subject":[{"nam
 printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures":[{"sig":"x"}]}\n' "$(printf '%s' "$statement" | base64 | tr -d '\n')"
 EOF
 
+# chown as root would; the updater gives the edge's user the directory it
+# keeps release manifests in.
+cat >"$bin/chown" <<'EOF'
+#!/bin/sh
+printf 'chown %s\n' "$*" >>"$CMD_LOG"
+[ ! -f "$WORLD/chown-fails" ] || { echo "chown: changing ownership of '$2': Operation not permitted" >&2; exit 1; }
+EOF
+
 cat >"$bin/flock" <<'EOF'
 #!/bin/sh
 printf 'flock %s\n' "$*" >>"$CMD_LOG"
@@ -279,7 +327,7 @@ shift
 exec "$@"
 EOF
 
-chmod 0755 "$bin/docker" "$bin/cosign" "$bin/curl" "$bin/flock" "$bin/sleep" "$bin/date" "$bin/timeout"
+chmod 0755 "$bin/docker" "$bin/cosign" "$bin/curl" "$bin/chown" "$bin/flock" "$bin/sleep" "$bin/date" "$bin/timeout"
 
 state="$tmp/state"
 compose_dir="$tmp/compose"
@@ -340,10 +388,12 @@ refute_denied() {
 
 # Fresh world: A (v1.0.0) runs, the channel points to B (v1.1.0), C is
 # v0.9.0, D is v1.2.0. Every image supports schema 1; the database is at 1
-# and holds "old".
+# and holds "old". $WORLD/channel-name is the channel the updater must
+# pass to release-check, and $WORLD/refusal makes release-check refuse
+# with that reason.
 reset() {
 	rm -rf "$world" "$state" "$compose_dir"
-	for d in version label promotion reports supports floor legacy no-release-check up-fails gone-after-up term-on-up unready claimed slow fingerprint data/backups; do
+	for d in version pruned prebuild label promotion reports supports floor legacy no-release-check up-fails gone-after-up term-on-up unready claimed slow fingerprint data/backups; do
 		mkdir -p "$world/$d"
 	done
 	mkdir -p "$compose_dir"
@@ -353,6 +403,7 @@ reset() {
 	echo v1.1.0 >"$world/version/$B"
 	echo v0.9.0 >"$world/version/$C"
 	echo v1.2.0 >"$world/version/$D"
+	echo stable >"$world/channel-name"
 	echo "$B" >"$world/channel"
 	echo "$A" >"$world/running"
 	echo "1 1 old" >"$world/db"
@@ -364,6 +415,11 @@ reset() {
 run() {
 	want="$1"
 	shift
+	prev=""
+	for a; do
+		[ "$prev" != --channel ] || echo "$a" >"$world/channel-name"
+		prev="$a"
+	done
 	set +e
 	sh "$script" "$@" >"$tmp/out" 2>&1
 	got=$?
@@ -380,7 +436,7 @@ write_db() {
 reset
 run 0
 assert "docker pull --quiet $image:stable"
-assert "docker run --rm $image@$A release-check --tag v1.1.0 --digest $B --from v1.0.0 --json"
+assert "$image@$A release-check --tag v1.1.0 --digest $B --from v1.0.0 --json"
 assert_before "docker exec aether-edge aether-edge backup /var/lib/aether-edge/backups/pre-update-v1.1.0-" "up -d --wait --wait-timeout 180 aether-edge"
 assert_before "release-check" "aether-edge backup"
 assert "cosign verify-attestation --new-bundle-format --type https://github.com/3xDevOps/aether/edge-promotion/v1 --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main $image@$B"
@@ -521,7 +577,7 @@ echo "$A" >"$world/channel"
 run 0 --check
 assert "cosign verify-attestation --new-bundle-format --type https://github.com/3xDevOps/aether/edge-promotion/v1 --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main $image@$A"
 assert_before "cosign verify-attestation" "$image@$A version --json"
-assert "docker run --rm $image@$A release-check --tag v1.0.0 --digest $A --from v1.0.0 --json"
+assert "$image@$A release-check --tag v1.0.0 --digest $A --from v1.0.0 --json"
 assert_out "verified the running v1.0.0 ($A)"
 assert_out "up to date"
 refute "compose"
@@ -529,7 +585,7 @@ reset
 echo "$A" >"$world/channel"
 echo none >"$world/promotion/$A"
 run 1 --check
-assert_out "the running v1.0.0 ($A) has no valid promotion attestation on stable"
+assert_out "the running v1.0.0 ($A) has no valid promotion attestation from promote-edge.yml on main"
 refute "$image@$A version"
 refute "release-check"
 reset
@@ -692,18 +748,176 @@ assert_out "passes only blocking manual steps, and release-check holds v1.1.0 fo
 refute "compose"
 assert_digest "$A"
 
-# Downgrade refused before any verification.
+# Ordering is release-check's: the updater passes it the channel and the
+# running digest, whose signed manifest gives the running build, and stops
+# when it refuses.
 reset
+echo "$C" >"$world/channel"
+echo "v0.9.0 (build 9) is older than the running v1.0.0 (build 10)" >"$world/refusal"
+run 1
+assert "$image@$A release-check --tag v0.9.0 --digest $C --from v1.0.0 --json --channel stable --from-digest $A"
+assert_out "refusing to upgrade: v0.9.0 (build 9) is older than the running v1.0.0 (build 10)"
+assert_out "release-check refused v0.9.0 ($C); nothing changed"
+refute "aether-edge backup"
+refute "compose"
+assert_digest "$A"
+
+# No version order is applied on top: a beta with a lower version than
+# the running nightly installs when release-check passes it.
+reset
+echo v0.9.0-nightly.10 >"$world/version/$A"
+echo v0.9.0-beta.2 >"$world/version/$B"
+echo "beta v0.9.0-beta.2" >"$world/promotion/$B"
+run 0 --channel beta
+assert "docker pull --quiet $image:beta"
+assert "release-check --tag v0.9.0-beta.2 --digest $B --from v0.9.0-nightly.10 --json --channel beta --from-digest $A"
+assert_digest "$B"
+
+# A running image from before release channels keeps today's version
+# gate before any verification.
+reset
+touch "$world/prebuild/$A"
 echo "$C" >"$world/channel"
 run 1
 assert_out "refusing v0.9.0"
+refute "cosign"
 refute "release-check"
 refute "compose"
 reset
+touch "$world/prebuild/$A"
 echo v1.1.0-alpha.2 >"$world/version/$B"
 echo v1.1.0 >"$world/version/$A"
 run 1
 assert_out "not newer than the running v1.1.0"
+
+# A host takes only an image attested for its own channel: beta refuses a
+# nightly attested for nightly, stable a beta attested for beta.
+for host in beta:nightly stable:beta; do
+	reset
+	published="${host#*:}" host="${host%:*}"
+	echo "v1.1.0-$published.3" >"$world/version/$B"
+	echo "$published v1.1.0-$published.3" >"$world/promotion/$B"
+	run 1 --channel "$host"
+	assert_out "has no valid promotion attestation"
+	refute "release-check"
+	refute "compose"
+	assert_digest "$A"
+done
+
+# An attestation names the channel it promoted to: a stable attestation
+# does not pass a nightly pull, nor a nightly one a stable pull.
+for host in nightly:stable stable:nightly; do
+	reset
+	attested="${host#*:}" host="${host%:*}"
+	echo "$attested v1.1.0" >"$world/promotion/$B"
+	run 1 --channel "$host"
+	assert_out "no promotion attestation of $B names release v1.1.0 on $host"
+	refute "release-check"
+	assert_digest "$A"
+done
+
+# A host that changed channel runs a release promoted on the old one:
+# --check accepts the running image's attestation on any channel, but the
+# new image still needs one on the new channel.
+reset
+echo v1.0.0-nightly.3 >"$world/version/$A"
+echo "nightly v1.0.0-nightly.3" >"$world/promotion/$A"
+echo "beta v1.1.0" >"$world/promotion/$B"
+run 0 --check --channel beta
+assert_out "verified the running v1.0.0-nightly.3 ($A)"
+assert "release-check --tag v1.0.0-nightly.3 --digest $A --from v1.0.0-nightly.3 --json --channel beta --from-digest $A"
+assert_out "would update v1.0.0-nightly.3 ($A) to v1.1.0 ($B)"
+echo "nightly v1.1.0" >"$world/promotion/$B"
+run 1 --check --channel beta
+assert_out "verified the running v1.0.0-nightly.3 ($A)"
+assert_out "v1.1.0 ($B) on beta has no valid promotion attestation"
+for promotion in none "latest v1.0.0-nightly.3" "beta v1.0.0"; do
+	echo "$promotion" >"$world/promotion/$A"
+	run 1 --check --channel beta
+	assert_out "the running v1.0.0-nightly.3 ($A) has no valid promotion attestation"
+done
+
+# Only the three channels and latest are names the updater follows.
+reset
+run 1 --channel edge
+assert_out "the channel is nightly, beta, stable or latest, got 'edge'"
+[ ! -s "$log" ] || fail "commands ran for an unknown channel"
+
+# latest checks no attestation and leaves the order and the channel,
+# which refuses a nightly, to release-check.
+reset
+run 0 --channel latest
+refute "cosign"
+assert "--channel latest --from-digest $A"
+assert_digest "$B"
+
+# A running image from before release channels runs release-check as
+# before, and the update goes ahead.
+reset
+touch "$world/prebuild/$A"
+run 0
+assert "$image@$A release-check --tag v1.1.0 --digest $B --from v1.0.0 --json"
+refute "--from-digest"
+assert_digest "$B"
+
+# release-check keeps the signed manifests it verified in the state
+# directory, which the edge's user writes, so it still orders after GitHub
+# prunes the release the edge runs.
+reset
+run 0
+assert "chown 65532:65532 $state/releases"
+assert "docker run --rm -v $state/releases:/run/aether-edge-update/releases $image@$A release-check --tag v1.1.0 --digest $B --from v1.0.0 --json --channel stable --from-digest $A --keep-manifests /run/aether-edge-update/releases"
+refute "from-manifest"
+[ "$(cat "$state/releases/v1.0.0.json")" = "signed manifest of v1.0.0" ] || fail "running manifest not kept"
+[ "$(cat "$state/releases/v1.1.0.json")" = "signed manifest of v1.1.0" ] || fail "new release's manifest not kept"
+[ "$(ls -ld "$state/releases" | cut -c1-10)" = drwxr-xr-x ] || fail "the kept manifests are not readable by the edge's user"
+assert_digest "$B"
+touch "$world/pruned/v1.0.0" "$world/pruned/v1.1.0"
+echo "$D" >"$world/channel"
+: >"$log"
+run 0
+assert "release-check --tag v1.2.0 --digest $D --from v1.1.0 --json --channel stable --from-digest $B --keep-manifests /run/aether-edge-update/releases --from-manifest=/run/aether-edge-update/releases/v1.1.0.json"
+assert_out "now running v1.2.0"
+# Without a kept copy release-check downloads the manifest itself, so a
+# running release pruned before it was kept stops the update.
+reset
+touch "$world/pruned/v1.0.0"
+run 1
+assert_out "the running release: release v1.0.0 has no signed aether-release.json"
+refute "compose"
+assert_digest "$A"
+# The new release's manifest must be kept before the switch: without it,
+# nothing changes and the next run retries.
+reset
+touch "$world/keeps-nothing"
+run 1
+assert_out "release-check kept no signed manifest of v1.1.0 in $state/releases, which orders updates once GitHub prunes it; nothing changed, and the next run retries"
+refute "aether-edge backup"
+refute "compose"
+assert_digest "$A"
+refute_denied "$B"
+rm "$world/keeps-nothing"
+run 0
+assert_digest "$B"
+# A kept copy that does not verify is refused, never trusted.
+reset
+mkdir -p "$state/releases"
+echo tampered >"$state/releases/v1.0.0.json"
+echo c2ln >"$state/releases/v1.0.0.json.sig"
+run 1
+assert_out "saved /run/aether-edge-update/releases/v1.0.0.json: aether-release.json for v1.0.0 is not signed by a trusted release key"
+assert_out "the kept signed manifest of the running v1.0.0 does not verify; delete $state/releases/v1.0.0.json and $state/releases/v1.0.0.json.sig, and the next run downloads them again"
+refute "compose"
+assert_digest "$A"
+rm "$state/releases/v1.0.0.json" "$state/releases/v1.0.0.json.sig"
+run 0
+assert_digest "$B"
+# The edge's user must own the directory release-check keeps them in.
+reset
+touch "$world/chown-fails"
+run 1
+assert_out "chown 65532:65532 $state/releases failed; the edge's user, uid 65532, must write the signed manifests release-check keeps there"
+refute "docker"
 
 reset
 touch "$world/backup-fails"
@@ -859,7 +1073,7 @@ touch "$world/hang"
 echo 100 >"$world/unrouted"
 run 1
 assert_out "GET https://edge.example.com/v1/edge failed; the running edge must answer before an update"
-[ "$(grep -c '^curl' "$log")" = 3 ] || fail "expected 3 requests in 30 s, got $(grep -c '^curl' "$log")"
+[ "$(grep -c '^curl.*/v1/edge' "$log")" = 3 ] || fail "expected 3 requests in 30 s, got $(grep -c '^curl.*/v1/edge' "$log")"
 
 # At boot the proxy may route only after a while; the public check waits.
 reset

@@ -44,7 +44,9 @@ var commands = map[string]func(args []string) error{
 	"restore":     func(args []string) error { return restoreCmd(args, os.Getenv, os.Stdout) },
 	"reviewer":    func(args []string) error { return reviewerCmd(args, os.Stdout) },
 	"release-check": func(args []string) error {
-		return releaseCheck(args, selfupdate.FetchManifest, os.Stdout)
+		return releaseCheck(args, func(ctx context.Context, tag string) (selfupdate.Manifest, []byte, []byte, error) {
+			return selfupdate.FetchSignedManifestFrom(ctx, "https://github.com/"+selfupdate.Repo, tag)
+		}, os.Stdout)
 	},
 }
 

@@ -719,7 +719,8 @@ linux/arm64, running as uid and gid 65532. `<release-tag>` never moves. `latest`
 moves with every release, alphas included, and can migrate the database on an
 unattended restart, so keep it out of production. `stable` moves to a release an
 admin promoted after it qualified and soaked
-([CONTRIBUTING.md](../CONTRIBUTING.md#releases)). In production pin `stable` by
+([CONTRIBUTING.md](../CONTRIBUTING.md#releases)); `beta` and `nightly` move
+to the releases promoted on those release channels. In production pin `stable` by
 digest (`ghcr.io/3xdevops/aether-edge:stable@sha256:<digest>`, from `docker
 buildx imagetools inspect ghcr.io/3xdevops/aether-edge:stable`) and change it
 deliberately.
@@ -773,18 +774,28 @@ aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is no
 
 Before you run a new digest, ask the edge you already run whether a release signed
 it ([Verified releases](install.md#verified-releases)) and whether the upgrade
-needs manual steps. It exits 0 to go ahead, or 3 with each `aether-edge: hold:
-...` reason on stderr:
+needs manual steps. `--from-digest` is the index digest the edge runs: the build
+number of the running release comes from `--from`'s signed manifest, which must
+name that digest. `--from-manifest <file>` reads a saved copy of that manifest,
+with its signature in `<file>.sig`, instead of downloading it, and
+`--keep-manifests <dir>` saves each manifest it downloads and verifies there as
+`<tag>.json` and `<tag>.json.sig`. `--channel` is the
+channel the host follows. It exits 1 when either manifest cannot be fetched and
+verified, when the release is not newer by build number, or when the channel
+does not take it (`stable` takes
+stable releases, `beta` beta and stable, `nightly` all three, `latest` all but nightly),
+0 to go ahead, or 3 with each `aether-edge: hold: ...` reason on stderr:
 
 ```sh
 docker exec <container> aether-edge release-check \
-  --tag <release-tag> --digest sha256:<digest> --from <running-tag>
+  --tag <release-tag> --digest sha256:<digest> --from <running-tag> \
+  --from-digest sha256:<running-digest> --channel stable
 ```
 
-A digest that `stable` names also carries a promotion attestation from
-`promote-edge.yml` on `main`. A host that follows `stable` requires it. The
-printed predicate must name `stable`, the digest and the tag `release-check`
-verified:
+A digest that `nightly`, `beta` or `stable` names also carries a promotion
+attestation from `promote-edge.yml` on `main`. A host that follows one of them
+requires it. The printed predicate must name that channel, the digest and the
+tag `release-check` verified:
 
 ```sh
 cosign verify-attestation --new-bundle-format \
@@ -1031,9 +1042,13 @@ check first, run `docker run --rm -v <data>:/var/lib/aether-edge <old image> sch
 ### Automatic updates
 
 `aether-edge-update` ([`scripts/edge-update.sh`](../scripts/edge-update.sh))
-updates an edge that runs in Docker Compose to the newest release on a channel.
+updates an edge that runs in Docker Compose to the newest release on a channel:
+`nightly`, `beta`, `stable` (the default) or `latest`.
 A systemd timer runs it daily at 04:00 UTC with up to an hour's random delay. It
-never downgrades and never runs a digest that a signed release does not name.
+never moves to a lower build number than the running release's signed manifest
+carries, whatever the version says (an edge whose image predates release
+channels compares versions instead), and never runs a digest that a signed
+release does not name.
 Before it switches, it checks with `cosign` that `promote-edge.yml` on `main`
 promoted the digest (except on `latest`), runs `aether-edge release-check` from
 the running image, and backs the database up to
@@ -1068,6 +1083,21 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now aether-edge-update.timer aether-edge-update-recover.service
 ```
 
+`AETHER_EDGE_DIGEST` must be the release's index digest, the `Digest:` that
+`docker buildx imagetools inspect ghcr.io/3xdevops/aether-edge:<release-tag>`
+prints, not a platform digest. Otherwise every run stops with `the running
+release <tag> signs the edge image <index digest>, not the running <digest>; pin
+the edge to the index digest <index digest>`.
+
+To change channel, set `AETHER_EDGE_UPDATE_CHANNEL` and run `sudo
+aether-edge-update --check`: it accepts a running release promoted on the old
+channel, but the next one must be promoted on the new channel. An edge that
+leaves `nightly` stays on its build until the new channel reaches it; until
+then each run exits 1 with `refusing to upgrade: <tag> (build <n>) is older
+than the running <tag> (build <n>)`. An edge
+whose image prints no `build` in `version --json` predates channels and cannot
+verify a nightly release: update it once on `beta` or `stable` first.
+
 Without cosign or jq `--check` fails with `cosign not found` or `jq not found`.
 An edge whose image predates `version --json`, `release-check`, `backup` and
 `schema` makes every session exit 1 with `<image>@<digest> predates aether-edge ...`.
@@ -1096,6 +1126,11 @@ updater does the rest.
   --manual-steps-done`. A hold because the running release is older than
   `min_upgrade_from` is refused with `--manual-steps-done passes only blocking
   manual steps`: upgrade by hand to a release at or above it first.
+  An edge whose release has a build number compares itself with
+  `min_upgrade_from` and each step's `since` by the builds in their signed
+  manifests; when one cannot be read, the step counts as needed and the floor as
+  not met, and the reason names the tag. A boundary that names a beta not yet
+  published therefore holds nightly hosts until that beta is published.
 - A `broken` state means the rollback failed, and every session exits 1 with
   `state is broken since <time>: <reason>`. Run the edge on a release you trust
   (put its digest in `.env`, restore a backup first if `schema --json` asks for
@@ -1103,6 +1138,17 @@ updater does the rest.
   `/var/lib/aether-edge-update/state`.
 - A digest in `/var/lib/aether-edge-update/failed` is skipped on every session. Delete
   its line to try it again.
+- `/var/lib/aether-edge-update/releases/<tag>.json` and `.json.sig` are the signed
+  manifests `release-check` verified, kept so updates still order after GitHub
+  prunes the release the edge runs (nightlies after 14 days). An update switches
+  only once the new release's copy is kept; otherwise nothing changes and the
+  next run retries. A copy that does not verify is
+  refused with `saved <file>: ... is not signed by a trusted release key`; delete
+  both files and the next run downloads them again. Without a copy, `release-check`
+  downloads the manifest, so an edge whose release was pruned before a copy was
+  kept stops with `the running release: release <tag> has no signed
+  aether-release.json`: upgrade it by hand to the channel's current release
+  ([First upgrade](#first-upgrade)).
 - A host that reboots mid-update is recovered at boot by
   `aether-edge-update-recover.service`, or by `sudo aether-edge-update --recover`.
 

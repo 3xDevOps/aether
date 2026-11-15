@@ -31,7 +31,7 @@ die() {
 
 usage() {
 	cat >&2 <<'EOF'
-usage: aether-edge-update [--check] [--channel <tag>] [--manual-steps-done]
+usage: aether-edge-update [--check] [--channel nightly|beta|stable|latest] [--manual-steps-done]
        aether-edge-update --rollback [--restore-backup]
        aether-edge-update --recover
 EOF
@@ -64,7 +64,12 @@ config="${AETHER_EDGE_UPDATE_CONFIG:-/etc/aether-edge-update.env}"
 # shellcheck disable=SC1090 # the operator's settings
 [ ! -f "$config" ] || . "$config"
 channel="${channel_flag:-${AETHER_EDGE_UPDATE_CHANNEL:-stable}}"
+case "$channel" in
+nightly | beta | stable | latest) ;;
+*) die "the channel is nightly, beta, stable or latest, got '$channel'; set AETHER_EDGE_UPDATE_CHANNEL in $config or pass --channel" ;;
+esac
 state_dir="${AETHER_EDGE_UPDATE_STATE:-/var/lib/aether-edge-update}"
+releases="$state_dir/releases"
 compose_dir="${AETHER_EDGE_UPDATE_COMPOSE_DIR:-/opt/aether-edge}"
 digest_file="${AETHER_EDGE_UPDATE_DIGEST_FILE:-$compose_dir/.env}"
 relay_url="${AETHER_EDGE_UPDATE_RELAY_URL:-}"
@@ -81,7 +86,9 @@ done
 
 command -v jq >/dev/null || die "jq not found; install it (docs/edge.md, \"Installing the updater\")"
 
-# Exits 0 when release $1 sorts before $2 by SemVer precedence.
+# Exits 0 when release $1 sorts before $2 by SemVer precedence. Only a
+# running image from before release channels orders this way; every other
+# order comes from its release-check.
 version_lt() {
 	awk -v a="$1" -v b="$2" '
 	function ident(x, y,   xn, yn) {
@@ -205,22 +212,64 @@ version_json() {
 }
 
 # Exits 0 when promote-edge.yml on main attested digest $1 as release $2
-# on the channel. The workflow file run from any other ref signs with
-# another identity, which cosign refuses.
+# on one of the channels $3, a JSON array. The workflow file run from any
+# other ref signs with another identity, which cosign refuses.
 verify_promotion() {
 	atts="$(cosign verify-attestation --new-bundle-format --type "$promotion_type" \
 		--certificate-oidc-issuer https://token.actions.githubusercontent.com \
 		--certificate-identity "$promoter" \
 		"$image@$1")" || return 1
-	printf '%s\n' "$atts" | jq -e --arg c "$channel" --arg t "$2" --arg d "$1" \
-		'.payload | @base64d | fromjson | .predicate | select(.channel == $c and .tag == $t and .digest == $d)' >/dev/null && return 0
-	say "no promotion attestation of $1 names channel $channel and release $2"
+	printf '%s\n' "$atts" | jq -e --argjson cs "$3" --arg t "$2" --arg d "$1" \
+		'.payload | @base64d | fromjson | .predicate | select(.channel as $c | any($cs[]; . == $c)) | select(.tag == $t and .digest == $d)' >/dev/null && return 0
+	say "no promotion attestation of $1 names release $2 on $(printf '%s\n' "$3" | jq -r 'join(" or ")')"
 	return 1
 }
 
+# Exits 0 when version --json $1 has no build: the image predates release
+# channels, and its release-check takes only --tag, --digest and --from.
+predates_channels() {
+	printf '%s\n' "$1" | jq -e '.build == null and .hotfix == null' >/dev/null
+}
+
+# Exits 0 when $1 is a release tag that is safe in a file name.
+release_tag() {
+	case "$1" in
+	'' | .* | *[!A-Za-z0-9.+_-]*) return 1 ;;
+	esac
+}
+
+# Runs release-check from image $1, release $4, whose version --json is
+# $5, for release $2 as digest $3. It refuses a release this host's
+# channel does not take or that is not newer by the build numbers both
+# signed manifests carry. It keeps each manifest it verified in $releases,
+# which the container's user writes through a mount, and reads $4's from
+# there when it is kept: GitHub may prune a release the edge still runs. A
+# kept copy that no longer verifies is named, to be deleted.
+release_check() {
+	if predates_channels "$5"; then
+		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json
+		return
+	fi
+	if ! release_tag "$4"; then
+		say "$image@$1 reports version '$4', which is not a release tag"
+		return 1
+	fi
+	kept=""
+	[ ! -f "$releases/$4.json" ] || [ ! -f "$releases/$4.json.sig" ] || kept="--from-manifest=/run/aether-edge-update/releases/$4.json"
+	docker run --rm -v "$releases:/run/aether-edge-update/releases" "$image@$1" release-check \
+		--tag "$2" --digest "$3" --from "$4" --json --channel "$channel" --from-digest "$1" \
+		--keep-manifests /run/aether-edge-update/releases ${kept:+"$kept"} 2>"$state_dir/release-check.err" && rc=0 || rc=$?
+	cat "$state_dir/release-check.err" >&2
+	if [ -n "$kept" ] && grep -q '^aether-edge: the running release: saved ' "$state_dir/release-check.err"; then
+		say "the kept signed manifest of the running $4 does not verify; delete $releases/$4.json and $releases/$4.json.sig, and the next run downloads them again"
+	fi
+	return "$rc"
+}
+
 # Verifies the running digest $1 as an update verifies a new one, so that
-# --check vets a digest pinned by hand before its first start. Sets
-# from_json.
+# --check vets a digest pinned by hand before its first start, except that
+# a promotion on any channel will do: a host that changed channel runs a
+# release promoted on the old one. Sets from_json.
 verify_running() {
 	docker pull --quiet "$image@$1" >/dev/null || die "docker pull $image@$1 failed"
 	v="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image@$1")" ||
@@ -229,13 +278,13 @@ verify_running() {
 	if [ "$channel" = latest ]; then
 		say "latest is not a promoted channel; only the running image's own release-check vouches for $v ($1)"
 	else
-		verify_promotion "$1" "$v" ||
-			die "the running $v ($1) has no valid promotion attestation on $channel from promote-edge.yml on main; do not run it"
+		verify_promotion "$1" "$v" '["nightly","beta","stable"]' ||
+			die "the running $v ($1) has no valid promotion attestation from promote-edge.yml on main; do not run it"
 	fi
 	from_json="$(version_json "$1")" || exit 1
 	got="$(printf '%s\n' "$from_json" | jq -r .version)"
 	[ "$got" = "$v" ] || die "$image@$1 reports version $got but is labelled $v"
-	docker run --rm "$image@$1" release-check --tag "$v" --digest "$1" --from "$v" --json >/dev/null ||
+	release_check "$1" "$v" "$1" "$v" "$from_json" >/dev/null ||
 		die "release-check refused the running $v ($1); do not run it"
 	say "verified the running $v ($1)"
 }
@@ -510,16 +559,18 @@ update() {
 	[ -n "$new_version" ] || die "$image@$new has no org.opencontainers.image.version label"
 	[ -n "$from_json" ] || from_json="$(version_json "$cur")" || exit 1
 	cur_version="$(printf '%s\n' "$from_json" | jq -r .version)"
-	version_lt "$cur_version" "$new_version" ||
-		die "refusing $new_version ($new) on $channel: not newer than the running $cur_version"
+	if predates_channels "$from_json"; then
+		version_lt "$cur_version" "$new_version" ||
+			die "refusing $new_version ($new) on $channel: not newer than the running $cur_version"
+	fi
 	if [ "$channel" = latest ]; then
 		say "latest is not a promoted channel; trusting the release signature alone"
 	else
-		verify_promotion "$new" "$new_version" ||
+		verify_promotion "$new" "$new_version" "[\"$channel\"]" ||
 			die "$new_version ($new) on $channel has no valid promotion attestation from promote-edge.yml on main; nothing changed"
 	fi
 
-	report="$(docker run --rm "$image@$cur" release-check --tag "$new_version" --digest "$new" --from "$cur_version" --json)" && rc=0 || rc=$?
+	report="$(release_check "$cur" "$new_version" "$new" "$cur_version" "$from_json")" && rc=0 || rc=$?
 	case "$rc" in
 	0) ;;
 	2) bootstrap "$cur" ;;
@@ -559,6 +610,10 @@ update() {
 	to_json="$(docker run --rm --network none "$image@$new" version --json)" || die "aether-edge version --json failed in $image@$new"
 	got="$(printf '%s\n' "$to_json" | jq -r .version)"
 	[ "$got" = "$new_version" ] || die "$image@$new reports version $got but is labelled $new_version"
+	if ! predates_channels "$from_json" &&
+		! { release_tag "$new_version" && [ -f "$releases/$new_version.json" ] && [ -f "$releases/$new_version.json.sig" ]; }; then
+		die "release-check kept no signed manifest of $new_version in $releases, which orders updates once GitHub prunes it; nothing changed, and the next run retries"
+	fi
 	printf '%s\n' "$from_json" >"$state_dir/from.json"
 	printf '%s\n' "$to_json" >"$state_dir/to.json"
 
@@ -622,6 +677,10 @@ if ! flock -n 9; then
 	[ "$mode" != rollback ] && [ "$manual_steps_done" = 0 ] || exit 1
 	exit 0
 fi
+mkdir -p "$releases"
+chmod 0755 "$releases"
+chown 65532:65532 "$releases" ||
+	die "chown 65532:65532 $releases failed; the edge's user, uid 65532, must write the signed manifests release-check keeps there"
 cd "$compose_dir"
 
 state=idle kind=update from_digest="" from_version="" to_digest="" to_version=""

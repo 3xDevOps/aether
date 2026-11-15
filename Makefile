@@ -207,7 +207,8 @@ browser-image:
 
 edge-image:
 	docker build --tag '$(EDGE_IMAGE)' --file images/edge/Dockerfile \
-		--build-arg VERSION='$(VERSION)' --build-arg COMMIT='$(COMMIT)' .
+		--build-arg VERSION='$(VERSION)' --build-arg COMMIT='$(COMMIT)' \
+		--build-arg RELEASE_BUILD='$(BUILD_NUMBER)' --build-arg RELEASE_HOTFIX='$(HOTFIX_NUMBER)' .
 
 # A working Ubuntu kernel/user-namespace AppArmor policy is a prerequisite;
 # sandbox failures fail this gate, never trigger an unconfined fallback.

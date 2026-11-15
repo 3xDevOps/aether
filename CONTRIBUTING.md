@@ -513,7 +513,9 @@ bad published release needs a new tag.
 store schema, protocol and file hashes. A pull request that adds an edge
 migration, protocol version or `AETHER_EDGE_*` variable, or changes the edge
 image or unit, updates it; `go test ./internal/edge/cmd/release-edge` fails
-until it does. Never remove a step.
+until it does. Never remove a step. `min_upgrade_from` and each step's `since`
+name a beta or stable release, never a `-nightly.N` tag: an edge orders itself
+against them by their signed build, and nightlies are pruned.
 
 A release that becomes Latest moves `ghcr.io/3xdevops/aether-edge:latest`.
 Production edges follow `:stable`, which only `promote-edge.yml` moves, run
