@@ -423,7 +423,6 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" {...drop.handlers}>
-      {drop.count !== null && <DropOverlay count={drop.count} refused={drop.refused} blocked={dropStatus.blocked} limit={dropStatus.limit} />}
       {session?.truncatedBefore && (
         <div className={cn(sessionColumn, 'shrink-0 pt-2')}>
           <Callout tone="needs-you" role="status">
@@ -527,6 +526,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
       <CompletionPrompt run={run} className={cn(sessionColumn, 'pb-2')} />
       <Composer run={run} agent={agent} room={room} textarea={textarea} autoFocus={focusComposer} onFocusChange={onComposing} dock={dock || undefined} onEscape={() => viewport.current?.focus()} onDropStatus={reportDropStatus} />
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</span>
+      {drop.count !== null && <DropOverlay count={drop.count} refused={drop.refused} blocked={dropStatus.blocked} limit={dropStatus.limit} />}
     </div>
   )
 }
