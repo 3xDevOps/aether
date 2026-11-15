@@ -6,9 +6,9 @@ nightly at most every 4 hours. An admin promotes a nightly to beta and a
 beta to stable. One setting on the server picks the channel for the server
 and the apps that connect to it.
 
-**Status:** draft for the owner's review, 2026-11-15. The decisions dated
-2026-11-14/15 are the owner's. Everything marked *Assumption* is open, as
-is everything under [Open questions](#open-questions).
+**Status:** approved by the owner, 2026-11-15. The decisions dated
+2026-11-14/15 are the owner's. Everything marked *Assumption* is this
+plan's choice and stands unless the owner changes it.
 
 ## Decisions (2026-11-14/15)
 
@@ -26,11 +26,13 @@ is everything under [Open questions](#open-questions).
   the signed manifest that only increases. The version string is a label.
 - Promotion is manual. Nightly to beta needs the full suite green on that
   commit and an admin's click. Beta to stable is the maintainers' call,
-  with a click; the days since the beta was cut are shown. Auto-promotion
-  is out of scope.
-- One channel setting covers the server, the desktop app, the Android app
-  and Aether Edge. Changing it is super admin only. Desktop, Android and
-  the CLI follow their server; with two servers, the one marked default.
+  with a click. The days since the beta was cut are shown as a reminder
+  only; nothing enforces a minimum. Auto-promotion is out of scope.
+- One channel setting covers the server, the desktop app and the Android
+  app. Changing it is super admin only. Desktop, Android and the CLI
+  follow their server; with two servers, the one marked default.
+- Aether Edge has the same three channels and keeps its own update
+  mechanism and setting. The hosted Aether Edge service follows `stable`.
 - No developer role. A Settings section holds the channel toggle, and
   switching it moves the server and the local app. Choosing nightly shows
   a warning.
@@ -39,8 +41,11 @@ is everything under [Open questions](#open-questions).
 - The first stable is `v0.8.7`, promoted from a beta. Existing installs
   land on beta. New installs default to stable once it exists. Nightlies
   then start at `v0.9.0-nightly.1`.
-- The project's own server runs nightly.
-- Nightly assets are pruned after 14 days. Beta and stable are kept.
+- A server on nightly applies updates by itself when idle, like any
+  channel ([Applying updates](#applying-updates)). The project's own
+  server runs nightly.
+- Nightly assets are pruned after 14 days, except a nightly a waiting
+  server may still run ([Pruning](#pruning)). Beta and stable are kept.
 
 ## Today
 
@@ -91,7 +96,7 @@ that tag. Only Edge has anything like a channel. Android files are under
 | CLI | `aether update`: `--version`, else the linked server's release when the server is ahead (`cmd/aether/update.go:85-93`, `internal/cli/update.go:16`), else `DefaultChecker` → Latest | the user | Follows its default server |
 | Desktop app | `aether gui` runs `DefaultChecker` (`cmd/aether/gui.go:84`); `localgw.updateTarget` prefers the server's release (`internal/localgw/update.go:144-155`). The Electron shell has no updater (`desktop/main.js:285-289`); it is rebuilt after the CLI updates | the dashboard banner or the menu | Follows its default server, through the CLI |
 | Android | Notice: the bundled CLI's `update --check --json` (`UpdateNotice.kt:175-198`), so Latest. Gate: the gateway's `update.check`, offering only the server's release (`GateCheck.kt:66-83`). The APK comes from the release assets, or the Play listing for Play installs (`UpdateTarget.kt:56-62`) | hourly check; the user installs | Follows its server |
-| Edge | `docker pull ghcr.io/3xdevops/aether-edge:$channel`, `AETHER_EDGE_UPDATE_CHANNEL` `stable` or `latest` (`scripts/edge-update.sh:66`, `:497`); `:stable` needs a `promote-edge.yml` attestation (`:516-521`) and `release-check` against the signed manifest (`:523`) | systemd timer, daily | Its own setting, the same three names |
+| Edge | `docker pull ghcr.io/3xdevops/aether-edge:$channel`, `AETHER_EDGE_UPDATE_CHANNEL` `stable` or `latest` (`scripts/edge-update.sh:66`, `:497`); `:stable` needs a `promote-edge.yml` attestation (`:516-521`) and `release-check` against the signed manifest (`:523`) | systemd timer, daily | Its own setting, the same three names; the hosted service follows `stable` |
 | Dashboard banner | Server row from `server.update_status` (`web/src/store/updates.ts:287-333`); client row from the gateway's `update.check` (`:246-273`); the `-32005` gate swaps in `UpdateGate` (`web/src/App.tsx:138-140`) | every 30 minutes and on focus (`web/src/components/update-checks.tsx:18-42`) | Shows the server's channel and the wait state |
 | Install scripts | `/releases/latest`, falling back to the newest complete non-prerelease (`scripts/install.sh:510-520`, `:655-688`; `scripts/install.ps1:312`, `:695-723`); `AETHER_VERSION` pins a tag | the user | Unchanged: Latest is stable once it exists |
 
@@ -390,6 +395,21 @@ the host, prints the same text, and needs `--yes`. It is a flag because
 `aether-server update` takes no positional arguments
 (`cmd/aether-server/update.go:60-62`). *Assumption:* the flag name.
 
+### Applying updates
+
+The owner's decision: a server on nightly applies updates by itself when
+idle, like any channel. Today no channel does: the background check only
+records the newest release (`internal/serverupdate/check.go:125`), and a
+super admin schedules each update with `server.update` `idle` or `now`
+(`internal/sshd/serverupdate.go:62`). *Assumption,* for the owner to
+confirm before pull request 3 builds it: on every channel, when the check
+finds a release on the server's channel above the running build, the
+server schedules it itself, exactly as `server.update` `idle` would, and
+it applies once no session is working. `AETHER_NO_UPDATE_CHECK=1`, which
+already turns the check off, turns this off with it. The narrower reading
+is that only a nightly server does this and beta and stable servers keep
+waiting for a super admin.
+
 ### Apps follow their server
 
 The CLI, the desktop app and the Android app have no channel setting.
@@ -422,33 +442,41 @@ to. Following the server rules both out.
 
 ### Edge
 
-The decision has one setting cover Edge, but an Edge serves many
-servers, which can be on different channels, and cannot read any one
-server's setting. *Assumption,* for the owner to confirm: "covers" means
-the same three channels and the same promotions, and an Edge host keeps
-its own setting,
+An Edge serves many servers, which can be on different channels, and
+cannot read any one server's setting. So Edge has the same three channels
+and keeps its own mechanism: an Edge host has its own setting,
 `AETHER_EDGE_UPDATE_CHANNEL` in `/etc/aether-edge-update.env`
 (`scripts/edge-update.sh:64-66`), now `nightly`, `beta` or `stable`,
 default `stable`. Its compat floors (`internal/selfupdate/manifest.go:76-98`)
 already let an older Edge serve newer servers.
 
+The hosted Aether Edge service follows `stable`, the way an Edge host
+does today: its `edge-update.sh` timer pulls `aether-edge:stable`, which
+moves only when an admin runs `promote-edge.yml` for a published stable
+release, and the host installs it only with that run's attestation and a
+passing `release-check`. Nothing on the hosted service changes.
+
 - The image tags `:nightly`, `:beta` and `:stable` move with the matching
   pointer. `:latest` keeps following GitHub's Latest
   (`release.yml:983-987`), which becomes stable.
-- `promote-edge.yml` gains `workflow_call` and Promote calls it. The
-  attestation's signing identity is the called workflow
+- `promote-edge.yml` gains `workflow_call` and a channel input. Promote
+  calls it for `:beta` and `nightly.yml` for `:nightly`. The attestation's
+  signing identity is the called workflow
   (`promote-edge.yml@refs/heads/main`), which hosts pin
   (`scripts/edge-update.sh:21`) and copy by hand, so they keep verifying.
   Each move publishes the `edge-promotion/v1` attestation naming the
-  channel; `nightly.yml` calls it for `:nightly`.
+  channel.
+- `:stable` keeps its own step: an admin dispatches `promote-edge.yml`
+  for the stable release, as today. Its 24-hour soak, counted from that
+  release's publication and skipped with `soak_override_reason`, stays.
+  It is Edge's own rule and delays no promotion: Promote to stable never
+  waits on it.
 - A host that changes channel runs an image attested on its old channel,
   which `edge-update.sh:230-233` would refuse. It accepts the running
   image's attestation on any channel; the new image still needs one on
   the new channel.
 - `latest` stays a channel name, following stable releases with no
   attestation, as today.
-- The 24-hour soak `promote-edge.yml` enforces for `:stable` stays until
-  the beta-to-stable minimum is decided ([Open questions](#open-questions)).
 - `release-check` reads the manifest's `channel` and `build` and refuses a
   channel the host's does not accept, or a lower build.
 
@@ -514,10 +542,11 @@ its build number stays taken. Betas and stables are kept.
 
 A server that left nightly waits on its nightly, and its clients install
 exactly that tag (`internal/cli/update.go:16-22`, `UpdateTarget.kt:59`),
-so pruning it would leave new and gated clients a 404. *Assumption:*
-pruning also keeps the newest nightly and every nightly whose build is
-above `beta.json`'s. A server waiting for stable can still outlive its
-nightly; see [Open questions](#open-questions).
+so pruning it would leave new and gated clients a 404. Pruning therefore
+keeps the nightly a waiting server runs: the newest nightly and every
+nightly whose build is above `stable.json`'s, which covers a server
+waiting for beta too, because beta is never below stable. It prunes
+nothing while `stable.json` cannot be read and verified.
 
 ### Tests that read the previous tag
 
@@ -559,8 +588,8 @@ It resolves the new tag, `vX.Y.Z-beta.N` (next `N` for that version) or
   commit;
 - a build below the target channel's current pointer.
 
-Its run summary states the days since the beta was cut. Nothing enforces a
-minimum. It then calls `release-build.yml`, which rebuilds every asset
+Its run summary states the days since the beta was cut, as a reminder.
+Nothing enforces a minimum. It then calls `release-build.yml`, which rebuilds every asset
 from that commit with the new version, runs the edge qualification and
 the Defender scan again, and hands the artifacts to the trusted signer,
 which signs with the release key, publishes, and moves `beta.json` and
@@ -638,7 +667,8 @@ step 1; 5 to 7 must merge before step 3.
    servers, first-boot default from the pointers), super-admin check,
    `aether-server update --channel`, the wait state and builds in
    `server.update_status`, `build` and `min_client_build` in
-   `server.info`, the build in the client banner.
+   `server.info`, the build in the client banner, applying an update
+   when idle ([Applying updates](#applying-updates)).
 4. `feat(dashboard)`: the Release channel section, both confirmations,
    the wait state in the banner, the Promote links; Android's notice reads
    the server's release; clients follow the default link. Design review.
@@ -648,7 +678,7 @@ step 1; 5 to 7 must merge before step 3.
 6. `ci`: split `release.yml` into `release-build.yml` with the trusted
    signer job, no other behavior change; the pointer writer script.
 7. `ci`: `promote.yml`, calling `promote-edge.yml` through
-   `workflow_call`.
+   `workflow_call` for `:beta`.
 8. `feat(edge)`: build order and channel in `release-check` and
    `edge-update.sh`, channel switches, the `nightly` and `beta` tags.
 9. `ci`: `nightly.yml` with "build now", pruning, and the edge-qualify
@@ -662,13 +692,6 @@ Then the migration steps, run by an admin.
 
 ## Open questions
 
-- A staging server on the beta channel. On hold.
-- Whether a server on nightly applies an update by itself once idle, or
-  waits for an operator.
-- Whether a minimum number of days between beta and stable is enforced,
-  or only shown. This plan shows it only.
-- Whether Edge's own setting satisfies "one setting covers Edge".
-- Pruning against a server waiting for stable on a nightly older than 14
-  days: keep its nightly (keeps more nightlies), or let its clients
-  install the next nightly and run ahead of it.
-- Every *Assumption* above.
+- Whether "applies updates by itself when idle, like any channel" means
+  every channel or nightly only ([Applying updates](#applying-updates)).
+  Pull request 3 builds it once the owner confirms.
