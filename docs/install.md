@@ -725,8 +725,86 @@ sudo mv /var/lib/aether/server-update/aether.db.pre-update /var/lib/aether/aethe
 sudo systemctl start aether-server
 ```
 
-The server checks for releases every 6 hours and prompts admins;
-`AETHER_NO_UPDATE_CHECK=1` in `/etc/aether/aether-server.env` turns that off.
+The server checks for releases every 6 hours. When the check finds a newer
+build on the server's [release channel](#release-channel), the server
+schedules it itself, as `aether server update --when idle` would, and
+applies it once no session is working. `server.update_status` marks that
+pending update `by_server`, and the timeline names `server` as its actor.
+It never replaces an update a member scheduled, and never schedules a
+release from before channels or one the preflight refuses. It schedules
+nothing while it has not chosen its channel, or when it runs a build from
+source (no signed build number, a version past a tag, or dirty);
+`server.update_status` still offers the release. An update the server
+scheduled that rolls back is declined like a failed one; the restored
+binary records that, which it can because only a binary with this
+behaviour schedules updates as the server. A super admin's `--cancel`, an `--allow-downgrade`
+update, and a scheduled update that fails (after 3 tries for a network
+error) mark that build declined in the database; `server.update_status`
+shows it as `declined`, and the server schedules only a higher build by
+itself. A cancel or rollback whose mark cannot be saved is refused with
+the error. A cancel whose release's build cannot be read from its signed
+manifest still cancels, and says in `not_declined` (and
+`server.update_status` `decline_note`) that the server may schedule it
+again. A cancel is refused once an update is applying past the point of
+no return (`v0.9.0-nightly.13 is applying now and can no longer be
+cancelled`): from the start of `--when now`, and once a scheduled update
+has downloaded; a new update is refused with the same message meanwhile.
+An update whose download could not be undone refuses the next one until
+`aether-server` restarts and puts the previous binaries back. `schedule_error` says why the server last failed to
+schedule the newest release by itself; it retries on a backoff from 5
+minutes, and declines the release after 3 failures in a row. A super admin's own `aether server update` ignores the mark.
+`AETHER_NO_UPDATE_CHECK=1` in `/etc/aether/aether-server.env` turns off the
+check and with it these updates, including one the server scheduled
+before; a member's scheduled update still applies.
+
+### Release channel
+
+A server follows one release channel: `stable`, `beta` (betas and stables)
+or `nightly` (everything). Its release check, `aether server update` and
+`sudo aether-server update` with no `--version` take the newest release on
+that channel, read from the channel's signed pointer
+([Verified releases](#verified-releases)). A server that existed before
+channels follows `beta`. A new server chooses at its release checks:
+`stable` when `stable.json` is published and verifies, `beta` once
+`stable.json` itself (not its signature) has answered 404 at two checks in
+a row, so one 404 while the
+asset is replaced does not decide it. Until then, and on any other answer,
+such as on a first boot without network, the server follows `beta` and
+`server.update_status` reports `channel_pending`.
+
+Any member sees the channel in `server.update_status`. Only a super admin
+changes it, from the dashboard or on the host:
+
+```sh
+sudo aether-server update --channel beta          # prints what changes
+sudo aether-server update --channel beta --yes    # saves it
+```
+
+Without `--yes` it prints the confirmation and changes nothing. A plain
+`sudo aether-server update` only reads the channel, following `beta` while
+the server has not chosen. Saving installs nothing. An update waiting for
+an idle moment applies only a release the server's channel takes:
+`--when idle` refuses any other, the dashboard's switch retires a pending
+one, recording it as failed with the reason, and one left pending after a
+switch on the host fails at the idle moment. `--when now` installs any
+release. The server checks the new channel at its next release
+check, and `sudo aether-server update` installs what it finds. A server
+never installs a lower build because its channel changed. Leaving `nightly`
+for a channel below its build, it stays on its build until that channel
+reaches it, then updates as usual:
+
+```
+Switch to beta?
+
+This server runs v0.9.0-nightly.12 (build 412). Beta is at v0.9.0-beta.1 (build 380). The server stays on its current build until beta reaches build 412, then updates as usual. It never installs an older build.
+```
+
+Meanwhile `server.update_status` reports `channel_wait`, and `sudo
+aether-server update` prints
+`aether-server v0.9.0-nightly.12 (build 412) stays on its build until beta reaches it: beta is at v0.9.0-beta.1 (build 380)`.
+The same build under the lower channel's tag installs. Each channel keeps
+its own pointer mark in `server-update/check.json`, so switching away and
+back never lets an older pointer in.
 
 ### Update a client
 
@@ -815,10 +893,14 @@ decides. The server refuses a lower build, or the same build on the same
 channel, without `--allow-downgrade`; the same build under another
 channel's tag installs. `aether update` and the dashboard's **Update now**
 never pick a lower build on their own; `aether update --version <tag>`
-installs the release you name. The server does not report its build yet,
-so a client picks its server's release to match, and the server decides
-whether a client is too old, by version; a match to a lower build is
-refused, and `aether update --version <tag>` installs it anyway.
+installs the release you name. `server.info` reports the server's `build`
+and `min_client_build`, and a client sends its build in its SSH banner as
+`v0.9.0-beta.2+b.412` (`+b.412.h.1` for a hotfix). When both carry a
+build, the server refuses a client below its build and the client matches
+its server by build; when either is build 0, the version decides, as
+before. A server from before builds ignores the build in the banner. A
+match to a lower build is refused, and `aether update --version <tag>`
+installs it anyway.
 The manifest also signs image digests ([edge.md](edge.md#verifying-an-image)).
 
 #### Verify a release by hand

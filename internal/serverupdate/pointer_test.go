@@ -71,9 +71,12 @@ func channelService(t *testing.T, dir, baseURL, channel string) *Service {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	if err = db.SetReleaseChannel(t.Context(), channel); err != nil {
+		t.Fatal(err)
+	}
 	svc, err := New(Config{
 		Store: db, Bus: newTestBus(t), StateDir: dir, Now: time.Now,
-		Checker: selfupdate.NewChecker(baseURL, time.Hour), Channel: channel,
+		Checker: selfupdate.NewChecker(baseURL, time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -368,9 +371,12 @@ func TestChannelCheckWithAnUnmovedMarkSurvivesAFailedWrite(t *testing.T) {
 func TestUpdateWithNoVersionDoesNotWaitOnAHungCheck(t *testing.T) {
 	feed := &firstCallHangs{gate: make(chan struct{}), entered: make(chan struct{})}
 	svc := newCheckService(t, t.TempDir(), feed, time.Now)
-	go svc.runCheck(context.Background())
+	checked := make(chan struct{})
+	go func() { svc.runCheck(context.Background()); close(checked) }()
 	<-feed.entered
-	t.Cleanup(func() { close(feed.gate) })
+	// Registered after the state directory, so it runs first: the hung
+	// check finishes writing check.json before the directory is removed.
+	t.Cleanup(func() { close(feed.gate); <-checked })
 	done := make(chan error, 1)
 	go func() { _, err := svc.resolveTag(t.Context(), ""); done <- err }()
 	select {

@@ -53,12 +53,14 @@ func migrating(database string, want int, seen *int) bool {
 // binary to commit or be rolled back.
 func updateCmd(args []string) error {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
-	tag := fs.String("version", "", "release tag to install (default: the latest release)")
+	tag := fs.String("version", "", "release tag to install (default: the newest release on the server's release channel)")
+	channel := fs.String("channel", "", "release channel the server follows: stable, beta or nightly; prints what changes and saves it with --yes")
+	yes := fs.Bool("yes", false, "confirm the --channel change")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 {
-		return errors.New("usage: aether-server update [--version <tag>]")
+	if fs.NArg() != 0 || *channel != "" && *tag != "" || *yes && *channel == "" {
+		return errors.New("usage: aether-server update [--version <tag>] | --channel <stable|beta|nightly> [--yes]")
 	}
 	if os.Geteuid() != 0 {
 		return errors.New("run it as root: sudo aether-server update")
@@ -94,14 +96,17 @@ func updateCmd(args []string) error {
 		return fmt.Errorf("the %s unit runs %s, not this binary (%s): run `sudo %s update`", updateUnit, unitExe, self, unitExe)
 	}
 	stateDir, database := server.UpdateStateDir(*o.dataDir), server.StorePath(*o.dataDir)
+	baseURL := selfupdate.DefaultChecker().BaseURL()
+	if *channel != "" {
+		return setChannel(context.Background(), os.Stdout, baseURL, stateDir, database, *channel, *yes)
+	}
 	unlock, err := serverupdate.Lock(stateDir)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	ctx := context.Background()
-	baseURL := selfupdate.DefaultChecker().BaseURL()
-	target, err := updateTarget(ctx, baseURL, *tag)
+	target, err := updateTarget(ctx, os.Stdout, baseURL, stateDir, database, *tag)
 	if err != nil {
 		return err
 	}
@@ -187,21 +192,27 @@ func step(w io.Writer, what string, do func() error) error {
 	return nil
 }
 
-// updateTarget is the tag to install: the one asked for, or the latest
-// release when it is newer than this binary. A latest release no newer
-// than this binary is the running version, which means up to date.
-func updateTarget(ctx context.Context, baseURL, tag string) (string, error) {
+// updateTarget is the tag to install: the one asked for, or the newest
+// release on the server's release channel when the server takes it
+// (serverupdate.Offers). Anything else is the running version, which
+// means up to date; a server above its channel says it waits.
+func updateTarget(ctx context.Context, w io.Writer, baseURL, stateDir, database, tag string) (string, error) {
 	if tag != "" {
 		if !selfupdate.ValidTag(tag) {
 			return "", fmt.Errorf("%w (got %q)", serverupdate.ErrBadTag, tag)
 		}
 		return tag, nil
 	}
-	m, err := selfupdate.LatestManifestFrom(ctx, baseURL)
+	channel, m, err := followChannel(ctx, baseURL, stateDir, database, "")
 	if err != nil {
 		return "", err
 	}
-	if !selfupdate.Newer(m.Release(), selfupdate.Running()) {
+	running := selfupdate.Running()
+	if !serverupdate.Offers(channel, running, m.Release()) {
+		if serverupdate.Waits(running, m.Release()) {
+			_, _ = fmt.Fprintf(w, "aether-server %s stays on its build until %s reaches it: %s is at %s\n",
+				buildLabel(running), channel, channel, buildLabel(m.Release()))
+		}
 		return version.Version, nil
 	}
 	return m.Version, nil

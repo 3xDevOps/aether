@@ -138,7 +138,8 @@ func SignPointer(t testing.TB, p selfupdate.Pointer, key ed25519.PrivateKey) (da
 }
 
 // SetPointer serves data and sig as channel's pointer and its signature;
-// nil data withdraws both, so they answer 404.
+// nil data withdraws both, so they answer 404, and nil sig the signature
+// alone.
 func (r *Release) SetPointer(channel string, data, sig []byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -220,7 +221,7 @@ func (r *Release) body(tag, name string) ([]byte, bool) {
 			return nil, false
 		}
 		if sig {
-			return p[1], true
+			return p[1], p[1] != nil
 		}
 		return p[0], true
 	}

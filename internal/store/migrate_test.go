@@ -34,7 +34,7 @@ func TestAppliedMigrationSurvivesCompetingWriter(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, version := range []int{1, 45} {
-		current, err := applyMigration(opening.db, version)
+		current, err := applyMigration(opening.db, version, true)
 		if err != nil {
 			t.Errorf("already committed migration %d behind another writer: %v", version, err)
 		} else if current != len(migrations) {
@@ -71,7 +71,7 @@ func TestMigrationDoesNotTrustUncommittedProgress(t *testing.T) {
 	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (1, 0)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := applyMigration(opening, 1); !isBusy(err) {
+	if _, err := applyMigration(opening, 1, false); !isBusy(err) {
 		t.Fatalf("uncommitted version must remain pending: %v", err)
 	}
 	if err := tx.Rollback(); err != nil {

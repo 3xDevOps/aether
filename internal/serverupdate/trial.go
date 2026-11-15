@@ -49,6 +49,8 @@ type swapRecord struct {
 	Phase       string `json:"phase"`
 	FromVersion string `json:"from_version"`
 	ToVersion   string `json:"to_version"`
+	ToBuild     int    `json:"to_build,omitempty"`
+	ToHotfix    int    `json:"to_hotfix,omitempty"`
 	RequestedBy string `json:"requested_by,omitempty"`
 	// Binaries are the replaced files, the server first; each previous
 	// file sits beside it as <path>.prev.
@@ -428,6 +430,13 @@ func (t *Trial) Commit(ctx context.Context, st store.Store, bus events.Bus) erro
 	}
 	if err != nil {
 		return err
+	}
+	// An update the server scheduled itself that rolled back is declined,
+	// so the next check does not schedule it again.
+	if outcome == store.ServerUpdateRolledBack && domain.MemberID(rec.RequestedBy) == ServerActor {
+		if _, err = raiseDeclined(ctx, st, selfupdate.Release{Version: rec.ToVersion, Build: rec.ToBuild, Hotfix: rec.ToHotfix}); err != nil {
+			return err
+		}
 	}
 	publish(ctx, st, bus, events.ServerUpdatePayload{
 		Phase: phase, Version: rec.ToVersion, FromVersion: rec.FromVersion,

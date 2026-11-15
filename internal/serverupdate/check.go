@@ -37,6 +37,16 @@ type checkState struct {
 	NextAt        time.Time `json:"next_at,omitzero"`
 	// Pointers are the channel pointers' high-water marks.
 	Pointers selfupdate.Marks `json:"pointers,omitempty"`
+	// Channel is the release channel the latest fields were found on.
+	Channel string `json:"channel,omitempty"`
+	// followed is the pointer this check accepted, zero when none.
+	followed selfupdate.Pointer
+}
+
+// forget drops the latest fields, which a check on another channel than
+// theirs must not keep.
+func (st *checkState) forget() {
+	st.LatestVersion, st.LatestChannel, st.LatestBuild, st.LatestHotfix, st.NotesURL = "", "", 0, 0, ""
 }
 
 // latest is the newest release the check found, in release order.
@@ -76,6 +86,10 @@ func backoff(n int) time.Duration {
 	return min(d, checkInterval)
 }
 
+// checkTimeout bounds a check, and separately what it schedules, so a
+// stalled release host fails them instead of holding the check.
+const checkTimeout = time.Minute
+
 // refreshEvery is the least time between the checks that
 // server.update_status refresh can force, since any member may call it.
 const refreshEvery = time.Minute
@@ -99,6 +113,13 @@ func (s *Service) Start(ctx context.Context) error {
 	s.loop.Add(1)
 	go func() {
 		defer s.loop.Done()
+		// A restart keeps the check state but not the display pointers;
+		// with the next check hours away, they are fetched once now.
+		if cur := s.current(); cur.Channel != "" && cur.NextAt.After(s.cfg.Now()) {
+			showCtx, cancel := context.WithTimeout(ctx, checkTimeout)
+			s.showPointers(showCtx, cur, true)
+			cancel()
+		}
 		for {
 			s.checkMu.Lock()
 			wait := s.check.NextAt.Sub(s.cfg.Now())
@@ -113,7 +134,7 @@ func (s *Service) Start(ctx context.Context) error {
 				continue
 			case <-timer.C:
 			}
-			s.runCheck(ctx)
+			s.checkAndSchedule(ctx)
 		}
 	}()
 	return nil
@@ -138,14 +159,38 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	s.run <- struct{}{}
 	defer func() { <-s.run }()
 	if s.checkRuns.Load() != asked {
-		return s.check
+		return s.current()
 	}
+	return s.checkLocked(ctx)
+}
+
+// current is a copy of the check state. Only a holder of run replaces it,
+// but checkSoon and a failed self-schedule move its NextAt under checkMu.
+func (s *Service) current() checkState {
+	s.checkMu.Lock()
+	defer s.checkMu.Unlock()
+	return s.check
+}
+
+// checkLocked is runCheck for a caller holding run. A check whose ctx
+// was cancelled is not recorded: the request went away, the release host
+// did not fail. One past its deadline is a failed check.
+func (s *Service) checkLocked(ctx context.Context) checkState {
 	s.checkRuns.Add(1)
 	s.reloadState()
-	st := s.check
-	m, marks, err := s.latest(ctx, st.Pointers)
+	before := s.current()
+	st := before
+	m, marks, channel, followed, err := s.latest(ctx, st.Pointers)
+	if err != nil && errors.Is(ctx.Err(), context.Canceled) {
+		return before
+	}
+	st.followed = followed
 	now := s.cfg.Now().UTC()
 	st.CheckedAt, st.Pointers = now, marks
+	if st.Channel != channel {
+		st.forget()
+		st.Channel = channel
+	}
 	switch {
 	case err == nil:
 		st.LatestVersion, st.NotesURL, st.Error, st.Failures = m.Version, m.NotesURL, "", 0
@@ -164,11 +209,11 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	}
 	if werr := s.persistCheck(st); werr != nil {
 		slog.Warn("serverupdate: persist release check", "error", werr)
-		if s.cfg.Channel != "" && st.Error == "" && !maps.Equal(st.Pointers, s.check.Pointers) {
+		if s.cfg.Releases == nil && st.Error == "" && !maps.Equal(st.Pointers, before.Pointers) {
 			// A channel mark only in memory is gone after a restart, so the
 			// check that found it fails, offers nothing new and keeps the
 			// marks on disk.
-			failed := s.check
+			failed := before
 			failed.CheckedAt = now
 			failed.Error = werr.Error()
 			failed.Failures++
@@ -221,18 +266,57 @@ func (s *Service) persistCheck(st checkState) error {
 	return nil
 }
 
-// latest asks for the newest release: through Config.Channel's signed
-// pointer when the server follows a channel, else from the release feed's
-// Latest. It returns marks raised to the pointer it accepted.
-func (s *Service) latest(ctx context.Context, marks selfupdate.Marks) (selfupdate.Manifest, selfupdate.Marks, error) {
-	if s.cfg.Channel == "" {
-		m, err := s.releases().Latest(ctx)
-		return m, marks, err
+// latest asks for the newest release: through the signed pointer of the
+// server's release channel, or from Config.Releases when it is set. It
+// returns marks raised to the pointer it accepted, the channel it
+// followed and that pointer, zero when it accepted none.
+func (s *Service) latest(ctx context.Context, marks selfupdate.Marks) (selfupdate.Manifest, selfupdate.Marks, string, selfupdate.Pointer, error) {
+	if s.cfg.Releases != nil {
+		m, err := s.cfg.Releases.Latest(ctx)
+		return m, marks, "", selfupdate.Pointer{}, err
+	}
+	channel, err := s.chooseChannel(ctx)
+	if err != nil {
+		return selfupdate.Manifest{}, marks, "", selfupdate.Pointer{}, err
 	}
 	if s.stateErr != nil {
-		return selfupdate.Manifest{}, marks, s.stateErr
+		return selfupdate.Manifest{}, marks, channel, selfupdate.Pointer{}, s.stateErr
 	}
-	return selfupdate.FollowChannel(ctx, s.cfg.Checker.BaseURL(), s.cfg.Channel, marks)
+	m, p, raised, err := selfupdate.FollowChannelPointer(ctx, s.cfg.Checker.BaseURL(), channel, marks)
+	return m, raised, channel, p, err
+}
+
+// published is the verified pointer of every channel, for display: the
+// one followed, accepted, for channel, and each other channel's as
+// FetchPointer verifies it; at start, with no check run yet, the
+// followed channel's too. A pointer that does not verify is left out.
+// Nothing here touches the marks, the channel or what the server takes.
+func (s *Service) published(ctx context.Context, channel string, followed selfupdate.Pointer, atStart bool) map[string]publishedPointer {
+	out := map[string]publishedPointer{}
+	if channel == "" {
+		return out
+	}
+	for _, ch := range []string{selfupdate.ChannelNightly, selfupdate.ChannelBeta, selfupdate.ChannelStable} {
+		p := followed
+		if ch != channel || atStart {
+			var err error
+			if p, err = selfupdate.FetchPointer(ctx, s.cfg.Checker.BaseURL(), ch); err != nil {
+				continue
+			}
+		}
+		if p.Tag != "" {
+			out[ch] = publishedPointer{Version: p.Tag, Build: p.Build, Hotfix: p.Hotfix, PublishedAt: p.PublishedAt}
+		}
+	}
+	return out
+}
+
+// publishedPointer is what a channel's pointer named at the last check.
+type publishedPointer struct {
+	Version     string    `json:"version"`
+	Build       int       `json:"build,omitempty"`
+	Hotfix      int       `json:"hotfix,omitempty"`
+	PublishedAt time.Time `json:"published_at"`
 }
 
 // refresh runs a check now and moves the background schedule after it,
@@ -247,7 +331,7 @@ func (s *Service) refresh(ctx context.Context) {
 	if recent {
 		return
 	}
-	s.runCheck(ctx)
+	s.checkAndSchedule(ctx)
 	select {
 	case s.kick <- struct{}{}:
 	default:

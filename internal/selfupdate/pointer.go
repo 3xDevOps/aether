@@ -178,6 +178,13 @@ func (m Mark) String() string {
 // failed check, so replacing the asset never sends the install back to
 // Latest.
 func FollowChannel(ctx context.Context, baseURL, channel string, marks Marks) (Manifest, Marks, error) {
+	m, _, raised, err := FollowChannelPointer(ctx, baseURL, channel, marks)
+	return m, raised, err
+}
+
+// FollowChannelPointer is FollowChannel that also returns the pointer it
+// accepted, zero when it fell back to /releases/latest or refused one.
+func FollowChannelPointer(ctx context.Context, baseURL, channel string, marks Marks) (Manifest, Pointer, Marks, error) {
 	seen, verified := marks[channel]
 	p, err := FetchPointer(ctx, baseURL, channel)
 	var status *statusError
@@ -185,39 +192,39 @@ func FollowChannel(ctx context.Context, baseURL, channel string, marks Marks) (M
 		m, latestErr := LatestManifestFrom(ctx, baseURL)
 		if latestErr == nil {
 			if refused := m.AcceptedOn(channel); refused != nil {
-				return Manifest{}, marks, fmt.Errorf("%w: %w", ErrNoRelease, refused)
+				return Manifest{}, Pointer{}, marks, fmt.Errorf("%w: %w", ErrNoRelease, refused)
 			}
 		}
-		return m, marks, latestErr
+		return m, Pointer{}, marks, latestErr
 	}
 	if err != nil {
-		return Manifest{}, marks, err
+		return Manifest{}, Pointer{}, marks, err
 	}
 	name := PointerName(channel)
 	if verified && p.Mark().below(seen) {
-		return Manifest{}, marks, replayed(channel, p.Mark(), seen)
+		return Manifest{}, Pointer{}, marks, replayed(channel, p.Mark(), seen)
 	}
 	m, err := fetchManifest(ctx, baseURL, p.Tag)
 	if err != nil {
-		return Manifest{}, marks, fmt.Errorf("channel pointer %s names %s: %w", name, p.Tag, err)
+		return Manifest{}, Pointer{}, marks, fmt.Errorf("channel pointer %s names %s: %w", name, p.Tag, err)
 	}
 	switch {
 	case m.Commit != p.Commit:
-		return Manifest{}, marks, fmt.Errorf("channel pointer %s names %s at commit %s, but its manifest says commit %s; do not install it", name, p.Tag, p.Commit, m.Commit)
+		return Manifest{}, Pointer{}, marks, fmt.Errorf("channel pointer %s names %s at commit %s, but its manifest says commit %s; do not install it", name, p.Tag, p.Commit, m.Commit)
 	case m.Build != p.Build || m.Hotfix != p.Hotfix:
-		return Manifest{}, marks, fmt.Errorf("channel pointer %s names %s at %s, but its manifest says %s; do not install it", name, p.Tag, p.Mark(), Mark{Build: m.Build, Hotfix: m.Hotfix})
+		return Manifest{}, Pointer{}, marks, fmt.Errorf("channel pointer %s names %s at %s, but its manifest says %s; do not install it", name, p.Tag, p.Mark(), Mark{Build: m.Build, Hotfix: m.Hotfix})
 	case m.StoreSchema != p.StoreSchema:
-		return Manifest{}, marks, fmt.Errorf("channel pointer %s names %s at store schema %d, but its manifest says store schema %d; do not install it", name, p.Tag, p.StoreSchema, m.StoreSchema)
+		return Manifest{}, Pointer{}, marks, fmt.Errorf("channel pointer %s names %s at store schema %d, but its manifest says store schema %d; do not install it", name, p.Tag, p.StoreSchema, m.StoreSchema)
 	case p.nightlySigned && m.Channel != ChannelNightly:
-		return Manifest{}, marks, fmt.Errorf("channel pointer %s is signed by a nightly key but names %s, a %s release; do not install it", name, p.Tag, m.Channel)
+		return Manifest{}, Pointer{}, marks, fmt.Errorf("channel pointer %s is signed by a nightly key but names %s, a %s release; do not install it", name, p.Tag, m.Channel)
 	}
 	if err := m.AcceptedOn(channel); err != nil {
-		return Manifest{}, marks, fmt.Errorf("channel pointer %s: %w; do not install it", name, err)
+		return Manifest{}, Pointer{}, marks, fmt.Errorf("channel pointer %s: %w; do not install it", name, err)
 	}
 	raised := maps.Clone(marks)
 	if raised == nil {
 		raised = Marks{}
 	}
 	raised[channel] = p.Mark()
-	return m, raised, nil
+	return m, p, raised, nil
 }
