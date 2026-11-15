@@ -2,12 +2,14 @@
 // a release whose signed manifest it is given:
 //
 //	release-pointer -channel beta -tag v0.9.0-beta.2 \
-//	  -manifest dist/aether-release.json [-current current/beta.json] -out <dir>
+//	  -manifest dist/aether-release.json [-current current/beta.json] [-if-above] -out <dir>
 //
 // It verifies the manifest and the current pointer against the keys this
 // build trusts, refuses to name a lower (build, hotfix) than the current
 // pointer does, signs with AETHER_RELEASE_SIGNING_KEY, and verifies its own
-// output the way an updater will. scripts/publish-pointer.sh runs it.
+// output the way an updater will. With -if-above it writes nothing, and
+// succeeds, unless the release is above the current pointer: promoting to
+// stable moves beta.json only then. scripts/publish-pointer.sh runs it.
 package main
 
 import (
@@ -39,6 +41,7 @@ func run(args []string, now time.Time) error {
 	tag := fs.String("tag", "", "release tag the pointer names")
 	manifest := fs.String("manifest", "", "the release's signed "+selfupdate.ManifestName+"; its signature is beside it")
 	current := fs.String("current", "", "the channel's current pointer, if it has one; its signature is beside it")
+	ifAbove := fs.Bool("if-above", false, "write the pointer only when the release is above the current one, and succeed without writing otherwise")
 	out := fs.String("out", "", "directory to write <channel>.json and its signature into")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -69,8 +72,18 @@ func run(args []string, now time.Time) error {
 		PublishedAt: now.UTC().Truncate(time.Second),
 	}
 	if *current != "" {
-		if err = notBelow(*current, p); err != nil {
+		var cur selfupdate.Pointer
+		if cur, err = readCurrent(*current, *channel); err != nil {
 			return err
+		}
+		switch {
+		case below(p.Mark(), cur.Mark()) && !*ifAbove:
+			return fmt.Errorf("%s names %s at %s; refusing to move it down to %s at %s",
+				selfupdate.PointerName(p.Channel), cur.Tag, cur.Mark(), p.Tag, p.Mark())
+		case *ifAbove && !below(cur.Mark(), p.Mark()):
+			fmt.Printf("%s stays at %s (%s): %s at %s is not above it\n",
+				selfupdate.PointerName(p.Channel), cur.Tag, cur.Mark(), p.Tag, p.Mark())
+			return nil
 		}
 	}
 	key, err := signingKey(os.Getenv(keyEnv))
@@ -103,26 +116,24 @@ func readManifest(path, tag string) (selfupdate.Manifest, error) {
 	return selfupdate.VerifyManifest(data, sig, tag)
 }
 
-// notBelow refuses p when the verified pointer at path names a higher
-// (build, hotfix), so no pointer ever moves down.
-func notBelow(path string, p selfupdate.Pointer) error {
+func readCurrent(path, channel string) (selfupdate.Pointer, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return selfupdate.Pointer{}, err
 	}
 	sig, err := os.ReadFile(path + ".sig")
 	if err != nil {
-		return err
+		return selfupdate.Pointer{}, err
 	}
-	cur, err := selfupdate.VerifyPointer(data, sig, p.Channel)
+	cur, err := selfupdate.VerifyPointer(data, sig, channel)
 	if err != nil {
-		return fmt.Errorf("the current %s does not verify, so it cannot be replaced safely: %w", selfupdate.PointerName(p.Channel), err)
+		return selfupdate.Pointer{}, fmt.Errorf("the current %s does not verify, so it cannot be replaced safely: %w", selfupdate.PointerName(channel), err)
 	}
-	if p.Build < cur.Build || p.Build == cur.Build && p.Hotfix < cur.Hotfix {
-		return fmt.Errorf("%s names %s at %s; refusing to move it down to %s at %s",
-			selfupdate.PointerName(p.Channel), cur.Tag, cur.Mark(), p.Tag, p.Mark())
-	}
-	return nil
+	return cur, nil
+}
+
+func below(a, b selfupdate.Mark) bool {
+	return a.Build < b.Build || a.Build == b.Build && a.Hotfix < b.Hotfix
 }
 
 func signingKey(seed string) (ed25519.PrivateKey, error) {

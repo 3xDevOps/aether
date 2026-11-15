@@ -156,3 +156,42 @@ func TestRefuses(t *testing.T) {
 		})
 	}
 }
+
+// Promoting to stable moves beta.json only when the stable is above it.
+func TestIfAboveMovesOnlyUpward(t *testing.T) {
+	trust(t)
+	stable := writeManifest(t, "v0.9.0", "stable", 412)
+	for _, tc := range []struct {
+		name    string
+		current string
+		moved   bool
+	}{
+		{"no pointer yet", "", true},
+		{"a lower pointer", writeCurrent(t, "v0.9.0-beta.1", 380, releasetest.Key), true},
+		{"an equal pointer", writeCurrent(t, "v0.9.0-beta.2", 412, releasetest.Key), false},
+		{"a higher pointer", writeCurrent(t, "v0.9.1-beta.1", 500, releasetest.Key), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := t.TempDir()
+			args := []string{"-channel", "beta", "-tag", "v0.9.0", "-manifest", stable, "-if-above", "-out", out}
+			if tc.current != "" {
+				args = append(args, "-current", tc.current)
+			}
+			if err := run(args, now); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(out, "beta.json"))
+			if !tc.moved {
+				if !os.IsNotExist(err) {
+					t.Fatalf("wrote beta.json %q, want it kept", data)
+				}
+				return
+			}
+			sig, _ := os.ReadFile(filepath.Join(out, "beta.json.sig"))
+			p, err := selfupdate.VerifyPointer(data, sig, "beta")
+			if err != nil || p.Tag != "v0.9.0" || p.Build != 412 {
+				t.Fatalf("pointer %+v, %v; want v0.9.0 at build 412", p, err)
+			}
+		})
+	}
+}

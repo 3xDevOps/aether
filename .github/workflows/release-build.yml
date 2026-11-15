@@ -34,6 +34,10 @@ on:
         description: Channel whose pointer to move to this release once it is published; empty for none. The caller must run in the channels concurrency group
         type: string
         default: ''
+      pointer-if-above:
+        description: Channel whose pointer to move to this release only when the release is above it, after pointer; empty for none
+        type: string
+        default: ''
     secrets:
       AETHER_RELEASE_SIGNING_KEY:
         required: false
@@ -60,6 +64,7 @@ env:
   BUILD: ${{ inputs.build }}
   HOTFIX: ${{ inputs.hotfix }}
   POINTER: ${{ inputs.pointer }}
+  POINTER_IF_ABOVE: ${{ inputs.pointer-if-above }}
 
 jobs:
   # Every other job needs this one, so no input reaches a build, a tag or
@@ -98,7 +103,10 @@ jobs:
             [ "$form" = "$CHANNEL" ] || fail "channel $CHANNEL does not match $TAG"
             ;;
           esac
-          case $POINTER in '' | nightly | beta | stable) ;; *) fail "pointer $POINTER is not nightly, beta or stable" ;; esac
+          for pointer in "$POINTER" "$POINTER_IF_ABOVE"; do
+            case $pointer in '' | nightly | beta | stable) ;; *) fail "pointer $pointer is not nightly, beta or stable" ;; esac
+          done
+          [ -z "$POINTER" ] || [ "$POINTER" != "$POINTER_IF_ABOVE" ] || fail "pointer and pointer-if-above both name $POINTER"
 
   # Each architecture runs the exact image it publishes on a native headless
   # Ubuntu host. No QEMU or host-installed Chromium changes the sandbox proof.
@@ -1064,6 +1072,13 @@ jobs:
           AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
           RELEASE_POINTER: ${{ runner.temp }}/release-pointer
         run: sh scripts/publish-pointer.sh "$POINTER" "$TAG" "$RUNNER_TEMP/dist"
+      - name: Move the channel pointer the release is above
+        if: inputs.pointer-if-above != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
+          RELEASE_POINTER: ${{ runner.temp }}/release-pointer
+        run: sh scripts/publish-pointer.sh --if-above "$POINTER_IF_ABOVE" "$TAG" "$RUNNER_TEMP/dist"
 
   # latest moves only after the release is published, to the index
   # edge-manifest already pushed, so a release that fails earlier leaves it

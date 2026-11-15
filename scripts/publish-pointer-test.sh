@@ -63,8 +63,9 @@ else
 	cp "$STATE/assets/$file" "$out"
 fi
 EOF
-# release-pointer itself is tested in Go; this one records how it was run
-# and refuses when $STATE/refuse exists.
+# release-pointer itself is tested in Go; this one records how it was run,
+# refuses when $STATE/refuse exists, and with -if-above writes nothing when
+# $STATE/keep exists.
 cat >"$bin/release-pointer" <<'EOF'
 #!/bin/sh
 set -eu
@@ -72,6 +73,11 @@ echo "release-pointer $*" >>"$STATE/log"
 [ ! -f "$STATE/refuse" ] || { echo "release-pointer: refusing" >&2; exit 1; }
 while [ "$#" -gt 0 ]; do
 	case $1 in
+	-if-above)
+		[ ! -f "$STATE/keep" ] || exit 0
+		shift
+		continue
+		;;
 	-channel) channel=$2 ;;
 	-tag) tag=$2 ;;
 	-current) cp "$2" "$STATE/current-seen" ;;
@@ -133,6 +139,20 @@ run 0 beta v0.9.0-beta.2 "$dist"
 grep -qx "beta v0.9.0-beta.1" "$state/current-seen"
 grep -qx "beta v0.9.0-beta.2" "$state/assets/beta.json"
 assert_out "beta.json names v0.9.0-beta.2"
+
+# --if-above moves a pointer the release is above, and keeps any other.
+reset
+run 0 --if-above beta v0.9.0 "$dist"
+grep -qF -- "-if-above" "$state/log"
+grep -qx "beta v0.9.0" "$state/assets/beta.json"
+reset
+touch "$state/keep"
+run 0 --if-above beta v0.9.0 "$dist"
+assert_out "beta.json is not below v0.9.0 and stays"
+refute_log "release upload"
+reset
+run 0 beta v0.9.0 "$dist"
+refute_log "-if-above"
 
 # A refusal uploads nothing.
 reset

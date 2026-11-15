@@ -2,12 +2,19 @@
 # Moves channel $1's pointer to release $2, whose signed manifest is in
 # $3: reads the current pointer from the channels prerelease, has
 # release-pointer refuse a lower (build, hotfix) and sign the new one, uploads
-# it and reads it back the way updaters do. Every writer must run in the
-# channels concurrency group, so no two read and replace one pointer at once.
+# it and reads it back the way updaters do. With --if-above it leaves a
+# pointer that is not below the release as it is. Every writer must run in
+# the channels concurrency group, so no two read and replace one pointer at
+# once.
 set -eu
 
+if_above=
+if [ "${1-}" = --if-above ]; then
+	if_above=-if-above
+	shift
+fi
 if [ "$#" -ne 3 ]; then
-	echo "usage: publish-pointer.sh <channel> <tag> <dist-dir>" >&2
+	echo "usage: publish-pointer.sh [--if-above] <channel> <tag> <dist-dir>" >&2
 	exit 2
 fi
 
@@ -49,7 +56,11 @@ case $assets in
 *) fail "channels holds $assets for $name; it needs both $name and $name.sig" ;;
 esac
 
-"$tool" -channel "$channel" -tag "$tag" -manifest "$dist/aether-release.json" "$@" -out "$tmp/new"
+"$tool" -channel "$channel" -tag "$tag" -manifest "$dist/aether-release.json" ${if_above:+"$if_above"} "$@" -out "$tmp/new"
+if [ -n "$if_above" ] && [ ! -e "$tmp/new/$name" ]; then
+	echo "$name is not below $tag and stays"
+	exit 0
+fi
 gh release upload channels --clobber "$tmp/new/$name" "$tmp/new/$name.sig"
 
 # A replaced asset can be served stale for a moment, so a mismatch is
