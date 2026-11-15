@@ -31,7 +31,7 @@ die() {
 
 usage() {
 	cat >&2 <<'EOF'
-usage: aether-edge-update [--check] [--channel <tag>] [--manual-steps-done]
+usage: aether-edge-update [--check] [--channel nightly|beta|stable|latest] [--manual-steps-done]
        aether-edge-update --rollback [--restore-backup]
        aether-edge-update --recover
 EOF
@@ -64,6 +64,10 @@ config="${AETHER_EDGE_UPDATE_CONFIG:-/etc/aether-edge-update.env}"
 # shellcheck disable=SC1090 # the operator's settings
 [ ! -f "$config" ] || . "$config"
 channel="${channel_flag:-${AETHER_EDGE_UPDATE_CHANNEL:-stable}}"
+case "$channel" in
+nightly | beta | stable | latest) ;;
+*) die "the channel is nightly, beta, stable or latest, got '$channel'; set AETHER_EDGE_UPDATE_CHANNEL in $config or pass --channel" ;;
+esac
 state_dir="${AETHER_EDGE_UPDATE_STATE:-/var/lib/aether-edge-update}"
 compose_dir="${AETHER_EDGE_UPDATE_COMPOSE_DIR:-/opt/aether-edge}"
 digest_file="${AETHER_EDGE_UPDATE_DIGEST_FILE:-$compose_dir/.env}"
@@ -80,35 +84,6 @@ done
 [ -n "$relay_url" ] || die "AETHER_EDGE_UPDATE_RELAY_URL is not set; set it in $config to the edge's relay origin, such as https://edge.example.com"
 
 command -v jq >/dev/null || die "jq not found; install it (docs/edge.md, \"Installing the updater\")"
-
-# Exits 0 when release $1 sorts before $2 by SemVer precedence.
-version_lt() {
-	awk -v a="$1" -v b="$2" '
-	function ident(x, y,   xn, yn) {
-		xn = (x ~ /^[0-9]+$/); yn = (y ~ /^[0-9]+$/)
-		if (xn && yn) return (x + 0 < y + 0) ? -1 : (x + 0 > y + 0)
-		if (xn) return -1
-		if (yn) return 1
-		return (x < y) ? -1 : (x > y)
-	}
-	function vcmp(a, b,   i, n, m, c, ap, bp, ac, bc, ai, bi) {
-		sub(/^v/, "", a); sub(/^v/, "", b); sub(/\+.*/, "", a); sub(/\+.*/, "", b)
-		ap = ""; bp = ""
-		if ((i = index(a, "-")) > 0) { ap = substr(a, i + 1); a = substr(a, 1, i - 1) }
-		if ((i = index(b, "-")) > 0) { bp = substr(b, i + 1); b = substr(b, 1, i - 1) }
-		split(a, ac, "."); split(b, bc, ".")
-		for (i = 1; i <= 3; i++)
-			if (ac[i] + 0 != bc[i] + 0) return (ac[i] + 0 < bc[i] + 0) ? -1 : 1
-		if (ap == bp) return 0
-		if (ap == "") return 1
-		if (bp == "") return -1
-		n = split(ap, ai, "."); m = split(bp, bi, ".")
-		for (i = 1; i <= n && i <= m; i++)
-			if ((c = ident(ai[i], bi[i])) != 0) return c
-		return (n < m) ? -1 : (n > m)
-	}
-	BEGIN { exit !(vcmp(a, b) < 0) }'
-}
 
 # Single-quotes $1 for the state file, which this script sources.
 quote() {
@@ -205,22 +180,49 @@ version_json() {
 }
 
 # Exits 0 when promote-edge.yml on main attested digest $1 as release $2
-# on the channel. The workflow file run from any other ref signs with
-# another identity, which cosign refuses.
+# on one of the channels $3, a JSON array. The workflow file run from any
+# other ref signs with another identity, which cosign refuses.
 verify_promotion() {
 	atts="$(cosign verify-attestation --new-bundle-format --type "$promotion_type" \
 		--certificate-oidc-issuer https://token.actions.githubusercontent.com \
 		--certificate-identity "$promoter" \
 		"$image@$1")" || return 1
-	printf '%s\n' "$atts" | jq -e --arg c "$channel" --arg t "$2" --arg d "$1" \
-		'.payload | @base64d | fromjson | .predicate | select(.channel == $c and .tag == $t and .digest == $d)' >/dev/null && return 0
-	say "no promotion attestation of $1 names channel $channel and release $2"
+	printf '%s\n' "$atts" | jq -e --argjson cs "$3" --arg t "$2" --arg d "$1" \
+		'.payload | @base64d | fromjson | .predicate | select(.channel as $c | any($cs[]; . == $c)) | select(.tag == $t and .digest == $d)' >/dev/null && return 0
+	say "no promotion attestation of $1 names release $2 on $(printf '%s\n' "$3" | jq -r 'join(" or ")')"
 	return 1
 }
 
+is_number() {
+	case "$1" in
+	'' | *[!0-9]*) return 1 ;;
+	esac
+}
+
+# Runs release-check from image $1 for release $2 as digest $3, upgrading
+# from release $4, whose version --json is $5. It refuses a release this
+# host's channel does not take or that is not newer by build order. An
+# image from before release channels prints no build, takes only --tag,
+# --digest and --from, orders by version and holds a downgrade (exit 3)
+# rather than refusing it.
+release_check() {
+	b="$(printf '%s\n' "$5" | jq -r .build)" && h="$(printf '%s\n' "$5" | jq -r .hotfix)" || return 1
+	if [ "$b" = null ] && [ "$h" = null ]; then
+		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json
+		return
+	fi
+	if ! is_number "$b" || ! is_number "$h"; then
+		say "$image@$1 prints build '$b' and hotfix '$h' in version --json, not two whole numbers"
+		return 1
+	fi
+	docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json \
+		--channel "$channel" --from-build "$b" --from-hotfix "$h"
+}
+
 # Verifies the running digest $1 as an update verifies a new one, so that
-# --check vets a digest pinned by hand before its first start. Sets
-# from_json.
+# --check vets a digest pinned by hand before its first start, except that
+# a promotion on any channel will do: a host that changed channel runs a
+# release promoted on the old one. Sets from_json.
 verify_running() {
 	docker pull --quiet "$image@$1" >/dev/null || die "docker pull $image@$1 failed"
 	v="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image@$1")" ||
@@ -229,13 +231,13 @@ verify_running() {
 	if [ "$channel" = latest ]; then
 		say "latest is not a promoted channel; only the running image's own release-check vouches for $v ($1)"
 	else
-		verify_promotion "$1" "$v" ||
-			die "the running $v ($1) has no valid promotion attestation on $channel from promote-edge.yml on main; do not run it"
+		verify_promotion "$1" "$v" '["nightly","beta","stable"]' ||
+			die "the running $v ($1) has no valid promotion attestation from promote-edge.yml on main; do not run it"
 	fi
 	from_json="$(version_json "$1")" || exit 1
 	got="$(printf '%s\n' "$from_json" | jq -r .version)"
 	[ "$got" = "$v" ] || die "$image@$1 reports version $got but is labelled $v"
-	docker run --rm "$image@$1" release-check --tag "$v" --digest "$1" --from "$v" --json >/dev/null ||
+	release_check "$1" "$v" "$1" "$v" "$from_json" >/dev/null ||
 		die "release-check refused the running $v ($1); do not run it"
 	say "verified the running $v ($1)"
 }
@@ -510,16 +512,14 @@ update() {
 	[ -n "$new_version" ] || die "$image@$new has no org.opencontainers.image.version label"
 	[ -n "$from_json" ] || from_json="$(version_json "$cur")" || exit 1
 	cur_version="$(printf '%s\n' "$from_json" | jq -r .version)"
-	version_lt "$cur_version" "$new_version" ||
-		die "refusing $new_version ($new) on $channel: not newer than the running $cur_version"
 	if [ "$channel" = latest ]; then
 		say "latest is not a promoted channel; trusting the release signature alone"
 	else
-		verify_promotion "$new" "$new_version" ||
+		verify_promotion "$new" "$new_version" "[\"$channel\"]" ||
 			die "$new_version ($new) on $channel has no valid promotion attestation from promote-edge.yml on main; nothing changed"
 	fi
 
-	report="$(docker run --rm "$image@$cur" release-check --tag "$new_version" --digest "$new" --from "$cur_version" --json)" && rc=0 || rc=$?
+	report="$(release_check "$cur" "$new_version" "$new" "$cur_version" "$from_json")" && rc=0 || rc=$?
 	case "$rc" in
 	0) ;;
 	2) bootstrap "$cur" ;;

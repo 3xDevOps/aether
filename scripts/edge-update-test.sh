@@ -24,6 +24,14 @@ D=sha256:$(printf '%064d' 0 | tr 0 d)
 
 # World files, per digest under $WORLD/<name>/<digest>:
 #   version     the release the image is (label and version --json)
+#   build       its signed build number (default 0); a release with a
+#               build is on the channel its tag's form names
+#   hotfix      its signed hotfix number (default 0)
+#   prebuild    the image predates release channels: no build in
+#               version --json, and release-check takes only --tag,
+#               --digest and --from
+#   older       release-check finds it older than the running release
+#               when neither has a build (by version)
 #   label       a version label that differs from version
 #   reports     a version the running container reports instead
 #   supports    the highest database schema the image supports
@@ -61,8 +69,19 @@ backup() {
 	cp "$w/db" "$w/data/backups/$(basename "$1")"
 }
 version_json() {
-	printf '{"version":"%s","commit":"abc","store_schema":%s,"store_compat_floor":%s,"protocol":{"version":1,"min_version":1}}\n' \
-		"$1" "$(get supports "$2" 1)" "$(get floor "$2" "$(get supports "$2" 1)")"
+	order=",\"build\":$(get build "$2" 0),\"hotfix\":$(get hotfix "$2" 0)"
+	[ ! -f "$w/prebuild/$2" ] || order=""
+	printf '{"version":"%s","commit":"abc"%s,"store_schema":%s,"store_compat_floor":%s,"protocol":{"version":1,"min_version":1}}\n' \
+		"$1" "$order" "$(get supports "$2" 1)" "$(get floor "$2" "$(get supports "$2" 1)")"
+}
+# The channel a release's tag form names, when it has a build.
+tag_channel() {
+	case "$1" in
+	*-nightly.*) echo nightly ;;
+	*-beta.*) echo beta ;;
+	*-*) echo none ;;
+	*) echo stable ;;
+	esac
 }
 image=ghcr.io/3xdevops/aether-edge
 case "$1" in
@@ -100,10 +119,48 @@ run)
 	release-check)
 		[ ! -f "$w/no-release-check/$d" ] || { echo "aether-edge: unknown command \"release-check\"" >&2; exit 2; }
 		tag="$3" digest="$5" from="$7"
+		[ "$8" = --json ] || { echo "docker stub: release-check without --json" >&2; exit 2; }
+		shift 8
+		host="" fb="" fh=""
+		while [ $# -gt 0 ]; do
+			case "$1" in
+			--channel) host="$2" ;;
+			--from-build) fb="$2" ;;
+			--from-hotfix) fh="$2" ;;
+			*) echo "docker stub: unexpected release-check $1" >&2; exit 2 ;;
+			esac
+			shift 2
+		done
+		if [ -f "$w/prebuild/$d" ]; then
+			[ -z "$host$fb$fh" ] || { echo "aether-edge: flag provided but not defined: -channel" >&2; exit 1; }
+		elif [ -z "$host" ] || [ -z "$fb" ] || [ -z "$fh" ]; then
+			echo "aether-edge: usage: aether-edge release-check --tag <tag> --digest sha256:<digest> --from <tag> --from-build <n> [--from-hotfix <n>] --channel <nightly|beta|stable|latest> [--json]" >&2
+			exit 1
+		fi
 		rc=0 kind=""
 		[ ! -f "$w/release-check" ] || read -r rc kind <"$w/release-check"
 		from="${from:?release-check requires --from}"
 		[ "$rc" != 1 ] || { echo "aether-edge: release $tag signs the edge image sha256:0, not $digest; do not run it" >&2; exit 1; }
+		if [ -n "$host" ] && [ "$tag" != "$from" ]; then
+			tb="$(get build "$digest" 0)" th="$(get hotfix "$digest" 0)" tc=""
+			[ "$tb" = 0 ] || tc="$(tag_channel "$tag")"
+			case "$host:$tc" in
+			stable:stable | beta:stable | beta:beta | beta: | nightly:* | latest:stable | latest:beta | latest:) ;;
+			*)
+				echo "aether-edge: refusing to upgrade: $tag is a ${tc:-no channel} release, which an install on $host does not take" >&2
+				exit 1
+				;;
+			esac
+			if [ "$tb" = 0 ] && [ "$fb" = 0 ]; then
+				[ ! -f "$w/older/$digest" ] || { echo "aether-edge: refusing to upgrade: $tag is older than the running $from" >&2; exit 1; }
+			elif [ "$fb" -gt "$tb" ] || { [ "$fb" = "$tb" ] && [ "$fh" -gt "$th" ]; }; then
+				echo "aether-edge: refusing to upgrade: $tag (build $tb) is older than the running $from (build $fb)" >&2
+				exit 1
+			elif [ "$fb" = "$tb" ] && [ "$fh" = "$th" ] && [ "$tc" = "$(tag_channel "$from")" ]; then
+				echo "aether-edge: refusing to upgrade: $tag (build $tb) is the same build as the running $from (build $fb)" >&2
+				exit 1
+			fi
+		fi
 		steps='[]' reasons='[]' hold=false reason=""
 		if [ "$rc" = 3 ] && [ "$kind" = min ]; then
 			reason="$tag upgrades only from v1.0.5 or later; upgrade $from to v1.0.5 first"
@@ -338,12 +395,12 @@ refute_denied() {
 	! grep -q "^$1 " "$state/failed" 2>/dev/null || fail "$1 in failed"
 }
 
-# Fresh world: A (v1.0.0) runs, the channel points to B (v1.1.0), C is
-# v0.9.0, D is v1.2.0. Every image supports schema 1; the database is at 1
-# and holds "old".
+# Fresh world: A (v1.0.0, build 10) runs, the channel points to B
+# (v1.1.0, build 11), C is v0.9.0 (build 9), D is v1.2.0 (build 12). Every
+# image supports schema 1; the database is at 1 and holds "old".
 reset() {
 	rm -rf "$world" "$state" "$compose_dir"
-	for d in version label promotion reports supports floor legacy no-release-check up-fails gone-after-up term-on-up unready claimed slow fingerprint data/backups; do
+	for d in version build hotfix prebuild older label promotion reports supports floor legacy no-release-check up-fails gone-after-up term-on-up unready claimed slow fingerprint data/backups; do
 		mkdir -p "$world/$d"
 	done
 	mkdir -p "$compose_dir"
@@ -353,6 +410,10 @@ reset() {
 	echo v1.1.0 >"$world/version/$B"
 	echo v0.9.0 >"$world/version/$C"
 	echo v1.2.0 >"$world/version/$D"
+	echo 10 >"$world/build/$A"
+	echo 11 >"$world/build/$B"
+	echo 9 >"$world/build/$C"
+	echo 12 >"$world/build/$D"
 	echo "$B" >"$world/channel"
 	echo "$A" >"$world/running"
 	echo "1 1 old" >"$world/db"
@@ -529,7 +590,7 @@ reset
 echo "$A" >"$world/channel"
 echo none >"$world/promotion/$A"
 run 1 --check
-assert_out "the running v1.0.0 ($A) has no valid promotion attestation on stable"
+assert_out "the running v1.0.0 ($A) has no valid promotion attestation from promote-edge.yml on main"
 refute "$image@$A version"
 refute "release-check"
 reset
@@ -692,18 +753,130 @@ assert_out "passes only blocking manual steps, and release-check holds v1.1.0 fo
 refute "compose"
 assert_digest "$A"
 
-# Downgrade refused before any verification.
+# A lower build is refused by release-check from the running image.
 reset
 echo "$C" >"$world/channel"
 run 1
-assert_out "refusing v0.9.0"
-refute "release-check"
+assert "docker run --rm $image@$A release-check --tag v0.9.0 --digest $C --from v1.0.0 --json --channel stable --from-build 10 --from-hotfix 0"
+assert_out "refusing to upgrade: v0.9.0 (build 9) is older than the running v1.0.0 (build 10)"
+assert_out "release-check refused v0.9.0 ($C); nothing changed"
+refute "aether-edge backup"
 refute "compose"
+assert_digest "$A"
+
+# Build order, not the version, decides: on nightly a nightly with a
+# higher version but a lower build than the running beta is refused...
 reset
-echo v1.1.0-alpha.2 >"$world/version/$B"
-echo v1.1.0 >"$world/version/$A"
-run 1
-assert_out "not newer than the running v1.1.0"
+echo v0.9.0-beta.2 >"$world/version/$A"
+echo 412 >"$world/build/$A"
+echo v0.9.0-nightly.10 >"$world/version/$B"
+echo 400 >"$world/build/$B"
+echo "nightly v0.9.0-nightly.10" >"$world/promotion/$B"
+run 1 --channel nightly
+assert "docker pull --quiet $image:nightly"
+assert_out "refusing to upgrade: v0.9.0-nightly.10 (build 400) is older than the running v0.9.0-beta.2 (build 412)"
+assert_digest "$A"
+# ...and on beta a beta with a lower version but a higher build installs.
+reset
+echo v0.9.0-nightly.10 >"$world/version/$A"
+echo 400 >"$world/build/$A"
+echo v0.9.0-beta.2 >"$world/version/$B"
+echo 412 >"$world/build/$B"
+echo "beta v0.9.0-beta.2" >"$world/promotion/$B"
+run 0 --channel beta
+assert "docker pull --quiet $image:beta"
+assert "release-check --tag v0.9.0-beta.2 --digest $B --from v0.9.0-nightly.10 --json --channel beta --from-build 400 --from-hotfix 0"
+assert_digest "$B"
+
+# A host takes only what its channel accepts, even when the image is newer
+# and attested for the channel it was published on: beta refuses a
+# nightly, stable refuses a beta.
+for host in beta:nightly stable:beta; do
+	reset
+	published="${host#*:}" host="${host%:*}"
+	echo "v1.1.0-$published.3" >"$world/version/$B"
+	echo "$published v1.1.0-$published.3" >"$world/promotion/$B"
+	run 1 --channel "$host"
+	assert_out "has no valid promotion attestation"
+	refute "release-check"
+	echo "$host v1.1.0-$published.3" >"$world/promotion/$B"
+	run 1 --channel "$host"
+	assert_out "refusing to upgrade: v1.1.0-$published.3 is a $published release, which an install on $host does not take"
+	refute "compose"
+	assert_digest "$A"
+done
+
+# An attestation names the channel it promoted to: a stable attestation
+# does not pass a nightly pull, nor a nightly one a stable pull.
+for host in nightly:stable stable:nightly; do
+	reset
+	attested="${host#*:}" host="${host%:*}"
+	echo "$attested v1.1.0" >"$world/promotion/$B"
+	run 1 --channel "$host"
+	assert_out "no promotion attestation of $B names release v1.1.0 on $host"
+	refute "release-check"
+	assert_digest "$A"
+done
+
+# A host that changed channel runs a release promoted on the old one:
+# --check accepts the running image's attestation on any channel, but the
+# new image still needs one on the new channel.
+reset
+echo v1.0.0-nightly.3 >"$world/version/$A"
+echo "nightly v1.0.0-nightly.3" >"$world/promotion/$A"
+echo "beta v1.1.0" >"$world/promotion/$B"
+run 0 --check --channel beta
+assert_out "verified the running v1.0.0-nightly.3 ($A)"
+assert "release-check --tag v1.0.0-nightly.3 --digest $A --from v1.0.0-nightly.3 --json --channel beta"
+assert_out "would update v1.0.0-nightly.3 ($A) to v1.1.0 ($B)"
+echo "nightly v1.1.0" >"$world/promotion/$B"
+run 1 --check --channel beta
+assert_out "verified the running v1.0.0-nightly.3 ($A)"
+assert_out "v1.1.0 ($B) on beta has no valid promotion attestation"
+for promotion in none "latest v1.0.0-nightly.3" "beta v1.0.0"; do
+	echo "$promotion" >"$world/promotion/$A"
+	run 1 --check --channel beta
+	assert_out "the running v1.0.0-nightly.3 ($A) has no valid promotion attestation"
+done
+
+# Only the three channels and latest are names the updater follows.
+reset
+run 1 --channel edge
+assert_out "the channel is nightly, beta, stable or latest, got 'edge'"
+[ ! -s "$log" ] || fail "commands ran for an unknown channel"
+
+# latest checks no attestation, orders by build too and never takes a
+# nightly, which only an attestation could vouch for.
+reset
+echo v1.1.0-beta.3 >"$world/version/$B"
+run 0 --channel latest
+refute "cosign"
+assert "--channel latest --from-build 10 --from-hotfix 0"
+assert_digest "$B"
+reset
+echo v1.1.0-nightly.3 >"$world/version/$B"
+run 1 --channel latest
+assert_out "refusing to upgrade: v1.1.0-nightly.3 is a nightly release, which an install on latest does not take"
+assert_digest "$A"
+
+# A running image from before release channels runs release-check as
+# before, and the update goes ahead.
+reset
+touch "$world/prebuild/$A"
+run 0
+assert "docker run --rm $image@$A release-check --tag v1.1.0 --digest $B --from v1.0.0 --json"
+refute "--from-build"
+assert_digest "$B"
+
+# A build that is not a whole number stops before release-check runs.
+for bad in '"10; touch pwned"' 1.5 -1; do
+	reset
+	echo "$bad" >"$world/build/$A"
+	run 1
+	assert_out "not two whole numbers"
+	refute "release-check"
+	assert_digest "$A"
+done
 
 reset
 touch "$world/backup-fails"

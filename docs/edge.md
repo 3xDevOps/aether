@@ -719,7 +719,8 @@ linux/arm64, running as uid and gid 65532. `<release-tag>` never moves. `latest`
 moves with every release, alphas included, and can migrate the database on an
 unattended restart, so keep it out of production. `stable` moves to a release an
 admin promoted after it qualified and soaked
-([CONTRIBUTING.md](../CONTRIBUTING.md#releases)). In production pin `stable` by
+([CONTRIBUTING.md](../CONTRIBUTING.md#releases)); `beta` and `nightly` move
+to the releases promoted on those release channels. In production pin `stable` by
 digest (`ghcr.io/3xdevops/aether-edge:stable@sha256:<digest>`, from `docker
 buildx imagetools inspect ghcr.io/3xdevops/aether-edge:stable`) and change it
 deliberately.
@@ -773,18 +774,23 @@ aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is no
 
 Before you run a new digest, ask the edge you already run whether a release signed
 it ([Verified releases](install.md#verified-releases)) and whether the upgrade
-needs manual steps. It exits 0 to go ahead, or 3 with each `aether-edge: hold:
-...` reason on stderr:
+needs manual steps. `--from-build` and `--from-hotfix` are the `build` and
+`hotfix` that `docker exec <container> aether-edge version --json` prints, and
+`--channel` is the channel the host follows. It exits 1 when the release is
+not newer by build number or the channel does not take it (`stable` takes
+stable releases, `beta` beta and stable, `nightly` all three, `latest` all but nightly),
+0 to go ahead, or 3 with each `aether-edge: hold: ...` reason on stderr:
 
 ```sh
 docker exec <container> aether-edge release-check \
-  --tag <release-tag> --digest sha256:<digest> --from <running-tag>
+  --tag <release-tag> --digest sha256:<digest> --from <running-tag> \
+  --from-build <build> --from-hotfix <hotfix> --channel stable
 ```
 
-A digest that `stable` names also carries a promotion attestation from
-`promote-edge.yml` on `main`. A host that follows `stable` requires it. The
-printed predicate must name `stable`, the digest and the tag `release-check`
-verified:
+A digest that `nightly`, `beta` or `stable` names also carries a promotion
+attestation from `promote-edge.yml` on `main`. A host that follows one of them
+requires it. The printed predicate must name that channel, the digest and the
+tag `release-check` verified:
 
 ```sh
 cosign verify-attestation --new-bundle-format \
@@ -1031,9 +1037,11 @@ check first, run `docker run --rm -v <data>:/var/lib/aether-edge <old image> sch
 ### Automatic updates
 
 `aether-edge-update` ([`scripts/edge-update.sh`](../scripts/edge-update.sh))
-updates an edge that runs in Docker Compose to the newest release on a channel.
+updates an edge that runs in Docker Compose to the newest release on a channel:
+`nightly`, `beta`, `stable` (the default) or `latest`.
 A systemd timer runs it daily at 04:00 UTC with up to an hour's random delay. It
-never downgrades and never runs a digest that a signed release does not name.
+never moves to a lower build number, whatever the version says, and never runs a
+digest that a signed release does not name.
 Before it switches, it checks with `cosign` that `promote-edge.yml` on `main`
 promoted the digest (except on `latest`), runs `aether-edge release-check` from
 the running image, and backs the database up to
@@ -1067,6 +1075,15 @@ sudo aether-edge-update --check            # verifies the running digest; change
 sudo systemctl daemon-reload
 sudo systemctl enable --now aether-edge-update.timer aether-edge-update-recover.service
 ```
+
+To change channel, set `AETHER_EDGE_UPDATE_CHANNEL` and run `sudo
+aether-edge-update --check`: it accepts a running release promoted on the old
+channel, but the next one must be promoted on the new channel. An edge that
+leaves `nightly` stays on its build until the new channel reaches it; until
+then each run exits 1 with `refusing to upgrade: <tag> (build <n>) is older
+than the running <tag> (build <n>)`. An edge
+whose image prints no `build` in `version --json` predates channels and cannot
+verify a nightly release: update it once on `beta` or `stable` first.
 
 Without cosign or jq `--check` fails with `cosign not found` or `jq not found`.
 An edge whose image predates `version --json`, `release-check`, `backup` and

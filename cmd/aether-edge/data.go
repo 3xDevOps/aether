@@ -19,6 +19,7 @@ import (
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -49,13 +50,16 @@ func versionCmd(args []string, out io.Writer) error {
 		Version    int `json:"version"`
 		MinVersion int `json:"min_version"`
 	}
+	running := selfupdate.Running()
 	return json.NewEncoder(out).Encode(struct {
 		Version          string   `json:"version"`
 		Commit           string   `json:"commit"`
+		Build            int      `json:"build"`
+		Hotfix           int      `json:"hotfix"`
 		StoreSchema      int      `json:"store_schema"`
 		StoreCompatFloor int      `json:"store_compat_floor"`
 		Protocol         protocol `json:"protocol"`
-	}{version.Version, version.Commit, edgestore.SchemaVersion(), edgestore.CompatFloor(),
+	}{version.Version, version.Commit, running.Build, running.Hotfix, edgestore.SchemaVersion(), edgestore.CompatFloor(),
 		protocol{edgeproto.Version, edgeproto.MinVersion}})
 }
 

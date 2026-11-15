@@ -13,7 +13,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
-const releaseCheckUsage = "usage: aether-edge release-check --tag <tag> --digest sha256:<digest> --from <tag> [--json]"
+const releaseCheckUsage = "usage: aether-edge release-check --tag <tag> --digest sha256:<digest> --from <tag> --from-build <n> [--from-hotfix <n>] --channel <nightly|beta|stable|latest> [--json]"
+
+// channelLatest follows the image GitHub's Latest release publishes, with
+// no promotion attestation. Latest is never a nightly, so it refuses one:
+// a nightly key alone must not move a host.
+const channelLatest = "latest"
 
 // holdError is a release the edge must not move to until an operator acts.
 type holdError struct{ reasons []string }
@@ -33,22 +38,33 @@ type releaseReport struct {
 }
 
 // releaseCheck verifies tag's signed manifest names digest as its edge
-// image and whether the upgrade to it from --from must hold.
+// image, refuses it when the host's channel does not take it or it is not
+// newer than --from by build order, and reports whether the upgrade to it
+// must hold. A --tag equal to --from checks the running release itself,
+// which needs neither.
 func releaseCheck(args []string, fetch func(context.Context, string) (selfupdate.Manifest, error), out io.Writer) error {
 	fs := flag.NewFlagSet("aether-edge release-check", flag.ContinueOnError)
 	tag := fs.String("tag", "", "release tag to check")
 	digest := fs.String("digest", "", "index digest of the edge image to run")
 	from := fs.String("from", "", "release tag the edge runs now (required); whether that release can open the database\n"+
 		"after the upgrade migrates it is not checked here: run aether-edge schema --json with its image")
+	fromBuild := fs.Int("from-build", -1, "signed build number of the --from release, as its aether-edge version --json prints it (required; 0 for a release from before channels)")
+	fromHotfix := fs.Int("from-hotfix", 0, "signed hotfix number of the --from release")
+	channel := fs.String("channel", "", "release channel the host follows: nightly, beta, stable or latest (required)")
 	asJSON := fs.Bool("json", false, "print the report as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *tag == "" || *digest == "" || *from == "" || fs.NArg() != 0 {
+	if *tag == "" || *digest == "" || *from == "" || *fromBuild < 0 || *fromHotfix < 0 || *channel == "" || fs.NArg() != 0 {
 		return errors.New(releaseCheckUsage)
 	}
 	if !selfupdate.ValidTag(*from) {
 		return fmt.Errorf("--from %q is not a release tag such as v0.7.0", *from)
+	}
+	switch *channel {
+	case selfupdate.ChannelNightly, selfupdate.ChannelBeta, selfupdate.ChannelStable, channelLatest:
+	default:
+		return fmt.Errorf("--channel %q is not nightly, beta, stable or latest", *channel)
 	}
 	m, err := fetch(context.Background(), *tag)
 	if err != nil {
@@ -63,12 +79,23 @@ func releaseCheck(args []string, fetch func(context.Context, string) (selfupdate
 	if m.Edge.ImageDigest != *digest {
 		return fmt.Errorf("release %s signs the edge image %s, not %s; do not run it", *tag, m.Edge.ImageDigest, *digest)
 	}
+	if *tag != *from {
+		switch {
+		case *channel == channelLatest && m.Channel == selfupdate.ChannelNightly:
+			return fmt.Errorf("refusing to upgrade: %s is a nightly release, which an install on latest does not take", *tag)
+		case *channel != channelLatest:
+			if err = m.AcceptedOn(*channel); err != nil {
+				return fmt.Errorf("refusing to upgrade: %w", err)
+			}
+		}
+		running := selfupdate.Release{Version: *from, Channel: selfupdate.TagChannel(*from), Build: *fromBuild, Hotfix: *fromHotfix}
+		if err = selfupdate.Downgrade(running, m.Release()); err != nil {
+			return fmt.Errorf("refusing to upgrade: %w", err)
+		}
+	}
 	r := releaseReport{Version: m.Version, Commit: m.Commit, Edge: *m.Edge,
 		ApplicableSteps: []selfupdate.ManualStep{}, Reasons: []string{}}
-	switch {
-	case selfupdate.Behind(*tag, *from):
-		r.Reasons = append(r.Reasons, fmt.Sprintf("refusing a downgrade: %s is older than %s", *tag, *from))
-	case selfupdate.Behind(*from, m.Edge.MinUpgradeFrom):
+	if selfupdate.Behind(*from, m.Edge.MinUpgradeFrom) {
 		r.Reasons = append(r.Reasons, fmt.Sprintf("%s upgrades only from %s or later; upgrade %s to %s first",
 			*tag, m.Edge.MinUpgradeFrom, *from, m.Edge.MinUpgradeFrom))
 	}
