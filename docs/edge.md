@@ -777,7 +777,9 @@ it ([Verified releases](install.md#verified-releases)) and whether the upgrade
 needs manual steps. `--from-digest` is the index digest the edge runs: the build
 number of the running release comes from `--from`'s signed manifest, which must
 name that digest. `--from-manifest <file>` reads a saved copy of that manifest,
-with its signature in `<file>.sig`, instead of downloading it. `--channel` is the
+with its signature in `<file>.sig`, instead of downloading it, and
+`--keep-manifests <dir>` saves each manifest it downloads and verifies there as
+`<tag>.json` and `<tag>.json.sig`. `--channel` is the
 channel the host follows. It exits 1 when either manifest cannot be fetched and
 verified, when the release is not newer by build number, or when the channel
 does not take it (`stable` takes
@@ -1137,10 +1139,10 @@ updater does the rest.
 - A digest in `/var/lib/aether-edge-update/failed` is skipped on every session. Delete
   its line to try it again.
 - `/var/lib/aether-edge-update/releases/<tag>.json` and `.json.sig` are the signed
-  manifest of the release the edge runs, kept so updates still order after GitHub
-  prunes that release (nightlies after 14 days). An update keeps the new
-  release's copy before it switches; when that download fails, nothing changes
-  and the next run retries. A copy that does not verify is
+  manifests `release-check` verified, kept so updates still order after GitHub
+  prunes the release the edge runs (nightlies after 14 days). An update switches
+  only once the new release's copy is kept; otherwise nothing changes and the
+  next run retries. A copy that does not verify is
   refused with `saved <file>: ... is not signed by a trusted release key`; delete
   both files and the next run downloads them again. Without a copy, `release-check`
   downloads the manifest, so an edge whose release was pruned before a copy was

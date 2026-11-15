@@ -4,7 +4,7 @@
 # ($QUALIFY_IMAGE) and back in the digests it reads. release-check is
 # answered here instead: the image's binary trusts only the real release
 # keys and fetches from github.com. Release <tag> signs the digest in
-# $QUALIFY_RELEASES/<tag>.
+# $QUALIFY_RELEASES/<tag>, which --keep-manifests keeps as its manifest.
 set -eu
 from=ghcr.io/3xdevops/aether-edge
 to=$QUALIFY_IMAGE
@@ -20,13 +20,17 @@ for a; do
 done
 
 if [ "$check" = 1 ]; then
-	tag="" digest=""
-	while [ $# -gt 1 ]; do
-		case $1 in
-		--tag) tag=$2 ;;
-		--digest) digest=$2 ;;
+	tag="" digest="" from="" keep="" mount="" saved=0 prev=""
+	for a; do
+		case $prev in
+		--tag) tag=$a ;;
+		--digest) digest=$a ;;
+		--from) from=$a ;;
+		--keep-manifests) keep=$a ;;
+		-v) mount=$a ;;
 		esac
-		shift
+		case $a in --from-manifest=*) saved=1 ;; esac
+		prev=$a
 	done
 	signed=$(cat "$QUALIFY_RELEASES/$tag" 2>/dev/null) || {
 		echo "aether-edge: download the $tag manifest: GET https://github.com/3xDevOps/Aether/releases/download/$tag/aether-release.json: 404 Not Found" >&2
@@ -35,6 +39,16 @@ if [ "$check" = 1 ]; then
 	if [ "$signed" != "$digest" ]; then
 		echo "aether-edge: release $tag signs the edge image $signed, not $digest; do not run it" >&2
 		exit 1
+	fi
+	if [ -n "$keep" ]; then
+		dir=${mount%%:*}
+		[ "${mount#*:}" = "$keep" ] || { echo "docker: --keep-manifests $keep is not the mounted ${mount#*:}" >&2; exit 2; }
+		for r in "$tag" "$from"; do
+			[ "$r" != "$from" ] || [ "$saved" = 0 ] || continue
+			[ -f "$QUALIFY_RELEASES/$r" ] || continue
+			echo sig >"$dir/$r.json.sig"
+			cp "$QUALIFY_RELEASES/$r" "$dir/$r.json"
+		done
 	fi
 	printf '{"version":"%s","hold":false,"reasons":[],"applicable_steps":[]}\n' "$tag"
 	exit 0

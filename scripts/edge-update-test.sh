@@ -90,7 +90,7 @@ run)
 		--volumes-from) [ ! -f "$w/gone" ] || { echo "docker: Error response from daemon: No such container: $2." >&2; exit 125; } ;;
 		-v)
 			case "$2" in
-			"$w/data:/var/lib/aether-edge" | "$AETHER_EDGE_UPDATE_STATE/releases:/run/aether-edge-update/releases:ro") ;;
+			"$w/data:/var/lib/aether-edge" | "$AETHER_EDGE_UPDATE_STATE/releases:/run/aether-edge-update/releases") ;;
 			*) echo "docker stub: unexpected mount $2" >&2; exit 2 ;;
 			esac
 			;;
@@ -115,21 +115,29 @@ run)
 		if [ -f "$w/prebuild/$d" ]; then
 			[ $# = 0 ] || { echo "aether-edge: flag provided but not defined: $1" >&2; exit 1; }
 		else
-			fd="$d"
-			[ "$tag" != "$from" ] || fd="$digest"
-			want="--channel $(cat "$w/channel-name") --from-digest $fd"
-			if [ $# -gt 4 ]; then
-				saved="${6#/run/aether-edge-update/releases/}"
-				want="$want --from-manifest /run/aether-edge-update/releases/$saved"
-				saved="$AETHER_EDGE_UPDATE_STATE/releases/$saved"
-				[ -f "$saved.sig" ] || { echo "aether-edge: the running release: open $saved.sig: no such file or directory" >&2; exit 1; }
+			keep=/run/aether-edge-update/releases
+			want="--channel $(cat "$w/channel-name") --from-digest $d --keep-manifests $keep"
+			saved=""
+			case "${7:-}" in
+			--from-manifest=*) saved="${7#--from-manifest=}" want="$want --from-manifest=$saved" ;;
+			esac
+			[ "$*" = "$want" ] || { echo "docker stub: release-check from $d got '$*', not $want" >&2; exit 2; }
+			keep="$AETHER_EDGE_UPDATE_STATE/releases"
+			if [ -n "$saved" ]; then
+				saved="$keep/${saved#/run/aether-edge-update/releases/}"
 				[ "$(cat "$saved")" = "signed manifest of $from" ] ||
 					{ echo "aether-edge: the running release: saved $saved: aether-release.json for $from is not signed by a trusted release key; do not install it" >&2; exit 1; }
-			elif [ -f "$w/pruned/$from" ]; then
-				echo "aether-edge: the running release: release $from has no signed aether-release.json (GET https://github.com/3xDevOps/Aether/releases/download/$from/aether-release.json: 404 Not Found)" >&2
-				exit 1
 			fi
-			[ "$*" = "$want" ] || { echo "docker stub: release-check from $d got '$*', not $want" >&2; exit 2; }
+			for r in "$tag" "$from"; do
+				[ -n "$saved" ] && [ "$r" = "$from" ] && continue
+				if [ -f "$w/pruned/$r" ]; then
+					which=""
+					[ "$r" != "$from" ] || [ "$r" = "$tag" ] || which="the running release: "
+					echo "aether-edge: ${which}release $r has no signed aether-release.json (GET https://github.com/3xDevOps/Aether/releases/download/$r/aether-release.json: 404 Not Found)" >&2
+					exit 1
+				fi
+				[ -f "$w/keeps-nothing" ] || { echo c2ln >"$keep/$r.json.sig" && echo "signed manifest of $r" >"$keep/$r.json"; }
+			done
 		fi
 		rc=0 kind=""
 		[ ! -f "$w/release-check" ] || read -r rc kind <"$w/release-check"
@@ -240,28 +248,10 @@ echo "docker stub: unexpected $*" >&2
 exit 2
 EOF
 
-# Serves /v1/edge, and each release's manifest and signature unless
-# $WORLD/pruned/<tag> exists. Like GitHub, it answers a release asset with
-# a redirect to its download host, which curl follows only with -L.
 cat >"$bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
 printf 'curl %s\n' "$*" >>"$CMD_LOG"
-case "$*" in
-*/releases/download/*)
-	url="${*##* }" file="${*#*-o }" file="${file%% *}" tag="${url#*/releases/download/}"
-	[ ! -f "$WORLD/pruned/${tag%%/*}" ] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
-	case " $* " in
-	*" -L "*) ;;
-	*) echo '<html><body>You are being <a href="https://objects.githubusercontent.com/">redirected</a>.</body></html>' >"$file" && exit 0 ;;
-	esac
-	case "$url" in
-	*.sig) echo c2ln >"$file" ;;
-	*) echo "signed manifest of ${tag%%/*}" >"$file" ;;
-	esac
-	exit 0
-	;;
-esac
 unrouted="$(cat "$WORLD/unrouted" 2>/dev/null || echo 0)"
 if [ "$unrouted" -gt 0 ]; then
 	echo $((unrouted - 1)) >"$WORLD/unrouted"
@@ -302,6 +292,13 @@ statement="$(printf '{"_type":"https://in-toto.io/Statement/v1","subject":[{"nam
 printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures":[{"sig":"x"}]}\n' "$(printf '%s' "$statement" | base64 | tr -d '\n')"
 EOF
 
+# chown as root would; the updater gives the edge's user the directory it
+# keeps release manifests in.
+cat >"$bin/chown" <<'EOF'
+#!/bin/sh
+printf 'chown %s\n' "$*" >>"$CMD_LOG"
+EOF
+
 cat >"$bin/flock" <<'EOF'
 #!/bin/sh
 printf 'flock %s\n' "$*" >>"$CMD_LOG"
@@ -330,7 +327,7 @@ shift
 exec "$@"
 EOF
 
-chmod 0755 "$bin/docker" "$bin/cosign" "$bin/curl" "$bin/flock" "$bin/sleep" "$bin/date" "$bin/timeout"
+chmod 0755 "$bin/docker" "$bin/cosign" "$bin/curl" "$bin/chown" "$bin/flock" "$bin/sleep" "$bin/date" "$bin/timeout"
 
 state="$tmp/state"
 compose_dir="$tmp/compose"
@@ -863,49 +860,43 @@ assert "$image@$A release-check --tag v1.1.0 --digest $B --from v1.0.0 --json"
 refute "--from-digest"
 assert_digest "$B"
 
-# The running release's signed manifest is kept in the state directory
-# once release-check verified it, so release-check still orders after the
-# release is pruned from GitHub.
+# release-check keeps the signed manifests it verified in the state
+# directory, which the edge's user writes, so it still orders after GitHub
+# prunes the release the edge runs.
 reset
 run 0
-assert "curl -fsS -L --proto =https --proto-redir =https --max-redirs 5 --max-time 30 -o $state/releases/v1.0.0.new.json https://github.com/3xDevOps/Aether/releases/download/v1.0.0/aether-release.json"
-assert_before "release-check --tag v1.0.0 --digest $A --from v1.0.0 --json --channel stable --from-digest $A --from-manifest /run/aether-edge-update/releases/v1.0.0.new.json" "release-check --tag v1.1.0"
-assert "release-check --tag v1.1.0 --digest $B --from v1.0.0 --json --channel stable --from-digest $A --from-manifest /run/aether-edge-update/releases/v1.0.0.json"
+assert "chown 65532:65532 $state/releases"
+assert "docker run --rm -v $state/releases:/run/aether-edge-update/releases $image@$A release-check --tag v1.1.0 --digest $B --from v1.0.0 --json --channel stable --from-digest $A --keep-manifests /run/aether-edge-update/releases"
+refute "from-manifest"
 [ "$(cat "$state/releases/v1.0.0.json")" = "signed manifest of v1.0.0" ] || fail "running manifest not kept"
-[ "$(ls -ld "$state/releases/v1.0.0.json" | cut -c1-10)" = -rw-r--r-- ] || fail "kept manifest is not readable by the edge's user"
 [ "$(cat "$state/releases/v1.1.0.json")" = "signed manifest of v1.1.0" ] || fail "new release's manifest not kept"
+[ "$(ls -ld "$state/releases" | cut -c1-10)" = drwxr-xr-x ] || fail "the kept manifests are not readable by the edge's user"
 assert_digest "$B"
 touch "$world/pruned/v1.0.0" "$world/pruned/v1.1.0"
 echo "$D" >"$world/channel"
 : >"$log"
 run 0
-refute "download/v1.1.0"
-assert "release-check --tag v1.1.0 --digest $B --from v1.1.0 --json --channel stable --from-digest $B --from-manifest /run/aether-edge-update/releases/v1.1.0.json"
-assert "--from v1.1.0 --json --channel stable --from-digest $B --from-manifest /run/aether-edge-update/releases/v1.1.0.json"
+assert "release-check --tag v1.2.0 --digest $D --from v1.1.0 --json --channel stable --from-digest $B --keep-manifests /run/aether-edge-update/releases --from-manifest=/run/aether-edge-update/releases/v1.1.0.json"
 assert_out "now running v1.2.0"
 # Without a kept copy release-check downloads the manifest itself, so a
 # running release pruned before it was kept stops the update.
 reset
 touch "$world/pruned/v1.0.0"
 run 1
-assert_out "cannot download the signed manifest of v1.0.0 to keep it in $state/releases"
-assert "release-check --tag v1.1.0 --digest $B --from v1.0.0 --json --channel stable --from-digest $A"
-refute "from-manifest"
 assert_out "the running release: release v1.0.0 has no signed aether-release.json"
 refute "compose"
 assert_digest "$A"
 # The new release's manifest must be kept before the switch: without it,
 # nothing changes and the next run retries.
 reset
-touch "$world/pruned/v1.1.0"
+touch "$world/keeps-nothing"
 run 1
-assert_out "cannot download the signed manifest of v1.1.0 to keep it"
-assert_out "v1.1.0 needs its signed manifest kept before the switch, to order updates once GitHub prunes it; nothing changed, and the next run retries"
+assert_out "release-check kept no signed manifest of v1.1.0 in $state/releases, which orders updates once GitHub prunes it; nothing changed, and the next run retries"
 refute "aether-edge backup"
 refute "compose"
 assert_digest "$A"
 refute_denied "$B"
-rm "$world/pruned/v1.1.0"
+rm "$world/keeps-nothing"
 run 0
 assert_digest "$B"
 # A kept copy that does not verify is refused, never trusted.

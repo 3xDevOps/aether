@@ -231,73 +231,36 @@ predates_channels() {
 	printf '%s\n' "$1" | jq -e '.build == null and .hotfix == null' >/dev/null
 }
 
-# Runs release-check from image $1 for release $2 as digest $3, upgrading
-# from release $4 as digest $5. With a file name $6 it reads the signed
-# manifest of $4 from $releases, which the container's user reads through
-# a read-only mount; without one it downloads it.
-run_release_check() {
-	if [ -z "${6:-}" ]; then
-		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json \
-			--channel "$channel" --from-digest "$5"
-		return
-	fi
-	docker run --rm -v "$releases:/run/aether-edge-update/releases:ro" "$image@$1" release-check \
-		--tag "$2" --digest "$3" --from "$4" --json \
-		--channel "$channel" --from-digest "$5" --from-manifest "/run/aether-edge-update/releases/$6"
-}
-
-# Keeps the signed manifest of release $2, image digest $3, as
-# $releases/$2.json with its .sig: the release may be pruned from GitHub
-# while the edge runs it, and release-check orders by it. The copy, kept
-# or downloaded, is used only once release-check from image $1 verified it
-# names $3. Sets kept to the file name, or to nothing when there is no copy
-# and none can be downloaded. Fails only when release-check refuses the
-# copy; exit 2 is an image without release-check.
-keep_manifest() {
-	case "$2" in
-	'' | .* | *[!A-Za-z0-9.+_-]*)
-		say "'$2' is not a release tag"
-		return 1
-		;;
+# Exits 0 when $1 is a release tag that is safe in a file name.
+release_tag() {
+	case "$1" in
+	'' | .* | *[!A-Za-z0-9.+_-]*) return 1 ;;
 	esac
-	kept="$2.json"
-	if [ ! -f "$releases/$kept" ] || [ ! -f "$releases/$kept.sig" ]; then
-		kept="$2.new.json"
-		url="https://github.com/3xDevOps/Aether/releases/download/$2/aether-release.json"
-		mkdir -p "$releases"
-		chmod 0755 "$releases"
-		if ! curl -fsS -L --proto =https --proto-redir =https --max-redirs 5 --max-time 30 -o "$releases/$kept" "$url" ||
-			! curl -fsS -L --proto =https --proto-redir =https --max-redirs 5 --max-time 30 -o "$releases/$kept.sig" "$url.sig"; then
-			rm -f "$releases/$kept" "$releases/$kept.sig"
-			say "cannot download the signed manifest of $2 to keep it in $releases"
-			kept=""
-			return 0
-		fi
-		chmod 0644 "$releases/$kept" "$releases/$kept.sig"
-	fi
-	run_release_check "$1" "$2" "$3" "$2" "$3" "$kept" >/dev/null && rc=0 || rc=$?
-	if [ "$rc" != 0 ] && [ "$rc" != 3 ]; then
-		[ "$kept" = "$2.json" ] || rm -f "$releases/$kept" "$releases/$kept.sig"
-		[ "$rc" = 2 ] || say "release-check refused the signed manifest of $2 in $releases/$kept; delete it and its .sig to download it again"
-		return "$rc"
-	fi
-	if [ "$kept" != "$2.json" ]; then
-		mv -f "$releases/$kept.sig" "$releases/$2.json.sig" && mv -f "$releases/$kept" "$releases/$2.json"
-		kept="$2.json"
-	fi
 }
 
 # Runs release-check from image $1, release $4, whose version --json is
 # $5, for release $2 as digest $3. It refuses a release this host's
 # channel does not take or that is not newer by the build numbers both
-# signed manifests carry.
+# signed manifests carry. It keeps each manifest it verified in $releases,
+# which the container's user writes through a mount, and reads $4's from
+# there when it is kept: GitHub may prune a release the edge still runs.
 release_check() {
 	if predates_channels "$5"; then
 		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json
 		return
 	fi
-	keep_manifest "$1" "$4" "$1" || return
-	run_release_check "$1" "$2" "$3" "$4" "$1" "$kept"
+	if ! release_tag "$4"; then
+		say "$image@$1 reports version '$4', which is not a release tag"
+		return 1
+	fi
+	mkdir -p "$releases"
+	chown 65532:65532 "$releases"
+	chmod 0755 "$releases"
+	kept=""
+	[ ! -f "$releases/$4.json" ] || [ ! -f "$releases/$4.json.sig" ] || kept="--from-manifest=/run/aether-edge-update/releases/$4.json"
+	docker run --rm -v "$releases:/run/aether-edge-update/releases" "$image@$1" release-check \
+		--tag "$2" --digest "$3" --from "$4" --json --channel "$channel" --from-digest "$1" \
+		--keep-manifests /run/aether-edge-update/releases ${kept:+"$kept"}
 }
 
 # Verifies the running digest $1 as an update verifies a new one, so that
@@ -644,10 +607,9 @@ update() {
 	to_json="$(docker run --rm --network none "$image@$new" version --json)" || die "aether-edge version --json failed in $image@$new"
 	got="$(printf '%s\n' "$to_json" | jq -r .version)"
 	[ "$got" = "$new_version" ] || die "$image@$new reports version $got but is labelled $new_version"
-	if ! predates_channels "$from_json" && ! predates_channels "$to_json"; then
-		keep_manifest "$cur" "$new_version" "$new" || die "nothing changed"
-		[ -n "$kept" ] ||
-			die "$new_version needs its signed manifest kept before the switch, to order updates once GitHub prunes it; nothing changed, and the next run retries"
+	if ! predates_channels "$from_json" &&
+		! { release_tag "$new_version" && [ -f "$releases/$new_version.json" ] && [ -f "$releases/$new_version.json.sig" ]; }; then
+		die "release-check kept no signed manifest of $new_version in $releases, which orders updates once GitHub prunes it; nothing changed, and the next run retries"
 	fi
 	printf '%s\n' "$from_json" >"$state_dir/from.json"
 	printf '%s\n' "$to_json" >"$state_dir/to.json"

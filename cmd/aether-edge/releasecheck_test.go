@@ -27,7 +27,7 @@ func edgeDigest(c string) string { return "sha256:" + strings.Repeat(c, 64) }
 // as its signed edge section, signed by key, and the releases the tests
 // upgrade from, which sign edgeDigest("a"). It returns a fetch that reads
 // them the way release-check does.
-func serveRelease(t *testing.T, edge *selfupdate.Edge, key ed25519.PrivateKey) func(context.Context, string) (selfupdate.Manifest, error) {
+func serveRelease(t *testing.T, edge *selfupdate.Edge, key ed25519.PrivateKey) fetchSigned {
 	t.Helper()
 	ms := []selfupdate.Manifest{{Version: "v1.5.0", Edge: edge}}
 	for _, from := range []string{"v1.0.0", "v1.3.0", "v1.4.0", "v1.5.0-alpha.2", "v1.6.0"} {
@@ -52,7 +52,7 @@ func signManifest(t *testing.T, key ed25519.PrivateKey, m selfupdate.Manifest) (
 }
 
 // serveManifests publishes each manifest under its version, signed by key.
-func serveManifests(t *testing.T, key ed25519.PrivateKey, ms ...selfupdate.Manifest) func(context.Context, string) (selfupdate.Manifest, error) {
+func serveManifests(t *testing.T, key ed25519.PrivateKey, ms ...selfupdate.Manifest) fetchSigned {
 	t.Helper()
 	t.Cleanup(selfupdate.TrustKeysForTest(releaseKey.Public().(ed25519.PublicKey)))
 	mux := http.NewServeMux()
@@ -63,8 +63,8 @@ func serveManifests(t *testing.T, key ed25519.PrivateKey, ms ...selfupdate.Manif
 	}
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return func(ctx context.Context, name string) (selfupdate.Manifest, error) {
-		return selfupdate.FetchManifestFrom(ctx, srv.URL, name)
+	return func(ctx context.Context, name string) (selfupdate.Manifest, []byte, []byte, error) {
+		return selfupdate.FetchSignedManifestFrom(ctx, srv.URL, name)
 	}
 }
 
@@ -143,7 +143,7 @@ func TestReleaseCheckRefuses(t *testing.T) {
 	other := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{8}, ed25519.SeedSize))
 	cases := []struct {
 		name  string
-		fetch func(context.Context, string) (selfupdate.Manifest, error)
+		fetch fetchSigned
 		args  []string
 		want  string
 	}{
@@ -338,7 +338,7 @@ func TestReleaseCheckOrdersUpgradeBoundariesByBuild(t *testing.T) {
 	)
 	other := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{9}, ed25519.SeedSize))
 	untrusted := serveManifests(t, other, release("v0.8.9-beta.4", "beta", 390, none))
-	fetch := func(ctx context.Context, tag string) (selfupdate.Manifest, error) {
+	fetch := func(ctx context.Context, tag string) (selfupdate.Manifest, []byte, []byte, error) {
 		if tag == "v0.8.9-beta.4" {
 			return untrusted(ctx, tag)
 		}
@@ -365,5 +365,44 @@ func TestReleaseCheckOrdersUpgradeBoundariesByBuild(t *testing.T) {
 		case c.want != "" && (!errors.As(err, &hold) || !strings.Contains(err.Error(), c.want)):
 			t.Errorf("to %s: err = %v, want a hold with %q", c.tag, err, c.want)
 		}
+	}
+}
+
+// --keep-manifests saves exactly the bytes release-check verified, and
+// nothing for a release it refused before that.
+func TestReleaseCheckKeepsTheManifestsItVerified(t *testing.T) {
+	edge := &selfupdate.Edge{Image: "ghcr.io/3xdevops/aether-edge", ImageDigest: edgeDigest("e"),
+		StoreSchema: 4, StoreCompatFloor: 3, Protocol: selfupdate.EdgeProtocol{Version: 2, MinVersion: 1},
+		MinUpgradeFrom: "v0.5.0", ManualSteps: []selfupdate.ManualStep{}}
+	fetch := serveManifests(t, releaseKey,
+		selfupdate.Manifest{Version: "v0.9.0-beta.1", Channel: "beta", Build: 405, Edge: edge},
+		selfupdate.Manifest{Version: "v0.9.0-beta.2", Channel: "beta", Build: 412, Edge: edge})
+	dir := t.TempDir()
+	check := func(digest string, extra ...string) error {
+		return releaseCheck(append([]string{"--tag", "v0.9.0-beta.2", "--digest", digest, "--from", "v0.9.0-beta.1",
+			"--from-digest", edgeDigest("e"), "--channel", "beta", "--keep-manifests", dir}, extra...), fetch, &bytes.Buffer{})
+	}
+	if err := check(edgeDigest("f")); err == nil {
+		t.Fatal("want another digest refused")
+	}
+	if names, _ := filepath.Glob(filepath.Join(dir, "*")); len(names) != 0 {
+		t.Fatalf("kept %v for a refused release", names)
+	}
+	if err := check(edgeDigest("e")); err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range []string{"v0.9.0-beta.1", "v0.9.0-beta.2"} {
+		if _, err := readManifest(filepath.Join(dir, tag+".json"), tag); err != nil {
+			t.Errorf("kept %s: %v", tag, err)
+		}
+	}
+	if err := os.Remove(filepath.Join(dir, "v0.9.0-beta.2.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := check(edgeDigest("e"), "--from-manifest", filepath.Join(dir, "v0.9.0-beta.1.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readManifest(filepath.Join(dir, "v0.9.0-beta.2.json"), "v0.9.0-beta.2"); err != nil {
+		t.Errorf("the new release is not kept again: %v", err)
 	}
 }
