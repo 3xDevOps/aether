@@ -82,4 +82,59 @@ if sh "$script" v0.4.0 v0.4.1 >/dev/null 2>&1; then
 	exit 1
 fi
 
+# A release on a channel takes its code from the build and hotfix the
+# release workflow passes, whatever its tag, above every code a tag gives.
+expect_build() {
+	got=$(sh "$script" "$@")
+	if [ "$got" != "$EXPECT" ]; then
+		echo "android-version-code-test: $* gave $got, wanted $EXPECT" >&2
+		exit 1
+	fi
+}
+EXPECT=100000100 expect_build v0.8.7 1
+EXPECT=100041200 expect_build v0.9.0-nightly.12 412
+EXPECT=100041200 expect_build v0.9.0-beta.2 412 0
+EXPECT=100041201 expect_build v0.9.1 412 1
+EXPECT=100041299 expect_build v0.9.1 412 99
+EXPECT=2100000000 expect_build v0.9.0 20000000
+EXPECT=100000300 expect_build v0.9.0-nightly.250 3
+if [ "$(code v9.99.99)" -ge "$(sh "$script" v0.9.0 1)" ]; then
+	echo "android-version-code-test: build 1 is not above every tag below v10.0.0" >&2
+	exit 1
+fi
+
+refuse_build() {
+	if message=$(sh "$script" "$@" 2>&1); then
+		echo "android-version-code-test: $* was accepted as $message" >&2
+		exit 1
+	fi
+	case $message in
+	"android-version-code: "*) ;;
+	*)
+		echo "android-version-code-test: $* failed without saying why: $message" >&2
+		exit 1
+		;;
+	esac
+}
+# A nightly tag has no tag formula.
+refuse v0.9.0-nightly.1
+refuse_build v0.9.0-nightly.x 3
+refuse_build v0.9.0-pre.1 3
+refuse_build v0.4 3
+refuse_build v0.9.0 0
+refuse_build v0.9.0 ''
+refuse_build v0.9.0 012
+refuse_build v0.9.0 -1
+refuse_build v0.9.0 3 100
+refuse_build v0.9.0 3 -1
+refuse_build v0.9.0 3 x
+# Past Android's limit, and wider than the shell compares.
+refuse_build v0.9.0 20000000 1
+refuse_build v0.9.0 20000001
+refuse_build v0.9.0 99999999999999999999
+if sh "$script" v0.9.0 1 0 1 >/dev/null 2>&1; then
+	echo "android-version-code-test: four arguments were accepted" >&2
+	exit 1
+fi
+
 echo "android-version-code-test: ok"

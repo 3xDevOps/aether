@@ -409,8 +409,10 @@ ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_ALIAS=throwaway ANDROID_KEY_PASSWORD=.
 expires before 22 October 2033. A PKCS12 keystore has one password, so
 `ANDROID_KEY_PASSWORD` equals `ANDROID_KEYSTORE_PASSWORD`. A signed build
 needs a release tag: `scripts/android-version-code.sh` derives the
-versionCode from it, so every release outranks the one before. An untagged
-or dirty tree builds versionCode 1.
+versionCode from it, or, when `RELEASE_BUILD` or `RELEASE_HOTFIX` is set
+on the make command line, from those as
+`100000000 + RELEASE_BUILD * 100 + RELEASE_HOTFIX`, so every release
+outranks the one before. An untagged or dirty tree builds versionCode 1.
 
 `ANDROID_IMAGE` in the `Makefile` (a Cirrus Labs image, published unsigned)
 moves together with `compileSdk` and `buildToolsVersion` in
@@ -486,9 +488,12 @@ for session VMs and the browser, edge and standard images from the tag's
 commit, runs the edge upgrade qualification and a Defender scan, and uploads
 the assets to a draft. After
 checking them against the signed manifest it publishes a normal release,
-never a GitHub prerelease, because the installers and update checks read
-`/releases/latest`, which skips prereleases. The highest published version
-becomes Latest.
+not a GitHub prerelease, because the installers and update checks read
+`/releases/latest`, which skips prereleases. Only a release whose signed
+manifest names the `nightly` or `beta` channel is published as a
+prerelease. Latest goes to the published stable release with the highest
+signed build and hotfix, above every release from before channels, which
+carry no build; among those, the highest version wins.
 
 Besides the binaries, the guest kernel (`aether-vmlinux-x86_64`), the
 Windows desktop zips and the Android APK and AAB, a release carries `checksums.txt` and a manifest signed with Ed25519
