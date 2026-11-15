@@ -2280,7 +2280,9 @@ the server snapshot from loading.
   prints, under `cli`, beside the linked server's version. Its fields are
   `version`, `commit`, `latest`, `update_available`, `asset`, `release_url`,
   `dev`, `disabled`, `can_self_update`, `packaged` and `checked_at`
-  ([install.md](install.md#upgrading)). The gateway resolves the latest
+  ([install.md](install.md#upgrading)). `latest` is the newest release on the
+  channel the default linked server follows, which the gateway reads from
+  `server.update_status` at most every 10 minutes. The gateway resolves the latest
   release at most once an hour and serves the cached answer in between, so
   a page load never costs a request to GitHub. `refresh: true` skips the
   cache and dials, and the answer it resolves replaces the cached one; the
