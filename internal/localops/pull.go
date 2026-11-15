@@ -22,22 +22,6 @@ type PullResult struct {
 	Dirty   bool
 }
 
-// PullCommand builds the fetch that lands a run branch in repo under
-// refs/remotes/aether/<branch>. Pull performs the follow-up branch operation.
-// addr is the link's cli.Config.GitHost, so an edge link fetches through
-// aether edge-ssh.
-func PullCommand(repo, user, addr string, coords protocol.RunPullResult) (string, *exec.Cmd, error) {
-	if coords.Branch == "" {
-		return "", nil, errors.New("session has no branch")
-	}
-	url := cli.GitURL(user, addr, coords.WorkspaceID)
-	cmd, err := fetchCommand(repo, url, coords.Branch)
-	if err != nil {
-		return "", nil, err
-	}
-	return coords.Branch, cmd, nil
-}
-
 // Pull fetches a run branch, creates or updates its local branch, and reports
 // whether that branch is current and whether the worktree is dirty.
 func Pull(repo, user, addr string, coords protocol.RunPullResult) (PullResult, error) {
@@ -254,8 +238,8 @@ func pullFetch(repo, url, branch string) (ref, output string, err error) {
 	return ref, output, nil
 }
 
-// fetchCommand is the one fetch both surfaces run: no tags, one refspec
-// landing the run branch under the aether remote-tracking namespace.
+// fetchCommand is the fetch Pull runs: no tags, one refspec landing the
+// run branch under the aether remote-tracking namespace.
 func fetchCommand(repo, url, branch string) (*exec.Cmd, error) {
 	env, err := cli.GitSSHEnv(url)
 	if err != nil {

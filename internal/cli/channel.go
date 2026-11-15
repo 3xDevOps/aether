@@ -140,18 +140,11 @@ func requestPTY(ch ssh.Channel, cols, rows uint) error {
 	return err
 }
 
-type Terminal interface {
-	io.ReadWriteCloser
-	Resize(cols, rows uint) error
-}
-
 // TerminalStream is a PTY-backed subsystem stream; Resize sends the RFC
 // 4254 window-change request on the underlying session channel.
 type TerminalStream struct {
 	*bufferedStream
 }
-
-var _ Terminal = (*TerminalStream)(nil)
 
 func (t *TerminalStream) Resize(cols, rows uint) error {
 	payload := ssh.Marshal(struct {
@@ -241,16 +234,6 @@ func (c *Conn) TerminalStream(req protocol.TerminalRequest) (*TerminalStream, pr
 		return nil, ack, refusal("terminal", ack.Code, ack.Error, ack.Data)
 	}
 	return &TerminalStream{bufferedStream: out}, ack, nil
-}
-
-func (c *Conn) Attach(runID string, cols, rows uint) (io.ReadWriteCloser, error) {
-	stream, _, err := c.AttachStream(protocol.AttachRequest{
-		RunID: runID, Cols: cols, Rows: rows, ControlSessionID: NewControlSessionID(),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return stream, nil
 }
 
 // Sync returns the raw mutagen endpoint stream. force overrides the

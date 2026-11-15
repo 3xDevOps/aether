@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -16,15 +15,13 @@ import (
 // Windows has no equivalent for, and syscall.Mkfifo does not exist there
 // at all, so the whole file is tagged rather than skipped at runtime:
 // `go vet` compiles test files, and an undefined symbol fails the build
-// before any skip could run. The cross-platform half of the same
-// behaviour is in preview_test.go, which asserts what the mode check
-// names each file type.
+// before any skip could run.
 
-// TestInventorySkipsNonRegularFiles covers the blocker: a unix socket in a
+// TestDiscoverSkipsNonRegularFiles covers the blocker: a unix socket in a
 // profile root - ~/.codex/ipc/ipc.sock exists on any machine codex has run
 // on - aborted the whole walk with "no such device or address", so the
-// harness could be neither previewed nor pushed.
-func TestInventorySkipsNonRegularFiles(t *testing.T) {
+// harness could not be pushed.
+func TestDiscoverSkipsNonRegularFiles(t *testing.T) {
 	root := setupClaudeRoot(t)
 	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
 	sock := filepath.Join(root, "ipc", "ipc.sock")
@@ -37,41 +34,21 @@ func TestInventorySkipsNonRegularFiles(t *testing.T) {
 	}
 	defer func() { _ = listener.Close() }()
 
-	preview, err := Inventory(t.Context(), "claude")
-	if err != nil {
-		t.Fatalf("a socket in the profile root aborted the walk: %v", err)
-	}
-	var got Exclusion
-	for _, e := range preview.Excluded {
-		if e.Path == "ipc/ipc.sock" {
-			got = e
-		}
-	}
-	if got.Reason != ExcludeNotRegular {
-		t.Fatalf("exclusions = %+v, want ipc/ipc.sock as %s", preview.Excluded, ExcludeNotRegular)
-	}
-	if !strings.Contains(got.Detail, "socket") {
-		t.Errorf("detail does not name the file type: %q", got.Detail)
-	}
-	if preview.Files != 1 {
-		t.Errorf("files = %d, want only settings.json", preview.Files)
-	}
-	// The push agrees: a socket must not abort discovery either.
 	files, _, err := DiscoverFiles(t.Context(), "claude", nil)
 	if err != nil {
-		t.Fatalf("DiscoverFiles: %v", err)
+		t.Fatalf("a socket in the profile root aborted the walk: %v", err)
 	}
 	if len(files) != 1 || files[0].Path != "settings.json" {
 		t.Errorf("discovered %+v, want only settings.json", files)
 	}
 }
 
-// TestInventoryDoesNotBlockOnAFifo is the half a socket cannot prove:
+// TestDiscoverDoesNotBlockOnAFifo is the half a socket cannot prove:
 // os.ReadFile on a FIFO blocks until a writer appears, and the context
 // check runs only between entries, so opening one would hang the walk on
 // an fd nothing can reclaim. The walk must refuse it on its mode and
 // return promptly.
-func TestInventoryDoesNotBlockOnAFifo(t *testing.T) {
+func TestDiscoverDoesNotBlockOnAFifo(t *testing.T) {
 	root := setupClaudeRoot(t)
 	mustWrite(t, filepath.Join(root, "settings.json"), `{"ok":true}`)
 	fifo := filepath.Join(root, "pipe")
@@ -81,7 +58,7 @@ func TestInventoryDoesNotBlockOnAFifo(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := Inventory(t.Context(), "claude")
+		_, _, err := DiscoverFiles(t.Context(), "claude", nil)
 		done <- err
 	}()
 	select {
