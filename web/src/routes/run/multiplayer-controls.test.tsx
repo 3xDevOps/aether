@@ -31,7 +31,8 @@ function tick() {
 }
 
 function size(strip: HTMLElement) {
-  strip.getBoundingClientRect = () => ({ left: 0, top: 0, right: 120, bottom: 32, width: 120, height: 32 }) as DOMRect
+  strip.querySelector<HTMLElement>('.control-matrix')!.getBoundingClientRect = () =>
+    ({ left: 0, top: 0, right: 120, bottom: 32, width: 120, height: 32 }) as DOMRect
 }
 
 beforeEach(() => {

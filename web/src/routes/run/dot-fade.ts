@@ -3,7 +3,8 @@ import { useReducedMotion } from '@/lib/hooks'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const DOT_GAP = 6
-const DOT_RADIUS = 0.8
+// The CSS texture's 0.75px dot with a 0.5px feather carries the ink of a 1px circle.
+const DOT_RADIUS = 1
 const PART_RADIUS = 42
 const WAKE_LENGTH = 84
 const WAKE_OVERSHOOT = 1.02
@@ -43,7 +44,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
     const matrix = strip?.querySelector<HTMLElement>('.control-matrix')
     const reach = matrix?.querySelector<HTMLElement>('.control-matrix-reach')
     if (!strip || !matrix || !reach) return
-    const host = strip
+    const host = matrix
 
     let frame = 0
     let lastFrame = 0
@@ -108,7 +109,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
     }
     const createGrid = () => {
       if (neutralSVG) return
-      const rect = strip.getBoundingClientRect()
+      const rect = matrix.getBoundingClientRect()
       width = rect.width || rect.right - rect.left
       height = rect.height || rect.bottom - rect.top
       if (width <= 0 || height <= 0) return
@@ -116,13 +117,9 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
       neutralSVG = document.createElementNS(SVG_NS, 'svg')
       neutralSVG.setAttribute('class', 'control-matrix-grid')
       neutralSVG.setAttribute('aria-hidden', 'true')
-      neutralSVG.setAttribute('viewBox', `0 0 ${width} ${height}`)
-      neutralSVG.setAttribute('preserveAspectRatio', 'none')
       accentSVG = document.createElementNS(SVG_NS, 'svg')
-      accentSVG.setAttribute('class', 'control-matrix-grid control-matrix-grid-accent')
+      accentSVG.setAttribute('class', 'control-matrix-grid')
       accentSVG.setAttribute('aria-hidden', 'true')
-      accentSVG.setAttribute('viewBox', `0 0 ${width} ${height}`)
-      accentSVG.setAttribute('preserveAspectRatio', 'none')
       for (let y = 3; y < height; y += DOT_GAP) {
         for (let x = 3; x < width; x += DOT_GAP) {
           const neutral = circle('control-matrix-dot', x, y, DOT_RADIUS)
@@ -133,7 +130,6 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
         }
       }
       ring = circle('control-matrix-ring', 0, 0, 0)
-      ring.setAttribute('vector-effect', 'non-scaling-stroke')
       neutralSVG.appendChild(ring)
       matrix.insertBefore(neutralSVG, matrix.firstChild)
       reach.appendChild(accentSVG)
@@ -302,7 +298,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
       if (event.target !== strip) return
       if (event.key !== 'Enter' && event.key !== ' ' && !event.key.startsWith('Arrow')) return
       event.preventDefault()
-      const rect = strip.getBoundingClientRect()
+      const rect = matrix.getBoundingClientRect()
       const nextWidth = rect.width || rect.right - rect.left
       const nextHeight = rect.height || rect.bottom - rect.top
       const current = pointer ?? { x: nextWidth / 2, y: nextHeight / 2 }
@@ -333,7 +329,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
       else cancel()
     })
     const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => {
-      const rect = strip.getBoundingClientRect()
+      const rect = matrix.getBoundingClientRect()
       const nextWidth = rect.width || rect.right - rect.left
       const nextHeight = rect.height || rect.bottom - rect.top
       if (nextWidth === width && nextHeight === height) return
@@ -355,7 +351,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
     document.addEventListener('visibilitychange', visibility)
     observer?.observe(strip)
     resize?.observe(strip)
-    const rect = strip.getBoundingClientRect()
+    const rect = matrix.getBoundingClientRect()
     width = rect.width || rect.right - rect.left
     height = rect.height || rect.bottom - rect.top
     return () => {
