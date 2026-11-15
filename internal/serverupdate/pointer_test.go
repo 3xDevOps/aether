@@ -2,13 +2,16 @@ package serverupdate
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -279,7 +282,7 @@ func TestChannelCheckFailsClosedOnAnUnreadableState(t *testing.T) {
 	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.1", 380), releasetest.Key)
 	svc := channelService(t, dir, rel.URL, "beta")
 	st := svc.runCheck(t.Context())
-	if !strings.Contains(st.Error, path) || !strings.Contains(st.Error, "fix or remove it") || st.LatestVersion != "" {
+	if !strings.Contains(st.Error, path) || !strings.Contains(st.Error, "remove it, which forgets the channel marks") || st.LatestVersion != "" {
 		t.Fatalf("check = %+v, want it failed naming %s", st, path)
 	}
 	if _, err := svc.resolveTag(t.Context(), ""); err == nil || !strings.Contains(err.Error(), path) {
@@ -290,6 +293,12 @@ func TestChannelCheckFailsClosedOnAnUnreadableState(t *testing.T) {
 	}
 	if n := rel.Requests("/releases/download/channels/beta.json"); n != 1 {
 		t.Fatalf("fetched beta.json %d times, want only before the corruption", n)
+	}
+	if err := os.WriteFile(path, good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st := svc.runCheck(t.Context()); st.Error != "channel pointer beta.json names build 380, below build 412 seen before" {
+		t.Fatalf("check after the file was fixed = %+v, want the restored mark to refuse the replay", st)
 	}
 }
 
@@ -326,7 +335,79 @@ func TestChannelCheckFailsWhenItsMarkCannotBeSaved(t *testing.T) {
 	if !strings.Contains(st.Error, "record the release check") || st.Failures != 1 || st.LatestVersion != "" {
 		t.Fatalf("check = %+v, want it failed with nothing offered", st)
 	}
-	if _, err := svc.resolveTag(t.Context(), ""); err == nil || !strings.Contains(err.Error(), "record the release check") {
-		t.Fatalf("update with no version = %v, want the write failure", err)
+	if _, err := svc.resolveTag(t.Context(), ""); err == nil || !strings.Contains(err.Error(), "record the release check") || len(svc.check.Pointers) != 0 {
+		t.Fatalf("update with no version = %v with marks %v, want the write failure and no mark in memory", err, svc.check.Pointers)
 	}
+}
+
+// A write that fails when no mark moved is a warning, as on a server with
+// no channel.
+func TestChannelCheckWithAnUnmovedMarkSurvivesAFailedWrite(t *testing.T) {
+	rel := channelHost(t)
+	dir := t.TempDir()
+	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.2", 412), releasetest.Key)
+	svc := channelService(t, dir, rel.URL, "beta")
+	if st := svc.runCheck(t.Context()); st.Error != "" {
+		t.Fatalf("check = %+v", st)
+	}
+	path := filepath.Join(dir, "check.json")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if st := svc.runCheck(t.Context()); st.Error != "" || st.LatestVersion != "v0.9.0-beta.2" {
+		t.Fatalf("check = %+v, want it to succeed", st)
+	}
+}
+
+// server.update with no version never waits on a background check that
+// hangs: on no channel it asks the feed itself, and on a channel it gives
+// up when its context ends.
+func TestUpdateWithNoVersionDoesNotWaitOnAHungCheck(t *testing.T) {
+	feed := &firstCallHangs{gate: make(chan struct{}), entered: make(chan struct{})}
+	svc := newCheckService(t, t.TempDir(), feed, time.Now)
+	go svc.runCheck(context.Background())
+	<-feed.entered
+	t.Cleanup(func() { close(feed.gate) })
+	done := make(chan error, 1)
+	go func() { _, err := svc.resolveTag(t.Context(), ""); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrUpToDate) {
+			t.Fatalf("update with no version = %v, want the feed's answer", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("update with no version waited on the hung check")
+	}
+
+	rel := channelHost(t)
+	onChannel := channelService(t, t.TempDir(), rel.URL, "beta")
+	onChannel.run <- struct{}{}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := onChannel.resolveTag(ctx, ""); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("update with no version behind a running check = %v, want its deadline", err)
+	}
+}
+
+// firstCallHangs blocks its first Latest until gate closes and answers
+// every later one at once.
+type firstCallHangs struct {
+	calls   atomic.Int32
+	entered chan struct{}
+	gate    chan struct{}
+}
+
+func (f *firstCallHangs) Latest(context.Context) (selfupdate.Manifest, error) {
+	if f.calls.Add(1) == 1 {
+		close(f.entered)
+		<-f.gate
+	}
+	return selfupdate.Manifest{}, selfupdate.ErrNoRelease
+}
+
+func (f *firstCallHangs) Fetch(context.Context, string) (selfupdate.Manifest, error) {
+	return selfupdate.Manifest{}, errors.New("not used")
 }

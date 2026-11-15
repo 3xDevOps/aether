@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -130,16 +131,17 @@ func (s *Service) Close() error {
 // runCheck asks the release feed for the newest signed release and
 // persists the answer. Callers that queued behind a check that started
 // after they did take its answer instead of asking again. Checks are
-// serialized by runMu, the only writer of check, so readers holding
+// serialized by run, the only writer of check, so readers holding
 // checkMu never wait on the network.
 func (s *Service) runCheck(ctx context.Context) checkState {
 	asked := s.checkRuns.Load()
-	s.runMu.Lock()
-	defer s.runMu.Unlock()
+	s.run <- struct{}{}
+	defer func() { <-s.run }()
 	if s.checkRuns.Load() != asked {
 		return s.check
 	}
 	s.checkRuns.Add(1)
+	s.reloadState()
 	st := s.check
 	m, marks, err := s.latest(ctx, st.Pointers)
 	now := s.cfg.Now().UTC()
@@ -162,7 +164,7 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	}
 	if werr := s.persistCheck(st); werr != nil {
 		slog.Warn("serverupdate: persist release check", "error", werr)
-		if s.cfg.Channel != "" && st.Error == "" {
+		if s.cfg.Channel != "" && st.Error == "" && !maps.Equal(st.Pointers, s.check.Pointers) {
 			// A channel mark only in memory is gone after a restart, so the
 			// check that found it fails, offers nothing new and keeps the
 			// marks on disk.
@@ -178,6 +180,30 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	s.check = st
 	s.checkMu.Unlock()
 	return st
+}
+
+// unreadableState is the error every channel check fails with while
+// check.json cannot be read.
+func unreadableState(err error) error {
+	return fmt.Errorf("%w; fix it, or remove it, which forgets the channel marks, to resume release checks", err)
+}
+
+// reloadState reads check.json again while it could not be read, so a
+// file an operator fixed or removed is taken up without a restart. The
+// caller holds run.
+func (s *Service) reloadState() {
+	if s.stateErr == nil {
+		return
+	}
+	check, err := loadCheck(s.cfg.StateDir)
+	if err != nil {
+		s.stateErr = unreadableState(err)
+		return
+	}
+	s.stateErr = nil
+	s.checkMu.Lock()
+	s.check = check
+	s.checkMu.Unlock()
 }
 
 // persistCheck saves st to check.json, unless the file could not be read.
