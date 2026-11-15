@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -102,6 +103,12 @@ func (s *Service) describeChannel(ctx context.Context, out *protocol.ServerUpdat
 	}
 	running := selfupdate.Running()
 	out.ServerBuild, out.ServerHotfix = running.Build, running.Hotfix
+	for ch, p := range check.Published {
+		if out.ChannelPointers == nil {
+			out.ChannelPointers = map[string]protocol.ChannelPointer{}
+		}
+		out.ChannelPointers[ch] = protocol.ChannelPointer{Version: p.Version, Build: p.Build, Hotfix: p.Hotfix, PublishedAt: p.PublishedAt.UTC().Format(time.RFC3339)}
+	}
 	if s.cfg.Releases == nil {
 		out.Channel, out.ChannelPending = channel, !chosen
 		if check.Channel != channel {

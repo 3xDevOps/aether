@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"maps"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -172,5 +173,45 @@ func TestChannelChangeDoesNotRecordACancelledCheck(t *testing.T) {
 	cancel2()
 	if st := e.svc.runCheck(ctx2); st.Failures != 0 || st.Error != "" {
 		t.Fatalf("a cancelled check = %+v, want nothing recorded", st)
+	}
+}
+
+// Status shows each channel's verified pointer with its published_at, for
+// display only: a forged pointer for another channel is left out and
+// changes nothing the server follows.
+func TestStatusShowsEveryChannelsVerifiedPointer(t *testing.T) {
+	rel := channelHost(t)
+	publishPointer(t, rel, "nightly", pointer("nightly", "v0.9.0-nightly.12", 412), releasetest.NightlyKey)
+	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.2", 412), releasetest.Key)
+	publishPointer(t, rel, "stable", pointer("stable", "v0.9.0", 412), releasetest.Key)
+	svc := channelService(t, t.TempDir(), rel.URL, "beta")
+	if st := svc.runCheck(t.Context()); st.Error != "" {
+		t.Fatal(st.Error)
+	}
+	got, err := svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]protocol.ChannelPointer{
+		"nightly": {Version: "v0.9.0-nightly.12", Build: 412, PublishedAt: "2026-11-20T10:00:00Z"},
+		"beta":    {Version: "v0.9.0-beta.2", Build: 412, PublishedAt: "2026-11-20T10:00:00Z"},
+		"stable":  {Version: "v0.9.0", Build: 412, PublishedAt: "2026-11-20T10:00:00Z"},
+	}
+	if !maps.Equal(got.ChannelPointers, want) {
+		t.Fatalf("channel_pointers = %+v, want %+v", got.ChannelPointers, want)
+	}
+
+	_, forger, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishPointer(t, rel, "stable", pointer("stable", "v0.9.0", 999), forger)
+	before := svc.check
+	st := svc.runCheck(t.Context())
+	if _, ok := st.Published["stable"]; ok || st.Error != "" || len(st.Published) != 2 {
+		t.Fatalf("check with a forged stable.json = %+v, want stable left out and no error", st)
+	}
+	if !maps.Equal(st.Pointers, before.Pointers) || st.Channel != "beta" || st.LatestVersion != before.LatestVersion {
+		t.Fatalf("a forged display pointer changed the check: %+v, was %+v", st, before)
 	}
 }

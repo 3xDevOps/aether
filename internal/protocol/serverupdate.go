@@ -143,34 +143,47 @@ type ServerUpdateAttempt struct {
 // are the signed (build, hotfix) of each release, 0 for a release from
 // before channels. Declined is the build the server no longer schedules by
 // itself: a super admin cancelled it or rolled back from it, or it failed;
-// the server schedules only a build above it.
+// the server schedules only a build above it. ChannelPointers is each
+// channel's verified pointer at the last check: its version, build and
+// published_at, so a frozen channel shows its age.
 type ServerUpdateStatusResult struct {
-	ServerVersion   string               `json:"server_version"`
-	ServerBuild     int                  `json:"server_build,omitempty"`
-	ServerHotfix    int                  `json:"server_hotfix,omitempty"`
-	Channel         string               `json:"channel,omitempty"`
-	ChannelPending  bool                 `json:"channel_pending,omitempty"`
-	ChannelWait     bool                 `json:"channel_wait,omitempty"`
-	Declined        *ReleaseBuild        `json:"declined,omitempty"`
-	LatestVersion   string               `json:"latest_version,omitempty"`
-	LatestChannel   string               `json:"latest_channel,omitempty"`
-	LatestBuild     int                  `json:"latest_build,omitempty"`
-	LatestHotfix    int                  `json:"latest_hotfix,omitempty"`
-	NotesURL        string               `json:"notes_url,omitempty"`
-	CheckedAt       string               `json:"checked_at,omitempty"`
-	CheckError      string               `json:"check_error,omitempty"`
-	Phase           string               `json:"phase"`
-	Error           string               `json:"error,omitempty"`
-	FromVersion     string               `json:"from_version,omitempty"`
-	ToVersion       string               `json:"to_version,omitempty"`
-	Latest          string               `json:"latest,omitempty"`
-	UpdateAvailable bool                 `json:"update_available"`
-	Capable         bool                 `json:"capable"`
-	Incapable       string               `json:"incapable,omitempty"`
-	Pending         *PendingServerUpdate `json:"pending,omitempty"`
-	Waiting         *ServerUpdateWaiting `json:"waiting,omitempty"`
-	Last            *ServerUpdateAttempt `json:"last,omitempty"`
-	ManualCommands  []string             `json:"manual_commands,omitempty"`
+	ServerVersion   string                    `json:"server_version"`
+	ServerBuild     int                       `json:"server_build,omitempty"`
+	ServerHotfix    int                       `json:"server_hotfix,omitempty"`
+	Channel         string                    `json:"channel,omitempty"`
+	ChannelPending  bool                      `json:"channel_pending,omitempty"`
+	ChannelWait     bool                      `json:"channel_wait,omitempty"`
+	Declined        *ReleaseBuild             `json:"declined,omitempty"`
+	ChannelPointers map[string]ChannelPointer `json:"channel_pointers,omitempty"`
+	LatestVersion   string                    `json:"latest_version,omitempty"`
+	LatestChannel   string                    `json:"latest_channel,omitempty"`
+	LatestBuild     int                       `json:"latest_build,omitempty"`
+	LatestHotfix    int                       `json:"latest_hotfix,omitempty"`
+	NotesURL        string                    `json:"notes_url,omitempty"`
+	CheckedAt       string                    `json:"checked_at,omitempty"`
+	CheckError      string                    `json:"check_error,omitempty"`
+	Phase           string                    `json:"phase"`
+	Error           string                    `json:"error,omitempty"`
+	FromVersion     string                    `json:"from_version,omitempty"`
+	ToVersion       string                    `json:"to_version,omitempty"`
+	Latest          string                    `json:"latest,omitempty"`
+	UpdateAvailable bool                      `json:"update_available"`
+	Capable         bool                      `json:"capable"`
+	Incapable       string                    `json:"incapable,omitempty"`
+	Pending         *PendingServerUpdate      `json:"pending,omitempty"`
+	Waiting         *ServerUpdateWaiting      `json:"waiting,omitempty"`
+	Last            *ServerUpdateAttempt      `json:"last,omitempty"`
+	ManualCommands  []string                  `json:"manual_commands,omitempty"`
+}
+
+// ChannelPointer is what a channel's signed pointer named at the server's
+// last release check, for display: present in channel_pointers only for a
+// pointer the server fetched and verified.
+type ChannelPointer struct {
+	Version     string `json:"version"`
+	Build       int    `json:"build,omitempty"`
+	Hotfix      int    `json:"hotfix,omitempty"`
+	PublishedAt string `json:"published_at"`
 }
 
 // ServerReleaseChannelSetParams are the params of

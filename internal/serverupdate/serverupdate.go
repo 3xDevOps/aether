@@ -480,7 +480,7 @@ func (s *Service) latestRecorded(ctx context.Context) (selfupdate.Manifest, stri
 	}
 	defer func() { <-s.run }()
 	s.reloadState()
-	m, marks, channel, err := s.latest(ctx, s.check.Pointers)
+	m, marks, channel, _, err := s.latest(ctx, s.check.Pointers)
 	if err != nil || maps.Equal(marks, s.check.Pointers) {
 		return m, channel, err
 	}

@@ -39,6 +39,8 @@ type checkState struct {
 	Pointers selfupdate.Marks `json:"pointers,omitempty"`
 	// Channel is the release channel the latest fields were found on.
 	Channel string `json:"channel,omitempty"`
+	// Published is each channel's verified pointer at this check.
+	Published map[string]publishedPointer `json:"published,omitempty"`
 }
 
 // forget drops the latest fields, which a check on another channel than
@@ -158,9 +160,12 @@ func (s *Service) checkLocked(ctx context.Context) checkState {
 	s.checkRuns.Add(1)
 	s.reloadState()
 	st := s.check
-	m, marks, channel, err := s.latest(ctx, st.Pointers)
+	m, marks, channel, followed, err := s.latest(ctx, st.Pointers)
 	if err != nil && ctx.Err() != nil {
 		return s.check
+	}
+	if channel != "" {
+		st.Published = s.published(ctx, channel, followed)
 	}
 	now := s.cfg.Now().UTC()
 	st.CheckedAt, st.Pointers = now, marks
@@ -245,22 +250,51 @@ func (s *Service) persistCheck(st checkState) error {
 
 // latest asks for the newest release: through the signed pointer of the
 // server's release channel, or from Config.Releases when it is set. It
-// returns marks raised to the pointer it accepted and the channel it
-// followed.
-func (s *Service) latest(ctx context.Context, marks selfupdate.Marks) (selfupdate.Manifest, selfupdate.Marks, string, error) {
+// returns marks raised to the pointer it accepted, the channel it
+// followed and that pointer, zero when it accepted none.
+func (s *Service) latest(ctx context.Context, marks selfupdate.Marks) (selfupdate.Manifest, selfupdate.Marks, string, selfupdate.Pointer, error) {
 	if s.cfg.Releases != nil {
 		m, err := s.cfg.Releases.Latest(ctx)
-		return m, marks, "", err
+		return m, marks, "", selfupdate.Pointer{}, err
 	}
 	channel, err := s.chooseChannel(ctx)
 	if err != nil {
-		return selfupdate.Manifest{}, marks, "", err
+		return selfupdate.Manifest{}, marks, "", selfupdate.Pointer{}, err
 	}
 	if s.stateErr != nil {
-		return selfupdate.Manifest{}, marks, channel, s.stateErr
+		return selfupdate.Manifest{}, marks, channel, selfupdate.Pointer{}, s.stateErr
 	}
-	m, raised, err := selfupdate.FollowChannel(ctx, s.cfg.Checker.BaseURL(), channel, marks)
-	return m, raised, channel, err
+	m, p, raised, err := selfupdate.FollowChannelPointer(ctx, s.cfg.Checker.BaseURL(), channel, marks)
+	return m, raised, channel, p, err
+}
+
+// published is the verified pointer of every channel, for display: the
+// one followed, accepted, for channel, and each other channel's as
+// FetchPointer verifies it. A pointer that does not verify is left out.
+// Nothing here touches the marks, the channel or what the server takes.
+func (s *Service) published(ctx context.Context, channel string, followed selfupdate.Pointer) map[string]publishedPointer {
+	out := map[string]publishedPointer{}
+	for _, ch := range []string{selfupdate.ChannelNightly, selfupdate.ChannelBeta, selfupdate.ChannelStable} {
+		p := followed
+		if ch != channel {
+			var err error
+			if p, err = selfupdate.FetchPointer(ctx, s.cfg.Checker.BaseURL(), ch); err != nil {
+				continue
+			}
+		}
+		if p.Tag != "" {
+			out[ch] = publishedPointer{Version: p.Tag, Build: p.Build, Hotfix: p.Hotfix, PublishedAt: p.PublishedAt}
+		}
+	}
+	return out
+}
+
+// publishedPointer is what a channel's pointer named at the last check.
+type publishedPointer struct {
+	Version     string    `json:"version"`
+	Build       int       `json:"build,omitempty"`
+	Hotfix      int       `json:"hotfix,omitempty"`
+	PublishedAt time.Time `json:"published_at"`
 }
 
 // refresh runs a check now and moves the background schedule after it,
