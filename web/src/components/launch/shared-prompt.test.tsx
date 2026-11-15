@@ -65,6 +65,12 @@ it('restores a popped-out draft and removes its state from the address', () => {
   expect(useStore.getState().paletteDialog).toBe('launch')
   expect(useStore.getState().launchDraft).toEqual(draft)
   expect(takeLaunchPopoutRequest()).toBeNull()
+
+  act(() => {
+    useStore.getState().setLaunchDraft(null)
+    useStore.getState().closePaletteDialog()
+  })
+  expect(useStore.getState().paletteDialog).toBeNull()
 })
 
 it('drops a prompt without new=1', () => {

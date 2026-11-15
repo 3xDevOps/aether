@@ -122,6 +122,7 @@ export function hasLaunchPopoutRequest(): boolean {
 export function takeLaunchPopoutRequest(): { draft: string | null } | null {
   if (!hasLaunchPopoutRequest()) return null
   launchPopoutTaken = true
+  shared = null
   return { draft: launchPopoutDraft }
 }
 
