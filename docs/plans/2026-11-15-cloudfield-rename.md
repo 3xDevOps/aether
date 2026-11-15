@@ -638,7 +638,7 @@ Each is one session. Phase and dependencies are in brackets.
    `cloudfield-server.service` link, and never writes through a symlink.
    `internal/selfupdate/update.go`, `internal/serverupdate/apply.go`,
    `serverupdate.go`, `host.go`, `cmd/aether/update.go`,
-   `cmd/aether-server/update.go`. [0; after release-channels 1 and 2;
+   `cmd/aether-server/update.go`. [0; after release-channels 1, 2 and 3;
    agreed with micro VM item 10]
 3. `feat(server)`: answer to `cloudfield-internal`; mount and reserve both
    in-container paths. `cmd/aether-server/main.go`,
@@ -649,7 +649,8 @@ Each is one session. Phase and dependencies are in brackets.
    `cmd/aether-edge/options.go`, `main.go`, `metrics.go`, `data.go`,
    `internal/selfupdate/selfupdate.go`, `scripts/install.sh`,
    `install.ps1`, `install-sysbox.sh`, `scripts/edge-update.sh`,
-   `desktop/main.js`, `android/.../Gateway.kt`, `UpdateCheck.kt`. [0]
+   `desktop/main.js`, `android/.../Gateway.kt`, `UpdateCheck.kt`.
+   [0; after release-channels 1, 2 and 8]
 5. `feat(edge)`: serve several address pairs from a new setting; a grant's
    issuer is the address its server enrolled at; one OAuth app per sign-in
    address; announce the relay addresses to servers; per-address counters.
@@ -668,7 +669,7 @@ Each is one session. Phase and dependencies are in brackets.
    script is copied again. `scripts/edge-update.sh`,
    `edge-update-test.sh`, `.github/workflows/promote-edge.yml`,
    `packaging/edge/upgrade.json`, `internal/edge/edgetest/testdata/`,
-   `docs/edge.md`. [0; with or after release-channels 7 and 8]
+   `docs/edge.md`. [0; after release-channels 6, 7 and 8]
 8. `feat(gitengine)`: accept `cloudfield/run-` branches beside
    `aether/run-`. `internal/gitengine/slug.go`, `engine.go`,
    `transport.go`. [0]
@@ -688,7 +689,7 @@ Each is one session. Phase and dependencies are in brackets.
     `cmd/`, `internal/cli`, `scheduler`, `assistant`,
     `edge/service/templates`, `coordhooks`, `coordcli`, `ops`, `connector`,
     `mcpbridge`, and their tests. Not `internal/runtime/vm`,
-    `internal/guest`, `internal/vmimage`. [1]
+    `internal/guest`, `internal/vmimage`. [1; after release-channels 3 and 4]
 13. `feat(desktop)`: product name, dialogs and icons; Windows resources.
     `desktop/electron-builder.yml`, `package.json`, `main.js`,
     `desktop/build/`, `packaging/windows/versioninfo.json`,
@@ -715,7 +716,7 @@ Each is one session. Phase and dependencies are in brackets.
     link; printed `systemctl` lines use the new name. `scripts/install.sh`,
     `install.ps1`, `internal/macinstall`, `cmd/aether-server/install.go`,
     `internal/localgw/update.go`. [3; after 2, 3 and 4 are in a stable
-    release]
+    release, and after release-channels 1]
 19. `feat(server)`: prompts and role cards name `cloudfield-internal` in
     containers that have it. Hook and plugin files written into homes keep
     the old path. `internal/coordhooks/guide.go`, `internal/coordcli/`,
@@ -733,7 +734,9 @@ Each is one session. Phase and dependencies are in brackets.
 23. `refactor`: Go module path, with `go.mod`, `Makefile`, `.golangci.yml`,
     `.github/workflows/ci-suite.yml`, `windows-install.yml`,
     `images/edge/Dockerfile`, `scripts/deploy.sh`, and regenerated
-    `internal/guest/guestpb`. One scripted change in a quiet hour. [4]
+    `internal/guest/guestpb`. One scripted change, in a window the integration
+    manager names: the merge queue empty and every open pull request
+    merged or told to rebase. [4]
 24. `feat(gitengine)`: new sessions get `cloudfield/run-` branches and the
     `cloudfield` remote. `internal/gitengine/slug.go`,
     `internal/localops/pull.go`, `push.go`, `compare.go`,
