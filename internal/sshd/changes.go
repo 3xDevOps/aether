@@ -146,6 +146,7 @@ func (s *Server) changesList(ctx context.Context, member domain.MemberID, raw js
 	filter := timeline.Filter{
 		Workspace: ws,
 		Run:       domain.RunID(p.RunID),
+		Reader:    member,
 		NoRereads: true,
 		Scope:     s.eventScope(ctx, actor),
 	}

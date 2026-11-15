@@ -59,6 +59,9 @@ type Filter struct {
 	// NoRereads leaves out run.status rereads even when Types asks for
 	// run.status.
 	NoRereads bool
+	// Reader is the member this page is for. A private payload is kept only
+	// when it is addressed to this member, matching the live/replayed stream.
+	Reader domain.MemberID
 	// Scope, when its Workspace is set, keeps only the events it makes
 	// events.Reachable.
 	Scope events.Scope
@@ -217,6 +220,9 @@ func (f Filter) keeps(e events.Event) bool {
 		return false
 	}
 	if f.Scope.Workspace != nil && !events.Reachable(e, f.Scope) {
+		return false
+	}
+	if !events.VisibleTo(e, f.Reader) {
 		return false
 	}
 	if p, ok := e.Payload.(events.TimelinePayload); ok && len(f.TimelineKinds) > 0 && !slices.Contains(f.TimelineKinds, p.Kind) {

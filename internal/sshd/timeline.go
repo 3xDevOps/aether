@@ -44,6 +44,7 @@ func (s *Server) workspaceTimeline(ctx context.Context, member domain.MemberID, 
 		Workspace: domain.WorkspaceID(p.WorkspaceID),
 		Run:       domain.RunID(p.RunID),
 		Member:    domain.MemberID(p.MemberID),
+		Reader:    member,
 		Types:     types,
 		Scope:     s.eventScope(ctx, actor),
 	}
