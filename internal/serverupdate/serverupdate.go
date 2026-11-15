@@ -99,6 +99,11 @@ type Config struct {
 	// Checker names, by default the pinned GitHub repository.
 	Releases Releases
 	Checker  *selfupdate.Checker
+	// Channel is the release channel the server follows. Set, the newest
+	// release comes from the channel's signed pointer in the repository
+	// Checker names, not from Releases' Latest. Empty follows
+	// /releases/latest.
+	Channel string
 	// Host carries the process-replacing side effects. A zero Host leaves
 	// the service unable to apply anything, which is what keeps every test
 	// binary away from the host's systemd. cmd/aether-server passes
@@ -425,7 +430,10 @@ func (s *Service) resolveTag(ctx context.Context, tag string) (string, error) {
 		}
 		return tag, nil
 	}
-	m, err := s.releases().Latest(ctx)
+	s.checkMu.Lock()
+	marks := s.check.Pointers
+	s.checkMu.Unlock()
+	m, _, err := s.latest(ctx, marks)
 	if errors.Is(err, selfupdate.ErrNoRelease) {
 		return "", fmt.Errorf("%w: %w", ErrUpToDate, err)
 	}

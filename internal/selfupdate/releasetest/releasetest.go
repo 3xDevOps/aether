@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -25,12 +27,17 @@ import (
 // it for the rest of the test binary.
 var Key = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x5a}, ed25519.SeedSize))
 
+// NightlyKey is the nightly key Serve makes selfupdate trust, for tests of
+// what a nightly key may and may not sign.
+var NightlyKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x6b}, ed25519.SeedSize))
+
 var trust sync.Once
 
 // Release is a fake release host. /releases/latest redirects to the latest
-// tag, /releases/tag/<tag> answers 200, and every tag's download directory
+// tag, /releases/tag/<tag> answers 200, every tag's download directory
 // carries the assets, checksums.txt, and a manifest for them signed with
-// Key.
+// Key, and /releases/download/channels/ carries the pointers SetPointer
+// publishes.
 type Release struct {
 	*httptest.Server
 
@@ -42,6 +49,7 @@ type Release struct {
 	unsigned    bool
 	storeSchema int
 	builds      map[string]selfupdate.Release
+	pointers    map[string][2][]byte
 	requests    map[string]int
 }
 
@@ -49,7 +57,10 @@ type Release struct {
 // assets under every tag. It is closed when the test ends.
 func Serve(t testing.TB, latest string, assets map[string][]byte) *Release {
 	t.Helper()
-	trust.Do(func() { selfupdate.TrustKeysForTest(PublicKey()) })
+	trust.Do(func() {
+		selfupdate.TrustKeysForTest(PublicKey())
+		selfupdate.TrustNightlyKeysForTest(NightlyKey.Public().(ed25519.PublicKey))
+	})
 	r := newRelease(latest, assets)
 	r.Server = httptest.NewServer(http.HandlerFunc(r.serveHTTP))
 	r.baseURL = r.URL
@@ -77,6 +88,7 @@ func newRelease(latest string, assets map[string][]byte) *Release {
 		served:      map[string][]byte{},
 		storeSchema: store.SchemaVersion(),
 		builds:      map[string]selfupdate.Release{},
+		pointers:    map[string][2][]byte{},
 		requests:    map[string]int{},
 	}
 }
@@ -111,6 +123,30 @@ func (r *Release) SetBuild(tag, channel string, build, hotfix int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.builds[tag] = selfupdate.Release{Channel: channel, Build: build, Hotfix: hotfix}
+}
+
+// SignPointer encodes p and signs the encoded bytes with key, returning
+// the contents of <channel>.json and its .sig.
+func SignPointer(t testing.TB, p selfupdate.Pointer, key ed25519.PrivateKey) (data, sig []byte) {
+	t.Helper()
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, '\n')
+	return data, []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(key, data)) + "\n")
+}
+
+// SetPointer serves data and sig as channel's pointer and its signature;
+// nil data withdraws both, so they answer 404.
+func (r *Release) SetPointer(channel string, data, sig []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if data == nil {
+		delete(r.pointers, channel)
+		return
+	}
+	r.pointers[channel] = [2][]byte{data, sig}
 }
 
 // Tamper serves body for the asset name while the manifest keeps
@@ -177,6 +213,17 @@ func (r *Release) serveHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Release) body(tag, name string) ([]byte, bool) {
+	if tag == "channels" {
+		channel, sig := strings.CutSuffix(name, ".sig")
+		p, ok := r.pointers[strings.TrimSuffix(channel, ".json")]
+		if !ok || !strings.HasSuffix(channel, ".json") {
+			return nil, false
+		}
+		if sig {
+			return p[1], true
+		}
+		return p[0], true
+	}
 	switch name {
 	case selfupdate.ManifestName, selfupdate.SignatureName:
 		if r.unsigned {

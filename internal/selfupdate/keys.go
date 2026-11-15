@@ -42,3 +42,13 @@ func TrustKeysForTest(keys ...ed25519.PublicKey) (restore func()) {
 	releaseKeys = keys
 	return func() { releaseKeys = old }
 }
+
+// TrustNightlyKeysForTest is TrustKeysForTest for the nightly keys.
+func TrustNightlyKeysForTest(keys ...ed25519.PublicKey) (restore func()) {
+	if !testing.Testing() {
+		panic("selfupdate: TrustNightlyKeysForTest called outside a test")
+	}
+	old := nightlyKeys
+	nightlyKeys = keys
+	return func() { nightlyKeys = old }
+}

@@ -3,9 +3,13 @@ package selfupdate
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -202,6 +206,13 @@ func comparePrerelease(a, b string) int {
 type Checker struct {
 	baseURL string
 	ttl     time.Duration
+	// channel is the release channel the checker follows through its
+	// signed pointer, with each channel's high-water mark kept in
+	// statePath. Empty asks /releases/latest.
+	channel   string
+	statePath string
+	// markMu serializes the channel checks that read and raise the marks.
+	markMu sync.Mutex
 	// now reads the clock. Tests drive it so cache expiry does not depend
 	// on real time passing: Windows' timer resolution is coarse enough
 	// that two calls in a row can read the same instant, which would leave
@@ -229,6 +240,14 @@ type Checker struct {
 // https://github.com/3xDevOps/Aether.
 func NewChecker(baseURL string, ttl time.Duration) *Checker {
 	return &Checker{baseURL: baseURL, ttl: ttl, now: time.Now}
+}
+
+// NewChannelChecker is NewChecker following channel's signed pointer,
+// keeping the channel marks in the JSON file statePath.
+func NewChannelChecker(baseURL string, ttl time.Duration, channel, statePath string) *Checker {
+	c := NewChecker(baseURL, ttl)
+	c.channel, c.statePath = channel, statePath
+	return c
 }
 
 // DefaultChecker checks the Aether repository's releases.
@@ -284,7 +303,7 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 		out.Disabled = true
 	default:
 		var m Manifest
-		m, err = LatestManifestFrom(ctx, c.baseURL)
+		m, err = c.latest(ctx)
 		switch {
 		case err == nil:
 			out.Latest = m.Version
@@ -299,6 +318,72 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 	}
 	c.store(id, out, err)
 	return out, err
+}
+
+// latest is the newest release on the checker's channel.
+func (c *Checker) latest(ctx context.Context) (Manifest, error) {
+	if c.channel == "" {
+		return LatestManifestFrom(ctx, c.baseURL)
+	}
+	c.markMu.Lock()
+	defer c.markMu.Unlock()
+	st, err := loadChannelState(c.statePath)
+	if err != nil {
+		return Manifest{}, err
+	}
+	m, marks, err := FollowChannel(ctx, c.baseURL, c.channel, st.Pointers)
+	if err != nil || maps.Equal(marks, st.Pointers) {
+		return m, err
+	}
+	st.Pointers = marks
+	return m, saveChannelState(c.statePath, st)
+}
+
+// channelState is the client's update state file.
+type channelState struct {
+	Pointers Marks `json:"pointers,omitempty"`
+}
+
+func loadChannelState(path string) (channelState, error) {
+	var st channelState
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return st, nil
+	}
+	if err != nil {
+		return st, fmt.Errorf("read update state %s: %w", path, err)
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		return st, fmt.Errorf("parse update state %s: %w", path, err)
+	}
+	return st, nil
+}
+
+func saveChannelState(path string, st channelState) error {
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	if err = os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("save update state: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".update-*.json")
+	if err != nil {
+		return fmt.Errorf("save update state: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	_, err = tmp.Write(append(data, '\n'))
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+	}
+	if err != nil {
+		return fmt.Errorf("save update state %s: %w", path, err)
+	}
+	return nil
 }
 
 // nextID takes the number this lookup is ordered by.
