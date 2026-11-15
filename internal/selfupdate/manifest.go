@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -13,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -46,7 +48,15 @@ var errUnsigned = errors.New("it predates signed releases or is still being publ
 
 // Manifest is a release's verified aether-release.json.
 type Manifest struct {
-	Schema      int       `json:"schema"`
+	Schema int `json:"schema"`
+	// Channel is the channel the release was published on. It, Build and
+	// Hotfix are absent from a release that predates channels.
+	Channel string `json:"channel,omitempty"`
+	// Build orders releases: it only increases along main, and a release
+	// promoted from a nightly carries that nightly's build. Hotfix counts
+	// the hotfixes on top of the stable release with the same build.
+	Build       int       `json:"build,omitempty"`
+	Hotfix      int       `json:"hotfix,omitempty"`
 	Version     string    `json:"version"`
 	Commit      string    `json:"commit"`
 	PublishedAt time.Time `json:"published_at"`
@@ -258,21 +268,19 @@ func unsigned(tag string, err error) error {
 }
 
 // VerifyManifest checks sig over the exact bytes of data against the
-// trusted release keys, then parses data and checks it describes tag.
+// trusted release keys, then parses data and checks it describes tag. A
+// nightly key verifies only a manifest whose signed channel is nightly.
 func VerifyManifest(data, sig []byte, tag string) (Manifest, error) {
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(sig)))
 	if err != nil || len(raw) != ed25519.SignatureSize {
 		return Manifest{}, fmt.Errorf("%s for %s is not a base64 ed25519 signature", SignatureName, tag)
 	}
-	trusted := false
-	for _, key := range releaseKeys {
-		if ed25519.Verify(key, data, raw) {
-			trusted = true
-			break
-		}
-	}
-	if !trusted {
+	release, nightly := signedBy(releaseKeys, data, raw), signedBy(nightlyKeys, data, raw)
+	if !release && !nightly {
 		return Manifest{}, fmt.Errorf("%s for %s is not signed by a trusted release key; do not install it", ManifestName, tag)
+	}
+	if err := canonicalKeys(data); err != nil {
+		return Manifest{}, fmt.Errorf("parse %s for %s: %w; do not install it", ManifestName, tag, err)
 	}
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
@@ -284,6 +292,12 @@ func VerifyManifest(data, sig []byte, tag string) (Manifest, error) {
 	if m.Version != tag {
 		return Manifest{}, fmt.Errorf("%s fetched for %s describes %s; do not install it", ManifestName, tag, m.Version)
 	}
+	if !release && m.Channel != ChannelNightly {
+		return Manifest{}, fmt.Errorf("%s for %s is signed by a nightly key but its channel is %q, not nightly; do not install it", ManifestName, tag, m.Channel)
+	}
+	if err := m.validChannel(); err != nil {
+		return Manifest{}, fmt.Errorf("%s for %s: %w; do not install it", ManifestName, tag, err)
+	}
 	if len(m.Assets) == 0 {
 		return Manifest{}, fmt.Errorf("%s for %s lists no assets", ManifestName, tag)
 	}
@@ -293,6 +307,86 @@ func VerifyManifest(data, sig []byte, tag string) (Manifest, error) {
 		}
 	}
 	return m, nil
+}
+
+// manifestKeys are the top-level keys a manifest may carry, exactly as
+// spelled.
+var manifestKeys = func() []string {
+	t := reflect.TypeFor[Manifest]()
+	var keys []string
+	for i := range t.NumField() {
+		if name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ","); name != "" && name != "-" {
+			keys = append(keys, name)
+		}
+	}
+	return keys
+}()
+
+// canonicalKeys refuses a top-level key that repeats, or that spells a
+// manifest field in another case. encoding/json takes the last of
+// repeated keys and matches keys case-insensitively, where jq and other
+// tooling would read another value from the same signed bytes. Unknown
+// keys pass, so a later release may add fields.
+func canonicalKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return errors.New("not a JSON object")
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		key := tok.(string)
+		if seen[key] {
+			return fmt.Errorf("key %q repeats", key)
+		}
+		seen[key] = true
+		for _, want := range manifestKeys {
+			if key != want && strings.EqualFold(key, want) {
+				return fmt.Errorf("key %q is not spelled %q", key, want)
+			}
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func signedBy(keys []ed25519.PublicKey, data, sig []byte) bool {
+	for _, key := range keys {
+		if ed25519.Verify(key, data, sig) {
+			return true
+		}
+	}
+	return false
+}
+
+// validChannel checks the channel fields agree with each other and with
+// the tag's form: a release carries a channel and a positive build, or,
+// from before channels, neither.
+func (m Manifest) validChannel() error {
+	switch {
+	case m.Channel == "" && m.Build == 0 && m.Hotfix == 0:
+		return nil
+	case m.Channel == "":
+		return fmt.Errorf("build %d and hotfix %d without a channel", m.Build, m.Hotfix)
+	case m.Build < 1 || m.Hotfix < 0:
+		return fmt.Errorf("channel %s with build %d and hotfix %d; the build must be positive and the hotfix not negative", m.Channel, m.Build, m.Hotfix)
+	case m.Channel != TagChannel(m.Version):
+		return fmt.Errorf("channel %q does not match %s, %s", m.Channel, m.Version, tagForm(m.Version))
+	}
+	return nil
+}
+
+func tagForm(tag string) string {
+	if c := TagChannel(tag); c != "" {
+		return "a " + c + " tag"
+	}
+	return "a tag of no channel"
 }
 
 // SignManifest encodes m and signs the encoded bytes with key, returning

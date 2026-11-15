@@ -46,7 +46,8 @@ type Check struct {
 	Commit string `json:"commit"`
 	// Latest is the newest published release tag, empty when no check ran.
 	Latest string `json:"latest,omitempty"`
-	// UpdateAvailable reports that Latest is newer than Version.
+	// UpdateAvailable reports that Latest is newer than this build, by
+	// Newer.
 	UpdateAvailable bool `json:"update_available"`
 	// Asset is the release asset for this platform.
 	Asset string `json:"asset,omitempty"`
@@ -287,7 +288,7 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 		switch {
 		case err == nil:
 			out.Latest = m.Version
-			out.UpdateAvailable = Behind(version.Version, m.Version)
+			out.UpdateAvailable = Newer(m.Release(), Running())
 			out.ReleaseURL = c.baseURL + "/releases/tag/" + m.Version
 			if out.Packaged == "" {
 				out.Asset = assetName(runtime.GOOS, runtime.GOARCH)

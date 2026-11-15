@@ -13,11 +13,21 @@ MODULE  := github.com/3xDevOps/Aether
 # executing. Anything left empty falls back below.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | tr -cd 'A-Za-z0-9.+_-')
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null | tr -cd 'A-Za-z0-9')
+# The release's signed build and hotfix numbers, taken only from the make
+# command line (make RELEASE_BUILD=412 RELEASE_HOTFIX=0), never from the
+# environment. Unset is 0; anything but one run of digits stops the build
+# before it reaches a shell.
+nodigits = $(subst 0,,$(subst 1,,$(subst 2,,$(subst 3,,$(subst 4,,$(subst 5,,$(subst 6,,$(subst 7,,$(subst 8,,$(subst 9,,$(1)))))))))))
+release_number = $(if $(filter command line,$(origin $(1))),$(if $(and $(filter 1,$(words $($(1)))),$(if $(call nodigits,$($(1))),,1)),$($(1)),$(error $(1) must be a non-negative integer)),0)
+BUILD_NUMBER  := $(call release_number,RELEASE_BUILD)
+HOTFIX_NUMBER := $(call release_number,RELEASE_HOTFIX)
 VERSION := $(or $(VERSION),dev)
 COMMIT  := $(or $(COMMIT),unknown)
 LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.Version=$(VERSION) \
-	-X $(MODULE)/internal/version.Commit=$(COMMIT)
+	-X $(MODULE)/internal/version.Commit=$(COMMIT) \
+	-X $(MODULE)/internal/version.Build=$(BUILD_NUMBER) \
+	-X $(MODULE)/internal/version.Hotfix=$(HOTFIX_NUMBER)
 
 DIST := dist
 BUN  := bun

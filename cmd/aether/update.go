@@ -79,6 +79,9 @@ func runUpdate(args []string) error {
 		server = probeLinkedServer(ctx)
 	}
 	if match := matchServer(server); *tag == "" && match != "" {
+		if err := selfupdate.RefuseDowngrade(ctx, base, match); err != nil {
+			return err
+		}
 		*tag = match
 		fmt.Printf("installing %s to match the server\n", *tag)
 	} else if *tag == "" {
@@ -285,7 +288,7 @@ func matchServer(server linkedServer) string {
 	if !server.reachable {
 		return ""
 	}
-	return cli.MatchServer(version.Version, server.version)
+	return cli.MatchServer(selfupdate.Release{Version: version.Version}, selfupdate.Release{Version: server.version})
 }
 
 // serverFirst refuses to move this client past a linked server that its
@@ -294,12 +297,12 @@ func matchServer(server linkedServer) string {
 // can and the install goes ahead, as it does when the server is
 // unreachable or already current.
 func serverFirst(w io.Writer, target string, server linkedServer) error {
-	if !server.reachable || !selfupdate.Behind(server.version, target) {
+	if !server.reachable || !selfupdate.Newer(selfupdate.Release{Version: target}, selfupdate.Release{Version: server.version}) {
 		return nil
 	}
 	running := printable(server.version)
 	switch {
-	case cli.ServerFirst(server.version, target, server.admin, server.capable):
+	case cli.ServerFirst(selfupdate.Release{Version: server.version}, selfupdate.Release{Version: target}, server.admin, server.capable):
 		return fmt.Errorf("update the server first: aether server update (the server runs %s and this installs %s; --force skips this check)",
 			running, target)
 	case server.admin:

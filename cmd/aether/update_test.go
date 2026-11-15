@@ -165,6 +165,20 @@ func TestMatchServerInstallsTheServersRelease(t *testing.T) {
 	}
 }
 
+// Until the server reports its build, the client matches its server by
+// version, exactly as the server's gate refuses it by version, so a client
+// the gate refuses always has the server's release to move to. Installing
+// it still goes through selfupdate.RefuseDowngrade, which reads the
+// signed build.
+func TestMatchServerFollowsTheServersGateWithABuild(t *testing.T) {
+	oldVersion, oldBuild := version.Version, version.Build
+	version.Version, version.Build = "v0.9.0-beta.2", "412"
+	t.Cleanup(func() { version.Version, version.Build = oldVersion, oldBuild })
+	if got := matchServer(linkedServer{reachable: true, version: "v0.9.0-nightly.10"}); got != "v0.9.0-nightly.10" {
+		t.Fatalf("matchServer = %q, want the server's release", got)
+	}
+}
+
 // On a server host the release's aether-server must know this build's
 // store schema, or it could not open the database.
 func TestUpdateRefusesAServerThatCannotOpenTheDatabase(t *testing.T) {
