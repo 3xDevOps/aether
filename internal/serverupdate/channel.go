@@ -95,7 +95,8 @@ func ReadMarks(stateDir string) (selfupdate.Marks, error) {
 // describeChannel fills the channel and build fields of a status from the
 // last check. A check on another channel than the one now set, as after a
 // change on the host, says nothing about it, so it is left out and a
-// check is started, at most once per refreshEvery.
+// check is started, at most once per refreshEvery; before the first check
+// the background loop is already about to run one.
 func (s *Service) describeChannel(ctx context.Context, out *protocol.ServerUpdateStatusResult, check checkState) error {
 	channel, chosen, err := s.storedChannel(ctx)
 	if err != nil {
@@ -112,7 +113,7 @@ func (s *Service) describeChannel(ctx context.Context, out *protocol.ServerUpdat
 	if s.cfg.Releases == nil {
 		out.Channel, out.ChannelPending = channel, !chosen
 		if check.Channel != channel {
-			if s.cfg.Now().Sub(check.CheckedAt) >= refreshEvery {
+			if !check.CheckedAt.IsZero() && s.cfg.Now().Sub(check.CheckedAt) >= refreshEvery {
 				s.checkSoon()
 			}
 			return nil
