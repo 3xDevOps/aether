@@ -1,5 +1,6 @@
 import type { Command } from '@/lib/commands'
 import type { CloseOutcome, RunCloseCheck, WatchTarget } from '@/lib/types'
+import { saveLaunchDraft, type LaunchDraft } from '@/components/launch/draft'
 import type { SliceCreator } from '@/store/slice'
 
 /** Every form the shell hosts; sweep this list rather than keep a copy. */
@@ -17,6 +18,10 @@ export interface PaletteSlice {
   paletteWatchTarget: WatchTarget | null
   /** The task the launch form opens with: text shared to Aether. */
   paletteLaunchTask: string
+  launchDraft: LaunchDraft | null
+  launchDraftError: string | null
+  setLaunchDraft: (draft: LaunchDraft | null, persist?: boolean) => string | null
+  clearLaunchDraftError: () => void
   /** A verb that closes a run with close warnings, held until the owner confirms. */
   closeConfirmation: { check: RunCloseCheck; asked: string; outcome: CloseOutcome; command: Command } | null
   /** Runs whose close check is in flight, so a second press does not check again. */
@@ -32,13 +37,26 @@ export interface PaletteSlice {
   setCloseChecking: (runID: string, checking: boolean) => void
 }
 
-export const createPaletteSlice: SliceCreator<PaletteSlice> = (set) => ({
+export const createPaletteSlice: SliceCreator<PaletteSlice> = (set, get) => ({
   paletteOpen: false,
   paletteDialog: null,
   paletteRunID: null,
   paletteForwardTarget: null,
   paletteWatchTarget: null,
   paletteLaunchTask: '',
+  launchDraft: null,
+  launchDraftError: null,
+  setLaunchDraft: (launchDraft, persist = true) => {
+    const state = get()
+    const linkStatusPending = state.capabilities === null || (state.capabilities.local?.includes('link.status') && !state.linkStatus)
+    const error = saveLaunchDraft(state.identityKey, launchDraft, persist && !state.linkStatus?.edge_url && !linkStatusPending)
+    set({
+      launchDraft,
+      launchDraftError: error ? `Could not save launch draft: ${error}` : persist ? null : state.launchDraftError,
+    })
+    return error
+  },
+  clearLaunchDraftError: () => set({ launchDraftError: null }),
   closeConfirmation: null,
   closeChecking: {},
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),

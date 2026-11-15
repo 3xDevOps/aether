@@ -65,6 +65,9 @@ test('pasted tasks grow to the limit and scroll past it', async ({ page, aether 
   await phoneTask.evaluate((el) => { el.scrollTop = 0 })
   await page.screenshot({ path: testInfo.outputPath('task-field-phone.png') })
 
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.getByRole('dialog', { name: 'New session' }).getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.setViewportSize({ width: 390, height: 844 })
   const sharedURL = new URL(alice.url)
   sharedURL.searchParams.set('new', '1')
   sharedURL.searchParams.set('prompt', longPrompt)
