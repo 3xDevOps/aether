@@ -816,8 +816,9 @@ channel, without `--allow-downgrade`; the same build under another
 channel's tag installs. `aether update` and the dashboard's **Update now**
 never pick a lower build on their own; `aether update --version <tag>`
 installs the release you name. The server does not report its build yet,
-so a client with a build does not install its server's release to match
-it, and the server decides whether a client is too old by version.
+so a client picks its server's release to match, and the server decides
+whether a client is too old, by version; a match to a lower build is
+refused, and `aether update --version <tag>` installs it anyway.
 The manifest also signs image digests ([edge.md](edge.md#verifying-an-image)).
 
 #### Verify a release by hand

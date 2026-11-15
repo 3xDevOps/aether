@@ -165,15 +165,17 @@ func TestMatchServerInstallsTheServersRelease(t *testing.T) {
 	}
 }
 
-// A client with a build never matches down to a server whose build it
-// cannot see, however the tags sort: v0.9.0-nightly.10 sorts above
-// v0.9.0-beta.2 by semver but may be an older build.
-func TestMatchServerNeverMovesABuildDown(t *testing.T) {
+// Until the server reports its build, the client matches its server by
+// version, exactly as the server's gate refuses it by version, so a client
+// the gate refuses always has the server's release to move to. Installing
+// it still goes through selfupdate.RefuseDowngrade, which reads the
+// signed build.
+func TestMatchServerFollowsTheServersGateWithABuild(t *testing.T) {
 	oldVersion, oldBuild := version.Version, version.Build
 	version.Version, version.Build = "v0.9.0-beta.2", "412"
 	t.Cleanup(func() { version.Version, version.Build = oldVersion, oldBuild })
-	if got := matchServer(linkedServer{reachable: true, version: "v0.9.0-nightly.10"}); got != "" {
-		t.Fatalf("matchServer = %q, want no match", got)
+	if got := matchServer(linkedServer{reachable: true, version: "v0.9.0-nightly.10"}); got != "v0.9.0-nightly.10" {
+		t.Fatalf("matchServer = %q, want the server's release", got)
 	}
 }
 

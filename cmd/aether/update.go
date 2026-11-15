@@ -288,7 +288,7 @@ func matchServer(server linkedServer) string {
 	if !server.reachable {
 		return ""
 	}
-	return cli.MatchServer(selfupdate.Running(), selfupdate.Release{Version: server.version})
+	return cli.MatchServer(selfupdate.Release{Version: version.Version}, selfupdate.Release{Version: server.version})
 }
 
 // serverFirst refuses to move this client past a linked server that its

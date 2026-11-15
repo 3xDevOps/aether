@@ -152,7 +152,7 @@ func updateTarget(check selfupdate.Check, serverVersion string) string {
 	if check.Dev || check.Disabled {
 		return ""
 	}
-	if core := cli.MatchServer(selfupdate.Running(), selfupdate.Release{Version: serverVersion}); core != "" {
+	if core := cli.MatchServer(selfupdate.Release{Version: check.Version}, selfupdate.Release{Version: serverVersion}); core != "" {
 		return core
 	}
 	if check.UpdateAvailable {
