@@ -184,14 +184,22 @@ Every place that compares versions today moves to build order:
   cross a `store_schema`.
 - **Replayed pointer:** each install keeps the highest `(build, hotfix)` it
   has accepted from each channel's pointer, in `server-update/check.json`
-  on a server and the client's update state on a client. A pointer below
+  on a server and `update.json` beside the client's `config.json` on a
+  client. A state file that exists but cannot be read fails the check
+  and is never overwritten. A pointer below
   that mark is refused with
   `channel pointer beta.json names build 380, below build 412 seen before`
   and the check counts as failed. An old pointer an attacker replays can
-  therefore only fail checks; it cannot move an install back.
+  therefore only fail checks; it cannot move an install back. A validly
+  signed pointer with a very high build raises the mark for good; only a
+  higher build recovers it.
 - **No pointer moves down.** A pointer writer reads the current pointer
   and refuses to sign a lower build, so a lagging release listing or a
   deleted release cannot strand every install behind its high-water mark.
+  A missing pointer is an error, not a first pointer: the writer signs
+  the first one only when its caller says so (`first-pointer`). A run
+  that fails mid-upload retries, and keeps its signed pair as a workflow
+  artifact to restore from.
   Withdrawing a bad release means shipping a higher build: revert on
   `main` and "build now", or promote a newer nightly.
 - **Channel confusion:** the pointer and the manifest both sign their
@@ -358,8 +366,10 @@ change it, the same rule as server updates
 (`internal/sshd/serverupdate.go:62`). Every member sees the current
 channel. A server that existed before channels gets `beta` from the
 migration. A new server reads the pointers on first boot: `stable` when
-`stable.json` exists, else `beta`. The default cannot be compiled in,
-because the last beta and the first stable are the same commit.
+`stable.json` verifies, `beta` once `stable.json` has answered 404 on two
+checks in a row. Until then it has no channel, follows beta and applies
+nothing by itself. The default cannot be compiled in, because the last
+beta and the first stable are the same commit.
 
 ### Settings → Updates
 
@@ -407,7 +417,7 @@ idle, "like any channel". Today no channel does: the background check
 only records the newest release (`internal/serverupdate/check.go:125`),
 and each update starts with a super admin's `server.update` `idle` or
 `now` (`internal/sshd/serverupdate.go:61`). *Assumption,* for the owner to
-confirm before pull request 3 builds it: on every channel, when the check
+confirm: on every channel, when the check
 finds a release on the server's channel above the running build, the
 server schedules it itself, exactly as `server.update` `idle` would, and
 it applies once no session is working. The narrower reading is that only
@@ -421,10 +431,18 @@ Under either reading:
 - The server never schedules a build a super admin turned down. A
   `cancel`, an `allow_downgrade` update, and an update recorded failed
   after its 3 retries (`internal/serverupdate/apply.go:21`) each store
-  that build as declined in `server-update/check.json`. The server
-  schedules by itself only a build above the declined one, so a rollback
-  holds until a newer build ships. A super admin's own `server.update`
-  ignores the mark.
+  that build as declined in the database, as does a self-scheduled
+  update whose new binary failed its trial and rolled back. The mark is
+  written before the cancel or rollback takes effect, and a write that
+  fails refuses it. The server schedules by itself only a build above the
+  declined one, so a rollback holds until a newer build ships. A super
+  admin's own `server.update` ignores the mark.
+- Only a published release stamped with a build schedules by itself, and
+  only a release with a build is scheduled: a source build is never
+  replaced, and nothing changes until channel releases exist.
+- A channel change retires a pending update the new channel does not
+  accept, and `server.update` `idle` refuses such a release; `now` still
+  installs it.
 - The audit log names the server, not a member, as the actor of an update
   it scheduled.
 
@@ -517,7 +535,20 @@ it only with that run's attestation and a passing `release-check`.
   image's attestation on any channel; the new image still needs one on
   the new channel.
 - `latest` stays a channel name, following stable releases with no
-  attestation, as today.
+  attestation, as today. It refuses a nightly manifest.
+- `release-check` orders by the running release's signed manifest, bound
+  to the running image digest, never by what the image reports. The
+  updater keeps each verified manifest and signature on the host, so the
+  order survives pruning.
+- `min_upgrade_from` and a manual step's `since` are tags. With a running
+  build they are ordered by the boundary tag's signed build; a boundary
+  whose manifest cannot be read holds the update, unless its tag is below
+  `v0.8.7`. They never name a nightly. A step for a change merged this
+  cycle therefore names a beta that does not exist yet, and nightly hosts
+  hold until it is published. Signing a build per boundary would remove
+  that; it is a manifest format change this plan does not make.
+  (`cmd/aether-edge/releasecheck.go:71`, `:76` under
+  [Build number](#build-number) are these two comparisons.)
 - `release-check` reads the manifest's `channel` and `build` and refuses a
   channel the host's does not accept, or a lower build.
 
@@ -683,10 +714,12 @@ it gains a `release/X.Y` mode. CI's push trigger (`ci.yml:4-5`) adds
    way. It becomes Latest and reaches every install through
    `/releases/latest`. Existing servers get `release_channel` `beta` from
    its migration.
-2. Publish the first `beta.json` naming that beta, at build 0. Its
-   manifest has no `channel`; pre-channel manifests are accepted on beta.
-3. Promote it to stable `v0.8.7`. The trusted signer gives it `channel`
-   and build 1 even though its commit predates them. It becomes Latest, so
+2. Create the `channels` prerelease that holds the pointers. No pointer
+   is published for the pre-channel beta: until a channel's first
+   pointer verifies, installs on it read `/releases/latest`.
+3. Promote it to stable `v0.8.7`, with `first-pointer` set: this run
+   writes the first `stable.json` and `beta.json`. The trusted signer
+   gives it `channel` and build 1 even though its commit predates them. It becomes Latest, so
    pre-channel installs that missed step 1 still update, and new installs
    get stable.
 4. Turn on `nightly.yml`. The first nightly is `v0.9.0-nightly.1`, build 2.
@@ -729,7 +762,9 @@ step 1; 5 to 7 must merge before step 3.
 8. `feat(edge)`: build order and channel in `release-check` and
    `edge-update.sh`, channel switches, the `nightly` and `beta` tags.
 9. `ci`: `nightly.yml` with "build now", pruning, and the edge-qualify
-   starting points.
+   starting points; the signer job of `release-build.yml` takes its
+   environment and key from the caller, and until then refuses a nightly
+   channel or pointer.
 10. `ci`: `release/X.Y` hotfix support in `release.yml`,
     `release-ci-check.sh` and `ci.yml`.
 11. `docs`: `CONTRIBUTING.md#releases`, `docs/install.md` (Upgrading),
@@ -742,4 +777,5 @@ Then the migration steps, run by an admin.
 
 - Whether "applies updates by itself when idle, like any channel" means
   every channel or nightly only ([Applying updates](#applying-updates)).
-  Pull request 3 builds it once the owner confirms.
+  Pull request 3 builds the every-channel reading; `selfApplies` in
+  `internal/serverupdate/autoupdate.go` is the one place to change it.
