@@ -307,8 +307,8 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 		if title == "" {
 			title = r.Task
 		}
-		title = strings.ReplaceAll(title, "\n", " ")
-		task := strings.ReplaceAll(r.Task, "\n", " ")
+		title = printable(strings.ReplaceAll(title, "\n", " "))
+		task := printable(strings.ReplaceAll(r.Task, "\n", " "))
 		account := memberName(r.AccountMemberID)
 		if r.RequestedAccountMemberID != "" {
 			account += " (fallback)"
