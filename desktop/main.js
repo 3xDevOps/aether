@@ -16,6 +16,7 @@ const path = require('node:path')
 const readline = require('node:readline')
 
 const { boundCli } = require('./cli-binding')
+const { isLaunchPopoutURL } = require('./launch-popout')
 const notify = require('./notify')
 const { sidecarExitAction } = require('./sidecar-exit')
 const zoom = require('./zoom')
@@ -418,25 +419,15 @@ function main() {
 
   // --- window ---------------------------------------------------------------
 
-  function openWindow() {
-    const url = gatewayURL + pendingSuffix
-    pendingSuffix = ''
-    if (win && !win.isDestroyed()) {
-      win.loadURL(url)
-      focusWindow()
-      return
-    }
-    win = new BrowserWindow({
+  function shellWindowOptions() {
+    return {
       width: 1280,
       height: 840,
       minWidth: zoom.MIN_WIDTH,
       minHeight: zoom.MIN_HEIGHT,
-      // Keep native macOS traffic lights centered in the 44px navigation row.
       ...(process.platform === 'darwin'
         ? { titleBarStyle: 'hidden', trafficLightPosition: zoom.TRAFFIC_LIGHTS }
         : { frame: false }),
-      // The dashboard's default dark --canvas, so a frameless window does not
-      // flash another colour before the SPA paints.
       backgroundColor: '#141516',
       webPreferences: {
         contextIsolation: true,
@@ -446,21 +437,26 @@ function main() {
         preload: path.join(__dirname, 'preload.js'),
         additionalArguments: ['--aether-shell-version=' + shellVersion],
       },
-    })
+    }
+  }
 
-    // The SPA's maximize/restore button needs to track state changes it did
-    // not cause (double-click on the bar, window manager shortcuts). Bound to
-    // this window, not the `win` closure, so a later window cannot be driven
-    // by an older window's events.
-    const created = win
+  const editorLink = /^(?:(?:vscode|cursor):\/\/vscode-remote\/ssh-remote\+|zed:\/\/ssh\/)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.aether\/workspace$/
+  function openExternalURL(target) {
+    try {
+      const protocol = new URL(target).protocol
+      if (protocol === 'http:' || protocol === 'https:' || editorLink.test(target)) shell.openExternal(target)
+    } catch {
+      // Invalid navigation targets are denied without launching anything.
+    }
+  }
+
+  function configureWindow(created, primary = false) {
     const sendMaximized = (maximized) => () => {
       if (created.isDestroyed()) return
       created.webContents.send('window:maximized-change', maximized)
     }
     created.on('maximize', sendMaximized(true))
     created.on('unmaximize', sendMaximized(false))
-    // A right-click on a drag region never reaches the page on Windows;
-    // the OS reports it here instead, in window coordinates.
     if (process.platform !== 'darwin') {
       created.on('system-context-menu', (event, point) => {
         event.preventDefault()
@@ -468,26 +464,25 @@ function main() {
       })
     }
 
-    // The window is a browser locked to the gateway origin: anything else
-    // opens in the user's real browser, never in this privileged shell.
-    // The one other thing let out is the run view's Open in editor link, in
-    // exactly the shape the dashboard writes it: a link in agent output
-    // reaches this function too, and an editor scheme can carry far more
-    // than "open this run's checkout".
-    const editorLink = /^(?:(?:vscode|cursor):\/\/vscode-remote\/ssh-remote\+|zed:\/\/ssh\/)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.aether\/workspace$/
-    const openExternalURL = (target) => {
-      try {
-        const protocol = new URL(target).protocol
-        if (protocol === 'http:' || protocol === 'https:' || editorLink.test(target)) shell.openExternal(target)
-      } catch {
-        // Invalid navigation targets are denied without launching anything.
+    created.webContents.setWindowOpenHandler(({ url: target }) => {
+      if (isLaunchPopoutURL(target, gatewayURL)) {
+        return {
+          action: 'allow',
+          outlivesOpener: true,
+          overrideBrowserWindowOptions: shellWindowOptions(),
+        }
       }
-    }
-    win.webContents.setWindowOpenHandler(({ url: target }) => {
       openExternalURL(target)
       return { action: 'deny' }
     })
-    win.webContents.on('will-navigate', (event, target) => {
+    created.webContents.on('did-create-window', (popup, details) => {
+      if (!isLaunchPopoutURL(details.url, gatewayURL)) {
+        popup.close()
+        return
+      }
+      configureWindow(popup)
+    })
+    created.webContents.on('will-navigate', (event, target) => {
       let sameGateway = false
       try {
         sameGateway = new URL(target).origin === gatewayOrigin
@@ -500,9 +495,23 @@ function main() {
       }
     })
 
-    win.on('closed', () => {
-      win = null
-    })
+    if (primary) {
+      created.on('closed', () => {
+        if (win === created) win = null
+      })
+    }
+  }
+
+  function openWindow() {
+    const url = gatewayURL + pendingSuffix
+    pendingSuffix = ''
+    if (win && !win.isDestroyed()) {
+      win.loadURL(url)
+      focusWindow()
+      return
+    }
+    win = new BrowserWindow(shellWindowOptions())
+    configureWindow(win, true)
     win.loadURL(url)
   }
 

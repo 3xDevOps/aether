@@ -1,7 +1,8 @@
 import { act, renderHook } from '@testing-library/react'
 import { toast } from 'sonner'
+import type { LaunchDraft } from '@/components/launch/draft'
 import { useSharedPrompt } from '@/components/launch/shared-prompt'
-import { initialRoute, takeSharedPrompt } from '@/lib/url-state'
+import { hasLaunchPopoutRequest, initialRoute, isLaunchPopout, takeLaunchPopoutRequest, takeSharedPrompt } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { serverInfo } from '@/test/fixtures'
 
@@ -14,6 +15,7 @@ function share(query: string) {
 
 beforeEach(() => {
   takeSharedPrompt()
+  takeLaunchPopoutRequest()
   vi.clearAllMocks()
   useStore.setState({
     hydrated: true,
@@ -21,6 +23,7 @@ beforeEach(() => {
     capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
     paletteDialog: null,
     paletteLaunchTask: '',
+    launchDraft: null,
     staleSince: null,
   })
 })
@@ -31,6 +34,37 @@ it('takes the shared text off the address at load and opens New session with it'
   renderHook(() => useSharedPrompt())
   expect(useStore.getState().paletteDialog).toBe('launch')
   expect(useStore.getState().paletteLaunchTask).toBe('fix the login')
+})
+
+it('restores a popped-out draft and removes its state from the address', () => {
+  const draft: LaunchDraft = {
+    version: 1,
+    id: 'launch-draft-1',
+    workspace: 'workspace-1',
+    extras: [],
+    account: 'member-1',
+    fallback: { off: false, order: null, excluded: [] },
+    permission: 'default',
+    childRuns: '',
+    limits: { cpus: '', memory: '', pids: '' },
+    harness: 'claude',
+    mode: 'acp',
+    model: '',
+    effort: '',
+    task: 'keep the task text',
+  }
+  const encoded = encodeURIComponent(JSON.stringify(draft))
+  share(`new=1&popout=1#launch-draft=${encoded}`)
+
+  expect(window.location.search).toBe('?token=t')
+  expect(window.location.hash).toBe('')
+  expect(isLaunchPopout()).toBe(true)
+  expect(hasLaunchPopoutRequest()).toBe(true)
+  useStore.setState({ launchDraft: draft })
+  renderHook(() => useSharedPrompt())
+  expect(useStore.getState().paletteDialog).toBe('launch')
+  expect(useStore.getState().launchDraft).toEqual(draft)
+  expect(takeLaunchPopoutRequest()).toBeNull()
 })
 
 it('drops a prompt without new=1', () => {

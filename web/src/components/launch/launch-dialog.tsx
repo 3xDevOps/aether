@@ -15,7 +15,7 @@ import { AgentOptions, needsTask, RunFields, useAgentChoice } from '@/components
 import { emptyLimits, parseLimits, useServerRunLimits } from '@/components/launch/run-limits'
 import { fallbackFromSaved, fallbackToSaved, SaveAccountDefault, SavedIssues } from '@/components/launch/saved-defaults'
 import { AdoptCommand, adoptCommand, SetupOutput, setupOutput } from '@/components/launch/setup-output'
-import { LoaderCircle, X } from '@/components/icons'
+import { ExternalLink, LoaderCircle, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { SlideOut } from '@/components/ui/slide-out'
@@ -24,6 +24,8 @@ import { useClock } from '@/lib/clock'
 import { mobileScreen, useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
 import { multiRepoFeature, multiRepoMethod } from '@/lib/repos'
+import { openLaunchPopout, sendLaunchPopoutDiscarded, sendLaunchPopoutLaunched } from '@/lib/launch-popout'
+import { isLaunchPopout } from '@/lib/url-state'
 import type { Member, Permission, Run } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
 import { cn, randomID, surface } from '@/lib/utils'
@@ -168,24 +170,25 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
     if (!fallbackPicked.current) setFallback(fallbackFromSaved(savedFallback, accounts))
   }, [preset, savedRead.fresh, savedRead.error, saved, accounts, accountsRead, accountsReadError, ownAccountID])
 
+  const currentDraft = useMemo<LaunchDraft>(() => ({
+    version: 1, id: draftID, workspace: workspaceID, extras, account, fallback,
+    permission, childRuns, limits, harness, mode, model, effort, task,
+  }), [account, childRuns, draftID, effort, extras, fallback, harness, limits, mode, model, permission, task, workspaceID])
+
   useEffect(() => {
     const state = useStore.getState()
     if (ended.current || state.identityKey !== identityKey || (!open && state.launchDraft?.id !== draftID)) return
-    const draft: LaunchDraft = {
-      version: 1, id: draftID, workspace: workspaceID, extras, account, fallback,
-      permission, childRuns, limits, harness, mode, model, effort, task,
-    }
-    const failure = state.setLaunchDraft(draft, !launchDraftError)
+    const failure = state.setLaunchDraft(currentDraft, !launchDraftError)
     if (failure && !storageFailed.current) toast.error(`Draft could not be saved in this browser: ${failure}`)
     storageFailed.current = failure !== null
-  }, [identityKey, draftID, open, workspaceID, extras, account, fallback, permission, childRuns, limits, harness, mode, model, effort, task, launchDraftError, linkStatus])
+  }, [identityKey, draftID, open, currentDraft, launchDraftError, linkStatus])
 
   const collapse = () => {
     setPickedWorkspace(workspaceID)
     close()
   }
 
-  const discard = () => {
+  const clearDraft = () => {
     ended.current = true
     const state = useStore.getState()
     if (state.identityKey !== identityKey) return
@@ -194,6 +197,11 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
       if (failure) toast.error(`Draft could not be removed from this browser: ${failure}`)
     }
     close()
+  }
+
+  const discard = () => {
+    clearDraft()
+    if (isLaunchPopout()) sendLaunchPopoutDiscarded(draftID)
   }
 
   const saveAccountDefault = () => saveLaunchDefaults((current) => ({
@@ -205,6 +213,14 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
   const setUp = () => {
     close()
     navigate('agents')
+  }
+
+  const popOut = () => {
+    if (!openLaunchPopout(window.location.href, currentDraft)) {
+      toast.error('Could not open New session in a new window. Allow pop-ups for this site and try again.')
+      return
+    }
+    collapse()
   }
 
   const choosePermission = (next: Permission) => {
@@ -240,7 +256,11 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
     if (!signedIn()) return
     rememberChoice(harness, mode, chosenModel)
     upsertRun(run)
-    if (useStore.getState().launchDraft?.id === draftID) discard()
+    if (useStore.getState().launchDraft?.id === draftID) {
+      if (isLaunchPopout()) clearDraft()
+      else discard()
+    }
+    if (isLaunchPopout() && sendLaunchPopoutLaunched(run.id, draftID)) return
     navigate('run', { runId: run.id })
     toast.success('Session launched')
   }
@@ -419,6 +439,17 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
           <DialogTitle>New session</DialogTitle>
           <DialogDescription className="text-pretty">Starts an agent in its own sandbox on the workspace's base branch.</DialogDescription>
         </DialogHeader>
+        {!isLaunchPopout() && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            label="Open in a new window"
+            className="absolute top-2 right-10"
+            onClick={popOut}
+          >
+            <ExternalLink />
+          </Button>
+        )}
         <form
           id="launch-form"
           className="-mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto px-1 py-1 [&>*]:shrink-0"

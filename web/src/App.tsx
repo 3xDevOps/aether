@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
+import { api } from '@/lib/api'
 import { ConnectionError } from '@/components/connection-error'
 import { LaunchSplash } from '@/components/launch-splash'
 import { AppShell } from '@/components/shell/app-shell'
@@ -12,6 +13,8 @@ import { UpdateChecks } from '@/components/update-checks'
 import { ServerTooOldBanner } from '@/components/server-too-old-banner'
 import { UpdateGate } from '@/components/update-gate'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
+import { receiveLaunchPopoutMessage } from '@/lib/launch-popout'
+import { message } from '@/lib/format'
 import { bindRouteToUrl, handedLink, onHandedLink, onHandedLinkForgotten } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
@@ -90,6 +93,25 @@ export function App() {
   }, [])
 
   useEffect(() => connect(useStore), [attempt, epoch])
+  useEffect(() => {
+    const receive = (event: MessageEvent) => {
+      const result = receiveLaunchPopoutMessage(event)
+      if (!result) return
+      const state = useStore.getState()
+      if (result.type === 'discarded') {
+        if (state.launchDraft?.id === result.draftID) state.setLaunchDraft(null)
+        return
+      }
+      if (state.launchDraft?.id === result.draftID) state.setLaunchDraft(null)
+      void api.runGet(result.runID).then((run) => {
+        useStore.getState().upsertRun(run)
+        useStore.getState().navigate('run', { runId: run.id })
+        toast.success('Session launched')
+      }).catch((error: unknown) => toast.error(`Could not open the launched session: ${message(error)}`))
+    }
+    window.addEventListener('message', receive)
+    return () => window.removeEventListener('message', receive)
+  }, [])
   // The desktop app opens a card's notification by changing the address in place.
   useEffect(() => bindRouteToUrl(useStore, (query) => {
     if (!query.has('assistant')) return

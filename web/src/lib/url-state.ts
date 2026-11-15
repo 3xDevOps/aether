@@ -79,6 +79,9 @@ export function initialRoute(): Route {
 }
 
 let shared: string | null = null
+let launchPopout = false
+let launchPopoutDraft: string | null = null
+let launchPopoutTaken = false
 
 /**
  * Share to Aether opens `?new=1&prompt=<text>`. Both leave the address before
@@ -88,10 +91,20 @@ let shared: string | null = null
  */
 function keepSharedPrompt() {
   const url = new URL(window.location.href)
-  if (!url.searchParams.has('new') && !url.searchParams.has('prompt')) return
-  if (url.searchParams.get('new') === '1') shared = url.searchParams.get('prompt') ?? ''
+  const hasSharedText = url.searchParams.has('new') || url.searchParams.has('prompt')
+  const newSession = url.searchParams.get('new') === '1'
+  launchPopout = newSession && url.searchParams.get('popout') === '1'
+  launchPopoutDraft = null
+  launchPopoutTaken = false
+  const hasLaunchDraft = launchPopout && url.hash.startsWith('#launch-draft=')
+  if (!hasSharedText && !url.searchParams.has('popout') && !hasLaunchDraft) return
+  shared = null
+  if (newSession) shared = url.searchParams.get('prompt') ?? ''
+  if (hasLaunchDraft) launchPopoutDraft = new URLSearchParams(url.hash.slice(1)).get('launch-draft')
   url.searchParams.delete('new')
   url.searchParams.delete('prompt')
+  url.searchParams.delete('popout')
+  if (hasLaunchDraft) url.hash = ''
   window.history.replaceState(window.history.state, '', url.toString())
 }
 
@@ -100,6 +113,20 @@ export function takeSharedPrompt(): string | null {
   const text = shared
   shared = null
   return text
+}
+
+export function hasLaunchPopoutRequest(): boolean {
+  return launchPopout && !launchPopoutTaken
+}
+
+export function takeLaunchPopoutRequest(): { draft: string | null } | null {
+  if (!hasLaunchPopoutRequest()) return null
+  launchPopoutTaken = true
+  return { draft: launchPopoutDraft }
+}
+
+export function isLaunchPopout(): boolean {
+  return launchPopout
 }
 
 export type HandedLink = { kind: 'join' | 'claim'; link: string }

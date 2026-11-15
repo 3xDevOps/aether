@@ -88,6 +88,25 @@ describe('reopening', () => {
 describe('saved launch draft', () => {
   const resume = () => screen.getByRole('button', { name: 'Resume new session draft' })
 
+  it('opens the current launch draft in a new window and collapses the original panel', () => {
+    const saved = draft({ task: 'keep these launch settings' })
+    useStore.setState({ launchDraft: saved })
+    const popup = {} as WindowProxy
+    const open = vi.spyOn(window, 'open').mockReturnValue(popup)
+    render(<LaunchDialog />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open in a new window' }))
+
+    expect(open).toHaveBeenCalledOnce()
+    const target = new URL(open.mock.calls[0]![0]!)
+    expect(target.searchParams.get('new')).toBe('1')
+    expect(target.searchParams.get('popout')).toBe('1')
+    expect(JSON.parse(new URLSearchParams(target.hash.slice(1)).get('launch-draft')!)).toEqual(saved)
+    expect(useStore.getState().paletteDialog).toBeNull()
+    expect(useStore.getState().launchDraft).toEqual(saved)
+    open.mockRestore()
+  })
+
   it('collapses on an outside click, keeps that click and restores the task and mode', async () => {
     const mainClick = vi.fn()
     render(<><button onClick={mainClick}>Main chat</button><PaletteDialogs /></>)
