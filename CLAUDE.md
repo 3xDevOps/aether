@@ -166,14 +166,17 @@ Many sessions share the same CI runners.
   [docs/testing.md](docs/testing.md).
 - Mark the pull request ready (`gh pr ready <n>`) only when it is done;
   then the merge gate applies.
-- The merge gate: an adversarial review by a separate Opus session;
-  Greptile findings that are real are fixed and the rest resolved with a
-  reason; `CI gate` green on the current head. Then
+- The merge gate: an adversarial review by an Opus reviewer with a
+  fresh context that did not write the change (a subagent is enough; give
+  it the pull request, not the author's reasoning); Greptile findings that
+  are real are fixed and the rest resolved with a reason; `CI gate` green
+  on the current head. Then
   `gh pr merge <n> --squash` puts it in the merge queue, which runs the
   full suite once per batch before `main` moves. Never pass `--admin`.
-- A UI change also gets a design review loop: a separate Opus session
-  reviews dark-mode screenshots at the affected widths as a senior product
-  designer would. Apply or rebut each point and re-shoot until none blocks.
+- A UI change also gets a design review loop: a fresh-context Opus
+  reviewer (a subagent is enough) reviews dark-mode screenshots at the
+  affected widths as a senior product designer would. Apply or rebut each
+  point and re-shoot until none blocks.
   Aether is dark-first, so every screenshot is dark mode; force
   `colorScheme: 'dark'` in headless browsers.
 

@@ -223,8 +223,9 @@ to show or edit the brief.
 
 ### "Build this feature"
 
-1. Recommend a session in one line. For several independent parts or repositories,
-   tell the session to start subsessions.
+1. Recommend a session in one line. For several large, independent streams
+   that each need their own branch or pull request, tell the session to start
+   subsessions.
 2. Pick the workspace from `aether_list_workspaces`, and the harness, model
    and account from `aether_launch_options` if available, else the agents
    `aether_list_workspaces` returns. Use the member's explicit choice in this

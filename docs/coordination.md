@@ -1218,11 +1218,11 @@ session ID and question ID returned by the session's own status and inbox result
 ### Subsessions
 
 A **subsession** is a session another session started with a completely fresh context
-to take a piece of a task that the session's own subagents cannot: work on
-another agent or model, such as an adversarial review; work that needs its own
-branch, container or build; or long work that would crowd out the session's
-context. It can orchestrate its own subagents. Quick or tightly coupled work
-stays with the session, and more sessions are not faster by default.
+to take a large, independent stream of work: one that needs its own branch or
+pull request, would run for hours, or needs another agent, model, or harness.
+It can orchestrate its own subagents. Most tasks need none: the session splits
+parallel or bulky parts across its own subagents or workflows, which share its
+checkout, and more sessions are not faster by default.
 `aether-internal skill subsessions` gives agents these criteria, the steps, the
 task format and the account rules. The caller is its **parent**. A subsession
 is an ordinary session with its own sandbox, checkout and branch, owned by the

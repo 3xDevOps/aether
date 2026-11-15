@@ -210,8 +210,11 @@ func RoleCard(g Guide) string {
 			"Ask it with `aether-internal ask --to %s` before asking the user; your final report reaches it. If you sit idle or waiting for over an hour, it is told and may wake you or stop you.\n", g.Parent, g.Parent)
 	}
 	if g.Parent == "" && !g.Background {
-		b.WriteString("`aether-internal subsession start` runs part of your task as its own Aether session, with a fresh context and its own branch, on any installed agent or model; its report wakes you. " +
-			"Use one for what your own subagents cannot give: another agent or model, a separate branch or build, long work that would crowd out your context, or an independent review. `aether-internal skill subsessions` says when and how.\n")
+		b.WriteString("The majority of straightforward tasks can be done in one session: split parallel or bulky parts across your own subagents or workflows. " +
+			"They share your checkout, start in seconds, and their results land in your working tree. " +
+			"A subsession (`aether-internal subsession start`) is a separate session with its own container, branch and setup time; its report wakes you. " +
+			"Reserve it for a large, independent stream of work that needs its own branch or pull request, would run for hours, or needs another agent, model, or harness. " +
+			"Don't use subsessions in excess unless there is a need to use them over subagents/singular session workflows. `aether-internal skill subsessions` says how.\n")
 	}
 	if g.Role != "" {
 		b.WriteString(ReportGuide(g))
