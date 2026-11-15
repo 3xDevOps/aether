@@ -134,10 +134,6 @@
   z-index: -1;
   pointer-events: none;
   color: color-mix(in srgb, var(--text) 24%, transparent);
-  --dot-color: color-mix(in srgb, var(--text) 24%, transparent);
-  --dot-intensity: 1;
-  --dot-breathing: 0;
-  --dot-drift: 0;
 }
 
 .control-matrix-grid {
@@ -148,12 +144,17 @@
   height: 100%;
   overflow: visible;
   pointer-events: none;
-  color: var(--dot-color, currentColor);
+  fill: currentColor;
 }
 
 .control-matrix-grid-accent {
   z-index: 2;
-  color: var(--dot-accent-color, inherit);
+}
+
+.control-matrix-ring {
+  fill: none;
+  stroke: var(--control-light);
+  stroke-width: 1.5px;
 }
 
 .control-matrix[data-dot-grid-active] {

@@ -3140,10 +3140,7 @@ With a mouse or touch pointer on the multiplayer strip, `useDotFade`
 (`routes/run/dot-fade.ts`) renders an interactive copy of the dot texture.
 Each dot springs away from the pointer; pointer speed adds a two-branch V wake
 with a 1.02 overshoot, and a click or tap displaces and swells a ring. The
-clear bars behind text feather motion to 25% of the response. `--dot-color`,
-`--dot-accent-color`, `--dot-ring-color`, `--dot-intensity` (0–1),
-`--dot-breathing` and `--dot-drift`
-are CSS custom properties; breathing and drift default to off. A focused strip
+clear bars behind text feather motion to 25% of the response. A focused strip
 accepts Enter or Space for a ring and arrow keys to move the point; its
 accessible instructions describe these keys. An
 `IntersectionObserver` and page visibility listener pause the loop offscreen or

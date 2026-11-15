@@ -59,7 +59,7 @@ export function ControlMatrix({
       light.style.color = current.color
       animation.cancel()
     }
-  }, [appearance, breathing, reducedMotion])
+  }, [appearance, reducedMotion])
 
   useLayoutEffect(() => {
     previousTakeoverProgress.current = takeoverProgress

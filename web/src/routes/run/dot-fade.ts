@@ -30,41 +30,13 @@ type Pointer = Point & { time: number }
 type Pulse = Point & { started: number }
 type Zone = { left: number; top: number; right: number; bottom: number }
 
-export type DotGridOptions = {
-  /** Enables the low-amplitude idle opacity cycle. Off by default. */
-  breathing?: boolean
-  /** Enables the small idle drift used by touch-first displays. Off by default. */
-  drift?: boolean
-  /** Scales displacement and wake force from 0 to 1. */
-  intensity?: number
-}
-
-
 function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value))
 }
 
-function numberVariable(element: HTMLElement, name: string, fallback: number): number {
-  const value = Number.parseFloat(getComputedStyle(element).getPropertyValue(name))
-  return Number.isFinite(value) ? value : fallback
-}
-
-function enabledVariable(element: HTMLElement, name: string, fallback: boolean): boolean {
-  const value = getComputedStyle(element).getPropertyValue(name).trim()
-  return value ? Number.parseFloat(value) > 0 : fallback
-}
-
-function smoothstep(value: number): number {
-  const x = clamp(value, 0, 1)
-  return x * x * (3 - 2 * x)
-}
-
 /** Interactive dot physics for the multiplayer strip. The static CSS texture remains the rest state. */
-export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGridOptions): void {
+export function useDotFade(ref: RefObject<HTMLElement | null>): void {
   const reducedMotion = useReducedMotion()
-  const breathingOption = options?.breathing
-  const driftOption = options?.drift
-  const intensityOption = options?.intensity
 
   useEffect(() => {
     const strip = ref.current
@@ -87,9 +59,6 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
     let height = 0
     let visible = typeof document === 'undefined' || document.visibilityState !== 'hidden'
     let intersecting = true
-    const intensity = clamp(intensityOption ?? numberVariable(matrix, '--dot-intensity', 1), 0, 1)
-    const breathing = breathingOption ?? enabledVariable(matrix, '--dot-breathing', false)
-    const drift = driftOption ?? enabledVariable(matrix, '--dot-drift', false)
 
     const canAnimate = () => !reducedMotion && visible && intersecting
     const updateZones = (rect: DOMRect) => {
@@ -107,13 +76,10 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
     const calm = (x: number, y: number): number => {
       let result = 1
       for (const zone of zones) {
-        const insideX = x >= zone.left && x <= zone.right
-        const insideY = y >= zone.top && y <= zone.bottom
-        if (insideX && insideY) return 0.25
         const dx = x < zone.left ? zone.left - x : x > zone.right ? x - zone.right : 0
         const dy = y < zone.top ? zone.top - y : y > zone.bottom ? y - zone.bottom : 0
-        const distance = Math.hypot(dx, dy)
-        if (distance < CALM_FEATHER) result = Math.min(result, 0.25 + 0.75 * smoothstep(distance / CALM_FEATHER))
+        const t = Math.min(Math.hypot(dx, dy) / CALM_FEATHER, 1)
+        result = Math.min(result, 0.25 + 0.75 * t * t * (3 - 2 * t))
       }
       return result
     }
@@ -132,13 +98,12 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       dots = []
       matrix.removeAttribute('data-dot-grid-active')
     }
-    const circle = (className: string, x: number, y: number, radius: number, fill: string): SVGCircleElement => {
+    const circle = (className: string, x: number, y: number, radius: number): SVGCircleElement => {
       const element = document.createElementNS(SVG_NS, 'circle')
       element.setAttribute('class', className)
       element.setAttribute('cx', String(x))
       element.setAttribute('cy', String(y))
       element.setAttribute('r', String(radius))
-      element.setAttribute('fill', fill)
       return element
     }
     const createGrid = () => {
@@ -160,16 +125,14 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       accentSVG.setAttribute('preserveAspectRatio', 'none')
       for (let y = 3; y < height; y += DOT_GAP) {
         for (let x = 3; x < width; x += DOT_GAP) {
-          const neutral = circle('control-matrix-dot', x, y, DOT_RADIUS, 'currentColor')
-          const accent = circle('control-matrix-dot', x, y, DOT_RADIUS, 'currentColor')
+          const neutral = circle('control-matrix-dot', x, y, DOT_RADIUS)
+          const accent = circle('control-matrix-dot', x, y, DOT_RADIUS)
           neutralSVG.appendChild(neutral)
           accentSVG.appendChild(accent)
           dots.push({ x, y, dx: 0, dy: 0, vx: 0, vy: 0, burst: 0, neutral, accent })
         }
       }
-      ring = circle('control-matrix-ring', 0, 0, 0, 'none')
-      ring.setAttribute('stroke', 'var(--dot-ring-color, var(--control-light))')
-      ring.setAttribute('stroke-width', '1.5')
+      ring = circle('control-matrix-ring', 0, 0, 0)
       ring.setAttribute('vector-effect', 'non-scaling-stroke')
       neutralSVG.appendChild(ring)
       matrix.insertBefore(neutralSVG, matrix.firstChild)
@@ -181,7 +144,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       frame = requestAnimationFrame(paint)
     }
     const settle = () => {
-      if (!pointer && !pulse && !breathing && !drift) destroyGrid()
+      if (!pointer && !pulse) destroyGrid()
     }
     function paint(now: number) {
       frame = 0
@@ -189,9 +152,6 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       lastFrame = now
       let moving = false
       updateZones(host.getBoundingClientRect())
-      const breathingAmount = breathing ? 0.92 + Math.sin(now / 3600) * 0.08 : 1
-      if (neutralSVG) neutralSVG.style.opacity = String(breathingAmount)
-      if (accentSVG) accentSVG.style.opacity = String(breathingAmount)
       for (const dot of dots) {
         let targetX = 0
         let targetY = 0
@@ -201,7 +161,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
           const dy = dot.y - pointer.y
           const distance = Math.hypot(dx, dy)
           if (distance > 0.01 && distance < PART_RADIUS) {
-            const force = (1 - distance / PART_RADIUS) * 13 * intensity * localCalm
+            const force = (1 - distance / PART_RADIUS) * 13 * localCalm
             targetX = dx / distance * force
             targetY = dy / distance * force
           }
@@ -233,16 +193,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
         if (progress >= 1) pulse = undefined
         else moving = true
       }
-      if (drift && !pointer) {
-        const driftX = Math.sin(now / 2800) * 1.1 * intensity
-        const driftY = Math.cos(now / 3300) * 0.7 * intensity
-        for (const dot of dots) {
-          dot.dx += (driftX - dot.dx) * 0.01
-          dot.dy += (driftY - dot.dy) * 0.01
-        }
-        moving = true
-      }
-      if (moving || pulse || breathing || drift) schedule()
+      if (moving || pulse) schedule()
       else settle()
     }
     const pulseAt = (point: Point) => {
@@ -254,10 +205,10 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
         const dy = dot.y - point.y
         const distance = Math.hypot(dx, dy)
         if (distance > 0.01 && distance < RING_RADIUS) {
-          const force = (1 - distance / RING_RADIUS) * 5.5 * intensity * calm(dot.x, dot.y)
+          const force = (1 - distance / RING_RADIUS) * 5.5 * calm(dot.x, dot.y)
           dot.vx += dx / distance * force
           dot.vy += dy / distance * force
-          dot.burst = Math.max(dot.burst, (1 - distance / RING_RADIUS) * 0.7 * intensity)
+          dot.burst = Math.max(dot.burst, (1 - distance / RING_RADIUS) * 0.7)
         }
       }
       if (reducedMotion) {
@@ -304,7 +255,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
             const trail = -along
             const branchWidth = 7 + trail * 0.2
             if (trail > 0 && trail < WAKE_LENGTH && Math.abs(side) < branchWidth) {
-              const wake = speed * (1 - trail / WAKE_LENGTH) * (1 - Math.abs(side) / branchWidth) * intensity * WAKE_OVERSHOOT
+              const wake = speed * (1 - trail / WAKE_LENGTH) * (1 - Math.abs(side) / branchWidth) * WAKE_OVERSHOOT
               const branch = side < 0 ? -1 : 1
               const factor = calm(dot.x, dot.y)
               dot.vx += normalX * branch * wake * factor
@@ -389,7 +340,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       destroyGrid()
       width = nextWidth
       height = nextHeight
-      if (pointer || pulse || breathing || drift) {
+      if (pointer || pulse) {
         createGrid()
         schedule()
       }
@@ -407,10 +358,6 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
     const rect = strip.getBoundingClientRect()
     width = rect.width || rect.right - rect.left
     height = rect.height || rect.bottom - rect.top
-    if ((breathing || drift) && !reducedMotion) {
-      createGrid()
-      schedule()
-    }
     return () => {
       strip.removeEventListener('keydown', key)
       strip.removeEventListener('blur', blur)
@@ -424,5 +371,5 @@ export function useDotFade(ref: RefObject<HTMLElement | null>, options?: DotGrid
       resize?.disconnect()
       destroyGrid()
     }
-  }, [breathingOption, driftOption, intensityOption, reducedMotion, ref])
+  }, [reducedMotion, ref])
 }
