@@ -69,6 +69,10 @@ type fakeRelease struct {
 	// unsigned drops the manifest, the shape of a release still being
 	// published or one from before signing.
 	unsigned bool
+	// pointers serves each channel's pointer and signature.
+	pointers map[string][2][]byte
+	// onPointer, when set, runs as a pointer is served.
+	onPointer func()
 	// hits counts /releases/latest lookups.
 	hits atomic.Int64
 }
@@ -102,6 +106,23 @@ func (f *fakeRelease) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	case strings.HasPrefix(path, "/releases/download/"):
 		tag, name, _ := strings.Cut(strings.TrimPrefix(path, "/releases/download/"), "/")
+		if tag == channelsTag {
+			if f.onPointer != nil {
+				f.onPointer()
+			}
+			doc, sig := strings.CutSuffix(name, ".sig")
+			p, ok := f.pointers[strings.TrimSuffix(doc, ".json")]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			if sig {
+				_, _ = w.Write(p[1])
+			} else {
+				_, _ = w.Write(p[0])
+			}
+			return
+		}
 		if name == ManifestName || name == SignatureName {
 			if f.unsigned {
 				http.NotFound(w, r)

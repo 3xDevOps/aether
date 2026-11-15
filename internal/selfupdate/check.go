@@ -3,9 +3,13 @@ package selfupdate
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -202,6 +206,11 @@ func comparePrerelease(a, b string) int {
 type Checker struct {
 	baseURL string
 	ttl     time.Duration
+	// channel is the release channel the checker follows through its
+	// signed pointer, with each channel's high-water mark kept in
+	// statePath. Empty asks /releases/latest.
+	channel   string
+	statePath string
 	// now reads the clock. Tests drive it so cache expiry does not depend
 	// on real time passing: Windows' timer resolution is coarse enough
 	// that two calls in a row can read the same instant, which would leave
@@ -229,6 +238,14 @@ type Checker struct {
 // https://github.com/3xDevOps/Aether.
 func NewChecker(baseURL string, ttl time.Duration) *Checker {
 	return &Checker{baseURL: baseURL, ttl: ttl, now: time.Now}
+}
+
+// NewChannelChecker is NewChecker following channel's signed pointer,
+// keeping the channel marks in the JSON file statePath.
+func NewChannelChecker(baseURL string, ttl time.Duration, channel, statePath string) *Checker {
+	c := NewChecker(baseURL, ttl)
+	c.channel, c.statePath = channel, statePath
+	return c
 }
 
 // DefaultChecker checks the Aether repository's releases.
@@ -284,7 +301,7 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 		out.Disabled = true
 	default:
 		var m Manifest
-		m, err = LatestManifestFrom(ctx, c.baseURL)
+		m, err = c.latest(ctx)
 		switch {
 		case err == nil:
 			out.Latest = m.Version
@@ -299,6 +316,96 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 	}
 	c.store(id, out, err)
 	return out, err
+}
+
+// latest is the newest release on the checker's channel.
+func (c *Checker) latest(ctx context.Context) (Manifest, error) {
+	if c.channel == "" {
+		return LatestManifestFrom(ctx, c.baseURL)
+	}
+	st, err := loadChannelState(c.statePath)
+	if err != nil {
+		return Manifest{}, err
+	}
+	m, marks, err := FollowChannel(ctx, c.baseURL, c.channel, st.Pointers)
+	if err != nil {
+		return m, err
+	}
+	// Only a verified pointer leaves a mark. Another process may have
+	// raised the mark since the read above, so even an unchanged one is
+	// checked again under the lock.
+	if got, ok := marks[c.channel]; ok {
+		if err := c.raiseMark(got); err != nil {
+			return Manifest{}, err
+		}
+	}
+	return m, nil
+}
+
+// raiseMark records got as the channel's mark. Other processes share the
+// file, so it re-reads it under a lock and refuses got when one of them
+// has meanwhile accepted a higher pointer; an equal mark is left as it is.
+func (c *Checker) raiseMark(got Mark) error {
+	if err := os.MkdirAll(filepath.Dir(c.statePath), 0o700); err != nil {
+		return fmt.Errorf("save update state: %w", err)
+	}
+	f, err := os.OpenFile(c.statePath+".lock", os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return fmt.Errorf("lock update state: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	unlock, err := lockFile(f)
+	if err != nil {
+		return fmt.Errorf("lock update state %s: %w", f.Name(), err)
+	}
+	defer unlock()
+	st, err := loadChannelState(c.statePath)
+	if err != nil {
+		return err
+	}
+	seen, ok := st.Pointers[c.channel]
+	switch {
+	case ok && got.below(seen):
+		return replayed(c.channel, got, seen)
+	case ok && got == seen:
+		return nil
+	}
+	st.Pointers = maps.Clone(st.Pointers)
+	if st.Pointers == nil {
+		st.Pointers = Marks{}
+	}
+	st.Pointers[c.channel] = got
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := WriteFileAtomic(c.statePath, append(data, '\n')); err != nil {
+		return fmt.Errorf("save update state: %w", err)
+	}
+	return nil
+}
+
+// channelState is the client's update state file.
+type channelState struct {
+	Pointers Marks `json:"pointers,omitempty"`
+}
+
+// loadChannelState reads the state file. One that exists but cannot be
+// read fails the check and is never overwritten: starting afresh would
+// drop the marks.
+func loadChannelState(path string) (channelState, error) {
+	var st channelState
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return st, nil
+	}
+	if err == nil {
+		err = json.Unmarshal(data, &st)
+	}
+	if err != nil {
+		return channelState{}, fmt.Errorf("read update state %s: %w; fix or remove it to resume release checks", path, err)
+	}
+	return st, nil
 }
 
 // nextID takes the number this lookup is ordered by.

@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -99,6 +100,11 @@ type Config struct {
 	// Checker names, by default the pinned GitHub repository.
 	Releases Releases
 	Checker  *selfupdate.Checker
+	// Channel is the release channel the server follows. Set, the newest
+	// release comes from the channel's signed pointer in the repository
+	// Checker names, not from Releases' Latest. Empty follows
+	// /releases/latest.
+	Channel string
 	// Host carries the process-replacing side effects. A zero Host leaves
 	// the service unable to apply anything, which is what keeps every test
 	// binary away from the host's systemd. cmd/aether-server passes
@@ -150,9 +156,16 @@ type Service struct {
 	retries  int
 	retrying store.PendingServerUpdate
 
-	runMu     sync.Mutex
-	checkMu   sync.Mutex
-	check     checkState
+	// run is held by the one check that may write check; a channel
+	// server.update waits on it with its own context.
+	run     chan struct{}
+	checkMu sync.Mutex
+	check   checkState
+	// stateErr is why check.json could not be read on a server following a
+	// channel. Starting afresh would drop the channel marks, so every check
+	// fails with it and the file is not overwritten until it reads again.
+	// Guarded by run.
+	stateErr  error
 	checkRuns atomic.Uint64
 	kick      chan struct{}
 	stop      context.CancelFunc
@@ -181,9 +194,12 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	s := &Service{cfg: cfg, kick: make(chan struct{}, 1)}
+	s := &Service{cfg: cfg, kick: make(chan struct{}, 1), run: make(chan struct{}, 1)}
 	check, cerr := loadCheck(cfg.StateDir)
-	if cerr != nil {
+	switch {
+	case cerr != nil && cfg.Channel != "":
+		s.stateErr = unreadableState(cerr)
+	case cerr != nil:
 		slog.Warn("serverupdate: release check state unreadable; checking afresh", "error", cerr)
 	}
 	s.check = check
@@ -413,6 +429,35 @@ func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.S
 	return out, nil
 }
 
+// latestRecorded is latest for server.update. On a channel it waits for
+// any running check, bounded by ctx, and records a raised mark before it
+// answers.
+func (s *Service) latestRecorded(ctx context.Context) (selfupdate.Manifest, error) {
+	if s.cfg.Channel == "" {
+		return s.releases().Latest(ctx)
+	}
+	select {
+	case s.run <- struct{}{}:
+	case <-ctx.Done():
+		return selfupdate.Manifest{}, ctx.Err()
+	}
+	defer func() { <-s.run }()
+	s.reloadState()
+	m, marks, err := s.latest(ctx, s.check.Pointers)
+	if err != nil || maps.Equal(marks, s.check.Pointers) {
+		return m, err
+	}
+	st := s.check
+	st.Pointers = marks
+	if err := s.persistCheck(st); err != nil {
+		return selfupdate.Manifest{}, err
+	}
+	s.checkMu.Lock()
+	s.check = st
+	s.checkMu.Unlock()
+	return m, nil
+}
+
 // resolveTag validates a client-supplied tag or asks the release feed for
 // the newest signed one, which must be newer than the running server: an
 // older release marked latest is never a reason to downgrade. The tag only
@@ -425,7 +470,7 @@ func (s *Service) resolveTag(ctx context.Context, tag string) (string, error) {
 		}
 		return tag, nil
 	}
-	m, err := s.releases().Latest(ctx)
+	m, err := s.latestRecorded(ctx)
 	if errors.Is(err, selfupdate.ErrNoRelease) {
 		return "", fmt.Errorf("%w: %w", ErrUpToDate, err)
 	}

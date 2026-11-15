@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -34,6 +35,8 @@ type checkState struct {
 	Error         string    `json:"error,omitempty"`
 	Failures      int       `json:"failures,omitempty"`
 	NextAt        time.Time `json:"next_at,omitzero"`
+	// Pointers are the channel pointers' high-water marks.
+	Pointers selfupdate.Marks `json:"pointers,omitempty"`
 }
 
 // latest is the newest release the check found, in release order.
@@ -128,20 +131,21 @@ func (s *Service) Close() error {
 // runCheck asks the release feed for the newest signed release and
 // persists the answer. Callers that queued behind a check that started
 // after they did take its answer instead of asking again. Checks are
-// serialized by runMu, the only writer of check, so readers holding
+// serialized by run, the only writer of check, so readers holding
 // checkMu never wait on the network.
 func (s *Service) runCheck(ctx context.Context) checkState {
 	asked := s.checkRuns.Load()
-	s.runMu.Lock()
-	defer s.runMu.Unlock()
+	s.run <- struct{}{}
+	defer func() { <-s.run }()
 	if s.checkRuns.Load() != asked {
 		return s.check
 	}
 	s.checkRuns.Add(1)
-	m, err := s.releases().Latest(ctx)
-	now := s.cfg.Now().UTC()
+	s.reloadState()
 	st := s.check
-	st.CheckedAt = now
+	m, marks, err := s.latest(ctx, st.Pointers)
+	now := s.cfg.Now().UTC()
+	st.CheckedAt, st.Pointers = now, marks
 	switch {
 	case err == nil:
 		st.LatestVersion, st.NotesURL, st.Error, st.Failures = m.Version, m.NotesURL, "", 0
@@ -158,15 +162,77 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 		st.NextAt = now.Add(jitter(backoff(st.Failures)))
 		slog.Warn("serverupdate: release check failed", "error", err, "retry_at", st.NextAt)
 	}
+	if werr := s.persistCheck(st); werr != nil {
+		slog.Warn("serverupdate: persist release check", "error", werr)
+		if s.cfg.Channel != "" && st.Error == "" && !maps.Equal(st.Pointers, s.check.Pointers) {
+			// A channel mark only in memory is gone after a restart, so the
+			// check that found it fails, offers nothing new and keeps the
+			// marks on disk.
+			failed := s.check
+			failed.CheckedAt = now
+			failed.Error = werr.Error()
+			failed.Failures++
+			failed.NextAt = now.Add(jitter(backoff(failed.Failures)))
+			st = failed
+		}
+	}
 	s.checkMu.Lock()
 	s.check = st
 	s.checkMu.Unlock()
-	if data, merr := json.Marshal(st); merr == nil {
-		if werr := writeFileAtomic(checkPath(s.cfg.StateDir), data); werr != nil {
-			slog.Warn("serverupdate: persist release check", "error", werr)
-		}
-	}
 	return st
+}
+
+// unreadableState is the error every channel check fails with while
+// check.json cannot be read.
+func unreadableState(err error) error {
+	return fmt.Errorf("%w; fix it, or remove it, which forgets the channel marks, to resume release checks", err)
+}
+
+// reloadState reads check.json again while it could not be read, so a
+// file an operator fixed or removed is taken up without a restart. The
+// caller holds run.
+func (s *Service) reloadState() {
+	if s.stateErr == nil {
+		return
+	}
+	check, err := loadCheck(s.cfg.StateDir)
+	if err != nil {
+		s.stateErr = unreadableState(err)
+		return
+	}
+	s.stateErr = nil
+	s.checkMu.Lock()
+	s.check = check
+	s.checkMu.Unlock()
+}
+
+// persistCheck saves st to check.json, unless the file could not be read.
+func (s *Service) persistCheck(st checkState) error {
+	if s.stateErr != nil {
+		return nil
+	}
+	data, err := json.Marshal(st)
+	if err == nil {
+		err = selfupdate.WriteFileAtomic(checkPath(s.cfg.StateDir), data)
+	}
+	if err != nil {
+		return fmt.Errorf("serverupdate: record the release check: %w", err)
+	}
+	return nil
+}
+
+// latest asks for the newest release: through Config.Channel's signed
+// pointer when the server follows a channel, else from the release feed's
+// Latest. It returns marks raised to the pointer it accepted.
+func (s *Service) latest(ctx context.Context, marks selfupdate.Marks) (selfupdate.Manifest, selfupdate.Marks, error) {
+	if s.cfg.Channel == "" {
+		m, err := s.releases().Latest(ctx)
+		return m, marks, err
+	}
+	if s.stateErr != nil {
+		return selfupdate.Manifest{}, marks, s.stateErr
+	}
+	return selfupdate.FollowChannel(ctx, s.cfg.Checker.BaseURL(), s.cfg.Channel, marks)
 }
 
 // refresh runs a check now and moves the background schedule after it,
