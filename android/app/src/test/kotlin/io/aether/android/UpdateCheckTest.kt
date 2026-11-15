@@ -139,4 +139,11 @@ class UpdateCheckTest {
         for (day in 1..7) daily = answer(daily, 10 + day * DAY, line("v1.3.$day", true), 0)
         assertEquals("v1.3.7", noticeFor(daily, InstallSource.PLAY, 10 + 7 * DAY, 0)?.latest)
     }
+
+    @Test
+    fun aPlayInstallHearsOfStableReleasesOnly() {
+        val beta = answer(StoredUpdate(), 10, line("v1.3.0-beta.2", true), 0)
+        assertNull(noticeFor(beta, InstallSource.PLAY, 10 + 30 * DAY, 0))
+        assertEquals("v1.3.0-beta.2", noticeFor(beta, InstallSource.RELEASE, 10, 0)?.latest)
+    }
 }

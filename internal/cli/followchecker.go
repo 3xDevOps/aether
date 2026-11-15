@@ -35,6 +35,8 @@ type FollowedChecker struct {
 	made  map[string]ReleaseChecker
 	known string
 	at    time.Time
+	// reading is closed when the read in flight ends.
+	reading chan struct{}
 }
 
 // NewFollowedChecker follows the channel that channel returns, "" when
@@ -85,16 +87,40 @@ func (f *FollowedChecker) run(ctx context.Context, fresh bool) (selfupdate.Check
 }
 
 // followed is the channel of the default server: the last one read when
-// the server does not answer, "" when none was ever read.
+// the server does not answer, "" when none was ever read. Every attempt,
+// answered or not, is reused for channelTTL, so a server that is down or
+// predates channels is dialed once per period and not once per check. One
+// read runs at a time and the others wait for it, outside the lock.
 func (f *FollowedChecker) followed(ctx context.Context, fresh bool) string {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.known != "" && !fresh && f.now().Sub(f.at) < channelTTL {
+	if !fresh && !f.at.IsZero() && f.now().Sub(f.at) < channelTTL {
+		defer f.mu.Unlock()
 		return f.known
 	}
-	if channel := f.channel(ctx); channel != "" {
-		f.known, f.at = channel, f.now()
+	if reading := f.reading; reading != nil {
+		f.mu.Unlock()
+		select {
+		case <-reading:
+		case <-ctx.Done():
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.known
 	}
+	reading := make(chan struct{})
+	f.reading = reading
+	f.mu.Unlock()
+
+	channel := f.channel(ctx)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if channel != "" {
+		f.known = channel
+	}
+	f.at = f.now()
+	f.reading = nil
+	close(reading)
 	return f.known
 }
 

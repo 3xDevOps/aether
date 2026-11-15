@@ -121,13 +121,15 @@ fun afterCheck(
 /**
  * The check the notice shows, or null for none: a newer release the member
  * has not dismissed, from a check answered since the app was last updated.
- * A Play install waits [PLAY_DELAY_MS] after it first fell behind.
+ * A Play install waits [PLAY_DELAY_MS] after it first fell behind, and
+ * hears of stable releases only: Play carries no beta or nightly, so a
+ * prerelease tag shows nothing there.
  */
 fun noticeFor(stored: StoredUpdate, source: InstallSource, now: Long, appUpdatedAt: Long): UpdateCheck? {
     if (stored.answeredAt < appUpdatedAt) return null
     val check = stored.line?.let(::parseUpdateCheck) ?: return null
     if (!check.updateAvailable || !isReleaseTag(check.latest) || check.latest == stored.dismissed) return null
-    if (source == InstallSource.PLAY && now - stored.behindSince < PLAY_DELAY_MS) return null
+    if (source == InstallSource.PLAY && (check.latest.contains('-') || now - stored.behindSince < PLAY_DELAY_MS)) return null
     return check
 }
 

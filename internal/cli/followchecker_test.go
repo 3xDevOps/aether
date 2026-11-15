@@ -2,11 +2,15 @@ package cli
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
+
+var askedMu sync.Mutex
 
 type fakeChecker struct {
 	channel string
@@ -15,7 +19,9 @@ type fakeChecker struct {
 }
 
 func (f fakeChecker) Check(context.Context) (selfupdate.Check, error) {
+	askedMu.Lock()
 	*f.asked = append(*f.asked, f.channel)
+	askedMu.Unlock()
 	return selfupdate.Check{Latest: f.latest}, nil
 }
 
@@ -87,6 +93,48 @@ func TestFollowedCheckerKeepsTheLastChannelWhenTheServerIsDown(t *testing.T) {
 	}
 	if len(asked) != 2 || asked[1] != "beta" {
 		t.Fatalf("asked channels %v; want beta both times", asked)
+	}
+}
+
+func TestFollowedCheckerDoesNotRedialAServerThatAnswersNothing(t *testing.T) {
+	var asked []string
+	reads := 0
+	f := followed(func(context.Context) string { reads++; return "" }, map[string]string{"stable": "v0.8.7"}, &asked)
+	for range 4 {
+		if _, err := f.Check(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("read the channel %d times for a server that gave none; want 1 per period", reads)
+	}
+}
+
+func TestFollowedCheckerReadsOnceForConcurrentChecks(t *testing.T) {
+	var asked []string
+	var reads atomic.Int32
+	release := make(chan struct{})
+	f := followed(func(context.Context) string {
+		reads.Add(1)
+		<-release
+		return "beta"
+	}, map[string]string{"beta": "v0.8.7-beta.14"}, &asked)
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = f.Check(t.Context())
+		}()
+	}
+	for reads.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	if got := reads.Load(); got != 1 {
+		t.Fatalf("read the channel %d times for 5 concurrent checks; want 1", got)
 	}
 }
 

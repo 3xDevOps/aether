@@ -377,7 +377,7 @@ the server runs, from the gateway's `update.check`, and nothing newer until
 the server updates; in **Tailscale** mode it reads the `stable` pointer (`beta` until the first stable exists) through
 the bundled CLI. **Download update** fetches the new APK; open it
 and Android installs it over the app, keeping your data. A Google Play install
-gets **Open Google Play** once the release is 7 days old. In **Aether Edge**
+gets **Open Google Play** once a stable release is 7 days old; Play carries no beta or nightly. In **Aether Edge**
 mode the server refuses an older app: a screen such as `This app (v0.7.0) is
 too old for the server (v0.8.0 needs v0.8.0 or newer).` stays until you
 install the update it links.
