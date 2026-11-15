@@ -169,7 +169,7 @@ func ReportGuide(g Guide) string {
 		waitingFor = " [--for agents|ci|process]"
 	}
 	fmt.Fprintf(&b, "END EVERY TURN WITH EXACTLY ONE REPORT, as your last action: aether_report (a new idempotency_key each turn), else `aether-internal report --outcome <o>%s --summary \"<one line>\"`.\n", waitingFor)
-	b.WriteString("Write your reply to the person as message text before the report; neither your thinking nor the summary is shown as your reply.\n")
+	b.WriteString("Write your reply as message text before the report; thinking and the summary are not your reply. Say the result only there, none after.\n")
 	for _, o := range Outcomes(g) {
 		fmt.Fprintf(&b, "- %s: %s\n", o.Name, o.Use)
 	}
