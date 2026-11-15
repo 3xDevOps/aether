@@ -16,6 +16,7 @@ import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
 test.skip(!dockerReachable(), 'the sessions need a reachable Docker daemon')
+test.use({ colorScheme: 'dark' })
 
 const launchTimeout = 3 * 60 * 1000
 const shots = process.env.AETHER_E2E_SHOTS
@@ -111,4 +112,45 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   await alice.api.rpc('run.kill', { run_id: parent.id })
   await expect.poll(async () => (await runStatus(alice, second.run_id)).status, { timeout: 60_000 }).toBe('completed')
   expect((await runStatus(alice, second.run_id)).reason).toContain(`stopped by parent session ${parent.id}`)
+})
+
+test('the sidebar folds a parent session’s subsessions', async ({ page, aether }) => {
+  test.setTimeout(launchTimeout + 60_000)
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('sidebar-subsessions-project')
+  await seedWorkspace(alice, aether.server.addr, repo, 'sidebar-subsessions-project')
+  const aliceID = await memberID(alice)
+  aether.installAgent(aliceID, 'claude', 'printf "parent agent ready\\n"\nsleep 600')
+  aether.installAgent(aliceID, 'codex', 'printf "child agent ready\\n"\nsleep 600')
+  aether.giveCodexLogin(aliceID)
+  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
+  const { run: parent } = await alice.api.rpc<{ run: Run }>('run.launch', {
+    workspace_id: workspaces[0].id, task: 'Coordinate the sidebar check', harness: 'claude', mode: 'tui',
+  })
+  await waitForCoordCLI(parent.id, aether.server.dataDir)
+  const child = runCoordCLI<{ run_id: string }>(parent.id, [
+    'subsession', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Sidebar fold check',
+    '--task', 'Wait for the parent to stop this check.', '--idempotency-key', 'sidebar-fold-check',
+  ])
+  await expect.poll(async () => (await runStatus(alice, child.run_id)).status, { timeout: launchTimeout }).toBe('running')
+
+  const parentURL = new URL(alice.url)
+  parentURL.searchParams.set('run', parent.id)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(parentURL.toString())
+  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+  const fold = () => sidebar.getByRole('button', { name: /^(Collapse|Expand) 1 subsession$/ })
+  const childRow = sidebar.getByRole('button', { name: /Sidebar fold check/ })
+  await expect(fold()).toHaveAttribute('aria-expanded', 'true')
+  await expect(childRow).toBeVisible()
+  if (shots) await page.screenshot({ path: `${shots}/sidebar-subsessions-expanded.png` })
+  await fold().click()
+  await expect(fold()).toHaveAttribute('aria-expanded', 'false')
+  await expect(childRow).toBeHidden()
+  if (shots) await page.screenshot({ path: `${shots}/sidebar-subsessions-folded.png` })
+  await fold().click()
+  await expect(childRow).toBeVisible()
+  await page.setViewportSize({ width: 768, height: 900 })
+  if (shots) await page.screenshot({ path: `${shots}/sidebar-subsessions-narrow.png` })
+  await alice.api.rpc('run.kill', { run_id: parent.id })
 })
