@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
-import type { LaunchDraft } from '@/components/launch/draft'
+import { readLaunchDraft, type LaunchDraft } from '@/components/launch/draft'
 import { useIsMobile } from '@/lib/breakpoints'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { PaletteDialogs } from '@/components/palette/dialogs'
@@ -37,6 +37,7 @@ beforeEach(() => {
     activeWorkspace: workspace.id,
     paletteDialog: 'launch',
     launchDraft: null,
+    launchDraftPopoutActive: false,
     launchDraftError: null,
     linkStatus: null,
     identityKey: null,
@@ -83,6 +84,18 @@ describe('reopening', () => {
     expect(((await screen.findAllByLabelText('Task')).at(-1) as HTMLTextAreaElement).value).toBe('')
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
   })
+
+  it('resumes the latest pop-out draft after the child window closes', async () => {
+    const saved = draft({ task: 'before pop-out edit' })
+    act(() => useStore.setState({ paletteDialog: null, launchDraft: saved, launchDraftPopoutActive: true }))
+    render(<PaletteDialogs />)
+    expect(screen.queryByRole('button', { name: 'Resume new session draft' })).toBeNull()
+
+    act(() => useStore.setState({ launchDraft: { ...saved, task: 'latest pop-out edit' }, launchDraftPopoutActive: false, launchDraftRevision: 1 }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resume new session draft' }))
+
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('latest pop-out edit')
+  })
 })
 
 describe('saved launch draft', () => {
@@ -104,7 +117,24 @@ describe('saved launch draft', () => {
     expect(JSON.parse(new URLSearchParams(target.hash.slice(1)).get('launch-draft')!)).toEqual(saved)
     expect(useStore.getState().paletteDialog).toBeNull()
     expect(useStore.getState().launchDraft).toEqual(saved)
+    expect(useStore.getState().launchDraftPopoutActive).toBe(true)
     open.mockRestore()
+  })
+
+  it('leaves draft persistence to the pop-out after handing it off', () => {
+    allowDraftStorage()
+    useStore.setState({ identityKey: 'server/alice' })
+    const saved = draft()
+    useStore.getState().setLaunchDraft(saved)
+    vi.spyOn(window, 'open').mockReturnValue({} as WindowProxy)
+    render(<LaunchDialog />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open in a new window' }))
+    const poppedOut = { ...saved, task: 'edited in the pop-out' }
+    useStore.getState().setLaunchDraft(poppedOut)
+    useStore.setState({ launchDraftError: 'storage state changed' })
+
+    expect(readLaunchDraft('server/alice').draft).toEqual(poppedOut)
   })
 
   it('collapses on an outside click, keeps that click and restores the task and mode', async () => {

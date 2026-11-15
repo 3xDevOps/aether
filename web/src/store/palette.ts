@@ -20,7 +20,10 @@ export interface PaletteSlice {
   paletteLaunchTask: string
   launchDraft: LaunchDraft | null
   launchDraftError: string | null
+  launchDraftPopoutActive: boolean
+  launchDraftRevision: number
   setLaunchDraft: (draft: LaunchDraft | null, persist?: boolean) => string | null
+  setLaunchDraftPopoutActive: (active: boolean) => void
   clearLaunchDraftError: () => void
   /** A verb that closes a run with close warnings, held until the owner confirms. */
   closeConfirmation: { check: RunCloseCheck; asked: string; outcome: CloseOutcome; command: Command } | null
@@ -46,6 +49,8 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set, get) => ({
   paletteLaunchTask: '',
   launchDraft: null,
   launchDraftError: null,
+  launchDraftPopoutActive: false,
+  launchDraftRevision: 0,
   setLaunchDraft: (launchDraft, persist = true) => {
     const state = get()
     const linkStatusPending = state.capabilities === null || (state.capabilities.local?.includes('link.status') && !state.linkStatus)
@@ -56,6 +61,7 @@ export const createPaletteSlice: SliceCreator<PaletteSlice> = (set, get) => ({
     })
     return error
   },
+  setLaunchDraftPopoutActive: (launchDraftPopoutActive) => set({ launchDraftPopoutActive }),
   clearLaunchDraftError: () => set({ launchDraftError: null }),
   closeConfirmation: null,
   closeChecking: {},

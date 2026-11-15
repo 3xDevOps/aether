@@ -24,7 +24,7 @@ import { useClock } from '@/lib/clock'
 import { mobileScreen, useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
 import { multiRepoFeature, multiRepoMethod } from '@/lib/repos'
-import { openLaunchPopout, sendLaunchPopoutDiscarded, sendLaunchPopoutLaunched } from '@/lib/launch-popout'
+import { openLaunchPopout, sendLaunchPopoutDiscarded, sendLaunchPopoutLaunched, sendLaunchPopoutReturned } from '@/lib/launch-popout'
 import { isLaunchPopout } from '@/lib/url-state'
 import type { Member, Permission, Run } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
@@ -43,6 +43,7 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
   const [restored] = useState(() => useStore.getState().launchDraft)
   const [draftID] = useState(() => restored?.id ?? randomID('launch-draft'))
   const ended = useRef(false)
+  const handedOff = useRef(false)
   const outsideClick = useRef(false)
   const storageFailed = useRef(false)
   const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(restored?.workspace ?? null)
@@ -177,11 +178,20 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
 
   useEffect(() => {
     const state = useStore.getState()
-    if (ended.current || state.identityKey !== identityKey || (!open && state.launchDraft?.id !== draftID)) return
+    if (ended.current || handedOff.current || state.launchDraftPopoutActive || state.identityKey !== identityKey || (!open && state.launchDraft?.id !== draftID)) return
     const failure = state.setLaunchDraft(currentDraft, !launchDraftError)
     if (failure && !storageFailed.current) toast.error(`Draft could not be saved in this browser: ${failure}`)
     storageFailed.current = failure !== null
   }, [identityKey, draftID, open, currentDraft, launchDraftError, linkStatus])
+
+  useEffect(() => {
+    if (!isLaunchPopout()) return
+    const returnDraft = () => {
+      if (!ended.current) sendLaunchPopoutReturned(currentDraft)
+    }
+    window.addEventListener('beforeunload', returnDraft)
+    return () => window.removeEventListener('beforeunload', returnDraft)
+  }, [currentDraft])
 
   const collapse = () => {
     setPickedWorkspace(workspaceID)
@@ -220,6 +230,8 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
       toast.error('Could not open New session in a new window. Allow pop-ups for this site and try again.')
       return
     }
+    handedOff.current = true
+    useStore.getState().setLaunchDraftPopoutActive(true)
     collapse()
   }
 

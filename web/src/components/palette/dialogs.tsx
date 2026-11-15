@@ -20,6 +20,8 @@ export function PaletteDialogs() {
   const dialog = useStore((s) => s.paletteDialog)
   const identity = useStore((s) => s.identityKey)
   const draft = useStore((s) => s.launchDraft)
+  const launchPopoutActive = useStore((s) => s.launchDraftPopoutActive)
+  const draftRevision = useStore((s) => s.launchDraftRevision)
   const collapsed = useStore((s) => s.sidebarCollapsed)
   const phone = useIsMobile()
   const [sidebar, setSidebar] = useState(() => document.getElementById('sidebar'))
@@ -35,8 +37,8 @@ export function PaletteDialogs() {
   return (
     <>
       {/* A different member's launch starts over from their own accounts and saved choices. */}
-      {retained && <LaunchDialog key={`${identity ?? ''}:${opened.current.count}`} open={launchOpen} visible={launchShown} />}
-      {!phone && !launchShown && draft && createPortal(
+      {retained && <LaunchDialog key={`${identity ?? ''}:${opened.current.count}:${draftRevision}`} open={launchOpen} visible={launchShown} />}
+      {!phone && !launchShown && draft && !launchPopoutActive && createPortal(
         <Button
           variant="secondary"
           size="icon"

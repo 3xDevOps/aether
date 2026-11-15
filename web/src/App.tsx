@@ -98,11 +98,21 @@ export function App() {
       const result = receiveLaunchPopoutMessage(event)
       if (!result) return
       const state = useStore.getState()
+      if (result.type === 'returned') {
+        if (state.launchDraft?.id === result.draft.id) {
+          state.setLaunchDraft(result.draft)
+          useStore.setState({ launchDraftRevision: state.launchDraftRevision + 1 })
+        }
+        state.setLaunchDraftPopoutActive(false)
+        return
+      }
       if (result.type === 'discarded') {
         if (state.launchDraft?.id === result.draftID) state.setLaunchDraft(null)
+        state.setLaunchDraftPopoutActive(false)
         return
       }
       if (state.launchDraft?.id === result.draftID) state.setLaunchDraft(null)
+      state.setLaunchDraftPopoutActive(false)
       void api.runGet(result.runID).then((run) => {
         useStore.getState().upsertRun(run)
         useStore.getState().navigate('run', { runId: run.id })

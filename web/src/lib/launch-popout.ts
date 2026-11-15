@@ -1,7 +1,8 @@
-import type { LaunchDraft } from '@/components/launch/draft'
+import { parseLaunchDraft, type LaunchDraft } from '@/components/launch/draft'
 
 type PopoutMessage =
   | { source: 'aether-launch-popout'; type: 'discarded'; draftID: string }
+  | { source: 'aether-launch-popout'; type: 'returned'; draft: LaunchDraft }
   | { source: 'aether-launch-popout'; type: 'launched'; draftID: string; runID: string }
 
 const popouts = new WeakSet<object>()
@@ -29,6 +30,14 @@ export function sendLaunchPopoutDiscarded(draftID: string): void {
   if (opener && !opener.closed) {
     opener.postMessage({ source: 'aether-launch-popout', type: 'discarded', draftID }, window.location.origin)
   }
+  window.close()
+}
+
+export function sendLaunchPopoutReturned(draft: LaunchDraft): void {
+  const opener = window.opener
+  if (opener && !opener.closed) {
+    opener.postMessage({ source: 'aether-launch-popout', type: 'returned', draft }, window.location.origin)
+  }
 }
 
 export function sendLaunchPopoutLaunched(runID: string, draftID: string): boolean {
@@ -41,10 +50,19 @@ export function sendLaunchPopoutLaunched(runID: string, draftID: string): boolea
 
 export function receiveLaunchPopoutMessage(event: MessageEvent): PopoutMessage | null {
   if (event.origin !== window.location.origin || !event.source || typeof event.source !== 'object' || !popouts.has(event.source)) return null
-  const value = event.data as { source?: unknown; type?: unknown; draftID?: unknown; runID?: unknown } | null
+  const value = event.data as { source?: unknown; type?: unknown; draft?: unknown; draftID?: unknown; runID?: unknown } | null
   if (!value || value.source !== 'aether-launch-popout') return null
-  if (value.type === 'discarded' && typeof value.draftID === 'string') return value as PopoutMessage
-  if (value.type === 'launched' && typeof value.draftID === 'string' && typeof value.runID === 'string' && value.runID !== '') {
+  if (value.type === 'returned' && typeof value.draft === 'object' && value.draft !== null) {
+    const draft = parseLaunchDraft(JSON.stringify(value.draft))
+    if (!draft) return null
+    popouts.delete(event.source)
+    return { source: 'aether-launch-popout', type: 'returned', draft }
+  }
+  if (value.type === 'discarded' && typeof value.draftID === 'string' && value.draftID !== '') {
+    popouts.delete(event.source)
+    return value as PopoutMessage
+  }
+  if (value.type === 'launched' && typeof value.draftID === 'string' && value.draftID !== '' && typeof value.runID === 'string' && value.runID !== '') {
     popouts.delete(event.source)
     return value as PopoutMessage
   }
