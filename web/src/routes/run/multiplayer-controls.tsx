@@ -91,7 +91,7 @@ export function MultiplayerControls({ run, agent, onPeople }: {
       role="group"
       aria-label="Multiplayer controls"
       aria-describedby={interactive ? keyboardHelpID : undefined}
-      className="@container/multiplayer relative isolate shrink-0 overflow-clip border-b border-seam bg-chrome px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-focus">
+      className="@container/multiplayer relative isolate shrink-0 touch-pan-y overflow-clip border-b border-seam bg-chrome px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-focus">
       <ControlMatrix
         appearance={agent.localControl ? 'active'
           : agent.controlUnavailable ? 'hidden' : agent.roomControl?.loss ?? 'hidden'}

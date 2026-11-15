@@ -3142,7 +3142,8 @@ Each dot springs away from the pointer; pointer speed adds a two-branch V wake
 with a 1.02 overshoot, and a click or tap displaces and swells a ring. The
 clear bars behind text feather motion to 25% of the response. A focused strip
 accepts Enter or Space for a ring and arrow keys to move the point; its
-accessible instructions describe these keys. An
+accessible instructions describe these keys. The strip sets `touch-pan-y`, so
+a horizontal touch drag moves the dots instead of turning into a pan. An
 `IntersectionObserver` and page visibility listener pause the loop offscreen or
 in the background, and the loop sleeps when the dots settle. With reduced
 motion the strip keeps the static texture and is not a tab stop.
