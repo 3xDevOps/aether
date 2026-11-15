@@ -103,12 +103,14 @@ describe('release channel section', () => {
       })
       const client = fakeApi()
       render(<ReleaseChannelSection client={client} />)
-      const beta = screen.getByRole('link', { name: 'Promote the newest beta' })
-      const nightly = screen.getByRole('link', { name: 'Promote the newest nightly' })
+      const beta = screen.getByRole('link', { name: 'Promote the newest beta on GitHub' })
+      const nightly = screen.getByRole('link', { name: 'Promote the newest nightly on GitHub' })
       expect(beta.getAttribute('href')).toBe(promoteURL)
       expect(nightly.getAttribute('target')).toBe('_blank')
       expect(screen.getByText(/v0\.9\.0-beta\.1 \(build 380\), cut 5 days ago/)).toBeDefined()
       expect(screen.getByText(/v0\.9\.0-nightly\.13 \(build 420\), cut today/)).toBeDefined()
+      expect(screen.getByText(/v0\.9\.0-beta\.1 \(build 380\), cut 5 days ago\. Promote to stable from the Promote workflow on GitHub\./)).toBeDefined()
+      expect(screen.getByText(/Promote to beta from the Promote workflow/)).toBeDefined()
       fireEvent.click(beta)
       expect(client.serverReleaseChannelSet).not.toHaveBeenCalled()
     } finally {
@@ -132,6 +134,47 @@ describe('release channel section', () => {
     seed({ channel: 'beta', channel_pointers: pointers }, bob)
     render(<ReleaseChannelSection client={fakeApi()} />)
     expect(screen.queryByRole('link')).toBeNull()
+  })
+})
+
+describe('release channel context', () => {
+  it('explains the selected channel and shows the pointer age to every member', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-20T12:00:00Z') })
+    try {
+      seed({ channel: 'beta', channel_pointers: { beta: { version: 'v0.9.0-beta.1', published_at: '2026-11-08T12:00:00Z' } } }, bob)
+      render(<ReleaseChannelSection client={fakeApi()} />)
+      expect(screen.getByText(/Builds promoted from nightly\. Beta last published 12 days ago\./)).toBeDefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('hides the age when the server did not verify the pointer', () => {
+    seed({ channel: 'nightly' })
+    render(<ReleaseChannelSection client={fakeApi()} />)
+    expect(screen.getByText(/Built from main, at most every 4 hours\./).textContent).not.toContain('last published')
+  })
+
+  it('shows a spinner line while the dry run is out', async () => {
+    seed({ channel: 'nightly' })
+    let release: (r: ServerReleaseChannelSet) => void = () => {}
+    const client = fakeApi({ serverReleaseChannelSet: vi.fn(() => new Promise<ServerReleaseChannelSet>((resolve) => { release = resolve })) })
+    render(<ReleaseChannelSection client={client} />)
+    fireEvent.click(screen.getByRole('radio', { name: 'Beta' }))
+    expect(await screen.findByText('Checking beta…')).toBeDefined()
+    release(dry())
+    await screen.findByRole('dialog', { name: 'Switch to beta?' })
+  })
+
+  it('puts the server error on its own line when the channel cannot be read', async () => {
+    seed({ channel: 'nightly' })
+    const failure = 'channel pointer beta.json: 404 Not Found'
+    const client = fakeApi({ serverReleaseChannelSet: vi.fn(async () => dry({ wait: false, target: undefined, target_error: failure })) })
+    render(<ReleaseChannelSection client={client} />)
+    fireEvent.click(screen.getByRole('radio', { name: 'Beta' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Switch to beta?' })
+    expect(within(dialog).getByRole('alert').textContent).toBe(failure)
+    expect(within(dialog).getByText('The server never installs an older build.')).toBeDefined()
   })
 })
 

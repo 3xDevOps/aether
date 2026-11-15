@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ExternalLink } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
@@ -11,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { RadioPills, RadioPillsItem } from '@/components/ui/radio-pills'
+import { Spinner } from '@/components/ui/spinner'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { ChannelPointer, ReleaseChannel, ServerReleaseChannelSet } from '@/lib/types'
@@ -22,6 +24,12 @@ import { readServerStatus } from '@/store/updates'
 const channels: ReleaseChannel[] = ['stable', 'beta', 'nightly']
 
 const label: Record<ReleaseChannel, string> = { stable: 'Stable', beta: 'Beta', nightly: 'Nightly' }
+
+const meaning: Record<ReleaseChannel, string> = {
+  stable: 'Tested releases.',
+  beta: 'Builds promoted from nightly.',
+  nightly: 'Built from main, at most every 4 hours.',
+}
 
 /** The Promote workflow's page; its Run button is what promotes. */
 export const promoteURL = 'https://github.com/3xDevOps/aether/actions/workflows/promote.yml'
@@ -47,6 +55,7 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
+  const [checking, setChecking] = useState<ReleaseChannel | null>(null)
   const current = status?.channel
   if (!offered) return null
   if (!status) {
@@ -82,6 +91,7 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
       return
     }
     setBusy(true)
+    setChecking(channel)
     try {
       const dry = await client.serverReleaseChannelSet(channel, true)
       const kind = confirmation(channel, dry)
@@ -91,9 +101,12 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
       setError(message(err))
     } finally {
       setBusy(false)
+      setChecking(null)
     }
   }
 
+  const published = status.channel_pointers?.[current]?.published_at
+  const publishedAge = published ? daysAgo(published) : ''
   const promotable = canSet && (current === 'nightly' || current === 'beta')
 
   return (
@@ -101,18 +114,22 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
       <SettingRow
         id="release-channel"
         label="Channel"
-        help={[
-          'The server, this computer\'s app and the CLI follow it; the Android app follows its server.',
-          canSet ? '' : 'Only a super admin can change it.',
-          status.channel_pending ? 'This server has not chosen a channel yet and follows beta.' : '',
-        ].filter(Boolean).join(' ')}
+        help={
+          <>
+            <p>Which builds this server installs. Apps and the CLI connected to it follow it.</p>
+            <p>{[meaning[current], publishedAge && `${label[current]} last published ${publishedAge}.`, status.channel_pending && 'This server has not chosen a channel yet and follows beta.', !canSet && 'Only a super admin can change it.'].filter(Boolean).join(' ')}</p>
+          </>
+        }
         control={
           canSet ? (
+            <div className="flex items-center gap-2">
+              {checking && <span role="status" className="flex items-center gap-1.5 text-ui-sm text-muted"><Spinner />Checking {checking}…</span>}
             <RadioPills aria-label="Release channel" value={current} disabled={busy} onValueChange={(v) => void choose(v as ReleaseChannel)}>
               {channels.map((c) => (
                 <RadioPillsItem key={c} value={c}>{label[c]}</RadioPillsItem>
               ))}
             </RadioPills>
+            </div>
           ) : (
             <Badge>{label[current]}</Badge>
           )
@@ -160,14 +177,16 @@ function daysAgo(iso: string, now = Date.now()): string {
 function PromoteRow({ channel, pointer }: { channel: 'beta' | 'nightly'; pointer: ChannelPointer }) {
   const age = daysAgo(pointer.published_at)
   const build = pointer.build ? ` (build ${pointer.build})` : ''
+  const to = channel === 'nightly' ? 'beta' : 'stable'
   return (
     <SettingRow
       id={`release-promote-${channel}`}
       label={`Newest ${channel}`}
-      help={`${pointer.version}${build}${age ? `, cut ${age}` : ''}. The button opens the Promote workflow on GitHub; its Run button promotes.`}
+      help={`${pointer.version}${build}${age ? `, cut ${age}` : ''}. Promote to ${to} from the Promote workflow on GitHub.`}
       control={
-        <a className={buttonVariants({ variant: 'secondary', size: 'sm' })} href={promoteURL} target="_blank" rel="noreferrer" aria-label={`Promote the newest ${channel}`}>
-          Promote
+        <a className={buttonVariants({ variant: 'secondary', size: 'sm' })} href={promoteURL} target="_blank" rel="noreferrer" aria-label={`Promote the newest ${channel} on GitHub`}>
+          Promote on GitHub
+          <ExternalLink aria-hidden className="size-3.5" />
         </a>
       }
     />
@@ -192,21 +211,23 @@ function WaitConfirm({ channel, dry }: { channel: ReleaseChannel; dry?: ServerRe
   const name = label[channel]
   const lower = name.toLowerCase()
   const running = dry?.running
+  const runs = running && <>This server runs <Code>{running.version}</Code>{running.build > 0 && ` (build ${running.build})`}. </>
   return (
     <DialogHeader>
       <DialogTitle>Switch to {lower}?</DialogTitle>
-      <DialogDescription>
-        {running && <>This server runs <Code>{running.version}</Code>{running.build > 0 && ` (build ${running.build})`}. </>}
-        {dry?.target ? (
-          <>
-            {name} is at <Code>{dry.target.version}</Code>{dry.target.build > 0 && ` (build ${dry.target.build})`}.
-            {' '}The server stays on its current build until {lower} reaches {running && running.build > 0 ? `build ${running.build}` : 'it'}, then updates as usual.
-          </>
-        ) : (
-          <>The newest {lower} release could not be read: {dry?.target_error}</>
-        )}
-        {' '}It never installs an older build.
-      </DialogDescription>
+      {dry?.target ? (
+        <DialogDescription>
+          {runs}
+          {name} is at <Code>{dry.target.version}</Code>{dry.target.build > 0 && ` (build ${dry.target.build})`}.
+          {' '}The server stays on its current build until {lower} reaches {running && running.build > 0 ? `build ${running.build}` : 'it'}, then updates as usual. It never installs an older build.
+        </DialogDescription>
+      ) : (
+        <>
+          <DialogDescription>{runs}The newest {lower} release could not be read:</DialogDescription>
+          <p role="alert" className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 text-state-failed select-text">{dry?.target_error}</p>
+          <p className="text-ui text-muted">The server never installs an older build.</p>
+        </>
+      )}
     </DialogHeader>
   )
 }

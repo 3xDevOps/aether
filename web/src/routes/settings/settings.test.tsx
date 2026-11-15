@@ -7,7 +7,7 @@ import { ServerSection } from '@/routes/settings/server'
 import { createRootStore, useStore, type RootState } from '@/store'
 import { runLabel } from '@/lib/status'
 import { toRecord } from '@/store/runs'
-import { alice, bob, fakeApi, run, serverInfo, updateStatus, workspace } from '@/test/fixtures'
+import { alice, bob, fakeApi, run, serverInfo, serverUpdateStatus, updateStatus, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
 import { atViewport } from '@/test/viewport'
 
@@ -217,6 +217,21 @@ describe('settings view', () => {
     seed({ info: { ...serverInfo, tailnet_dashboard_error: refusal } })
     render(<ServerSection client={fakeApi()} />)
     await waitFor(() => expect(screen.queryByText('Tailnet dashboard')).toBeNull())
+  })
+
+  it('names the channel on the Version row, and the wait instead of "Up to date"', () => {
+    seed({ serverUpdate: serverUpdateStatus({ server_version: serverInfo.server_version, latest_version: serverInfo.server_version, channel: 'beta', checked_at: '2026-11-15T20:00:00Z' }) })
+    const first = render(<ServerSection client={fakeApi()} />)
+    expect(screen.getByText(/Up to date on beta\. Checked/)).toBeDefined()
+    first.unmount()
+
+    seed({
+      serverUpdate: serverUpdateStatus({ server_version: serverInfo.server_version, server_build: 412, latest_version: 'v0.9.0-beta.1', latest_build: 380, channel: 'beta', channel_wait: true }),
+      update: updateStatus(),
+    })
+    render(<ServerSection client={fakeApi()} />)
+    expect(screen.getByText(/Stays on build 412 until beta reaches it\./)).toBeDefined()
+    expect(screen.queryByText(/Up to date/)).toBeNull()
   })
 
   it('keeps the server admin rows from a collaborator', () => {

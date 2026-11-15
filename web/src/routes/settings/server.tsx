@@ -33,6 +33,7 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
   const navigate = useStore((s) => s.navigate)
   const clearDismissed = useStore((s) => s.clearDismissedUpdates)
   const checkForUpdates = useCheckForUpdates(client)
+  const channel = useStore((s) => s.serverUpdate?.channel)
   useEffect(() => {
     const read = () =>
       client.serverInfo().then(
@@ -52,8 +53,12 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
   const failed = [server, cli].find((t) => t.state === 'check_failed')
   const current = server.state === 'up_to_date' ? server : cli.state === 'up_to_date' ? cli : null
   const checking = server.state === 'checking' || cli.state === 'checking'
-  const checkedLine =
-    current && !update && checkedTime(current.checkedAt) ? `Up to date. Checked ${checkedTime(current.checkedAt)}.` : ''
+  const waiting = server.state === 'channel_wait' ? server : null
+  const checkedLine = waiting
+    ? `Stays on ${waiting.build ? `build ${waiting.build}` : waiting.version} until ${waiting.channel} reaches it.`
+    : current && !update && checkedTime(current.checkedAt)
+      ? `Up to date${channel ? ` on ${channel}` : ''}. Checked ${checkedTime(current.checkedAt)}.`
+      : ''
   return (
     <>
       <SettingsSection title="Status">
