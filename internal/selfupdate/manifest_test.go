@@ -102,6 +102,18 @@ func TestFetchManifestNamesAnUnsignedTag(t *testing.T) {
 	}
 }
 
+func TestFetchSignedManifestReturnsTheBytesItVerified(t *testing.T) {
+	_, srv := newFakeRelease(t, "v1.3.0", testAssets)
+	m, data, sig, err := FetchSignedManifestFrom(t.Context(), srv.URL, "v1.3.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := VerifyManifest(data, sig, "v1.3.0")
+	if err != nil || again.Version != m.Version || again.Commit != m.Commit {
+		t.Fatalf("the returned bytes verify as %+v, %v; want %s", again, err, m.Version)
+	}
+}
+
 func TestDownloadsRefuseARedirectOffHTTPS(t *testing.T) {
 	var hits atomic.Int64
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
