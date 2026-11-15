@@ -91,10 +91,14 @@ type ServerUpdateStatusParams struct {
 }
 
 // PendingServerUpdate is one recorded update waiting for an idle server.
+//
+// ByServer marks an update the server scheduled itself, when its release
+// check found a newer build on its channel; RequestedBy is then "server".
 type PendingServerUpdate struct {
 	Version     string `json:"version"`
 	RequestedBy string `json:"requested_by"`
 	RequestedAt string `json:"requested_at"`
+	ByServer    bool   `json:"by_server,omitempty"`
 }
 
 // ServerUpdateWaiting says what a pending update has not applied yet for.
@@ -137,7 +141,9 @@ type ServerUpdateAttempt struct {
 // check on it has run. ChannelWait reports that the running build is above
 // it: the server stays on its build until the channel reaches it. Builds
 // are the signed (build, hotfix) of each release, 0 for a release from
-// before channels.
+// before channels. Declined is the build the server no longer schedules by
+// itself: a super admin cancelled it or rolled back from it, or it failed;
+// the server schedules only a build above it.
 type ServerUpdateStatusResult struct {
 	ServerVersion   string               `json:"server_version"`
 	ServerBuild     int                  `json:"server_build,omitempty"`
@@ -145,6 +151,7 @@ type ServerUpdateStatusResult struct {
 	Channel         string               `json:"channel,omitempty"`
 	ChannelPending  bool                 `json:"channel_pending,omitempty"`
 	ChannelWait     bool                 `json:"channel_wait,omitempty"`
+	Declined        *ReleaseBuild        `json:"declined,omitempty"`
 	LatestVersion   string               `json:"latest_version,omitempty"`
 	LatestChannel   string               `json:"latest_channel,omitempty"`
 	LatestBuild     int                  `json:"latest_build,omitempty"`

@@ -184,6 +184,9 @@ func (s *Service) failOrRetry(ctx context.Context, pending store.PendingServerUp
 			return err
 		}
 	}
+	if scheduled {
+		s.decline(ctx, s.known(pending.Version))
+	}
 	return s.fail(ctx, pending, err)
 }
 

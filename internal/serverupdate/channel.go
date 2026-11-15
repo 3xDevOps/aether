@@ -93,6 +93,7 @@ func (s *Service) describeChannel(ctx context.Context, out *protocol.ServerUpdat
 	}
 	running := selfupdate.Running()
 	out.ServerBuild, out.ServerHotfix = running.Build, running.Hotfix
+	out.Declined = check.Declined.wire()
 	if s.cfg.Releases == nil {
 		out.Channel, out.ChannelPending = channel, !chosen
 		if check.Channel != channel {
@@ -158,7 +159,7 @@ func (s *Service) SetChannel(ctx context.Context, p protocol.ServerReleaseChanne
 	if p.DryRun {
 		target, terr = s.peek(ctx, p.Channel)
 	} else {
-		st := s.runCheck(ctx)
+		st := s.checkAndSchedule(ctx)
 		s.checkSoon()
 		target = st.latest()
 		if st.Error != "" {

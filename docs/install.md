@@ -725,8 +725,20 @@ sudo mv /var/lib/aether/server-update/aether.db.pre-update /var/lib/aether/aethe
 sudo systemctl start aether-server
 ```
 
-The server checks for releases every 6 hours and prompts admins;
-`AETHER_NO_UPDATE_CHECK=1` in `/etc/aether/aether-server.env` turns that off.
+The server checks for releases every 6 hours. When the check finds a newer
+build on the server's [release channel](#release-channel), the server
+schedules it itself, as `aether server update --when idle` would, and
+applies it once no session is working. `server.update_status` marks that
+pending update `by_server`, and the timeline names `server` as its actor.
+It never replaces an update a member scheduled, and never schedules a
+release from before channels or one the preflight refuses. A super admin's
+`--cancel`, an `--allow-downgrade` update, and a scheduled update that
+fails (after 3 tries for a network error) mark that build declined in
+`server-update/check.json`; `server.update_status` shows it as `declined`,
+and the server schedules only a higher build by itself. A super admin's
+own `aether server update` ignores the mark.
+`AETHER_NO_UPDATE_CHECK=1` in `/etc/aether/aether-server.env` turns off the
+check and with it these updates.
 
 ### Release channel
 

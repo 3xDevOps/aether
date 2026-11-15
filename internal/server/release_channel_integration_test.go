@@ -4,6 +4,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
+	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -42,9 +46,10 @@ func (r *running) setChannel(t *testing.T, p protocol.ServerReleaseChannelSetPar
 
 // A server on nightly build 412 moves to beta at build 380: it waits on its
 // build and says so, installs nothing lower, and updates once beta's
-// pointer reaches build 412, the same code under the beta label. Only a
-// super admin changes the channel, every member reads it, and a pointer
-// replayed after switching away and back is still refused.
+// pointer reaches build 412, the same code under the beta label, which it
+// then takes by itself. Only a super admin changes the channel, every
+// member reads it, and a pointer replayed after switching away and back is
+// still refused.
 func TestIntegrationReleaseChannelWaitsForTheLowerChannel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -120,31 +125,71 @@ func TestIntegrationReleaseChannelWaitsForTheLowerChannel(t *testing.T) {
 		t.Fatal("leaving nightly installed a lower build")
 	}
 
-	publishChannel(t, release, selfupdate.ChannelBeta, "v0.9.0-beta.2", 412)
-	h.skew.Store(int64(time.Minute))
-	var fresh protocol.ServerUpdateStatusResult
-	if err := srv.ctrl.Call(protocol.MethodServerUpdateStatus, protocol.ServerUpdateStatusParams{Refresh: true}, &fresh); err != nil {
-		t.Fatal(err)
-	}
-	if fresh.LatestVersion != "v0.9.0-beta.2" || fresh.LatestBuild != 412 || !fresh.UpdateAvailable || fresh.ChannelWait {
-		t.Fatalf("status once beta reached the build = %+v, want beta.2 available", fresh)
-	}
-
-	// The beta mark survives switching to nightly and back.
+	// The nightly mark survives switching to beta and back: a replayed
+	// nightly.json below it is refused.
+	release.SetBuild("v0.9.0-nightly.11", selfupdate.ChannelNightly, 411, 0)
+	publishChannel(t, release, selfupdate.ChannelNightly, "v0.9.0-nightly.11", 411)
 	srv.setChannel(t, protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelNightly})
-	publishChannel(t, release, selfupdate.ChannelBeta, "v0.9.0-beta.1", 380)
-	srv.setChannel(t, protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelBeta})
-	const replayed = "channel pointer beta.json names build 380, below build 412 seen before"
-	if st = srv.status(t); st.CheckError != replayed || st.UpdateAvailable {
-		t.Fatalf("status with beta.json replayed = %+v, want %q", st, replayed)
+	const replayed = "channel pointer nightly.json names build 411, below build 412 seen before"
+	if st = srv.status(t); st.CheckError != replayed || st.UpdateAvailable || st.Pending != nil {
+		t.Fatalf("status with nightly.json replayed = %+v, want %q", st, replayed)
 	}
 	wantCode(t, srv.update(protocol.ServerUpdateParams{}), protocol.CodeInternal, replayed)
 
+	// Once beta reaches build 412 the server takes beta.2, the same code
+	// under the beta label, by itself at the first idle moment.
+	srv.setChannel(t, protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelBeta})
 	publishChannel(t, release, selfupdate.ChannelBeta, "v0.9.0-beta.2", 412)
-	if err := srv.update(protocol.ServerUpdateParams{}); err != nil {
-		t.Fatalf("update to beta.2: %v", err)
+	h.skew.Store(int64(time.Minute))
+	if err := srv.ctrl.Call(protocol.MethodServerUpdateStatus, protocol.ServerUpdateStatusParams{Refresh: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-h.drained:
+	case <-ctx.Done():
+		t.Fatal("the server did not update once beta reached its build")
 	}
 	if readBinary(t, h.serverBin) != updatedServerBinary {
 		t.Fatal("the update once beta reached the build did not install beta.2")
+	}
+}
+
+// A server whose check finds a newer build on its channel schedules it
+// itself and applies it at the first idle moment, as the server.
+func TestIntegrationServerAppliesANewerBuildByItself(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	release := stubRelease(t, "v0.8.7-beta.14")
+	release.SetBuild("v0.9.0-nightly.12", selfupdate.ChannelNightly, 412, 0)
+	release.SetBuild("v0.9.0-nightly.13", selfupdate.ChannelNightly, 413, 0)
+	publishChannel(t, release, selfupdate.ChannelNightly, "v0.9.0-nightly.13", 413)
+	oldBuild := version.Build
+	version.Build = "412"
+	t.Cleanup(func() { version.Build = oldBuild })
+	h := newUpdateHarness(t, release)
+	srv := h.start(t, ctx, "v0.9.0-nightly.12")
+
+	srv.setChannel(t, protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelNightly})
+	select {
+	case <-h.drained:
+	case <-ctx.Done():
+		t.Fatalf("the server never applied nightly.13 by itself: %+v", srv.status(t))
+	}
+	if readBinary(t, h.serverBin) != updatedServerBinary {
+		t.Fatal("the server's own update did not install nightly.13")
+	}
+	data, err := os.ReadFile(filepath.Join(UpdateStateDir(h.dataDir), "swap.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec struct {
+		ToVersion   string `json:"to_version"`
+		RequestedBy string `json:"requested_by"`
+	}
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.ToVersion != "v0.9.0-nightly.13" || rec.RequestedBy != string(serverupdate.ServerActor) {
+		t.Fatalf("swap record = %+v, want nightly.13 requested by the server", rec)
 	}
 }

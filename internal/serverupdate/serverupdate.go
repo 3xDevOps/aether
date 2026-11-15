@@ -304,6 +304,7 @@ func (s *Service) Status(ctx context.Context, p protocol.ServerUpdateStatusParam
 			Version:     p.Version,
 			RequestedBy: string(p.RequestedBy),
 			RequestedAt: p.RequestedAt.UTC().Format(time.RFC3339),
+			ByServer:    p.RequestedBy == ServerActor,
 		}
 		// Asked live rather than cached from the last poll: a status call
 		// an admin makes after killing the last run should say the update
@@ -401,9 +402,21 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 		s.publish(ctx, actor, events.ServerUpdateScheduled, tag, "")
 		return res, nil, nil
 	}
+	leaving := s.known(version.Version)
 	restart, err := s.apply(ctx, pending, p.AllowDowngrade, false)
 	if err != nil {
 		return protocol.ServerUpdateResult{}, nil, err
+	}
+	if p.AllowDowngrade {
+		// A rollback holds: the server does not schedule the build it
+		// left, or the newest it knew of, by itself again.
+		s.checkMu.Lock()
+		latest := s.check.latest()
+		s.checkMu.Unlock()
+		if selfupdate.Newer(latest, leaving) {
+			leaving.Build, leaving.Hotfix = latest.Build, latest.Hotfix
+		}
+		s.decline(ctx, leaving)
 	}
 	res.Status = protocol.ServerUpdateApplying
 	return res, restart, nil
@@ -422,6 +435,7 @@ func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.S
 	out := protocol.ServerUpdateResult{Status: protocol.ServerUpdateCancelled}
 	if state.Pending != nil {
 		out.Version = state.Pending.Version
+		s.decline(ctx, s.known(state.Pending.Version))
 		s.publish(ctx, actor, events.ServerUpdateCancelled, state.Pending.Version, "")
 	}
 	return out, nil

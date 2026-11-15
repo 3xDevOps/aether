@@ -39,6 +39,8 @@ type checkState struct {
 	Pointers selfupdate.Marks `json:"pointers,omitempty"`
 	// Channel is the release channel the latest fields were found on.
 	Channel string `json:"channel,omitempty"`
+	// Declined is the build the server no longer schedules by itself.
+	Declined *declined `json:"declined,omitempty"`
 }
 
 // forget drops the latest fields, which a check on another channel than
@@ -121,7 +123,7 @@ func (s *Service) Start(ctx context.Context) error {
 				continue
 			case <-timer.C:
 			}
-			s.runCheck(ctx)
+			s.checkAndSchedule(ctx)
 		}
 	}()
 	return nil
@@ -265,7 +267,7 @@ func (s *Service) refresh(ctx context.Context) {
 	if recent {
 		return
 	}
-	s.runCheck(ctx)
+	s.checkAndSchedule(ctx)
 	select {
 	case s.kick <- struct{}{}:
 	default:

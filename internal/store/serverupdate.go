@@ -24,6 +24,10 @@ type ServerUpdateStore interface {
 	// earlier one. A nil pending clears it (cancel, or an attempt that
 	// finished).
 	SetPendingServerUpdate(ctx context.Context, pending *PendingServerUpdate) error
+	// SchedulePendingServerUpdate records pending only while none is
+	// pending, reporting whether it did, so it never replaces an update a
+	// member scheduled.
+	SchedulePendingServerUpdate(ctx context.Context, pending PendingServerUpdate) (bool, error)
 	// SetLastServerUpdate records the outcome of an attempt and clears the
 	// pending row in the same write, so a finished attempt can never be
 	// retried by the next idle tick.
@@ -139,6 +143,33 @@ func (d *DB) SetPendingServerUpdate(ctx context.Context, pending *PendingServerU
 		return fmt.Errorf("store: write pending server update: %w", err)
 	}
 	return nil
+}
+
+func (d *DB) SchedulePendingServerUpdate(ctx context.Context, pending PendingServerUpdate) (bool, error) {
+	if pending.Version == "" {
+		return false, errors.New("store: pending server update requires a version")
+	}
+	stamp, err := encodeTime(pending.RequestedAt)
+	if err != nil {
+		return false, fmt.Errorf("store: pending server update: %w", err)
+	}
+	res, err := d.db.ExecContext(ctx,
+		`INSERT INTO server_update_state (id, pending_version, pending_requested_by, pending_requested_at)
+		 VALUES (1, ?, ?, ?)
+		 ON CONFLICT (id) DO UPDATE SET
+		   pending_version = excluded.pending_version,
+		   pending_requested_by = excluded.pending_requested_by,
+		   pending_requested_at = excluded.pending_requested_at
+		 WHERE pending_version = ''`,
+		pending.Version, string(pending.RequestedBy), stamp)
+	if err != nil {
+		return false, fmt.Errorf("store: schedule server update: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: schedule server update: %w", err)
+	}
+	return n == 1, nil
 }
 
 func (d *DB) SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) error {
