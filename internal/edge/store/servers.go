@@ -19,23 +19,20 @@ type Server struct {
 	Kind         edgeproto.ServerKind
 	AccessPolicy edgeproto.AccessPolicy
 	Owner        *edgeproto.AccountInfo
-	ClaimedAt    time.Time
 }
 
 // Server returns the claimed server id.
 func (s *Store) Server(ctx context.Context, id string) (Server, error) {
 	var srv Server
-	var claimed int64
 	var ownerID sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, kind, access_policy, claimed_at, owner_account_id
-		FROM servers WHERE id = ?`, id).Scan(&srv.ID, &srv.Name, &srv.Kind, &srv.AccessPolicy, &claimed, &ownerID)
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, kind, access_policy, owner_account_id
+		FROM servers WHERE id = ?`, id).Scan(&srv.ID, &srv.Name, &srv.Kind, &srv.AccessPolicy, &ownerID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Server{}, ErrNotFound
 	}
 	if err != nil {
 		return Server{}, fmt.Errorf("edgestore: get server: %w", err)
 	}
-	srv.ClaimedAt = fromUnix(claimed)
 	if ownerID.Valid {
 		srv.Owner = new(edgeproto.AccountInfo)
 		var rowID int64

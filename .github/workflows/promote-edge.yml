@@ -2,8 +2,8 @@ name: Promote edge to stable
 
 # Moves ghcr.io/3xdevops/aether-edge:stable to a published release's image,
 # by copying the exact index the release signed and attested. It never
-# builds and never moves stable to an older release. docs/install.md,
-# Promoting an edge release to stable, describes when to run it.
+# builds and never moves stable to an older release. CONTRIBUTING.md,
+# Edge releases and the signing key, describes when to run it.
 on:
   workflow_dispatch:
     inputs:
@@ -134,8 +134,6 @@ jobs:
       - name: Require the release run to have qualified the edge
         env:
           COMMIT: ${{ steps.manifest.outputs.commit }}
-        # Until release.yml has an edge-qualify job, the whole release run
-        # must have succeeded.
         run: |
           run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?event=push&branch=$TAG&per_page=100" |
             jq -c --arg sha "$COMMIT" '[.workflow_runs[] | select(.head_sha == $sha)] | max_by(.run_number) // empty')
@@ -147,20 +145,15 @@ jobs:
           url=$(printf '%s' "$run" | jq -r .html_url)
           qualify=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?filter=latest&per_page=100" |
             jq -s '[.[].jobs[] | select(.name == "edge-qualify" or (.name | startswith("edge-qualify ")))]')
-          if [ "$(printf '%s' "$qualify" | jq length)" -gt 0 ]; then
-            if ! printf '%s' "$qualify" | jq -e 'all(.conclusion == "success")' >/dev/null; then
-              echo "::error::edge-qualify did not succeed in $url"
-              exit 1
-            fi
-            evidence="edge-qualify succeeded in $url"
-          else
-            if [ "$(printf '%s' "$run" | jq -r '.status + " " + (.conclusion // "")')" != "completed success" ]; then
-              echo "::error::the release run $url has not succeeded, and it has no edge-qualify job"
-              exit 1
-            fi
-            evidence="the release run $url succeeded (it has no edge-qualify job)"
+          if [ "$(printf '%s' "$qualify" | jq length)" -eq 0 ]; then
+            echo "::error::the release run $url has no edge-qualify job"
+            exit 1
           fi
-          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          if ! printf '%s' "$qualify" | jq -e 'all(.conclusion == "success")' >/dev/null; then
+            echo "::error::edge-qualify did not succeed in $url"
+            exit 1
+          fi
+          echo "EVIDENCE=edge-qualify succeeded in $url" >> "$GITHUB_ENV"
       - name: Require a 24-hour soak
         env:
           PUBLISHED_AT: ${{ steps.release.outputs.published_at }}

@@ -538,7 +538,7 @@ func TestTransferTakesOnlyItsOwnAnswer(t *testing.T) {
 
 func issueFor(t *testing.T, a *Agent) string {
 	t.Helper()
-	code, _, err := a.state.IssueClaimCode(a.ServerID(), "", time.Now())
+	code, _, err := a.state.IssueClaimCode(a.serverID, "", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

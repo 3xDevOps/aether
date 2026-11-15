@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"math/big"
 	"net"
 	"net/http"
@@ -50,10 +49,7 @@ const switchWait = 2 * time.Minute
 type edgeImage struct {
 	version string
 	digest  string
-	// updater is false for an image from before version --json, which
-	// the updater cannot update from. schema and floor are what its
-	// version --json reports.
-	updater       bool
+	// schema and floor are what its version --json reports.
 	schema, floor int
 }
 
@@ -124,16 +120,7 @@ func TestEdgeUpgrade(t *testing.T) {
 	q.requireData(prev, clients, servers)
 
 	q.promote(a)
-	if prev.updater {
-		q.update(0, "now running "+a.version)
-	} else {
-		q.update(1, "predates aether-edge version --json")
-		q.requireData(prev, clients, servers)
-		q.compose("stop", "aether-edge")
-		q.mustRun("cp", "-a", filepath.Join(q.dir, "data"), filepath.Join(q.dir, "data.pre-update"))
-		q.setDigest(a.digest)
-		q.compose("up", "-d", "--wait", "aether-edge")
-	}
+	q.update(0, "now running "+a.version)
 	q.requireData(a, clients, servers)
 
 	q.promote(f)
@@ -379,13 +366,14 @@ func (q *qualify) build(version, context string) edgeImage {
 	img := edgeImage{version: version, digest: q.manifestDigest(version)}
 	q.write(filepath.Join(q.work, "releases", version), []byte(img.digest), 0o644)
 	var v struct {
-		StoreSchema      int  `json:"store_schema"`
-		StoreCompatFloor *int `json:"store_compat_floor"`
+		StoreSchema      int `json:"store_schema"`
+		StoreCompatFloor int `json:"store_compat_floor"`
 	}
-	out, err := q.run(q.docker, "run", "--rm", "--network", "none", ref, "version", "--json")
-	if err == nil && json.Unmarshal([]byte(out), &v) == nil && v.StoreCompatFloor != nil {
-		img.updater, img.schema, img.floor = true, v.StoreSchema, *v.StoreCompatFloor
+	out := q.dockerRun("run", "--rm", "--network", "none", ref, "version", "--json")
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		q.t.Fatalf("%s: version --json = %s: %v", version, out, err)
 	}
+	img.schema, img.floor = v.StoreSchema, v.StoreCompatFloor
 	q.t.Logf("built %s@%s in %s (schema %d, compat floor %d)", version, img.digest, time.Since(start).Round(time.Second), img.schema, img.floor)
 	return img
 }
@@ -578,9 +566,6 @@ func (q *qualify) requireData(img edgeImage, clients []*client, servers []*serve
 			time.Sleep(time.Second)
 		}
 	}
-	if !img.updater {
-		return
-	}
 	var rep struct {
 		Status  string `json:"status"`
 		Servers struct {
@@ -621,23 +606,10 @@ func (q *qualify) backups(pattern string) []string {
 	return found
 }
 
-// buildPreviousServer compiles TestPreviousServer against the previous
-// release's edgetest package, in its worktree, and returns the test
-// binary, or the error.
+// buildPreviousServer compiles TestPreviousServer, from the previous
+// release's own previous_server_test.go, against that release's edgetest
+// package in its worktree, and returns the test binary, or the error.
 func (q *qualify) buildPreviousServer(worktree string) string {
-	// A release that ships previous_server_test.go keeps its own, which
-	// compiled against its harness; only older ones get this tree's.
-	dst := filepath.Join(worktree, "internal", "edge", "edgetest", "previous_server_test.go")
-	_, err := os.Stat(dst)
-	if errors.Is(err, fs.ErrNotExist) {
-		var src []byte
-		if src, err = os.ReadFile("previous_server_test.go"); err == nil {
-			err = os.WriteFile(dst, src, 0o644)
-		}
-	}
-	if err != nil {
-		return "error: " + err.Error()
-	}
 	bin := filepath.Join(q.work, "previous-server.test")
 	cmd := exec.Command("go", "test", "-c", "-tags", "edgeupgrade", "-o", bin, "./internal/edge/edgetest")
 	cmd.Dir = worktree

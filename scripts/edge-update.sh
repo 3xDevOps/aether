@@ -79,7 +79,7 @@ for n in "$server_wait" "$public_wait" "${tolerance%\%}"; do
 done
 [ -n "$relay_url" ] || die "AETHER_EDGE_UPDATE_RELAY_URL is not set; set it in $config to the edge's relay origin, such as https://edge.example.com"
 
-command -v jq >/dev/null || die "jq not found; install it (docs/edge.md, \"Installing the updater\")"
+command -v jq >/dev/null || die "jq not found; install it (docs/edge.md, \"Automatic updates\")"
 
 # Exits 0 when release $1 sorts before $2 by SemVer precedence.
 version_lt() {
@@ -490,7 +490,7 @@ record_pre_state() {
 update() {
 	if [ "$channel" != latest ]; then
 		command -v cosign >/dev/null ||
-			die "cosign not found; install it to verify that $channel was promoted (docs/edge.md, \"Installing the updater\")"
+			die "cosign not found; install it to verify that $channel was promoted (docs/edge.md, \"Automatic updates\")"
 	fi
 	cur="$(current_digest)"
 	docker pull --quiet "$image:$channel" >/dev/null || die "docker pull $image:$channel failed"

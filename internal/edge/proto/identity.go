@@ -177,20 +177,6 @@ type Device struct {
 	Key   string `json:"key"`
 }
 
-// DeviceStatus is where a device stands at a server, as servers report it
-// to clients.
-type DeviceStatus string
-
-const (
-	// DeviceStatusRegistered is a device admitted under PolicyAccount on
-	// first connection, never approved by a person. Under
-	// PolicyApprovedDevices it is refused until someone approves it.
-	DeviceStatusRegistered DeviceStatus = "registered"
-	DeviceStatusApproved   DeviceStatus = "approved"
-	DeviceStatusPending    DeviceStatus = "pending"
-	DeviceStatusRevoked    DeviceStatus = "revoked"
-)
-
 // ParseDeviceKey parses a device key: one Ed25519 authorized_keys line with
 // no options.
 func ParseDeviceKey(line string) (ssh.PublicKey, error) {

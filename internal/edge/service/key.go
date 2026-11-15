@@ -14,7 +14,6 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
 )
 
@@ -97,12 +96,4 @@ func createKey(path string) (ed25519.PrivateKey, error) {
 // EdgeKey is the public key grants are signed with.
 func (s *Service) EdgeKey() ed25519.PublicKey {
 	return s.key.Public().(ed25519.PublicKey)
-}
-
-// IssueGrant signs g, valid from now for edgeproto.GrantTTL. The caller
-// sets every other field.
-func (s *Service) IssueGrant(g edgeproto.Grant) (string, error) {
-	now := s.now()
-	g.IssuedAt, g.ExpiresAt = now, now.Add(edgeproto.GrantTTL)
-	return edgeproto.SignGrant(s.key, g)
 }
