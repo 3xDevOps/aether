@@ -3144,9 +3144,8 @@ clear bars behind text feather motion to 25% of the response. A focused strip
 accepts Enter or Space for a ring and arrow keys to move the point; its
 accessible instructions describe these keys. An
 `IntersectionObserver` and page visibility listener pause the loop offscreen or
-in the background, and the loop sleeps when the dots settle. Reduced motion
-keeps the composed layout still with a frozen ring; the static CSS texture is
-the rest state.
+in the background, and the loop sleeps when the dots settle. With reduced
+motion the strip keeps the static texture and is not a tab stop.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
 cancellation and server acknowledgement as Standard sessions. Streaming updates

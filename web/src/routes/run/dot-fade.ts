@@ -35,15 +35,18 @@ function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value))
 }
 
-/** Interactive dot physics for the multiplayer strip. The static CSS texture remains the rest state. */
-export function useDotFade(ref: RefObject<HTMLElement | null>): void {
+/**
+ * Springs SVG copies of the strip's `.control-matrix` dots away from the pointer; the static
+ * CSS texture is the rest state. Returns whether the strip responds, which reduced motion turns off.
+ */
+export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
   const reducedMotion = useReducedMotion()
 
   useEffect(() => {
     const strip = ref.current
     const matrix = strip?.querySelector<HTMLElement>('.control-matrix')
     const reach = matrix?.querySelector<HTMLElement>('.control-matrix-reach')
-    if (!strip || !matrix || !reach) return
+    if (reducedMotion || !strip || !matrix || !reach) return
     const host = matrix
 
     let frame = 0
@@ -61,7 +64,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
     let visible = typeof document === 'undefined' || document.visibilityState !== 'hidden'
     let intersecting = true
 
-    const canAnimate = () => !reducedMotion && visible && intersecting
+    const canAnimate = () => visible && intersecting
     const updateZones = (rect: DOMRect) => {
       zones = []
       for (const element of strip.querySelectorAll<HTMLElement>('.control-matrix-clear')) {
@@ -179,7 +182,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
         dot.neutral.setAttribute('r', String(DOT_RADIUS + dot.burst))
         dot.accent.setAttribute('r', String(DOT_RADIUS + dot.burst))
       }
-      if (pulse && !reducedMotion) {
+      if (pulse) {
         const progress = clamp((now - pulse.started) / RING_DURATION, 0, 1)
         const eased = 1 - Math.pow(1 - progress, 2)
         ring?.setAttribute('cx', String(pulse.x))
@@ -207,12 +210,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
           dot.burst = Math.max(dot.burst, (1 - distance / RING_RADIUS) * 0.7)
         }
       }
-      if (reducedMotion) {
-        ring?.setAttribute('cx', String(point.x))
-        ring?.setAttribute('cy', String(point.y))
-        ring?.setAttribute('r', '22')
-        ring?.setAttribute('opacity', '0.72')
-      } else schedule()
+      schedule()
     }
     const pointOf = (event: PointerEvent): Point | undefined => {
       const rect = host.getBoundingClientRect()
@@ -368,4 +366,6 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): void {
       destroyGrid()
     }
   }, [reducedMotion, ref])
+
+  return !reducedMotion
 }

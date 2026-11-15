@@ -127,13 +127,14 @@ it('supports touch drag, cancellation, and keyboard points', async () => {
   view.unmount()
 })
 
-it('keeps a frozen ring and no animation loop with reduced motion', () => {
+it('keeps the static dots and no keyboard stop with reduced motion', () => {
   const matchMedia = window.matchMedia
   vi.stubGlobal('matchMedia', (query: string) => ({ ...matchMedia(query), matches: query.includes('prefers-reduced-motion') }))
   render(<MultiplayerControls run={run} agent={agent(vi.fn())} onPeople={vi.fn()} />)
   const strip = screen.getByRole('group', { name: 'Multiplayer controls' })
   size(strip)
+  expect(strip.hasAttribute('tabindex')).toBe(false)
   fireEvent.pointerDown(strip, { pointerType: 'touch', pointerId: 1, clientX: 30, clientY: 12 })
-  expect(strip.querySelector('.control-matrix-ring')).not.toBeNull()
   expect(frames.size).toBe(0)
+  expect(strip.querySelector('.control-matrix-grid')).toBeNull()
 })
