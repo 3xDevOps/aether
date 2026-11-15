@@ -747,11 +747,12 @@ or `nightly` (everything). Its release check, `aether server update` and
 `sudo aether-server update` with no `--version` take the newest release on
 that channel, read from the channel's signed pointer
 ([Verified releases](#verified-releases)). A server that existed before
-channels follows `beta`. A new server chooses at its first release check:
-`stable` when `stable.json` is published and verifies, `beta` when it is not
-published. Until a check gets either answer, such as on a first boot without
-network, the server follows `beta` and `server.update_status` reports
-`channel_pending`; the next check chooses.
+channels follows `beta`. A new server chooses at its release checks:
+`stable` when `stable.json` is published and verifies, `beta` once
+`stable.json` has answered 404 at two checks in a row, so one 404 while the
+asset is replaced does not decide it. Until then, and on any other answer,
+such as on a first boot without network, the server follows `beta` and
+`server.update_status` reports `channel_pending`.
 
 Any member sees the channel in `server.update_status`. Only a super admin
 changes it, from the dashboard or on the host:
@@ -761,8 +762,14 @@ sudo aether-server update --channel beta          # prints what changes
 sudo aether-server update --channel beta --yes    # saves it
 ```
 
-Without `--yes` it prints the confirmation and changes nothing. Saving
-installs nothing; the server checks the new channel at its next release
+Without `--yes` it prints the confirmation and changes nothing. A plain
+`sudo aether-server update` only reads the channel, following `beta` while
+the server has not chosen. Saving installs nothing. An update waiting for
+an idle moment applies only a release the server's channel takes:
+`--when idle` refuses any other, the dashboard's switch retires a pending
+one, recording it as failed with the reason, and one left pending after a
+switch on the host fails at the idle moment. `--when now` installs any
+release. The server checks the new channel at its next release
 check, and `sudo aether-server update` installs what it finds. A server
 never installs a lower build because its channel changed. Leaving `nightly`
 for a channel below its build, it stays on its build until that channel

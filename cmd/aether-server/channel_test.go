@@ -80,6 +80,27 @@ func TestUpdateChannelOnTheHost(t *testing.T) {
 		t.Fatalf("update printed %q", got)
 	}
 
+	// A plain update only reads: a server that has not chosen its channel
+	// is followed as beta, and the choice is left to the server.
+	unchosen := filepath.Join(t.TempDir(), "aether.db")
+	fresh, openErr := store.Open(unchosen)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	_ = fresh.Close()
+	out.Reset()
+	if target, err = updateTarget(t.Context(), &out, rel.URL, stateDir, unchosen, ""); err != nil || target != version.Version || !strings.Contains(out.String(), "until beta reaches it") {
+		t.Fatalf("update on an unchosen server = %q, %v, printed %q", target, err, out.String())
+	}
+	f, openErr := store.OpenChannelFile(unchosen)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	if ch, _ := f.ReleaseChannel(t.Context()); ch != "" {
+		t.Fatalf("a plain update wrote channel %q", ch)
+	}
+	_ = f.Close()
+
 	out.Reset()
 	if err = setChannel(t.Context(), &out, rel.URL, stateDir, database, selfupdate.ChannelNightly, false); err == nil || !strings.HasPrefix(out.String(), "Switch to nightly builds?\n\nNot recommended unless you are developing Aether.") {
 		t.Fatalf("nightly: %v, printed %q", err, out.String())

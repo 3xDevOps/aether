@@ -113,11 +113,9 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 	}
 
 	info, err := g.serverInfo(r)
-	out.TargetVersion = updateTarget(check, cli.ServerRelease(info))
-	if out.TargetVersion != "" && out.TargetVersion == version.ReleaseCore(info.ServerVersion) {
-		out.TargetBuild, out.TargetHotfix = info.Build, info.Hotfix
-	}
-	if g.serverFirst(r, info, out.TargetVersion) {
+	target := targetRelease(check, info, updateTarget(check, cli.ServerRelease(info)))
+	out.TargetVersion, out.TargetBuild, out.TargetHotfix = target.Version, target.Build, target.Hotfix
+	if g.serverFirst(r, info, target) {
 		out.TargetVersion, out.ServerFirst = "", true
 	}
 	if err != nil {
@@ -126,7 +124,7 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 	}
 	out.ServerVersion = info.ServerVersion
 	out.ServerBuild, out.ServerHotfix = info.Build, info.Hotfix
-	out.ServerBehind = selfupdate.Ahead(selfupdate.Release{Version: check.Latest}, cli.ServerRelease(info))
+	out.ServerBehind = selfupdate.Ahead(check.LatestRelease(), cli.ServerRelease(info))
 	out.MinClientVersion = info.MinClientVersion
 	out.MinClientBuild, out.MinClientHotfix = info.MinClientBuild, info.MinClientHotfix
 	out.ClientUpdateRequired = cli.UpgradeRequired(info) != nil
@@ -137,9 +135,9 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 // supplies its version and this member's role, and server.update_status,
 // asked only when the rest of the rule holds, whether it can update
 // itself. A server that does not answer is not waited for.
-func (g *Gateway) serverFirst(r *http.Request, info protocol.ServerInfoResult, target string) bool {
+func (g *Gateway) serverFirst(r *http.Request, info protocol.ServerInfoResult, target selfupdate.Release) bool {
 	admin := cli.ServerAdmin(info)
-	if target == "" || !cli.ServerFirst(cli.ServerRelease(info), selfupdate.Release{Version: target}, admin, true) {
+	if target.Version == "" || !cli.ServerFirst(cli.ServerRelease(info), target, admin, true) {
 		return false
 	}
 	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerUpdateStatus, nil)
@@ -177,6 +175,21 @@ func updateTarget(check selfupdate.Check, server selfupdate.Release) string {
 		return check.Latest
 	}
 	return ""
+}
+
+// targetRelease is target with the build this gateway knows for it: the
+// server's when it is the server's release, the release check's when it
+// is the latest.
+func targetRelease(check selfupdate.Check, info protocol.ServerInfoResult, target string) selfupdate.Release {
+	switch target {
+	case "":
+		return selfupdate.Release{}
+	case version.ReleaseCore(info.ServerVersion):
+		return selfupdate.Release{Version: target, Build: info.Build, Hotfix: info.Hotfix}
+	case check.Latest:
+		return check.LatestRelease()
+	}
+	return selfupdate.Release{Version: target}
 }
 
 // localUpdateApply installs updateTarget's release over this CLI. This
@@ -218,7 +231,7 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	case check.Disabled:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
 			Message: "release checks are off: " + selfupdate.OptOutEnv + " is set in this process's environment"}
-	case g.serverFirst(r, info, target):
+	case g.serverFirst(r, info, targetRelease(check, info, target)):
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
 			Message: "update the server first: aether server update (the server runs " + info.ServerVersion + " and this installs " + target + ")"}
 	case target == "" && check.Latest == "":

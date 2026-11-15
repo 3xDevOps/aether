@@ -195,7 +195,9 @@ type ReleaseBuild struct {
 // Target is the newest release on Channel by its signed pointer, nil when
 // it could not be read, and TargetError then says why. Wait reports that
 // Running is above Target, so the server stays on its build until Channel
-// reaches it. Saved is false for a dry run.
+// reaches it. Saved is false for a dry run. Retired is the pending update
+// the change retires because the new channel does not take its release,
+// recorded as failed with the reason.
 type ServerReleaseChannelSetResult struct {
 	Channel     string        `json:"channel"`
 	Previous    string        `json:"previous"`
@@ -204,4 +206,5 @@ type ServerReleaseChannelSetResult struct {
 	Target      *ReleaseBuild `json:"target,omitempty"`
 	TargetError string        `json:"target_error,omitempty"`
 	Wait        bool          `json:"wait"`
+	Retired     string        `json:"retired,omitempty"`
 }

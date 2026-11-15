@@ -162,11 +162,14 @@ type Service struct {
 	// channel. Starting afresh would drop the channel marks, so every check
 	// fails with it and the file is not overwritten until it reads again.
 	// Guarded by run.
-	stateErr  error
-	checkRuns atomic.Uint64
-	kick      chan struct{}
-	stop      context.CancelFunc
-	loop      sync.WaitGroup
+	stateErr error
+	// stableMissing counts the checks in a row that found no stable.json
+	// while the server has not chosen a channel. Guarded by run.
+	stableMissing int
+	checkRuns     atomic.Uint64
+	kick          chan struct{}
+	stop          context.CancelFunc
+	loop          sync.WaitGroup
 }
 
 // New builds the service. It never fails on a deployment fact: self-update
@@ -390,8 +393,12 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 	if p.When == protocol.ServerUpdateIdle {
 		// Refused now rather than at the idle moment, when nobody is
 		// watching: the release must already be complete.
-		if _, err = preflight(ctx, s.plan(pending), tag, false); err != nil {
-			return protocol.ServerUpdateResult{}, nil, err
+		m, perr := preflight(ctx, s.plan(pending), tag, false)
+		if perr == nil {
+			perr = s.takenNow(ctx, m)
+		}
+		if perr != nil {
+			return protocol.ServerUpdateResult{}, nil, perr
 		}
 		// One pending update at a time: a second request replaces the
 		// first rather than queueing behind it.
@@ -443,31 +450,32 @@ func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.S
 
 // latestRecorded is latest for server.update. On a channel it waits for
 // any running check, bounded by ctx, and records a raised mark before it
-// answers.
-func (s *Service) latestRecorded(ctx context.Context) (selfupdate.Manifest, error) {
+// answers. It returns the channel it followed, "" on a fixed feed.
+func (s *Service) latestRecorded(ctx context.Context) (selfupdate.Manifest, string, error) {
 	if s.cfg.Releases != nil {
-		return s.cfg.Releases.Latest(ctx)
+		m, err := s.cfg.Releases.Latest(ctx)
+		return m, "", err
 	}
 	select {
 	case s.run <- struct{}{}:
 	case <-ctx.Done():
-		return selfupdate.Manifest{}, ctx.Err()
+		return selfupdate.Manifest{}, "", ctx.Err()
 	}
 	defer func() { <-s.run }()
 	s.reloadState()
-	m, marks, _, err := s.latest(ctx, s.check.Pointers)
+	m, marks, channel, err := s.latest(ctx, s.check.Pointers)
 	if err != nil || maps.Equal(marks, s.check.Pointers) {
-		return m, err
+		return m, channel, err
 	}
 	st := s.check
 	st.Pointers = marks
 	if err := s.persistCheck(st); err != nil {
-		return selfupdate.Manifest{}, err
+		return selfupdate.Manifest{}, channel, err
 	}
 	s.checkMu.Lock()
 	s.check = st
 	s.checkMu.Unlock()
-	return m, nil
+	return m, channel, nil
 }
 
 // resolveTag validates a client-supplied tag or asks the release feed for
@@ -482,14 +490,14 @@ func (s *Service) resolveTag(ctx context.Context, tag string) (string, error) {
 		}
 		return tag, nil
 	}
-	m, err := s.latestRecorded(ctx)
+	m, channel, err := s.latestRecorded(ctx)
 	if errors.Is(err, selfupdate.ErrNoRelease) {
 		return "", fmt.Errorf("%w: %w", ErrUpToDate, err)
 	}
 	if err != nil {
 		return "", err
 	}
-	if !Offers(selfupdate.Running(), m.Release()) {
+	if !Offers(channel, selfupdate.Running(), m.Release()) {
 		return "", fmt.Errorf("%w: aether-server %s is not older than the latest release %s", ErrUpToDate, version.Version, m.Version)
 	}
 	return m.Version, nil

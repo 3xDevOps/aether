@@ -1,11 +1,15 @@
 package serverupdate
 
 import (
+	"context"
 	"crypto/ed25519"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
@@ -13,7 +17,8 @@ import (
 )
 
 // A new server chooses its first channel from the pointers: stable only
-// for a stable.json signed by a release key, beta while there is none, and
+// for a stable.json signed by a release key, beta once two checks in a row
+// found none, and
 // no choice at all, following beta meanwhile, for one that does not verify.
 // A channel already chosen is never replaced.
 func TestNewServerChoosesItsChannelFromTheStablePointer(t *testing.T) {
@@ -52,6 +57,14 @@ func TestNewServerChoosesItsChannelFromTheStablePointer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if tc.key == nil {
+				// One 404 may be stable.json being replaced: the first check
+				// follows beta without choosing it.
+				svc.runCheck(t.Context())
+				if stored, _ := db.ReleaseChannel(t.Context()); stored != "" {
+					t.Fatalf("one 404 chose %q", stored)
+				}
+			}
 			if st := svc.runCheck(t.Context()); st.Channel != tc.want {
 				t.Fatalf("check followed %q (%+v), want %q", st.Channel, st, tc.want)
 			}
@@ -70,5 +83,94 @@ func TestNewServerChoosesItsChannelFromTheStablePointer(t *testing.T) {
 				t.Fatalf("status channel = %q pending %v, want %q pending %v", status.Channel, status.ChannelPending, tc.want, tc.pending)
 			}
 		})
+	}
+}
+
+// A channel change retires a pending update the new channel does not take,
+// a dry run names it, and a super admin's explicit update afterwards still
+// installs it now; one for an idle moment is refused. A pending update is
+// refused at the idle moment when its channel changed on the host
+// meanwhile.
+func TestChannelChangeRetiresAPendingUpdateItDoesNotTake(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.busy = domain.ServerBusy{Runs: 1}
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.14", When: protocol.ServerUpdateIdle}); err != nil {
+		t.Fatal(err)
+	}
+	dry, err := e.svc.SetChannel(t.Context(), "mem_a", protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelStable, DryRun: true})
+	if err != nil || dry.Retired != "v0.9.0-nightly.14" || dry.Saved {
+		t.Fatalf("dry run = %+v, %v; want it to name nightly.14", dry, err)
+	}
+	e.wantPending(t, "v0.9.0-nightly.14", "mem_a")
+	set, err := e.svc.SetChannel(t.Context(), "mem_a", protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelStable})
+	if err != nil || set.Retired != "v0.9.0-nightly.14" {
+		t.Fatalf("switch = %+v, %v", set, err)
+	}
+	e.wantPending(t, "", "")
+	e.busy, e.underSystemd = domain.ServerBusy{}, true
+	e.svc.Tick(t.Context())
+	if got := e.read(t, e.self); got != "the old binary" {
+		t.Fatal("a retired update was installed")
+	}
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.14", When: protocol.ServerUpdateIdle}); !errors.Is(err, ErrPreflight) {
+		t.Fatalf("idle update of a release stable does not take = %v, want refused", err)
+	}
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.14", When: protocol.ServerUpdateNow}); err != nil {
+		t.Fatalf("a super admin's explicit update after the switch: %v", err)
+	}
+
+	host := autoEnv(t, selfupdate.ChannelNightly)
+	host.busy = domain.ServerBusy{Runs: 1}
+	host.svc.checkAndSchedule(t.Context())
+	host.wantPending(t, "v0.9.0-nightly.13", ServerActor)
+	if err := host.db.SetReleaseChannel(t.Context(), selfupdate.ChannelStable); err != nil {
+		t.Fatal(err)
+	}
+	host.busy, host.underSystemd = domain.ServerBusy{}, true
+	host.svc.Tick(t.Context())
+	if got := host.read(t, host.self); got != "the old binary" {
+		t.Fatal("the server installed its own update after its channel moved to stable")
+	}
+	host.wantPending(t, "", "")
+}
+
+// A beta server running the stable label of its build keeps it: beta takes
+// stable, so beta.2 at the same build is no update.
+func TestAcceptedLabelIsNotRelabelled(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelBeta)
+	setRunning(t, "v0.9.0", 412, 0)
+	e.rel.SetBuild("v0.9.0", selfupdate.ChannelStable, 412, 0)
+	publishPointer(t, e.rel, "beta", pointer("beta", "v0.9.0-beta.2", 412), releasetest.Key)
+	e.svc.checkAndSchedule(t.Context())
+	e.wantPending(t, "", "")
+	st, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
+	if err != nil || st.UpdateAvailable || st.LatestVersion != "v0.9.0-beta.2" {
+		t.Fatalf("status = %+v, %v; want beta.2 found and not offered", st, err)
+	}
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateNow}); !errors.Is(err, ErrUpToDate) {
+		t.Fatalf("update with no version = %v, want up to date", err)
+	}
+}
+
+// A channel change whose request ends while a check holds the slot saves
+// the channel, reports the wait, and records no failed check.
+func TestChannelChangeDoesNotRecordACancelledCheck(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.svc.run <- struct{}{}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	set, err := e.svc.SetChannel(ctx, "mem_a", protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelBeta})
+	<-e.svc.run
+	if err != nil || !set.Saved || !strings.Contains(set.TargetError, context.DeadlineExceeded.Error()) {
+		t.Fatalf("switch = %+v, %v; want saved with the deadline", set, err)
+	}
+	if e.svc.check.Failures != 0 || e.svc.check.Error != "" {
+		t.Fatalf("check = %+v, want no failure recorded", e.svc.check)
+	}
+	e.svc.checkRuns.Store(0)
+	ctx2, cancel2 := context.WithCancel(t.Context())
+	cancel2()
+	if st := e.svc.runCheck(ctx2); st.Failures != 0 || st.Error != "" {
+		t.Fatalf("a cancelled check = %+v, want nothing recorded", st)
 	}
 }

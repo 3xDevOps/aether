@@ -91,10 +91,8 @@ func (s *Service) known(v string) selfupdate.Release {
 }
 
 // checkAndSchedule runs a release check and schedules what it found.
-func (s *Service) checkAndSchedule(ctx context.Context) checkState {
-	st := s.runCheck(ctx)
-	s.schedule(ctx, st)
-	return st
+func (s *Service) checkAndSchedule(ctx context.Context) {
+	s.schedule(ctx, s.runCheck(ctx))
 }
 
 // schedule records the newest release a check found as the pending update,
@@ -106,7 +104,7 @@ func (s *Service) checkAndSchedule(ctx context.Context) checkState {
 func (s *Service) schedule(ctx context.Context, st checkState) {
 	latest := st.latest()
 	if !selfApplies(st.Channel) || st.Error != "" || latest.Build == 0 ||
-		!Offers(selfupdate.Running(), latest) || st.Declined.refuses(latest) || s.incapableReason() != "" {
+		!Offers(st.Channel, selfupdate.Running(), latest) || st.Declined.refuses(latest) || s.incapableReason() != "" {
 		return
 	}
 	state, err := s.cfg.Store.GetServerUpdate(ctx)

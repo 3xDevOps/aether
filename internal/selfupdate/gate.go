@@ -59,3 +59,8 @@ func NotFound(err error) bool {
 	var status *statusError
 	return errors.As(err, &status) && status.code == http.StatusNotFound
 }
+
+// LatestRelease is c.Latest's place in the release order.
+func (c Check) LatestRelease() Release {
+	return Release{Version: c.Latest, Build: c.LatestBuild, Hotfix: c.LatestHotfix}
+}

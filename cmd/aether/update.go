@@ -74,7 +74,10 @@ func runUpdate(args []string) error {
 		return err
 	}
 	base := "https://github.com/" + selfupdate.Repo
-	var server linkedServer
+	var (
+		server linkedServer
+		latest selfupdate.Check
+	)
 	if !*force {
 		server = probeLinkedServer(ctx)
 	}
@@ -89,6 +92,7 @@ func runUpdate(args []string) error {
 		if err != nil {
 			return err
 		}
+		latest = got
 		if !got.UpdateAvailable {
 			printCheck(got)
 			return reportBinary()
@@ -99,7 +103,7 @@ func runUpdate(args []string) error {
 		return reportBinary()
 	}
 
-	if err := serverFirst(os.Stdout, *tag, server); err != nil {
+	if err := serverFirst(os.Stdout, targetRelease(*tag, latest, server), server); err != nil {
 		return err
 	}
 
@@ -297,20 +301,35 @@ func (s linkedServer) release() selfupdate.Release {
 	return selfupdate.Release{Version: s.version, Build: s.build, Hotfix: s.hotfix}
 }
 
+// targetRelease is tag with the build this client knows for it: the
+// linked server's when it is the server's release, the release check's
+// when it is the latest.
+func targetRelease(tag string, latest selfupdate.Check, server linkedServer) selfupdate.Release {
+	switch {
+	case server.reachable && tag == version.ReleaseCore(server.version):
+		r := server.release()
+		r.Version = tag
+		return r
+	case tag == latest.Latest:
+		return latest.LatestRelease()
+	}
+	return selfupdate.Release{Version: tag}
+}
+
 // serverFirst refuses to move this client past a linked server that its
 // admin can update: the server goes first, and only to a release every
 // client can install. A member who cannot update the server is told who
 // can and the install goes ahead, as it does when the server is
 // unreachable or already current.
-func serverFirst(w io.Writer, target string, server linkedServer) error {
-	if !server.reachable || !selfupdate.Ahead(selfupdate.Release{Version: target}, server.release()) {
+func serverFirst(w io.Writer, target selfupdate.Release, server linkedServer) error {
+	if !server.reachable || !selfupdate.Ahead(target, server.release()) {
 		return nil
 	}
 	running := printable(server.version)
 	switch {
-	case cli.ServerFirst(server.release(), selfupdate.Release{Version: target}, server.admin, server.capable):
+	case cli.ServerFirst(server.release(), target, server.admin, server.capable):
 		return fmt.Errorf("update the server first: aether server update (the server runs %s and this installs %s; --force skips this check)",
-			running, target)
+			running, target.Version)
 	case server.admin:
 		_, _ = fmt.Fprintf(w, "the server runs %s; update it first on the server host: %s\n", running, printable(strings.Join(server.manual, ", then ")))
 	default:

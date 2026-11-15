@@ -150,10 +150,20 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	if s.checkRuns.Load() != asked {
 		return s.check
 	}
+	return s.checkLocked(ctx)
+}
+
+// checkLocked is runCheck for a caller holding run. A check whose ctx
+// ended is not recorded: the request went away, the release host did not
+// fail.
+func (s *Service) checkLocked(ctx context.Context) checkState {
 	s.checkRuns.Add(1)
 	s.reloadState()
 	st := s.check
 	m, marks, channel, err := s.latest(ctx, st.Pointers)
+	if err != nil && ctx.Err() != nil {
+		return s.check
+	}
 	now := s.cfg.Now().UTC()
 	st.CheckedAt, st.Pointers = now, marks
 	if st.Channel != channel {

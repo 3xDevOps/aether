@@ -126,6 +126,9 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdatePreflight, pending.Version, "")
 	plan := s.plan(pending)
 	m, err := preflight(ctx, plan, pending.Version, allowDowngrade)
+	if err == nil && scheduled {
+		err = s.takenNow(ctx, m)
+	}
 	if err != nil {
 		return nil, s.failOrRetry(ctx, pending, scheduled, err)
 	}

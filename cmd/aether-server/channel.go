@@ -14,17 +14,22 @@ import (
 
 // followChannel finds the newest release on the server's release channel,
 // or on channel when it is set, through its signed pointer and the marks
-// the server keeps in check.json. Nothing is recorded: the server raises
+// the server keeps in check.json. It only reads: a channel the server has
+// not chosen yet is followed as beta, and the server chooses it and raises
 // its own marks at its next check.
 func followChannel(ctx context.Context, baseURL, stateDir, database, channel string) (string, selfupdate.Manifest, error) {
-	f, err := store.OpenChannelFile(database)
-	if err != nil {
-		return "", selfupdate.Manifest{}, err
-	}
-	defer f.Close() //nolint:errcheck // read-only here
 	if channel == "" {
-		if channel, err = serverupdate.ChooseChannel(ctx, baseURL, f); err != nil {
+		f, err := store.OpenChannelFile(database)
+		if err != nil {
 			return "", selfupdate.Manifest{}, err
+		}
+		channel, err = f.ReleaseChannel(ctx)
+		_ = f.Close()
+		if err != nil {
+			return "", selfupdate.Manifest{}, err
+		}
+		if channel == "" {
+			channel = selfupdate.ChannelBeta
 		}
 	}
 	marks, err := serverupdate.ReadMarks(stateDir)
@@ -36,8 +41,9 @@ func followChannel(ctx context.Context, baseURL, stateDir, database, channel str
 }
 
 // setChannel prints what moving the server to channel means, as the
-// dashboard's confirmation does, and with yes saves it. It installs
-// nothing: the server checks the new channel at its next release check.
+// dashboard's confirmation does, and with yes saves it under the update
+// lock. It installs nothing: the server checks the new channel at its
+// next release check.
 func setChannel(ctx context.Context, w io.Writer, baseURL, stateDir, database, channel string, yes bool) error {
 	switch channel {
 	case selfupdate.ChannelStable, selfupdate.ChannelBeta, selfupdate.ChannelNightly:
@@ -65,6 +71,11 @@ func setChannel(ctx context.Context, w io.Writer, baseURL, stateDir, database, c
 	if !yes {
 		return fmt.Errorf("nothing changed; run it again with --yes to switch to %s", channel)
 	}
+	unlock, err := serverupdate.Lock(stateDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if err := f.SetReleaseChannel(ctx, channel); err != nil {
 		return err
 	}

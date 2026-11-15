@@ -208,7 +208,7 @@ func updateTarget(ctx context.Context, w io.Writer, baseURL, stateDir, database,
 		return "", err
 	}
 	running := selfupdate.Running()
-	if !serverupdate.Offers(running, m.Release()) {
+	if !serverupdate.Offers(channel, running, m.Release()) {
 		if serverupdate.Waits(running, m.Release()) {
 			_, _ = fmt.Fprintf(w, "aether-server %s stays on its build until %s reaches it: %s is at %s\n",
 				buildLabel(running), channel, channel, buildLabel(m.Release()))

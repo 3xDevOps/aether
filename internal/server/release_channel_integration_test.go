@@ -44,7 +44,8 @@ func (r *running) setChannel(t *testing.T, p protocol.ServerReleaseChannelSetPar
 	return out
 }
 
-// A server on nightly build 412 moves to beta at build 380: it waits on its
+// A new server with no stable.json settles on beta after two checks. On
+// nightly build 412 it moves to beta at build 380: it waits on its
 // build and says so, installs nothing lower, and updates once beta's
 // pointer reaches build 412, the same code under the beta label, which it
 // then takes by itself. Only a super admin changes the channel, every
@@ -65,13 +66,22 @@ func TestIntegrationReleaseChannelWaitsForTheLowerChannel(t *testing.T) {
 	h := newUpdateHarness(t, release)
 	srv := h.start(t, ctx, "v0.9.0-nightly.12")
 
-	// A new server with no stable.json chooses beta at its first check.
+	// A new server with no stable.json follows beta from its first check
+	// and chooses it at the second that finds stable.json missing.
 	var st protocol.ServerUpdateStatusResult
 	for st = srv.status(t); st.CheckedAt == "" || st.Channel != selfupdate.ChannelBeta || st.LatestVersion == ""; st = srv.status(t) {
 		if ctx.Err() != nil {
-			t.Fatalf("the first check never chose a channel: %+v", st)
+			t.Fatalf("the first check never ran: %+v", st)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if !st.ChannelPending {
+		t.Fatalf("one 404 of stable.json chose the channel: %+v", st)
+	}
+	h.skew.Store(int64(time.Minute))
+	st = protocol.ServerUpdateStatusResult{}
+	if err := srv.ctrl.Call(protocol.MethodServerUpdateStatus, protocol.ServerUpdateStatusParams{Refresh: true}, &st); err != nil {
+		t.Fatal(err)
 	}
 	if st.ChannelPending || st.ServerBuild != 412 || st.LatestVersion != "v0.9.0-beta.1" || st.LatestBuild != 380 || !st.ChannelWait || st.UpdateAvailable {
 		t.Fatalf("first status = %+v, want beta chosen, waiting above beta.1 (380)", st)
@@ -140,7 +150,7 @@ func TestIntegrationReleaseChannelWaitsForTheLowerChannel(t *testing.T) {
 	// under the beta label, by itself at the first idle moment.
 	srv.setChannel(t, protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelBeta})
 	publishChannel(t, release, selfupdate.ChannelBeta, "v0.9.0-beta.2", 412)
-	h.skew.Store(int64(time.Minute))
+	h.skew.Store(int64(2 * time.Minute))
 	if err := srv.ctrl.Call(protocol.MethodServerUpdateStatus, protocol.ServerUpdateStatusParams{Refresh: true}, nil); err != nil {
 		t.Fatal(err)
 	}

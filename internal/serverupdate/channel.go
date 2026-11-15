@@ -7,20 +7,31 @@ import (
 	"log/slog"
 	"maps"
 
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // ErrBadChannel is returned for a release channel that is not one of the
 // three.
 var ErrBadChannel = errors.New(`channel must be "stable", "beta" or "nightly"`)
 
-// Offers reports whether a server on running takes target as its update:
-// a higher (build, hotfix), or the same code under another channel's
-// label, as when a server that left nightly reaches the channel it moved
-// to. It never offers a lower build.
-func Offers(running, target selfupdate.Release) bool {
-	return selfupdate.Newer(target, running) || selfupdate.SameCode(running, target) && running.Channel != target.Channel
+// Offers reports whether a server on channel running takes target as its
+// update: a higher (build, hotfix), or the same code under another label
+// when channel does not take the running one's, as when a server that left
+// nightly reaches the channel it moved to. A stable label on beta, say, is
+// kept. It never offers a lower build. On a fixed feed (channel "") any
+// other label is taken.
+func Offers(channel string, running, target selfupdate.Release) bool {
+	if selfupdate.Newer(target, running) {
+		return true
+	}
+	if !selfupdate.SameCode(running, target) || running.Channel == target.Channel {
+		return false
+	}
+	return channel == "" || selfupdate.Manifest{Version: running.Version, Channel: running.Channel}.AcceptedOn(channel) != nil
 }
 
 // Waits reports whether a server on running stays on its build because
@@ -40,39 +51,37 @@ func (s *Service) storedChannel(ctx context.Context) (string, bool, error) {
 	return selfupdate.ChannelBeta, false, nil
 }
 
-// ChannelStore holds the server's release channel: the store, or the
-// database file on the host.
-type ChannelStore interface {
-	ReleaseChannel(ctx context.Context) (string, error)
-	ChooseReleaseChannel(ctx context.Context, channel string) (string, error)
-}
+// stableMissingChecks is how many checks in a row must find no
+// stable.json before a new server settles on beta, so one 404 while the
+// asset is replaced does not pin it there.
+const stableMissingChecks = 2
 
-// ChooseChannel is the release channel a server with st follows, as the
-// repository at baseURL decides it for a server that has not chosen one:
-// stable once stable.json is published and verifies, beta while
-// stable.json is not published. Any other answer, such as no network or
-// a pointer that does not verify, leaves the choice to the next check
-// and follows beta meanwhile.
-func ChooseChannel(ctx context.Context, baseURL string, st ChannelStore) (string, error) {
-	channel, err := st.ReleaseChannel(ctx)
-	if err != nil || channel != "" {
+// chooseChannel is the channel a check follows. A server that has not
+// chosen one reads the pointers: stable once stable.json is published and
+// verifies, beta once stable.json has answered 404 at stableMissingChecks
+// checks in a row. Until then, and on any other answer, such as no
+// network or a pointer that does not verify, it follows beta and asks
+// again at the next check. The caller holds run.
+func (s *Service) chooseChannel(ctx context.Context) (string, error) {
+	channel, chosen, err := s.storedChannel(ctx)
+	if err != nil || chosen {
 		return channel, err
 	}
-	_, perr := selfupdate.FetchPointer(ctx, baseURL, selfupdate.ChannelStable)
+	_, perr := selfupdate.FetchPointer(ctx, s.cfg.Checker.BaseURL(), selfupdate.ChannelStable)
 	switch {
 	case perr == nil:
 		channel = selfupdate.ChannelStable
 	case selfupdate.NotFound(perr):
+		if s.stableMissing++; s.stableMissing < stableMissingChecks {
+			return selfupdate.ChannelBeta, nil
+		}
 		channel = selfupdate.ChannelBeta
 	default:
+		s.stableMissing = 0
 		slog.Warn("serverupdate: cannot choose a release channel yet; following beta until a check can", "error", perr)
 		return selfupdate.ChannelBeta, nil
 	}
-	return st.ChooseReleaseChannel(ctx, channel)
-}
-
-func (s *Service) chooseChannel(ctx context.Context) (string, error) {
-	return ChooseChannel(ctx, s.cfg.Checker.BaseURL(), s.cfg.Store)
+	return s.cfg.Store.ChooseReleaseChannel(ctx, channel)
 }
 
 // ReadMarks reads the channel pointers' high-water marks the server keeps
@@ -108,7 +117,7 @@ func (s *Service) describeChannel(ctx context.Context, out *protocol.ServerUpdat
 	out.LatestVersion, out.Latest, out.NotesURL = latest.Version, latest.Version, check.NotesURL
 	out.LatestChannel, out.LatestBuild, out.LatestHotfix = latest.Channel, latest.Build, latest.Hotfix
 	if latest.Version != "" {
-		out.UpdateAvailable = Offers(running, latest)
+		out.UpdateAvailable = Offers(check.Channel, running, latest)
 		out.ChannelWait = Waits(running, latest)
 	}
 	return nil
@@ -129,8 +138,10 @@ func (s *Service) checkSoon() {
 // release, the newest release on the channel asked for and whether the
 // server would wait for it, then, unless DryRun, saves the channel and
 // checks it at once. Saving never installs anything: a server that moves
-// to a channel below its build stays on it.
-func (s *Service) SetChannel(ctx context.Context, p protocol.ServerReleaseChannelSetParams) (protocol.ServerReleaseChannelSetResult, error) {
+// to a channel below its build stays on it, and a pending update the new
+// channel does not take is retired (Retired; a dry run names the one it
+// would retire).
+func (s *Service) SetChannel(ctx context.Context, actor domain.MemberID, p protocol.ServerReleaseChannelSetParams) (protocol.ServerReleaseChannelSetResult, error) {
 	switch p.Channel {
 	case selfupdate.ChannelStable, selfupdate.ChannelBeta, selfupdate.ChannelNightly:
 	default:
@@ -142,11 +153,23 @@ func (s *Service) SetChannel(ctx context.Context, p protocol.ServerReleaseChanne
 	}
 	running := selfupdate.Running()
 	out := protocol.ServerReleaseChannelSetResult{Channel: p.Channel, Previous: previous, Running: wireRelease(running)}
+	pending, reason, err := s.untaken(ctx, p.Channel)
+	if err != nil {
+		return protocol.ServerReleaseChannelSetResult{}, err
+	}
+	if pending != nil {
+		out.Retired = pending.Version
+	}
 	if !p.DryRun {
 		if err := s.cfg.Store.SetReleaseChannel(ctx, p.Channel); err != nil {
 			return protocol.ServerReleaseChannelSetResult{}, err
 		}
 		out.Saved = true
+		if pending != nil {
+			detail := fmt.Sprintf("the server moved to the %s channel, which does not take it: %s", p.Channel, reason)
+			s.record(ctx, pending.Version, store.ServerUpdateFailed, detail)
+			s.publish(ctx, actor, events.ServerUpdateCancelled, pending.Version, detail)
+		}
 	}
 	if !s.checks() {
 		out.TargetError = "this server does not check for releases (" + selfupdate.OptOutEnv + " is set, or it is a build from source)"
@@ -159,12 +182,7 @@ func (s *Service) SetChannel(ctx context.Context, p protocol.ServerReleaseChanne
 	if p.DryRun {
 		target, terr = s.peek(ctx, p.Channel)
 	} else {
-		st := s.checkAndSchedule(ctx)
-		s.checkSoon()
-		target = st.latest()
-		if st.Error != "" {
-			terr = errors.New(st.Error)
-		}
+		target, terr = s.checkNow(ctx)
 	}
 	switch {
 	case terr != nil:
@@ -175,6 +193,59 @@ func (s *Service) SetChannel(ctx context.Context, p protocol.ServerReleaseChanne
 		out.Wait = Waits(running, target)
 	}
 	return out, nil
+}
+
+// untaken is the pending update channel does not take, and why: its
+// signed manifest's channel is not one channel accepts, or the manifest
+// cannot be read to tell.
+func (s *Service) untaken(ctx context.Context, channel string) (*store.PendingServerUpdate, string, error) {
+	state, err := s.cfg.Store.GetServerUpdate(ctx)
+	if err != nil || state.Pending == nil {
+		return nil, "", err
+	}
+	m, err := feed(s.cfg.Releases, s.cfg.Checker.BaseURL()).Fetch(ctx, state.Pending.Version)
+	if err != nil {
+		return state.Pending, "its signed manifest cannot be read: " + err.Error(), nil
+	}
+	if err := m.AcceptedOn(channel); err != nil {
+		return state.Pending, err.Error(), nil
+	}
+	return nil, "", nil
+}
+
+// checkNow runs a check for a request, waiting for a running one no
+// longer than ctx, and schedules what it found.
+func (s *Service) checkNow(ctx context.Context) (selfupdate.Release, error) {
+	select {
+	case s.run <- struct{}{}:
+	case <-ctx.Done():
+		return selfupdate.Release{}, ctx.Err()
+	}
+	st := s.checkLocked(ctx)
+	<-s.run
+	s.schedule(ctx, st)
+	if st.Error != "" {
+		return selfupdate.Release{}, errors.New(st.Error)
+	}
+	return st.latest(), nil
+}
+
+// takenNow refuses m for an update applied at an idle moment when the
+// channel the server follows now does not accept m, as after a channel
+// change on the host. Only an update applied now installs such a
+// release.
+func (s *Service) takenNow(ctx context.Context, m selfupdate.Manifest) error {
+	if s.cfg.Releases != nil {
+		return nil
+	}
+	channel, _, err := s.storedChannel(ctx)
+	if err != nil {
+		return err
+	}
+	if err := m.AcceptedOn(channel); err != nil {
+		return fmt.Errorf("%w: %w; update with --when now to install it anyway", ErrPreflight, err)
+	}
+	return nil
 }
 
 // peek finds the newest release on channel against the marks recorded,

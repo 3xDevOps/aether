@@ -50,6 +50,10 @@ type Check struct {
 	Commit string `json:"commit"`
 	// Latest is the newest published release tag, empty when no check ran.
 	Latest string `json:"latest,omitempty"`
+	// LatestBuild and LatestHotfix are Latest's signed build numbers, 0
+	// for a release from before channels.
+	LatestBuild  int `json:"latest_build,omitempty"`
+	LatestHotfix int `json:"latest_hotfix,omitempty"`
 	// UpdateAvailable reports that Latest is newer than this build, by
 	// Newer.
 	UpdateAvailable bool `json:"update_available"`
@@ -304,7 +308,7 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 		m, err = c.latest(ctx)
 		switch {
 		case err == nil:
-			out.Latest = m.Version
+			out.Latest, out.LatestBuild, out.LatestHotfix = m.Version, m.Build, m.Hotfix
 			out.UpdateAvailable = Newer(m.Release(), Running())
 			out.ReleaseURL = c.baseURL + "/releases/tag/" + m.Version
 			if out.Packaged == "" {

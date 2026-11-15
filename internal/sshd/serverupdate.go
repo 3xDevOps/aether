@@ -30,7 +30,7 @@ type ServerUpdateService interface {
 	Update(ctx context.Context, actor domain.MemberID, p protocol.ServerUpdateParams) (protocol.ServerUpdateResult, func(), error)
 	// SetChannel saves the release channel, or with DryRun only reports
 	// what saving it would do.
-	SetChannel(ctx context.Context, p protocol.ServerReleaseChannelSetParams) (protocol.ServerReleaseChannelSetResult, error)
+	SetChannel(ctx context.Context, actor domain.MemberID, p protocol.ServerReleaseChannelSetParams) (protocol.ServerReleaseChannelSetResult, error)
 }
 
 func (s *Server) updates() (ServerUpdateService, *protocol.Error) {
@@ -105,7 +105,7 @@ func (s *Server) serverReleaseChannelSet(ctx context.Context, member domain.Memb
 	if perr != nil {
 		return nil, perr
 	}
-	out, err := svc.SetChannel(ctx, p)
+	out, err := svc.SetChannel(ctx, member, p)
 	if errors.Is(err, serverupdate.ErrBadChannel) {
 		return nil, invalidParams(err.Error())
 	}
