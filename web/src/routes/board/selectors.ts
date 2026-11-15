@@ -9,7 +9,7 @@ import type { Workspace } from '@/lib/types'
 import { useStore } from '@/store'
 import { useStateContext } from '@/store/hooks'
 import { isTerminal, type RunRecord } from '@/store/runs'
-import { listedRuns, runGroups, runRows, runTrees, type RunRow, type RunTree, type RunsInput } from '@/store/selectors'
+import { hiddenByMine, listedRuns, runGroups, runRows, runTrees, type RunRow, type RunTree, type RunsInput } from '@/store/selectors'
 
 export type BoardCard = RunTree
 
@@ -61,11 +61,7 @@ export function board(s: RunsInput): BoardData {
     archivedCards: runTrees(archivedRows(s)).sort(
       (a, b) => at(b.run.archived_at ?? '') - at(a.run.archived_at ?? ''),
     ),
-    hiddenByMine:
-      s.mineOnly &&
-      Object.values(s.ctx.runs).some(
-        (run) => (!s.workspace || run.workspace_id === s.workspace) && run.member_id !== s.ctx.viewerID,
-      ),
+    hiddenByMine: hiddenByMine(s),
   }
 }
 

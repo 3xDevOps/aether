@@ -368,7 +368,8 @@ top to bottom:
    list the selected workspace, and only the viewer's own sessions while **Mine**
    (`mineOnly`, persisted) in the Working header is pressed. When Mine is on and
    no Working sessions are visible, the same toggle stays at the top of the
-   region so it can be turned off. The region
+   region so it can be turned off. When Mine hides a teammate's session and
+   leaves the list empty, it reads "No sessions of yours." The region
    scrolls on its own, and while more rows sit below the fold its bottom edge
    fades out. The sidebar never collapses on its own at narrow widths; the
    splitter and `⌘B` stay the reader's call.
