@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { useRefuseStrayFileDrops } from '@/lib/file-drag'
+import { createPortal } from 'react-dom'
+import { useFileDrop, useRefuseStrayFileDrops } from '@/lib/file-drag'
 
 function Page() {
   useRefuseStrayFileDrops()
@@ -33,5 +34,26 @@ describe('useRefuseStrayFileDrops', () => {
     expect(drag('drop', ['Files']).defaultPrevented).toBe(false)
     expect(screen.queryByText('Page')).toBeNull()
     fireEvent.dragEnd(document.body)
+  })
+})
+
+describe('useFileDrop', () => {
+  function Target({ onFiles }: { onFiles: (files: File[]) => void }) {
+    const drop = useFileDrop({ onFiles, limit: 8 })
+    return (
+      <div data-testid="target" {...drop.handlers}>
+        {createPortal(<p>Dialog</p>, document.body)}
+      </div>
+    )
+  }
+  const files = { types: ['Files'], files: [new File(['x'], 'shot.png')], items: [{ kind: 'file' }] }
+
+  it('takes a drop on the target but not on a dialog it renders through a portal', () => {
+    const onFiles = vi.fn()
+    render(<Target onFiles={onFiles} />)
+    fireEvent.drop(screen.getByText('Dialog'), { dataTransfer: files })
+    expect(onFiles).not.toHaveBeenCalled()
+    fireEvent.drop(screen.getByTestId('target'), { dataTransfer: files })
+    expect(onFiles).toHaveBeenCalledWith(files.files)
   })
 })

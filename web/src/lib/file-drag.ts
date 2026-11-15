@@ -16,7 +16,8 @@ function hasFiles(transfer: DataTransfer | null): boolean {
  * never counts. Entering a child fires leave on its parent, so a depth counter
  * decides when the drag really left. Over `limit` files the cursor shows no
  * drop, and a drop adds nothing. Events stop here: React bubbles them through
- * portals, so a popover's zone must not also drive the composer around it.
+ * portals, so a popover's zone must not also drive the composer around it. A
+ * drag over a dialog or popover rendered outside the target is not the target's.
  */
 export function useFileDrop({ onFiles, limit }: { onFiles: (files: File[]) => void; limit: number }) {
   const [count, setCount] = useState<number | null>(null)
@@ -37,9 +38,10 @@ export function useFileDrop({ onFiles, limit }: { onFiles: (files: File[]) => vo
     }
   }, [dragging, end])
 
+  const ours = (event: React.DragEvent) => hasFiles(event.dataTransfer) && event.currentTarget.contains(event.target as Node)
   const handlers = {
     onDragEnter: (event: React.DragEvent) => {
-      if (!hasFiles(event.dataTransfer)) return
+      if (!ours(event)) return
       event.preventDefault()
       event.stopPropagation()
       depth.current += 1
@@ -47,19 +49,19 @@ export function useFileDrop({ onFiles, limit }: { onFiles: (files: File[]) => vo
       setCount(Array.from(event.dataTransfer.items).filter((item) => item.kind === 'file').length || 1)
     },
     onDragOver: (event: React.DragEvent) => {
-      if (!hasFiles(event.dataTransfer)) return
+      if (!ours(event)) return
       event.preventDefault()
       event.stopPropagation()
       event.dataTransfer.dropEffect = (count ?? 1) > limit ? 'none' : 'copy'
     },
     onDragLeave: (event: React.DragEvent) => {
-      if (!hasFiles(event.dataTransfer)) return
+      if (!ours(event)) return
       event.stopPropagation()
       depth.current = Math.max(0, depth.current - 1)
       if (depth.current === 0) setCount(null)
     },
     onDrop: (event: React.DragEvent) => {
-      if (!hasFiles(event.dataTransfer)) return
+      if (!ours(event)) return
       event.preventDefault()
       event.stopPropagation()
       end()

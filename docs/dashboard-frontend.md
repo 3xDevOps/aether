@@ -3525,12 +3525,15 @@ Dragging files over the Chat pane attaches them; the pane covers with a dashed
 veil reading "Drop to attach n files". The pane is the conversation and
 composer area, below the session header and beside neither the sidebar nor
 Details. The composer also keeps its own drop target. Both share the composer's
-current capacity and disabled state, ignore text and link drags, and take no
-pointer events. A refused drop shows the current limit or reason (the cursor
-then shows no drop). `useFileDrop` in
+current capacity and disabled state and ignore text and link drags; their veils
+take no pointer events, so the field keeps its caret. A refused drop reads "At
+most n files fit", "Uploading…", "At most 8 files" or "Files cannot be attached
+now" (the cursor then shows no drop). `useFileDrop` in
 `web/src/lib/file-drag.ts` counts the files in the drag (not the link or markup it carries) and the enter and leave
 events so a child never ends the drag early, and stops them so a drag over the
-popover's zone does not also drive the box around it. Folders are not walked:
+popover's zone does not also drive the box around it. A drag over a dialog or
+popover opened from the chat, such as the image viewer, is not a drop on the
+pane. Folders are not walked:
 a dropped folder fails as a file with the browser's own read error. The Session
 view and Home both call `useRefuseStrayFileDrops`, so a file dropped outside a
 target does nothing instead of replacing the dashboard with that file.
