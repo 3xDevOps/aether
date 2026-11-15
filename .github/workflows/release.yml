@@ -81,6 +81,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       sha: ${{ steps.authorize.outputs.sha }}
+      tools: ${{ steps.authorize.outputs.tools }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -99,6 +100,7 @@ jobs:
           test "$sha" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
           url=$(sh scripts/release-ci-check.sh "$GITHUB_REPOSITORY" "$sha")
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tools=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Release validation: $url (exact main commit \`$sha\`)" >> "$GITHUB_STEP_SUMMARY"
 
   # Every job in release-build.yml gets at most these permissions and
@@ -117,6 +119,7 @@ jobs:
     with:
       tag: ${{ github.ref_name }}
       commit: ${{ needs.release-policy.outputs.sha }}
+      tools-commit: ${{ needs.release-policy.outputs.tools }}
     secrets:
       AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
       ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}

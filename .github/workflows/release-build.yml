@@ -14,6 +14,10 @@ on:
         description: Full SHA of the commit to build
         type: string
         required: true
+      tools-commit:
+        description: Full SHA of the main commit whose scripts and tools sign and publish
+        type: string
+        required: true
       channel:
         description: nightly, beta or stable; empty for a release from before channels
         type: string
@@ -47,6 +51,7 @@ defaults:
 env:
   TAG: ${{ inputs.tag }}
   COMMIT: ${{ inputs.commit }}
+  TOOLS_COMMIT: ${{ inputs.tools-commit }}
 
 jobs:
   # Every other job needs this one, so no input reaches a build, a tag or
@@ -69,6 +74,7 @@ jobs:
           [[ $TAG =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]] ||
             fail "tag $TAG is not vX.Y.Z or vX.Y.Z-<prerelease>"
           [[ $COMMIT =~ ^[0-9a-f]{40}$ ]] || fail "commit $COMMIT is not a full lowercase SHA"
+          [[ $TOOLS_COMMIT =~ ^[0-9a-f]{40}$ ]] || fail "tools commit $TOOLS_COMMIT is not a full lowercase SHA"
           case $CHANNEL in '' | nightly | beta | stable) ;; *) fail "channel $CHANNEL is not nightly, beta or stable" ;; esac
           [[ $BUILD =~ ^(0|[1-9][0-9]*)$ ]] || fail "build $BUILD is not a non-negative integer"
           [[ $HOTFIX =~ ^(0|[1-9][0-9]*)$ ]] || fail "hotfix $HOTFIX is not a non-negative integer"
@@ -883,8 +889,9 @@ jobs:
           overwrite: true
           retention-days: 7
 
-  # The trusted signer. It checks out main and runs only main's scripts and
-  # tools; the artifacts are data, checked by name, size and the commit
+  # The trusted signer. It checks out tools-commit, which must be on main,
+  # and runs only its scripts and tools, so a re-run signs with the same
+  # tooling as the first attempt. The artifacts are data, checked by name, size and the commit
   # their Go binaries record before anything signs them. No producer may be
   # skipped or failed, and the release stays a draft until it is
   # downloaded back and matches the signed manifest, so installers never
@@ -897,9 +904,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Require the tools commit to be on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$TOOLS_COMMIT...main" --jq .status)
+          case $status in
+          ahead | identical) ;;
+          *)
+            echo "::error::tools commit $TOOLS_COMMIT is not on main (main is $status of it)"
+            exit 1
+            ;;
+          esac
+          echo "Signed and published with the tools of main commit \`$TOOLS_COMMIT\`" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: refs/heads/main
+          ref: ${{ inputs.tools-commit }}
           persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -988,7 +1008,7 @@ jobs:
             exit 1
           fi
       # After the downloads, so nothing they wrote can replace the tool.
-      - name: Build main's release-manifest
+      - name: Build the tools commit's release-manifest
         run: go build -o "$RUNNER_TEMP/release-manifest" ./internal/selfupdate/cmd/release-manifest
       # CHANNEL, BUILD and HOTFIX are unused until release-manifest takes
       # -channel, -build and -hotfix.
@@ -1014,6 +1034,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: sh scripts/publish-release.sh "$TAG" "$RUNNER_TEMP/dist"
 
+  # latest moves only after the release is published, to the index
   # edge-manifest already pushed, so a release that fails earlier leaves it
   # where it was and nothing is rebuilt. It moves only while this tag is
   # GitHub's Latest, checked when the job runs, so a re-run of an older

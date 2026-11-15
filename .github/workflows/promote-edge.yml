@@ -134,8 +134,8 @@ jobs:
       - name: Require the release run to have qualified the edge
         env:
           COMMIT: ${{ steps.manifest.outputs.commit }}
-        # Until release.yml has an edge-qualify job, the whole release run
-        # must have succeeded.
+        # A release run from before edge-qualify existed has no such job;
+        # then the whole release run must have succeeded.
         run: |
           run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?event=push&branch=$TAG&per_page=100" |
             jq -c --arg sha "$COMMIT" '[.workflow_runs[] | select(.head_sha == $sha)] | max_by(.run_number) // empty')
