@@ -63,6 +63,11 @@ func StaticHandler(fsys fs.FS) http.Handler {
 		}
 		h := w.Header()
 		h.Set("Content-Type", f.ctype)
+		// The dashboard authorizes by ambient position (loopback token or
+		// tailnet identity), so its same-origin check cannot stop clickjacking.
+		// Refuse framing by any other origin, as the edge pages already do.
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
 		if strings.HasPrefix(name, hashedAssets) {
 			h.Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
