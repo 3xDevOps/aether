@@ -3173,9 +3173,10 @@ so it is revealed from the right edge, where the control button sits. The
 acquisition, release and takeover animations drive `--control-reach` and
 `color` on the colored layer. Its opacity is a separate animation: 70%
 while the dots move or a hold is under way, then half once acquisition
-settles, breathing on an infinite 8-second loop. During a hold
-`--control-hold` moves a 4rem gradient mask that fades the teal out and a
-red copy in. In
+settles. Behind the terminal toolbar it then breathes on an infinite 8-second
+loop; on the multiplayer strip, whose dots answer the pointer, it holds still.
+During a hold `--control-hold` moves a 4rem gradient mask that fades the teal
+out and a red copy in. In
 Enhanced sessions its appearance follows the acknowledged ACP lease, not the
 unused agent terminal's history or connection state, and it shows on every
 view that shows the strip. Voluntary release retracts it; takeover
