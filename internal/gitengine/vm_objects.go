@@ -213,14 +213,15 @@ func (e *Engine) fetchVMObjects(ctx context.Context, run domain.RunID, store str
 
 // reserveVMReceive grants the bytes a receive into path may write, keeping the
 // disk's last maxVMPackBytes free and counting in-flight grants so concurrent
-// receives share the headroom. The caller releases the grant when done.
+// receives share the headroom. Free space is read under the lock, or a receive
+// released meanwhile would be missing from both. The caller releases the grant.
 func (e *Engine) reserveVMReceive(path string, want int64) (int64, error) {
+	e.vmReceiveMu.Lock()
+	defer e.vmReceiveMu.Unlock()
 	free, err := disk.Free(path)
 	if err != nil {
 		return 0, fmt.Errorf("%w: cannot inspect free disk", ErrSnapshotStorageLimit)
 	}
-	e.vmReceiveMu.Lock()
-	defer e.vmReceiveMu.Unlock()
 	avail := int64(free) - e.vmReceiveReserved
 	if avail <= 2*maxVMPackBytes {
 		return 0, fmt.Errorf("%w: the server has too little free disk", ErrSnapshotStorageLimit)
@@ -241,12 +242,12 @@ func (e *Engine) releaseVMReceive(grant int64) {
 // for a copy whose size is already bounded, such as the branch fetch into the
 // workspace repository after its objects passed the reserved store receive.
 func (e *Engine) checkVMReceiveSpace(path string) error {
+	e.vmReceiveMu.Lock()
+	defer e.vmReceiveMu.Unlock()
 	free, err := disk.Free(path)
 	if err != nil {
 		return fmt.Errorf("%w: cannot inspect free disk", ErrSnapshotStorageLimit)
 	}
-	e.vmReceiveMu.Lock()
-	defer e.vmReceiveMu.Unlock()
 	if int64(free)-e.vmReceiveReserved <= 2*maxVMPackBytes {
 		return fmt.Errorf("%w: the server has too little free disk", ErrSnapshotStorageLimit)
 	}
