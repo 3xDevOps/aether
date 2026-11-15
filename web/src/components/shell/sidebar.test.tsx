@@ -225,6 +225,46 @@ describe('run rows', () => {
     expect(shown('Failed', 'bump the linter')).toEqual({ unopened: false, muted: true })
   })
 
+  it('folds a session’s subsessions independently and keeps Needs you subsessions visible', () => {
+    useStore.setState((s) => ({
+      runs: {
+        ...s.runs,
+        run_parent: toRecord(run({ id: 'run_parent', task: 'coordinate' })),
+        run_child: toRecord(run({ id: 'run_child', task: 'finished check', status: 'completed', parent_run_id: 'run_parent' })),
+        run_waiting: toRecord(run({ id: 'run_waiting', task: 'question for you', status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which schema?', parent_run_id: 'run_parent' })),
+      },
+    }))
+    render(<AppShell />)
+
+    const disclosure = runList().getByRole('button', { name: 'Collapse 1 subsession' })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+    expect(disclosure.querySelector('svg')?.getAttribute('class')).toContain('rotate-90')
+    fireEvent.click(disclosure)
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+    expect(runList().queryByText('finished check')).toBeNull()
+    expect(runList().getByText('question for you')).toBeDefined()
+    fireEvent.click(runList().getByRole('button', { name: 'Expand 1 subsession' }))
+    expect(runList().getByText('finished check')).toBeDefined()
+  })
+
+  it('opens and turns the subsession arrow when the first child arrives', async () => {
+    useStore.setState((s) => ({ runs: { ...s.runs, run_parent: toRecord(run({ id: 'run_parent', task: 'coordinate' })) } }))
+    render(<AppShell />)
+    expect(runList().queryByRole('button', { name: /subsession/ })).toBeNull()
+
+    act(() => useStore.setState((s) => ({
+      runs: {
+        ...s.runs,
+        run_child: toRecord(run({ id: 'run_child', task: 'new check', status: 'completed', parent_run_id: 'run_parent' })),
+      },
+    })))
+
+    const disclosure = await runList().findByRole('button', { name: 'Collapse 1 subsession' })
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+    expect(disclosure.querySelector('svg')?.getAttribute('class')).toContain('rotate-90')
+    expect(runList().getByText('new check')).toBeDefined()
+  })
+
   describe('people', () => {
     const dan = { id: 'mem_dan', display_name: 'Dan', color: '#911eb4', role: 'viewer' as const }
     const on = (...members: { id: string }[]) => members.map((member) => ({

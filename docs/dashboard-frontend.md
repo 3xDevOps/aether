@@ -411,8 +411,11 @@ attached to it, the viewer included: the `watching` lists of
 right edge and the age and the glyph move left to make
 room; a session nobody is on reserves none. A root with subsessions shows a
 `Network` glyph and their count before the agent glyph, and its name adds
-"2 subsessions · 1 working"; every subsession lists under it. The first avatar sits whole at the
-edge and each one after shows from behind it, to its left. First is the
+"2 subsessions · 1 working"; every subsession lists under it. Its chevron
+folds the subsessions for this browser session only; they start open, and the
+first child to arrive opens with the chevron's turn animation. Folding keeps
+subsessions that need you visible. The first avatar sits whole at the edge and
+each one after shows from behind it, to its left. First is the
 session's controller. While nobody holds control it is the last controller, if
 they are still on the session. The rest follow by name. A row draws three
 avatars at most: a fourth person turns the stack into two avatars and `+2`.

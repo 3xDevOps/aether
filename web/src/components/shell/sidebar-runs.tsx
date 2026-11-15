@@ -200,20 +200,7 @@ function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; ex
       <ul id={listID} hidden={!expanded} className={cn(toggled && 'animate-fade-in motion-reduce:animate-none')}>
         {expanded && group.key === 'needs-you' && <MergesRow />}
         {expanded && group.key === 'needs-you' && <DevicesRow />}
-        {expanded && runs.map((tree) => (
-          <li key={tree.run.id}>
-            <RunRowItem tree={tree} />
-            {tree.children.length > 0 && (
-              <ul aria-label={`Sessions in ${runLabel(tree.run)}`}>
-                {tree.children.map((child) => (
-                  <li key={child.run.id} className={connectors}>
-                    <RunRowItem tree={{ ...child, children: [] }} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        ))}
+        {expanded && runs.map((tree) => <li key={tree.run.id}><RunFamily tree={tree} group={group.key} /></li>)}
         {expanded && extra > 0 && (
           <li>
             <Button variant="quiet" size="sm" className="ml-5.5 text-ui-sm" aria-expanded={all} onClick={() => setAll(!all)}>
@@ -223,6 +210,47 @@ function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; ex
         )}
       </ul>
     </div>
+  )
+}
+
+function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) {
+  const canFold = group === 'needs-you'
+    ? tree.children.some((child) => !child.needsYou)
+    : tree.children.length > 0
+  const [expanded, setExpanded] = useState(tree.children.length > 0)
+  const touched = useRef(false)
+  const hadChildren = useRef(tree.children.length > 0)
+
+  useEffect(() => {
+    const hasChildren = tree.children.length > 0
+    if (!hadChildren.current && hasChildren && !touched.current) setExpanded(true)
+    hadChildren.current = hasChildren
+  }, [tree.children.length])
+
+  const shown = expanded ? tree.children : tree.children.filter((child) => child.needsYou)
+  return (
+    <>
+      <RunRowItem
+        tree={tree}
+        subsessions={canFold ? {
+          count: tree.children.filter((child) => group !== 'needs-you' || !child.needsYou).length,
+          expanded,
+          onToggle: () => {
+            touched.current = true
+            setExpanded((open) => !open)
+          },
+        } : undefined}
+      />
+      {shown.length > 0 && (
+        <ul aria-label={`Sessions in ${runLabel(tree.run)}`}>
+          {shown.map((child) => (
+            <li key={child.run.id} className={connectors}>
+              <RunRowItem tree={{ ...child, children: [] }} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   )
 }
 
@@ -269,7 +297,7 @@ function MineToggle() {
   )
 }
 
-function RunRowItem({ tree }: { tree: RunTree }) {
+function RunRowItem({ tree, subsessions }: { tree: RunTree; subsessions?: { count: number; expanded: boolean; onToggle: () => void } }) {
   return (
     <RunRow
       runID={tree.run.id}
@@ -282,6 +310,7 @@ function RunRowItem({ tree }: { tree: RunTree }) {
       since={tree.since}
       workspaceName={tree.workspaceName}
       childRuns={tree.childRuns}
+      subsessions={subsessions}
     />
   )
 }
@@ -297,6 +326,7 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   since: string
   workspaceName?: string
   childRuns?: TreeSummary
+  subsessions?: { count: number; expanded: boolean; onToggle: () => void }
 }) {
   const run = useRun(runID)
   return run ? <RunRowButton run={run} {...shown} /> : null
@@ -304,7 +334,7 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
 
 const names = new Intl.ListFormat(undefined, { type: 'conjunction' })
 
-function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, workspaceName, childRuns }: {
+function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, workspaceName, childRuns, subsessions }: {
   run: RunRecord
   state: PresentationState
   waiting: boolean
@@ -315,6 +345,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
   since: string
   workspaceName?: string
   childRuns?: TreeSummary
+  subsessions?: { count: number; expanded: boolean; onToggle: () => void }
 }) {
   const navigate = useStore((s) => s.navigate)
   const self = useStore((s) => s.info?.member.id)
@@ -370,7 +401,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
         aria-current={selected ? 'page' : undefined}
         selected={selected}
         onClick={() => navigate('run', { runId: run.id })}
-        leading={
+        leading={subsessions ? undefined : (
           <>
             <StatusDot tone={toneOf({ state, wait })} />
             <span
@@ -380,7 +411,31 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
               className="-mx-1 h-1.75 w-1.5 shrink-0 bg-icon-faint [clip-path:polygon(0_0,100%_50%,0_100%)]"
             />
           </>
-        }
+        )}
+        leadingAction={subsessions && (
+          <span className="flex shrink-0 items-center gap-2 pl-2">
+            <StatusDot tone={toneOf({ state, wait })} />
+            <span
+              data-slot="owner-mark"
+              aria-hidden
+              style={{ backgroundColor: resolveMember({ members, mergedInto }, run.member_id).member?.color }}
+              className="-mx-1 h-1.75 w-1.5 shrink-0 bg-icon-faint [clip-path:polygon(0_0,100%_50%,0_100%)]"
+            />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              label={`${subsessions.expanded ? 'Collapse' : 'Expand'} ${subsessions.count} subsession${subsessions.count === 1 ? '' : 's'}`}
+              aria-expanded={subsessions.expanded}
+              onClick={(event) => {
+                event.stopPropagation()
+                subsessions.onToggle()
+              }}
+              className="size-4 coarse:size-11 -mr-2"
+            >
+              <ChevronRight className={cn(chevronTurn, subsessions.expanded && 'rotate-90')} />
+            </Button>
+          </span>
+        )}
         trailing={indicators}
         hoverAction={waiting && <AnswerButton run={run} />}
       >
