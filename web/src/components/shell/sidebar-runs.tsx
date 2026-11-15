@@ -23,7 +23,7 @@ import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { useDeviceNeeds, useRun, useRunPeople, useSidebarGroups, useStateContext } from '@/store/hooks'
 import { isTerminal, type RunRecord } from '@/store/runs'
-import { childRunsText, type RunTree, type SidebarGroup, type TreeSummary } from '@/store/selectors'
+import { childRunsText, hiddenByMine, type RunTree, type SidebarGroup, type TreeSummary } from '@/store/selectors'
 import type { Route } from '@/store/ui'
 import type { RunStatusCause, RunWait } from '@/lib/types'
 
@@ -80,6 +80,9 @@ function useRovingRows(region: React.RefObject<HTMLElement | null>) {
 export function SidebarRuns({ regroup }: { regroup?: (groups: SidebarGroup[]) => SidebarGroup[] } = {}) {
   const listed = useSidebarGroups()
   const groups = regroup ? regroup(listed) : listed
+  const mineOnly = useStore((s) => s.mineOnly)
+  const workspace = useStore((s) => s.activeWorkspace)
+  const ctx = useStateContext()
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => (s.hydrated ? null : s.hydrationError))
   const dead = useStore((s) => s.streamDead)
@@ -115,13 +118,20 @@ export function SidebarRuns({ regroup }: { regroup?: (groups: SidebarGroup[]) =>
       onKeyDown={roving.onKeyDown}
     >
       <RunDetailsGroup>
+        {hydrated && mineOnly && !groups.some((group) => group.key === 'working') && (
+          <div className="flex justify-end pt-2">
+            <div className="flex h-6 items-center coarse:h-11">
+              <MineToggle />
+            </div>
+          </div>
+        )}
         {groups.length === 0 ? (
           error !== null ? (
             <p className="px-2 py-1 text-ui-sm text-muted">{dead ? error : 'Cannot reach the server. Retrying.'}</p>
           ) : loading ? (
             <LoadingRuns />
           ) : hydrated && (
-            <p className="px-2 py-1 text-ui-sm text-muted">No sessions yet.</p>
+            <p className="px-2 py-1 text-ui-sm text-muted">{hiddenByMine({ workspace, mineOnly, ctx }) ? 'No sessions of yours.' : 'No sessions yet.'}</p>
           )
         ) : (
           groups.map((group) => {

@@ -21,6 +21,13 @@ export interface RunsInput {
   ctx: StateContext
 }
 
+/** Mine is on and hides at least one teammate's session in scope. */
+export function hiddenByMine(s: RunsInput): boolean {
+  return s.mineOnly && Object.values(s.ctx.runs).some(
+    (run) => (!s.workspace || run.workspace_id === s.workspace) && run.member_id !== s.ctx.viewerID,
+  )
+}
+
 export interface RunRow {
   run: RunRecord
   state: PresentationState
