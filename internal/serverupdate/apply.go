@@ -232,8 +232,15 @@ func ensureSettled(dir string) error {
 	if err != nil {
 		return err
 	}
-	if last != nil && last.Phase == recordVerifying {
+	switch {
+	case last != nil && last.Phase == recordVerifying:
 		return fmt.Errorf("%w: %s is still verifying its first start (%s); retry once it has started",
+			ErrBusy, last.ToVersion, recordPath(dir))
+	case last != nil && last.Phase == recordSwapping:
+		// A swap whose undo failed: its .prev files are the binaries to
+		// put back, which a new swap would overwrite. The next start of
+		// aether-server rolls it back.
+		return fmt.Errorf("%w: the update to %s was not undone (%s); restart aether-server, which puts the previous binaries back, then retry",
 			ErrBusy, last.ToVersion, recordPath(dir))
 	}
 	return nil
@@ -350,14 +357,15 @@ func (s *Service) setCommitted() {
 	s.committed = true
 }
 
-// committedTo is the update that can no longer be cancelled, "" when none.
-func (s *Service) committedTo() string {
+// refuseWhileCommitted refuses a cancel or a new pending update while an
+// update that can no longer be cancelled is applying.
+func (s *Service) refuseWhileCommitted() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.committed {
-		return ""
+		return nil
 	}
-	return s.target
+	return fmt.Errorf("%w: %s is applying now and can no longer be cancelled", ErrBusy, s.target)
 }
 
 // claim takes the one applying slot, so the RPC path and the idle poll can

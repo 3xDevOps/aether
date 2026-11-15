@@ -426,7 +426,10 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 		// One pending update at a time: a second request replaces the
 		// first rather than queueing behind it.
 		s.decideMu.Lock()
-		serr := s.cfg.Store.SetPendingServerUpdate(ctx, &pending)
+		serr := s.refuseWhileCommitted()
+		if serr == nil {
+			serr = s.cfg.Store.SetPendingServerUpdate(ctx, &pending)
+		}
 		s.decideMu.Unlock()
 		if serr != nil {
 			return protocol.ServerUpdateResult{}, nil, serr
@@ -481,8 +484,8 @@ func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.S
 	}
 	s.decideMu.Lock()
 	defer s.decideMu.Unlock()
-	if v := s.committedTo(); v != "" {
-		return protocol.ServerUpdateResult{}, fmt.Errorf("%w: %s is applying now and can no longer be cancelled", ErrBusy, v)
+	if err = s.refuseWhileCommitted(); err != nil {
+		return protocol.ServerUpdateResult{}, err
 	}
 	if state, err = s.cfg.Store.GetServerUpdate(ctx); err != nil {
 		return protocol.ServerUpdateResult{}, err

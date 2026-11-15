@@ -1,6 +1,7 @@
 package serverupdate
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -721,5 +722,86 @@ func TestCancelledUpdateIsNotRescheduledWhenBusy(t *testing.T) {
 		case <-time.After(200 * time.Millisecond):
 			return
 		}
+	}
+}
+
+// failingSchedule is a store whose SchedulePendingServerUpdate fails.
+type failingSchedule struct{ store.Store }
+
+func (failingSchedule) SchedulePendingServerUpdate(context.Context, store.PendingServerUpdate) (bool, error) {
+	return false, errors.New("disk I/O error")
+}
+
+// A release whose pending write keeps failing is declined after
+// maxRetries, and the decline does not deadlock on the decision lock the
+// write ran under.
+func TestFailingScheduleWriteDeclinesWithoutDeadlock(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	svc, err := New(Config{
+		StateDir: e.state, Database: filepath.Join(e.dir, "aether.db"), Store: failingSchedule{e.db}, Bus: e.bus,
+		Checker: selfupdate.NewChecker(e.release.URL, time.Hour), Executable: e.self, Host: e.svc.cfg.Host,
+		Busy: e.svc.cfg.Busy, Hold: e.svc.cfg.Hold, Now: e.svc.cfg.Now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		for range maxRetries {
+			svc.checkAndSchedule(t.Context())
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("scheduling deadlocked")
+	}
+	if state, err := e.db.GetServerUpdate(t.Context()); err != nil || state.Declined == nil || state.Declined.Build != 413 {
+		t.Fatalf("state = %+v, %v; want nightly.13 declined", state, err)
+	}
+	if _, _, err := svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel}); err != nil {
+		t.Fatalf("a cancel after the declines: %v", err)
+	}
+}
+
+// A swap left at swapping, whose undo failed, refuses a new update until
+// a restart has put the previous binaries back.
+func TestUnfinishedSwapRefusesANewUpdate(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	if err := saveRecord(e.state, &swapRecord{Phase: recordSwapping, FromVersion: "v0.9.0-nightly.12", ToVersion: "v0.9.0-nightly.13", Binaries: []string{e.self}, At: e.now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.14", When: protocol.ServerUpdateNow}); !errors.Is(err, ErrBusy) || !strings.Contains(err.Error(), "was not undone") {
+		t.Fatalf("update over an unfinished swap = %v, want refused", err)
+	}
+	if _, err := Stage(t.Context(), e.svc.plan(store.PendingServerUpdate{Version: "v0.9.0-nightly.14"}), "v0.9.0-nightly.14"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Stage over an unfinished swap = %v, want refused", err)
+	}
+}
+
+// While an update applied now is past cancelling, a new idle or now
+// update is refused with the same reason, so nothing is cleared silently.
+func TestCommittedUpdateRefusesANewOne(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.underSystemd = true
+	e.stalled, e.resume = make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.13", When: protocol.ServerUpdateNow})
+		done <- err
+	}()
+	<-e.stalled
+	for _, when := range []string{protocol.ServerUpdateIdle, protocol.ServerUpdateNow} {
+		if _, _, err := e.svc.Update(t.Context(), "mem_b", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.14", When: when}); !errors.Is(err, ErrBusy) {
+			t.Errorf("%s update during a committed apply = %v, want refused", when, err)
+		}
+	}
+	close(e.resume)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if p := e.pending(t); p != nil {
+		t.Fatalf("pending = %+v, want none after the applied update", p)
 	}
 }

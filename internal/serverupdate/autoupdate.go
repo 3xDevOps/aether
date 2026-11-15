@@ -149,13 +149,7 @@ func (s *Service) schedule(ctx context.Context) {
 		s.scheduled(ctx, latest, fmt.Errorf("not scheduling %s by itself: %w", latest.Version, err), errors.As(err, new(retryable)))
 		return
 	}
-	s.decideMu.Lock()
-	defer s.decideMu.Unlock()
-	if !s.takes(ctx, st, latest) {
-		s.scheduled(ctx, latest, nil, false)
-		return
-	}
-	scheduled, err := s.cfg.Store.SchedulePendingServerUpdate(ctx, pending)
+	scheduled, err := s.insert(ctx, st, latest, pending)
 	if err != nil {
 		slog.Warn("serverupdate: schedule the newest release", "version", latest.Version, "error", err)
 		s.scheduled(ctx, latest, fmt.Errorf("not scheduling %s by itself: %w", latest.Version, err), true)
@@ -166,6 +160,18 @@ func (s *Service) schedule(ctx context.Context) {
 		slog.Info("serverupdate: scheduled the newest release on the channel for the next idle moment", "version", latest.Version, "channel", st.Channel)
 		s.publish(ctx, ServerActor, events.ServerUpdateScheduled, latest.Version, "")
 	}
+}
+
+// insert decides again under decideMu and records pending when the server
+// still takes latest. The lock is released before the caller records the
+// outcome, which may decline the release under the same lock.
+func (s *Service) insert(ctx context.Context, st checkState, latest selfupdate.Release, pending store.PendingServerUpdate) (bool, error) {
+	s.decideMu.Lock()
+	defer s.decideMu.Unlock()
+	if !s.takes(ctx, st, latest) {
+		return false, nil
+	}
+	return s.cfg.Store.SchedulePendingServerUpdate(ctx, pending)
 }
 
 // scheduled records why the last self-schedule of latest failed, ""
