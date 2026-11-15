@@ -289,6 +289,19 @@ describe('the server update banner', () => {
     expect(await screen.findByText(/The update was cancelled\. The server may schedule it again by itself: store: database is locked/)).toBeTruthy()
   })
 
+  test('a cancel the server refuses shows its error as returned', async () => {
+    const refusal = 'server.update: v1.3.0 is applying now and can no longer be cancelled'
+    const client = seedServer({
+      status: serverUpdateStatus({ update_available: true, pending: { version: 'v1.3.0', requested_by: alice.id, requested_at: '2026-08-14T10:06:00Z' } }),
+    })
+    client.serverUpdate = vi.fn(async () => {
+      throw new Error(refusal)
+    })
+    render(<UpdateHost client={client} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText(refusal)).toBeTruthy()
+  })
+
   test('Update when idle schedules, and the banner then offers Cancel', async () => {
     const client = seedServer()
     render(<UpdateHost client={client} />)
