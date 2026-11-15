@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -45,6 +46,8 @@ func PointerName(channel string) string { return channel + ".json" }
 func PointerURL(baseURL, channel string) string {
 	return baseURL + "/releases/download/" + channelsTag + "/" + PointerName(channel)
 }
+
+var pointerKeys = jsonKeys(reflect.TypeFor[Pointer]())
 
 var commitHex = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
@@ -87,6 +90,9 @@ func VerifyPointer(data, sig []byte, channel string) (Pointer, error) {
 	release, nightly := signedBy(releaseKeys, data, raw), signedBy(nightlyKeys, data, raw)
 	if !release && !nightly {
 		return Pointer{}, fmt.Errorf("channel pointer %s is not signed by a trusted release key; do not follow it", name)
+	}
+	if err := canonicalKeys(data, pointerKeys); err != nil {
+		return Pointer{}, fmt.Errorf("parse channel pointer %s: %w; do not follow it", name, err)
 	}
 	var p Pointer
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -143,6 +149,12 @@ type Marks map[string]Mark
 // Mark is where p places its channel.
 func (p Pointer) Mark() Mark { return Mark{Build: p.Build, Hotfix: p.Hotfix} }
 
+// replayed refuses a pointer for channel that names got, below the mark
+// seen.
+func replayed(channel string, got, seen Mark) error {
+	return fmt.Errorf("channel pointer %s names %s, below %s seen before", PointerName(channel), got, seen)
+}
+
 func (m Mark) below(o Mark) bool {
 	return m.Build < o.Build || m.Build == o.Build && m.Hotfix < o.Hotfix
 }
@@ -183,7 +195,7 @@ func FollowChannel(ctx context.Context, baseURL, channel string, marks Marks) (M
 	}
 	name := PointerName(channel)
 	if verified && p.Mark().below(seen) {
-		return Manifest{}, marks, fmt.Errorf("channel pointer %s names %s, below %s seen before", name, p.Mark(), seen)
+		return Manifest{}, marks, replayed(channel, p.Mark(), seen)
 	}
 	m, err := fetchManifest(ctx, baseURL, p.Tag)
 	if err != nil {
@@ -194,6 +206,8 @@ func FollowChannel(ctx context.Context, baseURL, channel string, marks Marks) (M
 		return Manifest{}, marks, fmt.Errorf("channel pointer %s names %s at commit %s, but its manifest says commit %s; do not install it", name, p.Tag, p.Commit, m.Commit)
 	case m.Build != p.Build || m.Hotfix != p.Hotfix:
 		return Manifest{}, marks, fmt.Errorf("channel pointer %s names %s at %s, but its manifest says %s; do not install it", name, p.Tag, p.Mark(), Mark{Build: m.Build, Hotfix: m.Hotfix})
+	case m.StoreSchema != p.StoreSchema:
+		return Manifest{}, marks, fmt.Errorf("channel pointer %s names %s at store schema %d, but its manifest says store schema %d; do not install it", name, p.Tag, p.StoreSchema, m.StoreSchema)
 	case p.nightlySigned && m.Channel != ChannelNightly:
 		return Manifest{}, marks, fmt.Errorf("channel pointer %s is signed by a nightly key but names %s, a %s release; do not install it", name, p.Tag, m.Channel)
 	}

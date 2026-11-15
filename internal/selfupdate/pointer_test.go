@@ -68,3 +68,47 @@ func TestChannelCheckerKeepsItsMarkInTheStateFile(t *testing.T) {
 		t.Fatalf("asked /releases/latest %d times, want only the check before the pointer", n)
 	}
 }
+
+// A state file that cannot be parsed fails the check and is left as it is.
+func TestChannelCheckerFailsClosedOnACorruptStateFile(t *testing.T) {
+	setVersion(t, "v0.9.0-beta.1", "abc1234")
+	f, srv := newFakeRelease(t, "v0.9.0-beta.1", testAssets)
+	f.builds = map[string]Release{"v0.9.0-beta.2": {Channel: ChannelBeta, Build: 412}}
+	f.setPointer(t, "v0.9.0-beta.2", 412)
+	state := filepath.Join(t.TempDir(), "update.json")
+	corrupt := []byte(`{"pointers": {"beta": {"build": 4`)
+	if err := os.WriteFile(state, corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := NewChannelChecker(srv.URL, time.Hour, ChannelBeta, state).CheckFresh(t.Context())
+	if err == nil || !strings.Contains(err.Error(), state) || got.Latest != "" {
+		t.Fatalf("check = %+v, %v; want it failed naming %s", got, err, state)
+	}
+	if data, _ := os.ReadFile(state); string(data) != string(corrupt) {
+		t.Fatalf("state file rewritten to %s", data)
+	}
+	if f.hits.Load() != 0 {
+		t.Fatal("asked /releases/latest with a corrupt state file")
+	}
+}
+
+// Another process may accept a higher pointer between this check's read
+// and its save; the save then refuses to lower the mark.
+func TestChannelCheckerNeverLowersAMarkAnotherProcessRaised(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "update.json")
+	raised := []byte(`{"pointers": {"beta": {"build": 500, "hotfix": 0}, "stable": {"build": 400, "hotfix": 0}}}`)
+	if err := os.WriteFile(state, raised, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := NewChannelChecker("http://unused", time.Hour, ChannelBeta, state)
+	if err := c.raiseMark(Mark{Build: 412}); err == nil || err.Error() != "channel pointer beta.json names build 412, below build 500 seen before" {
+		t.Fatalf("raise below another process's mark = %v", err)
+	}
+	if err := c.raiseMark(Mark{Build: 501}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := loadChannelState(state)
+	if err != nil || st.Pointers[ChannelBeta] != (Mark{Build: 501}) || st.Pointers[ChannelStable] != (Mark{Build: 400}) {
+		t.Fatalf("state = %+v, %v; want beta raised to 501 and stable kept", st, err)
+	}
+}

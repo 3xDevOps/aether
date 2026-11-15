@@ -1,7 +1,9 @@
 package serverupdate
 
 import (
+	"bytes"
 	"crypto/ed25519"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
+	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
@@ -36,7 +39,7 @@ func pointer(channel, tag string, build int) selfupdate.Pointer {
 		Tag:         tag,
 		Commit:      pointerCommit,
 		Build:       build,
-		StoreSchema: 1,
+		StoreSchema: store.SchemaVersion(),
 		PublishedAt: time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC),
 	}
 }
@@ -45,6 +48,15 @@ func publishPointer(t *testing.T, rel *releasetest.Release, at string, p selfupd
 	t.Helper()
 	data, sig := releasetest.SignPointer(t, p, key)
 	rel.SetPointer(at, data, sig)
+}
+
+// publishEdited publishes p as beta.json with insert added after its
+// schema, signed by the release key.
+func publishEdited(t *testing.T, rel *releasetest.Release, p selfupdate.Pointer, insert string) {
+	t.Helper()
+	data, _ := releasetest.SignPointer(t, p, releasetest.Key)
+	data = bytes.Replace(data, []byte(`"schema": 1,`), []byte(`"schema": 1, `+insert), 1)
+	rel.SetPointer("beta", data, []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(releasetest.Key, data))))
 }
 
 // channelService is a server following channel against baseURL, keeping
@@ -182,6 +194,17 @@ func TestChannelPointerIsVerified(t *testing.T) {
 			p.Schema = 2
 			publishPointer(t, rel, "beta", p, releasetest.Key)
 		}, "has schema 2; this aether reads schema 1"},
+		{"store schema mismatch", "beta", func(t *testing.T, rel *releasetest.Release) {
+			p := pointer("beta", "v0.9.0-beta.2", 412)
+			p.StoreSchema++
+			publishPointer(t, rel, "beta", p, releasetest.Key)
+		}, "but its manifest says store schema"},
+		{"repeated key", "beta", func(t *testing.T, rel *releasetest.Release) {
+			publishEdited(t, rel, pointer("beta", "v0.9.0-beta.2", 412), `"build": 999999,`)
+		}, `key "build" repeats`},
+		{"miscased key", "beta", func(t *testing.T, rel *releasetest.Release) {
+			publishEdited(t, rel, pointer("beta", "v0.9.0-beta.2", 412), `"Build": 5,`)
+		}, `key "Build" is not spelled "build"`},
 		{"malformed commit", "beta", func(t *testing.T, rel *releasetest.Release) {
 			p := pointer("beta", "v0.9.0-beta.2", 412)
 			p.Commit = "abc1234"
@@ -214,5 +237,72 @@ func TestChannelPointerIsVerified(t *testing.T) {
 				t.Fatalf("check = %+v, want refused with %q", st, tc.want)
 			}
 		})
+	}
+}
+
+// A pointer at the same build with a lower hotfix is a replay too.
+func TestChannelPointerBelowAHotfixIsRefused(t *testing.T) {
+	rel := channelHost(t)
+	rel.SetBuild("v0.9.1", selfupdate.ChannelStable, 412, 1)
+	hotfix := pointer("stable", "v0.9.1", 412)
+	hotfix.Hotfix = 1
+	publishPointer(t, rel, "stable", hotfix, releasetest.Key)
+	svc := channelService(t, t.TempDir(), rel.URL, "stable")
+	if st := svc.runCheck(t.Context()); st.Error != "" || st.LatestVersion != "v0.9.1" {
+		t.Fatalf("check = %+v, want v0.9.1", st)
+	}
+	publishPointer(t, rel, "stable", pointer("stable", "v0.9.0", 412), releasetest.Key)
+	const want = "channel pointer stable.json names build 412, below build 412 hotfix 1 seen before"
+	if st := svc.runCheck(t.Context()); st.Error != want {
+		t.Fatalf("check = %+v, want %q", st, want)
+	}
+}
+
+// A check.json that cannot be parsed fails every channel check and is
+// never overwritten, so its marks are not silently dropped.
+func TestChannelCheckFailsClosedOnAnUnreadableState(t *testing.T) {
+	rel := channelHost(t)
+	dir := t.TempDir()
+	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.2", 412), releasetest.Key)
+	if st := channelService(t, dir, rel.URL, "beta").runCheck(t.Context()); st.Error != "" {
+		t.Fatalf("check = %+v", st)
+	}
+	path := filepath.Join(dir, "check.json")
+	good, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt := good[:len(good)/2]
+	if err := os.WriteFile(path, corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.1", 380), releasetest.Key)
+	svc := channelService(t, dir, rel.URL, "beta")
+	st := svc.runCheck(t.Context())
+	if !strings.Contains(st.Error, path) || !strings.Contains(st.Error, "fix or remove it") || st.LatestVersion != "" {
+		t.Fatalf("check = %+v, want it failed naming %s", st, path)
+	}
+	if _, err := svc.resolveTag(t.Context(), ""); err == nil || !strings.Contains(err.Error(), path) {
+		t.Fatalf("update with no version = %v, want it failed naming %s", err, path)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, corrupt) {
+		t.Fatalf("check.json was rewritten to %s", got)
+	}
+	if n := rel.Requests("/releases/download/channels/beta.json"); n != 1 {
+		t.Fatalf("fetched beta.json %d times, want only before the corruption", n)
+	}
+}
+
+// server.update with no version on a fresh server records the pointer it
+// verified, so the Latest fallback closes there too.
+func TestUpdateWithNoVersionRecordsTheChannelMark(t *testing.T) {
+	rel := channelHost(t)
+	dir := t.TempDir()
+	publishPointer(t, rel, "beta", pointer("beta", "v0.9.0-beta.2", 412), releasetest.Key)
+	_, _ = channelService(t, dir, rel.URL, "beta").resolveTag(t.Context(), "")
+	rel.SetPointer("beta", nil, nil)
+	st := channelService(t, dir, rel.URL, "beta").runCheck(t.Context())
+	if !strings.Contains(st.Error, "404") || rel.Requests("/releases/latest") != 0 {
+		t.Fatalf("check after the pointer went = %+v with %d Latest requests, want a failed check and none", st, rel.Requests("/releases/latest"))
 	}
 }

@@ -163,12 +163,20 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	s.checkMu.Lock()
 	s.check = st
 	s.checkMu.Unlock()
+	s.persistCheck(st)
+	return st
+}
+
+// persistCheck saves st to check.json, unless the file could not be read.
+func (s *Service) persistCheck(st checkState) {
+	if s.stateErr != nil {
+		return
+	}
 	if data, merr := json.Marshal(st); merr == nil {
-		if werr := writeFileAtomic(checkPath(s.cfg.StateDir), data); werr != nil {
+		if werr := selfupdate.WriteFileAtomic(checkPath(s.cfg.StateDir), data); werr != nil {
 			slog.Warn("serverupdate: persist release check", "error", werr)
 		}
 	}
-	return st
 }
 
 // latest asks for the newest release: through Config.Channel's signed
@@ -178,6 +186,9 @@ func (s *Service) latest(ctx context.Context, marks selfupdate.Marks) (selfupdat
 	if s.cfg.Channel == "" {
 		m, err := s.releases().Latest(ctx)
 		return m, marks, err
+	}
+	if s.stateErr != nil {
+		return selfupdate.Manifest{}, marks, s.stateErr
 	}
 	return selfupdate.FollowChannel(ctx, s.cfg.Checker.BaseURL(), s.cfg.Channel, marks)
 }

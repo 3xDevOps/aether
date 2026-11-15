@@ -279,7 +279,7 @@ func VerifyManifest(data, sig []byte, tag string) (Manifest, error) {
 	if !release && !nightly {
 		return Manifest{}, fmt.Errorf("%s for %s is not signed by a trusted release key; do not install it", ManifestName, tag)
 	}
-	if err := canonicalKeys(data); err != nil {
+	if err := canonicalKeys(data, manifestKeys); err != nil {
 		return Manifest{}, fmt.Errorf("parse %s for %s: %w; do not install it", ManifestName, tag, err)
 	}
 	var m Manifest
@@ -311,8 +311,10 @@ func VerifyManifest(data, sig []byte, tag string) (Manifest, error) {
 
 // manifestKeys are the top-level keys a manifest may carry, exactly as
 // spelled.
-var manifestKeys = func() []string {
-	t := reflect.TypeFor[Manifest]()
+var manifestKeys = jsonKeys(reflect.TypeFor[Manifest]())
+
+// jsonKeys are the JSON names of t's fields.
+func jsonKeys(t reflect.Type) []string {
 	var keys []string
 	for i := range t.NumField() {
 		if name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ","); name != "" && name != "-" {
@@ -320,14 +322,14 @@ var manifestKeys = func() []string {
 		}
 	}
 	return keys
-}()
+}
 
-// canonicalKeys refuses a top-level key that repeats, or that spells a
-// manifest field in another case. encoding/json takes the last of
+// canonicalKeys refuses a top-level key that repeats, or that spells one
+// of keys in another case. encoding/json takes the last of
 // repeated keys and matches keys case-insensitively, where jq and other
 // tooling would read another value from the same signed bytes. Unknown
 // keys pass, so a later release may add fields.
-func canonicalKeys(data []byte) error {
+func canonicalKeys(data []byte, keys []string) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
 		return errors.New("not a JSON object")
@@ -343,7 +345,7 @@ func canonicalKeys(data []byte) error {
 			return fmt.Errorf("key %q repeats", key)
 		}
 		seen[key] = true
-		for _, want := range manifestKeys {
+		for _, want := range keys {
 			if key != want && strings.EqualFold(key, want) {
 				return fmt.Errorf("key %q is not spelled %q", key, want)
 			}

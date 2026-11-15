@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -155,9 +156,13 @@ type Service struct {
 	retries  int
 	retrying store.PendingServerUpdate
 
-	runMu     sync.Mutex
-	checkMu   sync.Mutex
-	check     checkState
+	runMu   sync.Mutex
+	checkMu sync.Mutex
+	check   checkState
+	// stateErr is why check.json could not be read on a server following a
+	// channel. Starting afresh would drop the channel marks, so every check
+	// fails with it and the file is never overwritten.
+	stateErr  error
 	checkRuns atomic.Uint64
 	kick      chan struct{}
 	stop      context.CancelFunc
@@ -188,7 +193,10 @@ func New(cfg Config) (*Service, error) {
 	}
 	s := &Service{cfg: cfg, kick: make(chan struct{}, 1)}
 	check, cerr := loadCheck(cfg.StateDir)
-	if cerr != nil {
+	switch {
+	case cerr != nil && cfg.Channel != "":
+		s.stateErr = fmt.Errorf("%w; fix or remove it to resume release checks", cerr)
+	case cerr != nil:
 		slog.Warn("serverupdate: release check state unreadable; checking afresh", "error", cerr)
 	}
 	s.check = check
@@ -430,10 +438,16 @@ func (s *Service) resolveTag(ctx context.Context, tag string) (string, error) {
 		}
 		return tag, nil
 	}
-	s.checkMu.Lock()
-	marks := s.check.Pointers
-	s.checkMu.Unlock()
-	m, _, err := s.latest(ctx, marks)
+	s.runMu.Lock()
+	m, marks, err := s.latest(ctx, s.check.Pointers)
+	if err == nil && !maps.Equal(marks, s.check.Pointers) {
+		s.checkMu.Lock()
+		s.check.Pointers = marks
+		st := s.check
+		s.checkMu.Unlock()
+		s.persistCheck(st)
+	}
+	s.runMu.Unlock()
 	if errors.Is(err, selfupdate.ErrNoRelease) {
 		return "", fmt.Errorf("%w: %w", ErrUpToDate, err)
 	}

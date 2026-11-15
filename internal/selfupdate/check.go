@@ -211,8 +211,6 @@ type Checker struct {
 	// statePath. Empty asks /releases/latest.
 	channel   string
 	statePath string
-	// markMu serializes the channel checks that read and raise the marks.
-	markMu sync.Mutex
 	// now reads the clock. Tests drive it so cache expiry does not depend
 	// on real time passing: Windows' timer resolution is coarse enough
 	// that two calls in a row can read the same instant, which would leave
@@ -325,8 +323,6 @@ func (c *Checker) latest(ctx context.Context) (Manifest, error) {
 	if c.channel == "" {
 		return LatestManifestFrom(ctx, c.baseURL)
 	}
-	c.markMu.Lock()
-	defer c.markMu.Unlock()
 	st, err := loadChannelState(c.statePath)
 	if err != nil {
 		return Manifest{}, err
@@ -335,8 +331,46 @@ func (c *Checker) latest(ctx context.Context) (Manifest, error) {
 	if err != nil || maps.Equal(marks, st.Pointers) {
 		return m, err
 	}
-	st.Pointers = marks
-	return m, saveChannelState(c.statePath, st)
+	return m, c.raiseMark(marks[c.channel])
+}
+
+// raiseMark records got as the channel's mark. Other processes share the
+// file, so it re-reads it under a lock and refuses got when one of them
+// has meanwhile accepted a higher pointer.
+func (c *Checker) raiseMark(got Mark) error {
+	if err := os.MkdirAll(filepath.Dir(c.statePath), 0o700); err != nil {
+		return fmt.Errorf("save update state: %w", err)
+	}
+	f, err := os.OpenFile(c.statePath+".lock", os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return fmt.Errorf("lock update state: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	unlock, err := lockFile(f)
+	if err != nil {
+		return fmt.Errorf("lock update state %s: %w", f.Name(), err)
+	}
+	defer unlock()
+	st, err := loadChannelState(c.statePath)
+	if err != nil {
+		return err
+	}
+	if seen, ok := st.Pointers[c.channel]; ok && got.below(seen) {
+		return replayed(c.channel, got, seen)
+	}
+	st.Pointers = maps.Clone(st.Pointers)
+	if st.Pointers == nil {
+		st.Pointers = Marks{}
+	}
+	st.Pointers[c.channel] = got
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := WriteFileAtomic(c.statePath, append(data, '\n')); err != nil {
+		return fmt.Errorf("save update state: %w", err)
+	}
+	return nil
 }
 
 // channelState is the client's update state file.
@@ -344,46 +378,22 @@ type channelState struct {
 	Pointers Marks `json:"pointers,omitempty"`
 }
 
+// loadChannelState reads the state file. One that exists but cannot be
+// read fails the check and is never overwritten: starting afresh would
+// drop the marks.
 func loadChannelState(path string) (channelState, error) {
 	var st channelState
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return st, nil
 	}
-	if err != nil {
-		return st, fmt.Errorf("read update state %s: %w", path, err)
+	if err == nil {
+		err = json.Unmarshal(data, &st)
 	}
-	if err := json.Unmarshal(data, &st); err != nil {
-		return st, fmt.Errorf("parse update state %s: %w", path, err)
+	if err != nil {
+		return channelState{}, fmt.Errorf("read update state %s: %w; fix or remove it to resume release checks", path, err)
 	}
 	return st, nil
-}
-
-func saveChannelState(path string, st channelState) error {
-	data, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	if err = os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("save update state: %w", err)
-	}
-	tmp, err := os.CreateTemp(dir, ".update-*.json")
-	if err != nil {
-		return fmt.Errorf("save update state: %w", err)
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	_, err = tmp.Write(append(data, '\n'))
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Rename(tmp.Name(), path)
-	}
-	if err != nil {
-		return fmt.Errorf("save update state %s: %w", path, err)
-	}
-	return nil
 }
 
 // nextID takes the number this lookup is ordered by.
