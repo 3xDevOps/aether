@@ -485,6 +485,20 @@ describe('run rows', () => {
     expect(useStore.getState().mineOnly).toBe(true)
     expect(runList().getByText('answer the schema question')).toBeDefined()
   })
+
+  it('keeps Mine available when the filter removes the Working group', () => {
+    useStore.setState({
+      mineOnly: true,
+      runs: { teammate: toRecord(run({ id: 'teammate', task: 'teammate session', member_id: bob.id, status: 'merged' })) },
+    })
+    render(<AppShell />)
+
+    expect(runList().queryByRole('heading', { name: /Working/ })).toBeNull()
+    fireEvent.click(runList().getByRole('button', { name: 'Mine' }))
+
+    expect(useStore.getState().mineOnly).toBe(false)
+    expect(runList().getByText('teammate session')).toBeDefined()
+  })
 })
 
 describe('navigation rows', () => {

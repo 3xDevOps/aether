@@ -80,6 +80,7 @@ function useRovingRows(region: React.RefObject<HTMLElement | null>) {
 export function SidebarRuns({ regroup }: { regroup?: (groups: SidebarGroup[]) => SidebarGroup[] } = {}) {
   const listed = useSidebarGroups()
   const groups = regroup ? regroup(listed) : listed
+  const showMineToggle = useStore((s) => s.mineOnly) && !groups.some((group) => group.key === 'working')
   const hydrated = useStore((s) => s.hydrated)
   const error = useStore((s) => (s.hydrated ? null : s.hydrationError))
   const dead = useStore((s) => s.streamDead)
@@ -114,6 +115,13 @@ export function SidebarRuns({ regroup }: { regroup?: (groups: SidebarGroup[]) =>
       onFocus={roving.onFocus}
       onKeyDown={roving.onKeyDown}
     >
+      {showMineToggle && (
+        <div className="flex justify-end px-2 pt-2">
+          <div className="flex h-6 items-center coarse:h-11">
+            <MineToggle />
+          </div>
+        </div>
+      )}
       <RunDetailsGroup>
         {groups.length === 0 ? (
           error !== null ? (

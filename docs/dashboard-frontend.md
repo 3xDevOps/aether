@@ -366,7 +366,9 @@ top to bottom:
    "Loading sessions". Needs you lists every workspace; a row outside the
    selected workspace leads with that workspace's name. Working and Finished
    list the selected workspace, and only the viewer's own sessions while **Mine**
-   (`mineOnly`, persisted) in the Working header is pressed. The region
+   (`mineOnly`, persisted) in the Working header is pressed. When Mine is on and
+   no Working sessions are visible, the same toggle stays at the top of the
+   region so it can be turned off. The region
    scrolls on its own, and while more rows sit below the fold its bottom edge
    fades out. The sidebar never collapses on its own at narrow widths; the
    splitter and `⌘B` stay the reader's call.
