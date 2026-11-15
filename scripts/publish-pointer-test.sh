@@ -39,7 +39,19 @@ case "$1 $2" in
 	;;
 "release upload")
 	shift 4
-	for f in "$@"; do cp "$f" "$STATE/assets/"; done
+	# As gh --clobber does: each old asset is deleted before its
+	# replacement uploads. While $STATE/fail counts down, the .sig upload
+	# fails after its old asset is gone.
+	for f in "$@"; do
+		rm -f "$STATE/assets/${f##*/}"
+		fails=$(cat "$STATE/fail" 2>/dev/null || echo 0)
+		case $f in *.sig) if [ "$fails" -gt 0 ]; then
+			echo $((fails - 1)) >"$STATE/fail"
+			echo "HTTP 502: upload failed" >&2
+			exit 1
+		fi ;; esac
+		cp "$f" "$STATE/assets/"
+	done
 	;;
 *) exit 2 ;;
 esac
@@ -73,8 +85,8 @@ echo "release-pointer $*" >>"$STATE/log"
 [ ! -f "$STATE/refuse" ] || { echo "release-pointer: refusing" >&2; exit 1; }
 while [ "$#" -gt 0 ]; do
 	case $1 in
-	-if-above)
-		[ ! -f "$STATE/keep" ] || exit 0
+	-if-above | -first)
+		[ "$1" != -if-above ] || [ ! -f "$STATE/keep" ] || exit 0
 		shift
 		continue
 		;;
@@ -101,8 +113,10 @@ run() {
 	want=$1
 	shift
 	set +e
+	rm -rf "$tmp/pair"
+	mkdir "$tmp/pair"
 	PATH="$bin:$PATH" STATE="$state" tmp_dir="$state/tmp" GITHUB_REPOSITORY=3xDevOps/Aether \
-		RELEASE_POINTER="$bin/release-pointer" sh "$script_dir/publish-pointer.sh" "$@" >"$tmp/out" 2>&1
+		RELEASE_POINTER="$bin/release-pointer" sh "$script_dir/publish-pointer.sh" "$@" "$tmp/pair" >"$tmp/out" 2>&1
 	got=$?
 	set -e
 	if [ "$got" -ne "$want" ]; then
@@ -120,13 +134,50 @@ refute_log() {
 	! grep -qF -- "$1" "$state/log" 2>/dev/null || { echo "log has: $1" >&2; cat "$state/log" >&2; exit 1; }
 }
 
-# The first pointer: nothing to compare with.
+# A missing pointer is not a first one unless the caller says so.
 reset
-run 0 beta v0.9.0-beta.2 "$dist"
-assert_out "channels has no beta.json yet"
+run 1 beta v0.9.0-beta.2 "$dist"
+assert_out "channels has no beta.json. A missing pointer is not a first one"
+assert_out "gh run download <run-id> --repo 3xDevOps/Aether -n pointer-beta -D pair"
+refute_log "release-pointer"
+refute_log "release upload"
+
+reset
+run 0 --first beta v0.9.0-beta.2 "$dist"
+grep -qF -- "-first" "$state/log"
 refute_log "-current"
 grep -qx "beta v0.9.0-beta.2" "$state/assets/beta.json"
+grep -qx "beta v0.9.0-beta.2" "$tmp/pair/beta.json"
 grep -qF -- "-manifest $dist/aether-release.json" "$state/log"
+
+reset
+echo "beta v0.9.0-beta.1" >"$state/assets/beta.json"
+echo "sig v0.9.0-beta.1" >"$state/assets/beta.json.sig"
+run 1 --first beta v0.9.0-beta.2 "$dist"
+assert_out "channels already has beta.json; first-pointer is only for a channel without one"
+refute_log "release upload"
+
+# An upload that fails after deleting the old .sig is repaired by uploading
+# the whole pair again.
+reset
+echo "beta v0.9.0-beta.1" >"$state/assets/beta.json"
+echo "sig v0.9.0-beta.1" >"$state/assets/beta.json.sig"
+echo 1 >"$state/fail"
+run 0 beta v0.9.0-beta.2 "$dist"
+[ "$(grep -c "release upload" "$state/log")" -eq 2 ]
+grep -qx "beta v0.9.0-beta.2" "$state/assets/beta.json"
+grep -qx "sig v0.9.0-beta.2" "$state/assets/beta.json.sig"
+
+# One that keeps failing names the artifact that restores the pair, and
+# leaves this run's signed pair in the pair directory for it.
+reset
+echo "beta v0.9.0-beta.1" >"$state/assets/beta.json"
+echo "sig v0.9.0-beta.1" >"$state/assets/beta.json.sig"
+echo 99 >"$state/fail"
+run 1 beta v0.9.0-beta.2 "$dist"
+assert_out "uploading beta.json failed 3 times and channels may hold half a pair. This run's signed pair is the pointer-beta artifact"
+[ "$(grep -c "release upload" "$state/log")" -eq 3 ]
+grep -qx "sig v0.9.0-beta.2" "$tmp/pair/beta.json.sig"
 
 # A current pointer goes to release-pointer, which decides; a stale public
 # copy is fetched again until it matches.
@@ -142,36 +193,39 @@ assert_out "beta.json names v0.9.0-beta.2"
 
 # --if-above moves a pointer the release is above, and keeps any other.
 reset
-run 0 --if-above beta v0.9.0 "$dist"
+run 0 --first --if-above beta v0.9.0 "$dist"
 grep -qF -- "-if-above" "$state/log"
 grep -qx "beta v0.9.0" "$state/assets/beta.json"
 reset
+echo "beta v0.9.1-beta.1" >"$state/assets/beta.json"
+echo "sig v0.9.1-beta.1" >"$state/assets/beta.json.sig"
 touch "$state/keep"
 run 0 --if-above beta v0.9.0 "$dist"
 assert_out "beta.json is not below v0.9.0 and stays"
 refute_log "release upload"
 reset
-run 0 beta v0.9.0 "$dist"
+run 0 --first beta v0.9.0 "$dist"
 refute_log "-if-above"
 
 # A refusal uploads nothing.
 reset
 touch "$state/refuse"
-run 1 beta v0.9.0-beta.2 "$dist"
+run 1 --first beta v0.9.0-beta.2 "$dist"
+assert_out "release-pointer: refusing"
 refute_log "release upload"
 
 # A public copy that never matches fails the run.
 reset
 echo "beta old" >"$state/stale/beta.json"
 echo 99 >"$state/lag"
-run 1 beta v0.9.0-beta.2 "$dist"
+run 1 --first beta v0.9.0-beta.2 "$dist"
 assert_out "differs from the pointer this run signed"
 
 # A pointer without its signature.
 reset
 echo "beta v0.9.0-beta.1" >"$state/assets/beta.json"
 run 1 beta v0.9.0-beta.2 "$dist"
-assert_out "it needs both beta.json and beta.json.sig"
+assert_out "it needs both beta.json and beta.json.sig. Restore the last good pair from the pointer-beta artifact"
 refute_log "release-pointer"
 
 # No channels release, a channels release that is not a published

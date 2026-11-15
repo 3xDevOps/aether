@@ -31,13 +31,23 @@ on:
         type: number
         default: 0
       pointer:
-        description: Channel whose pointer to move to this release once it is published; empty for none. The caller must run in the channels concurrency group
+        description: >-
+          Channel whose pointer to move to this release once it is published;
+          empty for none. A caller that sets this or pointer-if-above runs in the
+          channels concurrency group with cancel-in-progress false. The group is
+          the caller's, not a job's here: GitHub keeps one pending run per group
+          and cancels the older pending one, which would cancel a waiting
+          signer, and a job here in a group its caller already holds deadlocks
         type: string
         default: ''
       pointer-if-above:
         description: Channel whose pointer to move to this release only when the release is above it, after pointer; empty for none
         type: string
         default: ''
+      first-pointer:
+        description: The pointer channel has never had a pointer, and this run publishes its first; only for that migration step
+        type: boolean
+        default: false
     secrets:
       AETHER_RELEASE_SIGNING_KEY:
         required: false
@@ -74,9 +84,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # The same rules release-manifest and android-version-code.sh apply,
-      # checked before anything is built or pushed.
+      # The same rules release-manifest, android-version-code.sh and
+      # release-pointer apply, checked before anything is built or pushed.
       - name: Validate the inputs
+        env:
+          FIRST_POINTER: ${{ inputs.first-pointer }}
         run: |
           fail() {
             echo "::error::$1"
@@ -107,6 +119,16 @@ jobs:
             case $pointer in '' | nightly | beta | stable) ;; *) fail "pointer $pointer is not nightly, beta or stable" ;; esac
           done
           [ -z "$POINTER" ] || [ "$POINTER" != "$POINTER_IF_ABOVE" ] || fail "pointer and pointer-if-above both name $POINTER"
+          if [ "$CHANNEL" = nightly ] || [ "$POINTER" = nightly ] || [ "$POINTER_IF_ABOVE" = nightly ]; then
+            fail "this workflow signs with the release key, which never signs a nightly; nightly releases and nightly.json wait for the nightly environment and key that nightly.yml adds (release channels plan, pull request 9)"
+          fi
+          for pointer in "$POINTER" "$POINTER_IF_ABOVE"; do
+            case $pointer:$CHANNEL in
+            :* | stable:stable | beta:beta | beta:stable) ;;
+            *) fail "a ${CHANNEL:-pre-channel} release cannot be named by $pointer.json" ;;
+            esac
+          done
+          [ "$FIRST_POINTER" = false ] || [ -n "$POINTER" ] || fail "first-pointer needs pointer"
 
   # Each architecture runs the exact image it publishes on a native headless
   # Ubuntu host. No QEMU or host-installed Chromium changes the sandbox proof.
@@ -1065,20 +1087,43 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: sh scripts/publish-release.sh "$TAG" "$RUNNER_TEMP/dist"
+      # Each signed pair is kept as the pointer-<channel> artifact, the pair
+      # an admin restores when an upload leaves channels with half of one.
       - name: Move the channel pointer
         if: inputs.pointer != ''
         env:
           GH_TOKEN: ${{ github.token }}
           AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
           RELEASE_POINTER: ${{ runner.temp }}/release-pointer
-        run: sh scripts/publish-pointer.sh "$POINTER" "$TAG" "$RUNNER_TEMP/dist"
+          FIRST_POINTER: ${{ inputs.first-pointer }}
+        run: |
+          first=()
+          if [ "$FIRST_POINTER" = true ]; then first=(--first); fi
+          mkdir "$RUNNER_TEMP/pointer-$POINTER"
+          sh scripts/publish-pointer.sh "${first[@]}" "$POINTER" "$TAG" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/pointer-$POINTER"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() && inputs.pointer != '' }}
+        with:
+          name: pointer-${{ inputs.pointer }}
+          path: ${{ runner.temp }}/pointer-${{ inputs.pointer }}/
+          if-no-files-found: ignore
+          retention-days: 90
       - name: Move the channel pointer the release is above
         if: inputs.pointer-if-above != ''
         env:
           GH_TOKEN: ${{ github.token }}
           AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
           RELEASE_POINTER: ${{ runner.temp }}/release-pointer
-        run: sh scripts/publish-pointer.sh --if-above "$POINTER_IF_ABOVE" "$TAG" "$RUNNER_TEMP/dist"
+        run: |
+          mkdir "$RUNNER_TEMP/pointer-$POINTER_IF_ABOVE"
+          sh scripts/publish-pointer.sh --if-above "$POINTER_IF_ABOVE" "$TAG" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/pointer-$POINTER_IF_ABOVE"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() && inputs.pointer-if-above != '' }}
+        with:
+          name: pointer-${{ inputs.pointer-if-above }}
+          path: ${{ runner.temp }}/pointer-${{ inputs.pointer-if-above }}/
+          if-no-files-found: ignore
+          retention-days: 90
 
   # latest moves only after the release is published, to the index
   # edge-manifest already pushed, so a release that fails earlier leaves it

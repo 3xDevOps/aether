@@ -2,12 +2,14 @@
 // a release whose signed manifest it is given:
 //
 //	release-pointer -channel beta -tag v0.9.0-beta.2 \
-//	  -manifest dist/aether-release.json [-current current/beta.json] [-if-above] -out <dir>
+//	  -manifest dist/aether-release.json {-current current/beta.json | -first} [-if-above] -out <dir>
 //
 // It verifies the manifest and the current pointer against the keys this
 // build trusts, refuses to name a lower (build, hotfix) than the current
 // pointer does, signs with AETHER_RELEASE_SIGNING_KEY, and verifies its own
-// output the way an updater will. With -if-above it writes nothing, and
+// output the way an updater will. A channel without a current pointer
+// needs -first, so a pointer deleted by a failed upload or by hand is never
+// silently replaced with a lower one. With -if-above it writes nothing, and
 // succeeds, unless the release is above the current pointer: promoting to
 // stable moves beta.json only then. scripts/publish-pointer.sh runs it.
 package main
@@ -15,7 +17,6 @@ package main
 import (
 	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -41,13 +42,17 @@ func run(args []string, now time.Time) error {
 	tag := fs.String("tag", "", "release tag the pointer names")
 	manifest := fs.String("manifest", "", "the release's signed "+selfupdate.ManifestName+"; its signature is beside it")
 	current := fs.String("current", "", "the channel's current pointer, if it has one; its signature is beside it")
+	first := fs.Bool("first", false, "the channel has no pointer yet and this is its first")
 	ifAbove := fs.Bool("if-above", false, "write the pointer only when the release is above the current one, and succeed without writing otherwise")
 	out := fs.String("out", "", "directory to write <channel>.json and its signature into")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *channel == "" || *tag == "" || *manifest == "" || *out == "" || fs.NArg() != 0 {
-		return errors.New("usage: release-pointer -channel <c> -tag <tag> -manifest <file> [-current <file>] -out <dir>")
+		return errors.New("usage: release-pointer -channel <c> -tag <tag> -manifest <file> {-current <file> | -first} [-if-above] -out <dir>")
+	}
+	if (*current == "") == !*first {
+		return errors.New("pass exactly one of -current, the channel's pointer now, and -first, for a channel that has none yet")
 	}
 	switch *channel {
 	case selfupdate.ChannelNightly, selfupdate.ChannelBeta, selfupdate.ChannelStable:
@@ -90,7 +95,7 @@ func run(args []string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	data, sig, err := sign(p, key)
+	data, sig, err := selfupdate.SignPointer(p, key)
 	if err != nil {
 		return err
 	}
@@ -127,7 +132,7 @@ func readCurrent(path, channel string) (selfupdate.Pointer, error) {
 	}
 	cur, err := selfupdate.VerifyPointer(data, sig, channel)
 	if err != nil {
-		return selfupdate.Pointer{}, fmt.Errorf("the current %s does not verify, so it cannot be replaced safely: %w", selfupdate.PointerName(channel), err)
+		return selfupdate.Pointer{}, fmt.Errorf("the current %s does not verify, so it cannot be replaced safely: %w; restore the last good pair from the pointer-%s artifact of the run that last moved it", selfupdate.PointerName(channel), err, channel)
 	}
 	return cur, nil
 }
@@ -145,14 +150,4 @@ func signingKey(seed string) (ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("%s is not a base64 %d-byte ed25519 seed", keyEnv, ed25519.SeedSize)
 	}
 	return ed25519.NewKeyFromSeed(raw), nil
-}
-
-// sign encodes p the way selfupdate.SignManifest encodes a manifest.
-func sign(p selfupdate.Pointer, key ed25519.PrivateKey) (data, sig []byte, err error) {
-	data, err = json.MarshalIndent(p, "", "  ")
-	if err != nil {
-		return nil, nil, err
-	}
-	data = append(data, '\n')
-	return data, []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(key, data)) + "\n"), nil
 }

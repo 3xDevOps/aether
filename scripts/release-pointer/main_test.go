@@ -81,6 +81,8 @@ func TestSignsAPointerAnUpdaterFollows(t *testing.T) {
 			args := []string{"-channel", "beta", "-tag", "v0.9.0-beta.2", "-manifest", manifest, "-out", out}
 			if current != "" {
 				args = append(args, "-current", current)
+			} else {
+				args = append(args, "-first")
 			}
 			if err := run(args, now); err != nil {
 				t.Fatal(err)
@@ -119,8 +121,19 @@ func TestRefuses(t *testing.T) {
 			want: "beta.json names v0.9.0-beta.3 at build 413; refusing to move it down to v0.9.0-beta.2 at build 412",
 		},
 		{
+			name: "no current pointer without -first",
+			args: []string{"-channel", "beta", "-tag", "v0.9.0-beta.2", "-manifest", beta},
+			want: "pass exactly one of -current",
+		},
+		{
+			name: "-first beside a current pointer",
+			args: []string{"-channel", "beta", "-tag", "v0.9.0-beta.2", "-manifest", beta, "-first",
+				"-current", writeCurrent(t, "v0.9.0-beta.1", 380, releasetest.Key)},
+			want: "pass exactly one of -current",
+		},
+		{
 			name: "a channel the release is not on",
-			args: []string{"-channel", "stable", "-tag", "v0.9.0-beta.2", "-manifest", beta},
+			args: []string{"-channel", "stable", "-tag", "v0.9.0-beta.2", "-manifest", beta, "-first"},
 			want: "v0.9.0-beta.2 cannot be the stable pointer",
 		},
 		{
@@ -131,13 +144,13 @@ func TestRefuses(t *testing.T) {
 		},
 		{
 			name: "a key the build does not trust",
-			args: []string{"-channel", "beta", "-tag", "v0.9.0-beta.2", "-manifest", beta},
+			args: []string{"-channel", "beta", "-tag", "v0.9.0-beta.2", "-manifest", beta, "-first"},
 			key:  other,
 			want: "verify the signed pointer",
 		},
 		{
 			name: "a manifest of another tag",
-			args: []string{"-channel", "beta", "-tag", "v0.9.0-beta.3", "-manifest", beta},
+			args: []string{"-channel", "beta", "-tag", "v0.9.0-beta.3", "-manifest", beta, "-first"},
 			want: "describes v0.9.0-beta.2",
 		},
 	} {
@@ -176,6 +189,8 @@ func TestIfAboveMovesOnlyUpward(t *testing.T) {
 			args := []string{"-channel", "beta", "-tag", "v0.9.0", "-manifest", stable, "-if-above", "-out", out}
 			if tc.current != "" {
 				args = append(args, "-current", tc.current)
+			} else {
+				args = append(args, "-first")
 			}
 			if err := run(args, now); err != nil {
 				t.Fatal(err)
