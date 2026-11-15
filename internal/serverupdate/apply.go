@@ -127,7 +127,7 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	plan := s.plan(pending)
 	m, err := preflight(ctx, plan, pending.Version, allowDowngrade)
 	if err == nil && scheduled {
-		err = s.takenNow(ctx, m)
+		err = s.stillTaken(ctx, pending, m)
 	}
 	if err != nil {
 		return nil, s.failOrRetry(ctx, pending, scheduled, err)
@@ -187,8 +187,10 @@ func (s *Service) failOrRetry(ctx context.Context, pending store.PendingServerUp
 			return err
 		}
 	}
-	if scheduled {
-		s.decline(ctx, s.known(pending.Version))
+	if scheduled && !errors.Is(err, errNotTaken) {
+		if derr := s.decline(ctx, s.known(pending.Version)); derr != nil {
+			slog.Error("serverupdate: a failed scheduled update stays eligible", "version", pending.Version, "error", derr)
+		}
 	}
 	return s.fail(ctx, pending, err)
 }

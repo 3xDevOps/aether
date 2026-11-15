@@ -320,6 +320,7 @@ func (s *Service) Status(ctx context.Context, p protocol.ServerUpdateStatusParam
 			}
 		}
 	}
+	out.Declined = wireDeclined(state.Declined)
 	if l := state.Last; l != nil {
 		out.Last = &protocol.ServerUpdateAttempt{
 			Version: l.Version,
@@ -409,21 +410,24 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 		s.publish(ctx, actor, events.ServerUpdateScheduled, tag, "")
 		return res, nil, nil
 	}
-	leaving := s.known(version.Version)
-	restart, err := s.apply(ctx, pending, p.AllowDowngrade, false)
-	if err != nil {
-		return protocol.ServerUpdateResult{}, nil, err
-	}
 	if p.AllowDowngrade {
 		// A rollback holds: the server does not schedule the build it
-		// left, or the newest it knew of, by itself again.
+		// leaves, or the newest it knows of, by itself again. Recorded
+		// first, so a rollback whose mark cannot be kept does not happen.
+		leaving := s.known(version.Version)
 		s.checkMu.Lock()
 		latest := s.check.latest()
 		s.checkMu.Unlock()
 		if selfupdate.Newer(latest, leaving) {
 			leaving.Build, leaving.Hotfix = latest.Build, latest.Hotfix
 		}
-		s.decline(ctx, leaving)
+		if err = s.decline(ctx, leaving); err != nil {
+			return protocol.ServerUpdateResult{}, nil, err
+		}
+	}
+	restart, err := s.apply(ctx, pending, p.AllowDowngrade, false)
+	if err != nil {
+		return protocol.ServerUpdateResult{}, nil, err
 	}
 	res.Status = protocol.ServerUpdateApplying
 	return res, restart, nil
@@ -431,10 +435,24 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 
 // cancel clears the pending update. Cancelling nothing is not an error:
 // the caller asked for no pending update and there is none.
+//
+// The cancelled release is declined first, under the slot the server
+// schedules under, so a cancel whose mark cannot be kept changes nothing
+// and the server cannot schedule the release again in between.
 func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.ServerUpdateResult, error) {
+	release, err := s.hold(ctx)
+	if err != nil {
+		return protocol.ServerUpdateResult{}, err
+	}
+	defer release()
 	state, err := s.cfg.Store.GetServerUpdate(ctx)
 	if err != nil {
 		return protocol.ServerUpdateResult{}, err
+	}
+	if state.Pending != nil {
+		if err := s.declineLocked(ctx, s.known(state.Pending.Version)); err != nil {
+			return protocol.ServerUpdateResult{}, err
+		}
 	}
 	if err := s.cfg.Store.SetPendingServerUpdate(ctx, nil); err != nil {
 		return protocol.ServerUpdateResult{}, err
@@ -442,7 +460,6 @@ func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.S
 	out := protocol.ServerUpdateResult{Status: protocol.ServerUpdateCancelled}
 	if state.Pending != nil {
 		out.Version = state.Pending.Version
-		s.decline(ctx, s.known(state.Pending.Version))
 		s.publish(ctx, actor, events.ServerUpdateCancelled, state.Pending.Version, "")
 	}
 	return out, nil

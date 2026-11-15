@@ -2,6 +2,8 @@ package serverupdate
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -9,6 +11,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // ServerActor is the actor of an update the server scheduled itself; no
@@ -22,16 +25,20 @@ const ServerActor domain.MemberID = "server"
 // (Config.Releases, channel "") never does.
 func selfApplies(channel string) bool { return channel != "" }
 
-// declined is the build the server no longer schedules by itself. Build 0
-// is a release whose build was not known, refused by its version alone.
-type declined struct {
-	Version string `json:"version"`
-	Build   int    `json:"build,omitempty"`
-	Hotfix  int    `json:"hotfix,omitempty"`
+// errNotTaken refuses an update at its idle moment that the server's
+// channel no longer takes, or that the server scheduled itself and has
+// since declined. It is no decline of the release itself.
+var errNotTaken = errors.New("the server no longer takes this update")
+
+// published reports whether this binary is a published release: a build
+// from source, past a tag or dirty, never replaces itself unattended.
+func published() bool {
+	return selfupdate.ValidTag(version.Version) && version.ReleaseCore(version.Version) == version.Version
 }
 
-// refuses reports whether r is d's release or not above d's build.
-func (d *declined) refuses(r selfupdate.Release) bool {
+// refuses reports whether d declines r: r is d's release or not above
+// d's build. Build 0 declines by version alone.
+func refuses(d *store.DeclinedServerUpdate, r selfupdate.Release) bool {
 	if d == nil {
 		return false
 	}
@@ -41,38 +48,51 @@ func (d *declined) refuses(r selfupdate.Release) bool {
 	return d.Build > 0 && (r.Build < d.Build || r.Build == d.Build && r.Hotfix <= d.Hotfix)
 }
 
-func (d *declined) wire() *protocol.ReleaseBuild {
+func wireDeclined(d *store.DeclinedServerUpdate) *protocol.ReleaseBuild {
 	if d == nil {
 		return nil
 	}
 	return &protocol.ReleaseBuild{Version: d.Version, Build: d.Build, Hotfix: d.Hotfix}
 }
 
-// decline records r in check.json as declined, keeping the highest build
-// declined so far, so the server schedules by itself only a build above
-// it. A super admin's own server.update ignores it.
-func (s *Service) decline(ctx context.Context, r selfupdate.Release) {
+// hold takes the check slot, which also serializes what the server
+// schedules by itself with the cancels and rollbacks that decline it.
+func (s *Service) hold(ctx context.Context) (func(), error) {
 	select {
 	case s.run <- struct{}{}:
+		return func() { <-s.run }, nil
 	case <-ctx.Done():
-		slog.Warn("serverupdate: record a declined build", "version", r.Version, "error", ctx.Err())
-		return
+		return nil, ctx.Err()
 	}
-	defer func() { <-s.run }()
-	s.reloadState()
-	st := s.check
-	d := &declined{Version: r.Version, Build: r.Build, Hotfix: r.Hotfix}
-	if old := st.Declined; old != nil && (old.Build > d.Build || old.Build == d.Build && old.Hotfix > d.Hotfix) {
+}
+
+// declineLocked records r in the store as declined, keeping the highest
+// build declined so far, so the server schedules by itself only a build
+// above it. A super admin's own server.update ignores it. The caller
+// holds the slot.
+func (s *Service) declineLocked(ctx context.Context, r selfupdate.Release) error {
+	state, err := s.cfg.Store.GetServerUpdate(ctx)
+	if err != nil {
+		return err
+	}
+	d := store.DeclinedServerUpdate{Version: r.Version, Build: r.Build, Hotfix: r.Hotfix}
+	if old := state.Declined; old != nil && (old.Build > d.Build || old.Build == d.Build && old.Hotfix > d.Hotfix) {
 		d.Build, d.Hotfix = old.Build, old.Hotfix
 	}
-	st.Declined = d
-	if err := s.persistCheck(st); err != nil {
-		slog.Warn("serverupdate: record a declined build", "version", r.Version, "error", err)
-		return
+	if err := s.cfg.Store.SetDeclinedServerUpdate(ctx, d); err != nil {
+		return fmt.Errorf("serverupdate: record %s as declined: %w", r.Version, err)
 	}
-	s.checkMu.Lock()
-	s.check = st
-	s.checkMu.Unlock()
+	return nil
+}
+
+// decline is declineLocked taking the slot.
+func (s *Service) decline(ctx context.Context, r selfupdate.Release) error {
+	release, err := s.hold(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return s.declineLocked(ctx, r)
 }
 
 // known is version's place in the release order as far as this server
@@ -92,19 +112,32 @@ func (s *Service) known(v string) selfupdate.Release {
 
 // checkAndSchedule runs a release check and schedules what it found.
 func (s *Service) checkAndSchedule(ctx context.Context) {
-	s.schedule(ctx, s.runCheck(ctx))
+	s.runCheck(ctx)
+	s.schedule(ctx)
 }
 
-// schedule records the newest release a check found as the pending update,
-// as server.update idle would, when the server should take it by itself:
-// its channel self-applies, the release has a build, Offers it, it is not
-// declined, its last attempt did not fail, the preflight passes, and
-// nothing is pending. Tick applies it at the first idle moment. A release
-// from before channels (build 0) is never scheduled by the server.
-func (s *Service) schedule(ctx context.Context, st checkState) {
+// schedule records the newest release the last check found as the pending
+// update, as server.update idle would, when the server should take it by
+// itself: this binary is a published release, the server has chosen its
+// channel and the check followed it, the channel self-applies, the release
+// has a build, Offers it, is not declined, its last attempt did not fail,
+// the preflight passes, and nothing is pending. It holds the slot
+// throughout, so a cancel or rollback cannot slip between its reads and
+// its write. Tick applies it at the first idle moment.
+func (s *Service) schedule(ctx context.Context) {
+	if !published() || s.incapableReason() != "" {
+		return
+	}
+	release, err := s.hold(ctx)
+	if err != nil {
+		return
+	}
+	defer release()
+	st := s.check
 	latest := st.latest()
-	if !selfApplies(st.Channel) || st.Error != "" || latest.Build == 0 ||
-		!Offers(st.Channel, selfupdate.Running(), latest) || st.Declined.refuses(latest) || s.incapableReason() != "" {
+	stored, err := s.cfg.Store.ReleaseChannel(ctx)
+	if err != nil || stored == "" || stored != st.Channel || !selfApplies(stored) || st.Error != "" ||
+		latest.Build == 0 || !Offers(stored, selfupdate.Running(), latest) {
 		return
 	}
 	state, err := s.cfg.Store.GetServerUpdate(ctx)
@@ -112,7 +145,7 @@ func (s *Service) schedule(ctx context.Context, st checkState) {
 		slog.Warn("serverupdate: read pending update", "error", err)
 		return
 	}
-	if state.Pending != nil {
+	if state.Pending != nil || refuses(state.Declined, latest) {
 		return
 	}
 	if l := state.Last; l != nil && l.Version == latest.Version && l.Outcome != store.ServerUpdateApplied {
@@ -129,7 +162,27 @@ func (s *Service) schedule(ctx context.Context, st checkState) {
 		return
 	}
 	if scheduled {
-		slog.Info("serverupdate: scheduled the newest release on the channel for the next idle moment", "version", latest.Version, "channel", st.Channel)
+		slog.Info("serverupdate: scheduled the newest release on the channel for the next idle moment", "version", latest.Version, "channel", stored)
 		s.publish(ctx, ServerActor, events.ServerUpdateScheduled, latest.Version, "")
 	}
+}
+
+// stillTaken refuses, at its idle moment, a pending update whose release m
+// the server's channel no longer takes, or, for one the server scheduled
+// itself, that the declined mark now refuses. Only an update applied now
+// installs such a release.
+func (s *Service) stillTaken(ctx context.Context, pending store.PendingServerUpdate, m selfupdate.Manifest) error {
+	if s.cfg.Releases != nil {
+		return nil
+	}
+	if pending.RequestedBy == ServerActor {
+		state, err := s.cfg.Store.GetServerUpdate(ctx)
+		if err != nil {
+			return err
+		}
+		if refuses(state.Declined, m.Release()) {
+			return fmt.Errorf("%w: %w: %s was declined", ErrPreflight, errNotTaken, m.Version)
+		}
+	}
+	return s.takenNow(ctx, m)
 }

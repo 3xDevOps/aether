@@ -34,6 +34,12 @@ type ServerUpdateStore interface {
 	SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) error
 	// SchemaVersion is the highest migration applied to this database.
 	SchemaVersion(ctx context.Context) (int, error)
+	// SetDeclinedServerUpdate records the build the server no longer
+	// schedules by itself.
+	SetDeclinedServerUpdate(ctx context.Context, declined DeclinedServerUpdate) error
+	// RetirePendingServerUpdate records last and clears the pending row
+	// only while it is still pending, reporting whether it was.
+	RetirePendingServerUpdate(ctx context.Context, pending PendingServerUpdate, last ServerUpdateAttempt) (bool, error)
 	// ReleaseChannel is the release channel the server follows, "" while
 	// a new server has not chosen one.
 	ReleaseChannel(ctx context.Context) (string, error)
@@ -55,10 +61,20 @@ const (
 	ServerUpdateRolledBack = "rolled_back"
 )
 
-// ServerUpdate is the whole state. Both fields are nil when unset.
+// ServerUpdate is the whole state. Each field is nil when unset.
 type ServerUpdate struct {
-	Pending *PendingServerUpdate
-	Last    *ServerUpdateAttempt
+	Pending  *PendingServerUpdate
+	Last     *ServerUpdateAttempt
+	Declined *DeclinedServerUpdate
+}
+
+// DeclinedServerUpdate is the build the server no longer schedules by
+// itself: a super admin cancelled it or rolled back from it, or it
+// failed. Build 0 is a release whose build was not known.
+type DeclinedServerUpdate struct {
+	Version string
+	Build   int
+	Hotfix  int
 }
 
 // PendingServerUpdate is one update waiting for an idle server.
@@ -85,12 +101,15 @@ func (d *DB) GetServerUpdate(ctx context.Context) (ServerUpdate, error) {
 		lastVersion, outcome string
 		detail               string
 		lastAt               int64
+		declined             DeclinedServerUpdate
 	)
 	err := d.db.QueryRowContext(ctx,
 		`SELECT pending_version, pending_requested_by, pending_requested_at,
-		        last_version, last_outcome, last_detail, last_at
+		        last_version, last_outcome, last_detail, last_at,
+		        declined_version, declined_build, declined_hotfix
 		 FROM server_update_state WHERE id = 1`,
-	).Scan(&pendingVersion, &pendingBy, &pendingAt, &lastVersion, &outcome, &detail, &lastAt)
+	).Scan(&pendingVersion, &pendingBy, &pendingAt, &lastVersion, &outcome, &detail, &lastAt,
+		&declined.Version, &declined.Build, &declined.Hotfix)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ServerUpdate{}, nil
 	}
@@ -103,6 +122,9 @@ func (d *DB) GetServerUpdate(ctx context.Context) (ServerUpdate, error) {
 			RequestedBy: domain.MemberID(pendingBy),
 			RequestedAt: decodeTime(pendingAt),
 		}
+	}
+	if declined.Version != "" {
+		out.Declined = &declined
 	}
 	if outcome != "" {
 		out.Last = &ServerUpdateAttempt{
@@ -143,6 +165,49 @@ func (d *DB) SetPendingServerUpdate(ctx context.Context, pending *PendingServerU
 		return fmt.Errorf("store: write pending server update: %w", err)
 	}
 	return nil
+}
+
+func (d *DB) SetDeclinedServerUpdate(ctx context.Context, declined DeclinedServerUpdate) error {
+	if declined.Version == "" {
+		return errors.New("store: declined server update requires a version")
+	}
+	_, err := d.db.ExecContext(ctx,
+		`INSERT INTO server_update_state (id, declined_version, declined_build, declined_hotfix)
+		 VALUES (1, ?, ?, ?)
+		 ON CONFLICT (id) DO UPDATE SET
+		   declined_version = excluded.declined_version,
+		   declined_build = excluded.declined_build,
+		   declined_hotfix = excluded.declined_hotfix`,
+		declined.Version, declined.Build, declined.Hotfix)
+	if err != nil {
+		return fmt.Errorf("store: write declined server update: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) RetirePendingServerUpdate(ctx context.Context, pending PendingServerUpdate, last ServerUpdateAttempt) (bool, error) {
+	at, err := encodeTime(pending.RequestedAt)
+	if err != nil {
+		return false, fmt.Errorf("store: retire server update: %w", err)
+	}
+	stamp, err := encodeTime(last.At)
+	if err != nil {
+		return false, fmt.Errorf("store: retire server update: %w", err)
+	}
+	res, err := d.db.ExecContext(ctx,
+		`UPDATE server_update_state SET
+		   last_version = ?, last_outcome = ?, last_detail = ?, last_at = ?,
+		   pending_version = '', pending_requested_by = '', pending_requested_at = 0
+		 WHERE id = 1 AND pending_version = ? AND pending_requested_by = ? AND pending_requested_at = ?`,
+		last.Version, last.Outcome, last.Detail, stamp, pending.Version, string(pending.RequestedBy), at)
+	if err != nil {
+		return false, fmt.Errorf("store: retire server update: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: retire server update: %w", err)
+	}
+	return n == 1, nil
 }
 
 func (d *DB) SchedulePendingServerUpdate(ctx context.Context, pending PendingServerUpdate) (bool, error) {

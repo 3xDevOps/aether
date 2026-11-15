@@ -2654,9 +2654,13 @@ ALTER TABLE child_settings ADD COLUMN off TEXT NOT NULL DEFAULT '[]';
 	// v113: the release channel the server follows, set by a super admin.
 	// Empty means not chosen yet: a new server chooses from the channel
 	// pointers at its first release check. A server that existed before
-	// channels follows beta (existingDatabaseMigrations).
+	// channels follows beta (existingDatabaseMigrations). The declined
+	// build is the one the server no longer schedules by itself.
 	`
 ALTER TABLE server_update_state ADD COLUMN release_channel TEXT NOT NULL DEFAULT '';
+ALTER TABLE server_update_state ADD COLUMN declined_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE server_update_state ADD COLUMN declined_build INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE server_update_state ADD COLUMN declined_hotfix INTEGER NOT NULL DEFAULT 0;
 `,
 }
 

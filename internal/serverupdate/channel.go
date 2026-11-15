@@ -102,7 +102,6 @@ func (s *Service) describeChannel(ctx context.Context, out *protocol.ServerUpdat
 	}
 	running := selfupdate.Running()
 	out.ServerBuild, out.ServerHotfix = running.Build, running.Hotfix
-	out.Declined = check.Declined.wire()
 	if s.cfg.Releases == nil {
 		out.Channel, out.ChannelPending = channel, !chosen
 		if check.Channel != channel {
@@ -167,8 +166,17 @@ func (s *Service) SetChannel(ctx context.Context, actor domain.MemberID, p proto
 		out.Saved = true
 		if pending != nil {
 			detail := fmt.Sprintf("the server moved to the %s channel, which does not take it: %s", p.Channel, reason)
-			s.record(ctx, pending.Version, store.ServerUpdateFailed, detail)
-			s.publish(ctx, actor, events.ServerUpdateCancelled, pending.Version, detail)
+			retired, rerr := s.cfg.Store.RetirePendingServerUpdate(ctx, *pending, store.ServerUpdateAttempt{
+				Version: pending.Version, Outcome: store.ServerUpdateFailed, Detail: detail, At: s.cfg.Now().UTC(),
+			})
+			switch {
+			case rerr != nil:
+				return protocol.ServerReleaseChannelSetResult{}, rerr
+			case retired:
+				s.publish(ctx, actor, events.ServerUpdateCancelled, pending.Version, detail)
+			default:
+				out.Retired = ""
+			}
 		}
 	}
 	if !s.checks() {
@@ -196,16 +204,18 @@ func (s *Service) SetChannel(ctx context.Context, actor domain.MemberID, p proto
 }
 
 // untaken is the pending update channel does not take, and why: its
-// signed manifest's channel is not one channel accepts, or the manifest
-// cannot be read to tell.
+// signed manifest's channel is not one channel accepts. Nightly takes
+// every release. A manifest that cannot be read keeps the pending update;
+// Tick refuses it at its idle moment if the channel does not take it.
 func (s *Service) untaken(ctx context.Context, channel string) (*store.PendingServerUpdate, string, error) {
 	state, err := s.cfg.Store.GetServerUpdate(ctx)
-	if err != nil || state.Pending == nil {
+	if err != nil || state.Pending == nil || channel == selfupdate.ChannelNightly {
 		return nil, "", err
 	}
 	m, err := feed(s.cfg.Releases, s.cfg.Checker.BaseURL()).Fetch(ctx, state.Pending.Version)
 	if err != nil {
-		return state.Pending, "its signed manifest cannot be read: " + err.Error(), nil
+		slog.Warn("serverupdate: keeping the pending update across a channel change", "version", state.Pending.Version, "error", err)
+		return nil, "", nil
 	}
 	if err := m.AcceptedOn(channel); err != nil {
 		return state.Pending, err.Error(), nil
@@ -223,7 +233,7 @@ func (s *Service) checkNow(ctx context.Context) (selfupdate.Release, error) {
 	}
 	st := s.checkLocked(ctx)
 	<-s.run
-	s.schedule(ctx, st)
+	s.schedule(ctx)
 	if st.Error != "" {
 		return selfupdate.Release{}, errors.New(st.Error)
 	}
@@ -243,7 +253,7 @@ func (s *Service) takenNow(ctx context.Context, m selfupdate.Manifest) error {
 		return err
 	}
 	if err := m.AcceptedOn(channel); err != nil {
-		return fmt.Errorf("%w: %w; update with --when now to install it anyway", ErrPreflight, err)
+		return fmt.Errorf("%w: %w: %w; update with --when now to install it anyway", ErrPreflight, errNotTaken, err)
 	}
 	return nil
 }

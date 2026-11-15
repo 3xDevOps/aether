@@ -731,12 +731,15 @@ schedules it itself, as `aether server update --when idle` would, and
 applies it once no session is working. `server.update_status` marks that
 pending update `by_server`, and the timeline names `server` as its actor.
 It never replaces an update a member scheduled, and never schedules a
-release from before channels or one the preflight refuses. A super admin's
-`--cancel`, an `--allow-downgrade` update, and a scheduled update that
-fails (after 3 tries for a network error) mark that build declined in
-`server-update/check.json`; `server.update_status` shows it as `declined`,
-and the server schedules only a higher build by itself. A super admin's
-own `aether server update` ignores the mark.
+release from before channels or one the preflight refuses. It schedules
+nothing while it has not chosen its channel, or when it runs a build from
+source (a version past a tag, or dirty); `server.update_status` still
+offers the release. A super admin's `--cancel`, an `--allow-downgrade`
+update, and a scheduled update that fails (after 3 tries for a network
+error) mark that build declined in the database; `server.update_status`
+shows it as `declined`, and the server schedules only a higher build by
+itself. A cancel or rollback whose mark cannot be saved is refused with
+the error. A super admin's own `aether server update` ignores the mark.
 `AETHER_NO_UPDATE_CHECK=1` in `/etc/aether/aether-server.env` turns off the
 check and with it these updates.
 

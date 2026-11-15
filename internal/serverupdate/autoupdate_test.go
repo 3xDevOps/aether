@@ -1,7 +1,12 @@
 package serverupdate
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -11,7 +16,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// autoEnv is a capable server running nightly build 412 on channel, with
+// autoEnv is a capable server running nightly build 412 on channel (""
+// leaves it unchosen), with
 // nightly.12 to nightly.14 and beta.1 and beta.2 published and nightly.json
 // naming nightly.13 (build 413).
 func autoEnv(t *testing.T, channel string) *env {
@@ -23,7 +29,11 @@ func autoEnv(t *testing.T, channel string) *env {
 	}
 	e.rel.SetBuild("v0.9.0-beta.1", selfupdate.ChannelBeta, 380, 0)
 	e.rel.SetBuild("v0.9.0-beta.2", selfupdate.ChannelBeta, 412, 0)
+	e.rel.SetBuild("v0.9.0-beta.3", selfupdate.ChannelBeta, 420, 0)
 	publishPointer(t, e.rel, "nightly", pointer("nightly", "v0.9.0-nightly.13", 413), releasetest.NightlyKey)
+	if channel == "" {
+		return e
+	}
 	if err := e.db.SetReleaseChannel(t.Context(), channel); err != nil {
 		t.Fatal(err)
 	}
@@ -209,4 +219,161 @@ func TestOptOutSchedulesNothing(t *testing.T) {
 	if n := e.rel.Requests("/releases/download/channels/nightly.json"); n != 0 {
 		t.Fatalf("asked for nightly.json %d times with the check off", n)
 	}
+}
+
+// A server that has not chosen its channel follows beta but schedules
+// nothing by itself, however new beta's build.
+func TestUnchosenServerSchedulesNothing(t *testing.T) {
+	e := autoEnv(t, "")
+	publishPointer(t, e.rel, "beta", pointer("beta", "v0.9.0-beta.3", 420), releasetest.Key)
+	e.svc.checkAndSchedule(t.Context())
+	e.wantPending(t, "", "")
+	if st, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{}); err != nil || !st.ChannelPending || !st.UpdateAvailable {
+		t.Fatalf("status = %+v, %v; want beta.3 offered on an unchosen channel", st, err)
+	}
+}
+
+// A binary built from source never replaces itself unattended; the newer
+// release is still offered.
+func TestSourceBuildSchedulesNothing(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	setRunning(t, "v0.9.0-nightly.3-5-gabc1234-dirty", 0, 0)
+	e.svc.checkAndSchedule(t.Context())
+	e.wantPending(t, "", "")
+	if st, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{}); err != nil || !st.UpdateAvailable {
+		t.Fatalf("status = %+v, %v; want nightly.13 offered", st, err)
+	}
+}
+
+// The declined mark is in the store: removing or corrupting check.json,
+// and restarting, keeps a cancelled build from being scheduled again.
+func TestDeclineSurvivesCheckStateAndRestart(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.busy = domain.ServerBusy{Runs: 1}
+	e.svc.checkAndSchedule(t.Context())
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel}); err != nil {
+		t.Fatal(err)
+	}
+	check := filepath.Join(e.state, "check.json")
+	if err := os.WriteFile(check, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restarted := e.restart(t)
+	restarted.checkAndSchedule(t.Context())
+	e.wantPending(t, "", "")
+	if err := os.Remove(check); err != nil {
+		t.Fatal(err)
+	}
+	restarted = e.restart(t)
+	restarted.checkAndSchedule(t.Context())
+	e.wantPending(t, "", "")
+	st, err := restarted.Status(t.Context(), protocol.ServerUpdateStatusParams{})
+	if err != nil || st.Declined == nil || st.Declined.Build != 413 {
+		t.Fatalf("status after a restart = %+v, %v; want nightly.13 declined", st, err)
+	}
+}
+
+// A cancel that arrives while the server is scheduling waits for it and
+// then cancels what it scheduled, so the scheduling cannot undo it.
+func TestCancelDuringSchedulingHolds(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.busy = domain.ServerBusy{Runs: 1}
+	e.svc.runCheck(t.Context())
+	probing, resume := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	e.onRequest = func() { once.Do(func() { close(probing); <-resume }) }
+	done := make(chan struct{})
+	go func() { e.svc.schedule(t.Context()); close(done) }()
+	<-probing
+	cancelled := make(chan error, 1)
+	go func() {
+		_, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel})
+		cancelled <- err
+	}()
+	select {
+	case err := <-cancelled:
+		t.Fatalf("the cancel did not wait for the scheduling: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(resume)
+	<-done
+	if err := <-cancelled; err != nil {
+		t.Fatal(err)
+	}
+	e.wantPending(t, "", "")
+	e.svc.schedule(t.Context())
+	e.wantPending(t, "", "")
+}
+
+// A check that ran on the old channel schedules nothing once the channel
+// changed, and a server update refused at its idle moment because the
+// channel moved does not raise the declined mark.
+func TestChannelChangeDuringACheckSchedulesNothing(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.busy = domain.ServerBusy{Runs: 1}
+	e.svc.runCheck(t.Context())
+	if err := e.db.SetReleaseChannel(t.Context(), selfupdate.ChannelBeta); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.schedule(t.Context())
+	e.wantPending(t, "", "")
+
+	if err := e.db.SetReleaseChannel(t.Context(), selfupdate.ChannelNightly); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.schedule(t.Context())
+	e.wantPending(t, "v0.9.0-nightly.13", ServerActor)
+	if err := e.db.SetReleaseChannel(t.Context(), selfupdate.ChannelStable); err != nil {
+		t.Fatal(err)
+	}
+	e.busy, e.underSystemd = domain.ServerBusy{}, true
+	e.svc.Tick(t.Context())
+	state, err := e.db.GetServerUpdate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Pending != nil || state.Declined != nil || state.Last == nil || !strings.Contains(state.Last.Detail, "does not take") {
+		t.Fatalf("state = %+v (last %+v), want refused without a declined mark", state, state.Last)
+	}
+	if got := e.read(t, e.self); got != "the old binary" {
+		t.Fatal("installed a release the channel does not take")
+	}
+}
+
+// A channel change keeps a pending update whose manifest cannot be read,
+// and never fetches one for nightly, which takes every release.
+func TestChannelChangeKeepsAPendingUpdateItCannotCheck(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelBeta)
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-beta.3", When: protocol.ServerUpdateIdle}); err != nil {
+		t.Fatal(err)
+	}
+	e.setMissing(selfupdate.ManifestName)
+	set, err := e.svc.SetChannel(t.Context(), "mem_a", protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelStable})
+	if err != nil || set.Retired != "" {
+		t.Fatalf("switch = %+v, %v; want nothing retired", set, err)
+	}
+	e.wantPending(t, "v0.9.0-beta.3", "mem_a")
+	e.heal()
+	before := e.rel.Requests("/releases/download/v0.9.0-beta.3/" + selfupdate.ManifestName)
+	if _, err := e.svc.SetChannel(t.Context(), "mem_a", protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelNightly}); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.rel.Requests("/releases/download/v0.9.0-beta.3/" + selfupdate.ManifestName); n != before {
+		t.Fatalf("fetched the pending release's manifest for nightly (%d requests)", n-before)
+	}
+	e.wantPending(t, "v0.9.0-beta.3", "mem_a")
+}
+
+// restart is the next process on e's store and state directory.
+func (e *env) restart(t *testing.T) *Service {
+	t.Helper()
+	svc, err := New(Config{
+		StateDir: e.state, Database: filepath.Join(e.dir, "aether.db"), Store: e.db, Bus: e.bus,
+		Checker: selfupdate.NewChecker(e.release.URL, time.Hour), Executable: e.self, Host: e.svc.cfg.Host,
+		Busy: e.svc.cfg.Busy, Hold: e.svc.cfg.Hold, Now: e.svc.cfg.Now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return svc
 }
