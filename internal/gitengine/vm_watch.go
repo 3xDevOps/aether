@@ -411,6 +411,11 @@ func (e *Engine) publishVMHead(ctx context.Context, run domain.RunID, meta runMe
 	if _, err = e.git(ctx, store, "update-ref", ref, head); err != nil {
 		return fmt.Errorf("gitengine: stage checkout HEAD %s: %w", head, err)
 	}
+	// The fetch copies the commit's objects a second time, into the workspace
+	// repo, so hold to the free-disk floor before it as the store receive did.
+	if err = e.checkVMReceiveSpace(repo); err != nil {
+		return fmt.Errorf("gitengine: publish session branch %s: %w", run, err)
+	}
 	if err = e.gitReceive(ctx, repo, "fetch", "--quiet", store, "+"+ref+":"+ref); err != nil {
 		return fmt.Errorf("gitengine: publish session branch %s: %w", run, err)
 	}

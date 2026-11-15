@@ -128,6 +128,12 @@ type Engine struct {
 	// repoMaintenanceMu prevents internal repository writers from racing
 	// evidence object pruning and repacking.
 	repoMaintenanceMu sync.Mutex
+	// vmReceiveMu guards vmReceiveReserved, the bytes concurrent receives of
+	// VM objects have promised to write but not yet freed. Each receive counts
+	// against it so several at once cannot jointly spend past the free-disk
+	// floor the way an independent disk.Free check each would.
+	vmReceiveMu       sync.Mutex
+	vmReceiveReserved int64
 	// evidencePrunes holds each workspace's debounced object prune. mu
 	// guards it and may be taken under fileWriteMu and repoMaintenanceMu,
 	// never the reverse. Close cancels pruneCtx and waits for prunesRunning.
