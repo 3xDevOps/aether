@@ -775,12 +775,12 @@ choices, is moved to the survivor, and those choices get a new `revision`.
 
 An agent can start a **subsession**: a session with a completely fresh context
 on any agent and model you have installed, such as Codex reviewing what Claude
-wrote. A subsession can orchestrate its own subagents. Agents start one for what
-their own subagents cannot give: another agent or model, a separate branch or
-build, long work that would crowd out their context, or an independent review,
-and whenever you ask for subsessions. Quick or tightly coupled work stays with
-the agent. A subsession of the parent's agent starts on the parent's account,
-so a session you launched on an account shared with you delegates on it too;
+wrote. A subsession can orchestrate its own subagents. Agents keep most tasks
+in one session, split across their own subagents or workflows, and start a
+subsession only for a large, independent stream of work that needs its own
+branch or pull request, would run for hours, or needs another agent, model, or
+harness, and whenever you ask for subsessions. A subsession of the parent's
+agent starts on the parent's account, so a session you launched on an account shared with you delegates on it too;
 any other agent, or a session handed to you, starts on your own account. The
 agent can pick your account or any account shared with you whose owner reaches
 the session's workspaces instead. The subsession appears under its parent in the

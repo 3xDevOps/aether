@@ -159,7 +159,8 @@ func childSkill(status *protocol.CoordStatusResult) string {
 	switch {
 	case slices.Contains(status.Capabilities, protocol.MethodChildStart):
 		return "Subsessions: `aether-internal subsession start` runs part of your task as a separate Aether session with a fresh context and its own container and branch, on any installed agent and model, on this session's account for this session's agent or your session owner's own account otherwise; its report reaches your inbox and wakes you. " +
-			"Use one for what your own subagents cannot give: another agent or model, a separate branch or build, long work that would crowd out your context, or an independent review; honor the number of subsessions and agents the user asks for. " +
+			"The majority of straightforward tasks can be done in one session: split parallel or bulky parts across your own subagents or workflows. They share your checkout, start in seconds, and their results land in your working tree. " +
+			"Reserve a subsession for a large, independent stream of work that needs its own branch or pull request, would run for hours, or needs another agent, model, or harness. Don't use subsessions in excess unless there is a need to use them over subagents/singular session workflows. Honor the number of subsessions and agents the user asks for. " +
 			"When to start one, the steps, the task format and the account rules: `aether-internal skill subsessions`. " +
 			"Account for unfinished subsessions before reporting success. A subsession idle or waiting for over an hour, or stopped on an error for a minute, is reported to your inbox: check it, then wake it with `send --to <subsession>` or stop it with `subsession cancel`.\n"
 	case slices.Contains(status.Capabilities, protocol.MethodChildOptions):
@@ -169,19 +170,21 @@ func childSkill(status *protocol.CoordStatusResult) string {
 }
 
 const subsessionTopic = `Subsessions: separate Aether sessions you start, then collect. Each has a fresh
-context and its own container and branch, and appears under this session in the
-dashboard, where people can watch and steer it.
-Start one when a part:
-- needs another agent or model, such as an independent review;
-- needs its own branch, container or build, or would conflict with your changes;
-- is long enough that doing it here would crowd out your context;
-- or when the user asks for subsessions, a number of them or particular agents:
-  do exactly that.
-Do the work yourself, or with your own subagents, when it is quick or one change,
-when its result must land in your working tree right away or the parts share
-files, or when what it needs lives in this conversation rather than in the
-repository. Each subsession costs a full new context and its own setup time;
-more sessions are not faster by default.
+context and its own container, branch and setup time, and appears under this
+session in the dashboard, where people can watch and steer it.
+The majority of straightforward tasks can be done in one session: split
+parallel or bulky parts across your own subagents or workflows. They share your
+checkout, start in seconds, and their results land in your working tree. That
+includes reviews: a fresh subagent that did not write the change is an
+independent reviewer.
+Reserve a subsession for a large, independent stream of work that:
+- needs its own branch or pull request, or would conflict with your changes;
+- would run for hours;
+- or needs another agent, model, or harness, such as a review by another agent.
+Don't use subsessions in excess unless there is a need to use them over
+subagents/singular session workflows. When the user asks for subsessions, a
+number of them or particular agents, do exactly that. A subsession can use its
+own subagents.
 Steps:
 1. Commit what it needs: it starts from your last commit and sees only its task.
 2. aether-internal subsession options --harness <agent>: whether you may start
