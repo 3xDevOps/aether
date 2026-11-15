@@ -37,6 +37,14 @@ type checkState struct {
 	NextAt        time.Time `json:"next_at,omitzero"`
 	// Pointers are the channel pointers' high-water marks.
 	Pointers selfupdate.Marks `json:"pointers,omitempty"`
+	// Channel is the release channel the latest fields were found on.
+	Channel string `json:"channel,omitempty"`
+}
+
+// forget drops the latest fields, which a check on another channel than
+// theirs must not keep.
+func (st *checkState) forget() {
+	st.LatestVersion, st.LatestChannel, st.LatestBuild, st.LatestHotfix, st.NotesURL = "", "", 0, 0, ""
 }
 
 // latest is the newest release the check found, in release order.
@@ -143,9 +151,13 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	s.checkRuns.Add(1)
 	s.reloadState()
 	st := s.check
-	m, marks, err := s.latest(ctx, st.Pointers)
+	m, marks, channel, err := s.latest(ctx, st.Pointers)
 	now := s.cfg.Now().UTC()
 	st.CheckedAt, st.Pointers = now, marks
+	if st.Channel != channel {
+		st.forget()
+		st.Channel = channel
+	}
 	switch {
 	case err == nil:
 		st.LatestVersion, st.NotesURL, st.Error, st.Failures = m.Version, m.NotesURL, "", 0
@@ -164,7 +176,7 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	}
 	if werr := s.persistCheck(st); werr != nil {
 		slog.Warn("serverupdate: persist release check", "error", werr)
-		if s.cfg.Channel != "" && st.Error == "" && !maps.Equal(st.Pointers, s.check.Pointers) {
+		if s.cfg.Releases == nil && st.Error == "" && !maps.Equal(st.Pointers, s.check.Pointers) {
 			// A channel mark only in memory is gone after a restart, so the
 			// check that found it fails, offers nothing new and keeps the
 			// marks on disk.
@@ -221,18 +233,24 @@ func (s *Service) persistCheck(st checkState) error {
 	return nil
 }
 
-// latest asks for the newest release: through Config.Channel's signed
-// pointer when the server follows a channel, else from the release feed's
-// Latest. It returns marks raised to the pointer it accepted.
-func (s *Service) latest(ctx context.Context, marks selfupdate.Marks) (selfupdate.Manifest, selfupdate.Marks, error) {
-	if s.cfg.Channel == "" {
-		m, err := s.releases().Latest(ctx)
-		return m, marks, err
+// latest asks for the newest release: through the signed pointer of the
+// server's release channel, or from Config.Releases when it is set. It
+// returns marks raised to the pointer it accepted and the channel it
+// followed.
+func (s *Service) latest(ctx context.Context, marks selfupdate.Marks) (selfupdate.Manifest, selfupdate.Marks, string, error) {
+	if s.cfg.Releases != nil {
+		m, err := s.cfg.Releases.Latest(ctx)
+		return m, marks, "", err
+	}
+	channel, err := s.chooseChannel(ctx)
+	if err != nil {
+		return selfupdate.Manifest{}, marks, "", err
 	}
 	if s.stateErr != nil {
-		return selfupdate.Manifest{}, marks, s.stateErr
+		return selfupdate.Manifest{}, marks, channel, s.stateErr
 	}
-	return selfupdate.FollowChannel(ctx, s.cfg.Checker.BaseURL(), s.cfg.Channel, marks)
+	m, raised, err := selfupdate.FollowChannel(ctx, s.cfg.Checker.BaseURL(), channel, marks)
+	return m, raised, channel, err
 }
 
 // refresh runs a check now and moves the background schedule after it,

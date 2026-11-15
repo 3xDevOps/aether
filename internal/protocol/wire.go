@@ -347,8 +347,17 @@ type ServerInfoResult struct {
 	DashboardURL string `json:"dashboard_url,omitempty"`
 	// MinClientVersion is the oldest client release the server serves:
 	// its own release, any `git describe` tail removed.
-	MinClientVersion string   `json:"min_client_version"`
-	Features         []string `json:"features,omitempty"`
+	MinClientVersion string `json:"min_client_version"`
+	// Build and Hotfix are the server release's signed build numbers, and
+	// MinClientBuild and MinClientHotfix the oldest client build it serves:
+	// the same. All are 0 on a release from before channels. A client
+	// with a build is gated by build when the server has one, else by
+	// version.
+	Build           int      `json:"build,omitempty"`
+	Hotfix          int      `json:"hotfix,omitempty"`
+	MinClientBuild  int      `json:"min_client_build,omitempty"`
+	MinClientHotfix int      `json:"min_client_hotfix,omitempty"`
+	Features        []string `json:"features,omitempty"`
 }
 
 const FeatureMultiRepo = "multi-repo"

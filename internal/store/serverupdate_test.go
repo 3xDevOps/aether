@@ -1,6 +1,7 @@
 package store
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -91,5 +92,72 @@ func TestSetPendingServerUpdateRejectsEmptyVersion(t *testing.T) {
 	db := openTestDB(t)
 	if err := db.SetPendingServerUpdate(t.Context(), &PendingServerUpdate{RequestedBy: "mem_1"}); err == nil {
 		t.Fatal("expected an error for a pending update with no version")
+	}
+}
+
+// A server that existed before release channels follows beta; a new one
+// has not chosen, so it chooses from the pointers at its first check, and
+// a choice never replaces a channel already set. The host reads and writes
+// the same setting without migrating the database, and reads a database
+// from before channels as beta.
+func TestReleaseChannelMigration(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	fresh := filepath.Join(t.TempDir(), "aether.db")
+	var got string
+	db, err := Open(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err = db.ReleaseChannel(ctx); err != nil || got != "" {
+		t.Fatalf("new database channel = %q, %v; want none chosen", got, err)
+	}
+	if got, err = db.ChooseReleaseChannel(ctx, "stable"); err != nil || got != "stable" {
+		t.Fatalf("choose on a new database = %q, %v; want stable", got, err)
+	}
+	if got, err = db.ChooseReleaseChannel(ctx, "beta"); err != nil || got != "stable" {
+		t.Fatalf("second choice = %q, %v; want stable kept", got, err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f, err := OpenChannelFile(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.SetReleaseChannel(ctx, "nightly"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = f.ReleaseChannel(ctx); err != nil || got != "nightly" {
+		t.Fatalf("host channel = %q, %v; want nightly", got, err)
+	}
+	_ = f.Close()
+
+	for _, schema := range []int{14, releaseChannelSchema - 1} {
+		existing := filepath.Join(t.TempDir(), "aether.db")
+		raw := openLegacy(t, existing, schema)
+		_ = raw.Close()
+		f, err = OpenChannelFile(existing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err = f.ReleaseChannel(ctx); err != nil || got != "beta" {
+			t.Fatalf("host channel of a v%d database = %q, %v; want beta", schema, got, err)
+		}
+		if err = f.SetReleaseChannel(ctx, "stable"); err == nil {
+			t.Fatalf("host changed the channel of a v%d database without migrating it", schema)
+		}
+		_ = f.Close()
+		db, err = Open(existing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err = db.ReleaseChannel(ctx); err != nil || got != "beta" {
+			t.Fatalf("v%d database after migration: channel %q, %v; want beta", schema, got, err)
+		}
+		if got, err = db.ChooseReleaseChannel(ctx, "stable"); err != nil || got != "beta" {
+			t.Fatalf("choice on a migrated v%d database = %q, %v; want beta kept", schema, got, err)
+		}
+		_ = db.Close()
 	}
 }

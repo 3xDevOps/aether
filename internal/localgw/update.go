@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/macinstall"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // applyUpdate is selfupdate.UpdateWithAuthorization behind a variable
@@ -51,18 +52,28 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		return nil, perr
 	}
 	check, perr := g.checkRelease(r, params.Refresh)
+	running := selfupdate.Running()
 	out := struct {
 		CLI selfupdate.Check `json:"cli"`
+		// CLIBuild and CLIHotfix are this CLI's signed build numbers, and
+		// each *Build and *Hotfix below those of the release it follows;
+		// 0 is a release from before channels, or a build not known here.
+		CLIBuild  int `json:"cli_build,omitempty"`
+		CLIHotfix int `json:"cli_hotfix,omitempty"`
 		// CLIError is why the release lookup failed; cli then carries
 		// only this build's own fields.
 		CLIError      string `json:"cli_error,omitempty"`
 		ServerVersion string `json:"server_version"`
+		ServerBuild   int    `json:"server_build,omitempty"`
+		ServerHotfix  int    `json:"server_hotfix,omitempty"`
 		ServerBehind  bool   `json:"server_behind"`
 		ServerError   string `json:"server_error,omitempty"`
 		// ClientUpdateRequired reports that the server refuses this CLI
 		// until it updates to MinClientVersion, which server.info names.
 		ClientUpdateRequired bool   `json:"client_update_required"`
 		MinClientVersion     string `json:"min_client_version"`
+		MinClientBuild       int    `json:"min_client_build,omitempty"`
+		MinClientHotfix      int    `json:"min_client_hotfix,omitempty"`
 		Supervised           bool   `json:"supervised"`
 		// ShellBuildError is why the last desktop-app rebuild failed. The
 		// gateway that ran it exited so the shell could respawn on the new
@@ -81,6 +92,8 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		// refuses to install it, CanSelfUpdate false: the user then
 		// installs it another way.
 		TargetVersion string `json:"target_version"`
+		TargetBuild   int    `json:"target_build,omitempty"`
+		TargetHotfix  int    `json:"target_hotfix,omitempty"`
 		// ServerFirst reports that the linked server is behind the target
 		// and this member, an admin, can update it: update.apply refuses
 		// until `aether server update` has run.
@@ -89,7 +102,7 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		// here: false for a dev build and in a packaged app.
 		CanSelfUpdate bool `json:"can_self_update"`
 	}{
-		CLI: check, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError(),
+		CLI: check, CLIBuild: running.Build, CLIHotfix: running.Hotfix, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError(),
 		CanSelfUpdate: check.CanSelfUpdate && !check.Dev && g.cfg.Packaged == "",
 	}
 	if perr != nil {
@@ -100,7 +113,10 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 	}
 
 	info, err := g.serverInfo(r)
-	out.TargetVersion = updateTarget(check, info.ServerVersion)
+	out.TargetVersion = updateTarget(check, cli.ServerRelease(info))
+	if out.TargetVersion != "" && out.TargetVersion == version.ReleaseCore(info.ServerVersion) {
+		out.TargetBuild, out.TargetHotfix = info.Build, info.Hotfix
+	}
 	if g.serverFirst(r, info, out.TargetVersion) {
 		out.TargetVersion, out.ServerFirst = "", true
 	}
@@ -109,8 +125,10 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		return out, nil
 	}
 	out.ServerVersion = info.ServerVersion
-	out.ServerBehind = selfupdate.Newer(selfupdate.Release{Version: check.Latest}, selfupdate.Release{Version: info.ServerVersion})
+	out.ServerBuild, out.ServerHotfix = info.Build, info.Hotfix
+	out.ServerBehind = selfupdate.Ahead(selfupdate.Release{Version: check.Latest}, cli.ServerRelease(info))
 	out.MinClientVersion = info.MinClientVersion
+	out.MinClientBuild, out.MinClientHotfix = info.MinClientBuild, info.MinClientHotfix
 	out.ClientUpdateRequired = cli.UpgradeRequired(info) != nil
 	return out, nil
 }
@@ -121,7 +139,7 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 // itself. A server that does not answer is not waited for.
 func (g *Gateway) serverFirst(r *http.Request, info protocol.ServerInfoResult, target string) bool {
 	admin := cli.ServerAdmin(info)
-	if target == "" || !cli.ServerFirst(selfupdate.Release{Version: info.ServerVersion}, selfupdate.Release{Version: target}, admin, true) {
+	if target == "" || !cli.ServerFirst(cli.ServerRelease(info), selfupdate.Release{Version: target}, admin, true) {
 		return false
 	}
 	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerUpdateStatus, nil)
@@ -148,11 +166,11 @@ func (g *Gateway) serverInfo(r *http.Request) (protocol.ServerInfoResult, error)
 // ahead of this CLI decides it: the client matches its server rather than
 // whatever GitHub calls latest, which skips prereleases and can lag a
 // publish. Otherwise it is the newest release when that is newer.
-func updateTarget(check selfupdate.Check, serverVersion string) string {
+func updateTarget(check selfupdate.Check, server selfupdate.Release) string {
 	if check.Dev || check.Disabled {
 		return ""
 	}
-	if core := cli.MatchServer(selfupdate.Release{Version: check.Version}, selfupdate.Release{Version: serverVersion}); core != "" {
+	if core := cli.MatchServer(selfupdate.Running(), server); core != "" {
 		return core
 	}
 	if check.UpdateAvailable {
@@ -190,7 +208,7 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	defer g.updating.Store(false)
 	check, lookupErr := g.checkRelease(r, true)
 	info, _ := g.serverInfo(r)
-	target := updateTarget(check, info.ServerVersion)
+	target := updateTarget(check, cli.ServerRelease(info))
 	switch {
 	case lookupErr != nil && target == "":
 		return nil, lookupErr

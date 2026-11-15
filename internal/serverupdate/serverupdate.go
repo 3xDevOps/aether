@@ -96,15 +96,12 @@ type Config struct {
 	// Database is the store's file, snapshotted before a release that
 	// migrates it. Empty skips the snapshot.
 	Database string
-	// Releases is the signed release feed. Nil reads the repository
-	// Checker names, by default the pinned GitHub repository.
+	// Releases, when set, is a fixed signed release feed whose Latest is
+	// the newest release, in place of the channel pointers. Nil follows
+	// the release channel in Store through the signed pointers of the
+	// repository Checker names, by default the pinned GitHub repository.
 	Releases Releases
 	Checker  *selfupdate.Checker
-	// Channel is the release channel the server follows. Set, the newest
-	// release comes from the channel's signed pointer in the repository
-	// Checker names, not from Releases' Latest. Empty follows
-	// /releases/latest.
-	Channel string
 	// Host carries the process-replacing side effects. A zero Host leaves
 	// the service unable to apply anything, which is what keeps every test
 	// binary away from the host's systemd. cmd/aether-server passes
@@ -197,7 +194,7 @@ func New(cfg Config) (*Service, error) {
 	s := &Service{cfg: cfg, kick: make(chan struct{}, 1), run: make(chan struct{}, 1)}
 	check, cerr := loadCheck(cfg.StateDir)
 	switch {
-	case cerr != nil && cfg.Channel != "":
+	case cerr != nil && cfg.Releases == nil:
 		s.stateErr = unreadableState(cerr)
 	case cerr != nil:
 		slog.Warn("serverupdate: release check state unreadable; checking afresh", "error", cerr)
@@ -292,8 +289,9 @@ func (s *Service) Status(ctx context.Context, p protocol.ServerUpdateStatusParam
 	s.checkMu.Lock()
 	check := s.check
 	s.checkMu.Unlock()
-	out.LatestVersion, out.Latest, out.NotesURL, out.CheckError = check.LatestVersion, check.LatestVersion, check.NotesURL, check.Error
-	out.UpdateAvailable = selfupdate.Newer(check.latest(), selfupdate.Running())
+	if err := s.describeChannel(ctx, &out, check); err != nil {
+		return protocol.ServerUpdateStatusResult{}, err
+	}
 	if !check.CheckedAt.IsZero() {
 		out.CheckedAt = check.CheckedAt.UTC().Format(time.RFC3339)
 	}
@@ -433,8 +431,8 @@ func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.S
 // any running check, bounded by ctx, and records a raised mark before it
 // answers.
 func (s *Service) latestRecorded(ctx context.Context) (selfupdate.Manifest, error) {
-	if s.cfg.Channel == "" {
-		return s.releases().Latest(ctx)
+	if s.cfg.Releases != nil {
+		return s.cfg.Releases.Latest(ctx)
 	}
 	select {
 	case s.run <- struct{}{}:
@@ -443,7 +441,7 @@ func (s *Service) latestRecorded(ctx context.Context) (selfupdate.Manifest, erro
 	}
 	defer func() { <-s.run }()
 	s.reloadState()
-	m, marks, err := s.latest(ctx, s.check.Pointers)
+	m, marks, _, err := s.latest(ctx, s.check.Pointers)
 	if err != nil || maps.Equal(marks, s.check.Pointers) {
 		return m, err
 	}
@@ -477,7 +475,7 @@ func (s *Service) resolveTag(ctx context.Context, tag string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !selfupdate.Newer(m.Release(), selfupdate.Running()) {
+	if !Offers(selfupdate.Running(), m.Release()) {
 		return "", fmt.Errorf("%w: aether-server %s is not older than the latest release %s", ErrUpToDate, version.Version, m.Version)
 	}
 	return m.Version, nil

@@ -239,6 +239,8 @@ func checkServerSchema(ctx context.Context, base, tag, self string) error {
 type linkedServer struct {
 	reachable bool
 	version   string
+	build     int
+	hotfix    int
 	admin     bool
 	capable   bool
 	manual    []string
@@ -272,7 +274,7 @@ func probeLinkedServer(ctx context.Context) linkedServer {
 	if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
 		return linkedServer{}
 	}
-	out := linkedServer{reachable: true, version: info.ServerVersion, admin: cli.ServerAdmin(info)}
+	out := linkedServer{reachable: true, version: info.ServerVersion, build: info.Build, hotfix: info.Hotfix, admin: cli.ServerAdmin(info)}
 	var status protocol.ServerUpdateStatusResult
 	if err := c.Call(protocol.MethodServerUpdateStatus, struct{}{}, &status); err == nil {
 		out.capable, out.manual = status.Capable, status.ManualCommands
@@ -288,7 +290,11 @@ func matchServer(server linkedServer) string {
 	if !server.reachable {
 		return ""
 	}
-	return cli.MatchServer(selfupdate.Release{Version: version.Version}, selfupdate.Release{Version: server.version})
+	return cli.MatchServer(selfupdate.Running(), server.release())
+}
+
+func (s linkedServer) release() selfupdate.Release {
+	return selfupdate.Release{Version: s.version, Build: s.build, Hotfix: s.hotfix}
 }
 
 // serverFirst refuses to move this client past a linked server that its
@@ -297,12 +303,12 @@ func matchServer(server linkedServer) string {
 // can and the install goes ahead, as it does when the server is
 // unreachable or already current.
 func serverFirst(w io.Writer, target string, server linkedServer) error {
-	if !server.reachable || !selfupdate.Newer(selfupdate.Release{Version: target}, selfupdate.Release{Version: server.version}) {
+	if !server.reachable || !selfupdate.Ahead(selfupdate.Release{Version: target}, server.release()) {
 		return nil
 	}
 	running := printable(server.version)
 	switch {
-	case cli.ServerFirst(selfupdate.Release{Version: server.version}, selfupdate.Release{Version: target}, server.admin, server.capable):
+	case cli.ServerFirst(server.release(), selfupdate.Release{Version: target}, server.admin, server.capable):
 		return fmt.Errorf("update the server first: aether server update (the server runs %s and this installs %s; --force skips this check)",
 			running, target)
 	case server.admin:

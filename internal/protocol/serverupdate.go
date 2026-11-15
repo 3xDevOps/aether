@@ -9,6 +9,10 @@ const (
 	MethodServerUpdate = "server.update"
 	// MethodServerUpdateStatus reports the server's own update state.
 	MethodServerUpdateStatus = "server.update_status"
+	// MethodServerReleaseChannelSet changes the release channel the
+	// server and its clients follow, or with dry_run reports what the
+	// change would do (super admin only).
+	MethodServerReleaseChannelSet = "server.release_channel_set"
 )
 
 // When values of ServerUpdateParams.
@@ -126,9 +130,25 @@ type ServerUpdateAttempt struct {
 // server's own background release check; Latest repeats LatestVersion for
 // older clients. Phase is where the current or last update is; Error,
 // FromVersion, and ToVersion describe that update.
+//
+// Channel is the release channel the server follows; ChannelPending is
+// set while a new server has not chosen one and follows beta. The latest
+// fields describe the newest release on Channel, and are empty until a
+// check on it has run. ChannelWait reports that the running build is above
+// it: the server stays on its build until the channel reaches it. Builds
+// are the signed (build, hotfix) of each release, 0 for a release from
+// before channels.
 type ServerUpdateStatusResult struct {
 	ServerVersion   string               `json:"server_version"`
+	ServerBuild     int                  `json:"server_build,omitempty"`
+	ServerHotfix    int                  `json:"server_hotfix,omitempty"`
+	Channel         string               `json:"channel,omitempty"`
+	ChannelPending  bool                 `json:"channel_pending,omitempty"`
+	ChannelWait     bool                 `json:"channel_wait,omitempty"`
 	LatestVersion   string               `json:"latest_version,omitempty"`
+	LatestChannel   string               `json:"latest_channel,omitempty"`
+	LatestBuild     int                  `json:"latest_build,omitempty"`
+	LatestHotfix    int                  `json:"latest_hotfix,omitempty"`
 	NotesURL        string               `json:"notes_url,omitempty"`
 	CheckedAt       string               `json:"checked_at,omitempty"`
 	CheckError      string               `json:"check_error,omitempty"`
@@ -144,4 +164,37 @@ type ServerUpdateStatusResult struct {
 	Waiting         *ServerUpdateWaiting `json:"waiting,omitempty"`
 	Last            *ServerUpdateAttempt `json:"last,omitempty"`
 	ManualCommands  []string             `json:"manual_commands,omitempty"`
+}
+
+// ServerReleaseChannelSetParams are the params of
+// server.release_channel_set (super admin only). Channel is "stable",
+// "beta" or "nightly". DryRun reports the result without saving.
+type ServerReleaseChannelSetParams struct {
+	Channel string `json:"channel"`
+	DryRun  bool   `json:"dry_run,omitempty"`
+}
+
+// ReleaseBuild is a release and its place in the release order: the signed
+// channel, build and hotfix, build 0 for a release from before channels.
+type ReleaseBuild struct {
+	Version string `json:"version"`
+	Channel string `json:"channel,omitempty"`
+	Build   int    `json:"build"`
+	Hotfix  int    `json:"hotfix,omitempty"`
+}
+
+// ServerReleaseChannelSetResult is the result of
+// server.release_channel_set: what a confirmation says before the change.
+// Target is the newest release on Channel by its signed pointer, nil when
+// it could not be read, and TargetError then says why. Wait reports that
+// Running is above Target, so the server stays on its build until Channel
+// reaches it. Saved is false for a dry run.
+type ServerReleaseChannelSetResult struct {
+	Channel     string        `json:"channel"`
+	Previous    string        `json:"previous"`
+	Saved       bool          `json:"saved"`
+	Running     ReleaseBuild  `json:"running"`
+	Target      *ReleaseBuild `json:"target,omitempty"`
+	TargetError string        `json:"target_error,omitempty"`
+	Wait        bool          `json:"wait"`
 }

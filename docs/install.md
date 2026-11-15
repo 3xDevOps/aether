@@ -728,6 +728,47 @@ sudo systemctl start aether-server
 The server checks for releases every 6 hours and prompts admins;
 `AETHER_NO_UPDATE_CHECK=1` in `/etc/aether/aether-server.env` turns that off.
 
+### Release channel
+
+A server follows one release channel: `stable`, `beta` (betas and stables)
+or `nightly` (everything). Its release check, `aether server update` and
+`sudo aether-server update` with no `--version` take the newest release on
+that channel, read from the channel's signed pointer
+([Verified releases](#verified-releases)). A server that existed before
+channels follows `beta`. A new server chooses at its first release check:
+`stable` when `stable.json` is published and verifies, `beta` when it is not
+published. Until a check gets either answer, such as on a first boot without
+network, the server follows `beta` and `server.update_status` reports
+`channel_pending`; the next check chooses.
+
+Any member sees the channel in `server.update_status`. Only a super admin
+changes it, from the dashboard or on the host:
+
+```sh
+sudo aether-server update --channel beta          # prints what changes
+sudo aether-server update --channel beta --yes    # saves it
+```
+
+Without `--yes` it prints the confirmation and changes nothing. Saving
+installs nothing; the server checks the new channel at its next release
+check, and `sudo aether-server update` installs what it finds. A server
+never installs a lower build because its channel changed. Leaving `nightly`
+for a channel below its build, it stays on its build until that channel
+reaches it, then updates as usual:
+
+```
+Switch to beta?
+
+This server runs v0.9.0-nightly.12 (build 412). Beta is at v0.9.0-beta.1 (build 380). The server stays on its current build until beta reaches build 412, then updates as usual. It never installs an older build.
+```
+
+Meanwhile `server.update_status` reports `channel_wait`, and `sudo
+aether-server update` prints
+`aether-server v0.9.0-nightly.12 (build 412) stays on its build until beta reaches it: beta is at v0.9.0-beta.1 (build 380)`.
+The same build under the lower channel's tag installs. Each channel keeps
+its own pointer mark in `server-update/check.json`, so switching away and
+back never lets an older pointer in.
+
 ### Update a client
 
 ```sh
@@ -815,10 +856,14 @@ decides. The server refuses a lower build, or the same build on the same
 channel, without `--allow-downgrade`; the same build under another
 channel's tag installs. `aether update` and the dashboard's **Update now**
 never pick a lower build on their own; `aether update --version <tag>`
-installs the release you name. The server does not report its build yet,
-so a client picks its server's release to match, and the server decides
-whether a client is too old, by version; a match to a lower build is
-refused, and `aether update --version <tag>` installs it anyway.
+installs the release you name. `server.info` reports the server's `build`
+and `min_client_build`, and a client sends its build in its SSH banner as
+`v0.9.0-beta.2+b.412` (`+b.412.h.1` for a hotfix). When both carry a
+build, the server refuses a client below its build and the client matches
+its server by build; when either is build 0, the version decides, as
+before. A server from before builds ignores the build in the banner. A
+match to a lower build is refused, and `aether update --version <tag>`
+installs it anyway.
 The manifest also signs image digests ([edge.md](edge.md#verifying-an-image)).
 
 #### Verify a release by hand

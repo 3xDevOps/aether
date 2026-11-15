@@ -165,17 +165,26 @@ func TestMatchServerInstallsTheServersRelease(t *testing.T) {
 	}
 }
 
-// Until the server reports its build, the client matches its server by
-// version, exactly as the server's gate refuses it by version, so a client
-// the gate refuses always has the server's release to move to. Installing
-// it still goes through selfupdate.RefuseDowngrade, which reads the
-// signed build.
-func TestMatchServerFollowsTheServersGateWithABuild(t *testing.T) {
+// The client matches its server by the server's gate order: by build when
+// both report one, else by version, so a client the gate refuses always
+// has the server's release to move to. Installing it still goes through
+// selfupdate.RefuseDowngrade, which reads the signed build.
+func TestMatchServerFollowsTheServersGate(t *testing.T) {
 	oldVersion, oldBuild := version.Version, version.Build
 	version.Version, version.Build = "v0.9.0-beta.2", "412"
 	t.Cleanup(func() { version.Version, version.Build = oldVersion, oldBuild })
-	if got := matchServer(linkedServer{reachable: true, version: "v0.9.0-nightly.10"}); got != "v0.9.0-nightly.10" {
-		t.Fatalf("matchServer = %q, want the server's release", got)
+	for name, tc := range map[string]struct {
+		server linkedServer
+		want   string
+	}{
+		"server without a build, newer by version": {linkedServer{reachable: true, version: "v0.9.0-nightly.10"}, "v0.9.0-nightly.10"},
+		"lower build, newer by version":            {linkedServer{reachable: true, version: "v0.9.0-nightly.10", build: 400}, ""},
+		"higher build":                             {linkedServer{reachable: true, version: "v0.9.0-nightly.14", build: 420}, "v0.9.0-nightly.14"},
+		"same code on another channel":             {linkedServer{reachable: true, version: "v0.9.0-nightly.12", build: 412}, ""},
+	} {
+		if got := matchServer(tc.server); got != tc.want {
+			t.Errorf("%s: matchServer = %q, want %q", name, got, tc.want)
+		}
 	}
 }
 

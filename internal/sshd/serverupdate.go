@@ -14,6 +14,7 @@ import (
 func init() {
 	registerMethod(protocol.MethodServerUpdate, (*Server).serverUpdate)
 	registerMethod(protocol.MethodServerUpdateStatus, (*Server).serverUpdateStatus)
+	registerMethod(protocol.MethodServerReleaseChannelSet, (*Server).serverReleaseChannelSet)
 }
 
 // ServerUpdateService is the control channel's view of the server
@@ -27,6 +28,9 @@ type ServerUpdateService interface {
 	// non-nil, re-executes the server and never returns; the caller runs
 	// it only once the response has reached the client.
 	Update(ctx context.Context, actor domain.MemberID, p protocol.ServerUpdateParams) (protocol.ServerUpdateResult, func(), error)
+	// SetChannel saves the release channel, or with DryRun only reports
+	// what saving it would do.
+	SetChannel(ctx context.Context, p protocol.ServerReleaseChannelSetParams) (protocol.ServerReleaseChannelSetResult, error)
 }
 
 func (s *Server) updates() (ServerUpdateService, *protocol.Error) {
@@ -84,6 +88,31 @@ func (s *Server) serverUpdate(ctx context.Context, member domain.MemberID, param
 		}
 	}
 	return res, nil
+}
+
+// serverReleaseChannelSet changes the release channel, which decides
+// what the server updates to, so it is super admin only like
+// server.update; any member reads the channel in server.update_status.
+func (s *Server) serverReleaseChannelSet(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	if err := s.requireSuperAdmin(ctx, member, protocol.MethodServerReleaseChannelSet); err != nil {
+		return nil, err
+	}
+	svc, perr := s.updates()
+	if perr != nil {
+		return nil, perr
+	}
+	p, perr := decodeParams[protocol.ServerReleaseChannelSetParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	out, err := svc.SetChannel(ctx, p)
+	if errors.Is(err, serverupdate.ErrBadChannel) {
+		return nil, invalidParams(err.Error())
+	}
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return out, nil
 }
 
 // serverUpdateError maps the self-update refusals onto wire codes. An

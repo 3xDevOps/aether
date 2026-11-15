@@ -71,9 +71,12 @@ func channelService(t *testing.T, dir, baseURL, channel string) *Service {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	if err = db.SetReleaseChannel(t.Context(), channel); err != nil {
+		t.Fatal(err)
+	}
 	svc, err := New(Config{
 		Store: db, Bus: newTestBus(t), StateDir: dir, Now: time.Now,
-		Checker: selfupdate.NewChecker(baseURL, time.Hour), Channel: channel,
+		Checker: selfupdate.NewChecker(baseURL, time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)

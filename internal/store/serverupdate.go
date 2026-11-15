@@ -30,6 +30,14 @@ type ServerUpdateStore interface {
 	SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) error
 	// SchemaVersion is the highest migration applied to this database.
 	SchemaVersion(ctx context.Context) (int, error)
+	// ReleaseChannel is the release channel the server follows, "" while
+	// a new server has not chosen one.
+	ReleaseChannel(ctx context.Context) (string, error)
+	// SetReleaseChannel saves the release channel.
+	SetReleaseChannel(ctx context.Context, channel string) error
+	// ChooseReleaseChannel saves channel only while none is chosen, and
+	// returns the channel in effect, so a choice made meanwhile stands.
+	ChooseReleaseChannel(ctx context.Context, channel string) (string, error)
 }
 
 // Outcome values of ServerUpdateAttempt.
@@ -157,6 +165,116 @@ func (d *DB) SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) 
 		return fmt.Errorf("store: write server update attempt: %w", err)
 	}
 	return nil
+}
+
+func (d *DB) ReleaseChannel(ctx context.Context) (string, error) {
+	return readReleaseChannel(ctx, d.db)
+}
+
+func (d *DB) SetReleaseChannel(ctx context.Context, channel string) error {
+	return writeReleaseChannel(ctx, d.db, channel, false)
+}
+
+func (d *DB) ChooseReleaseChannel(ctx context.Context, channel string) (string, error) {
+	if err := writeReleaseChannel(ctx, d.db, channel, true); err != nil {
+		return "", err
+	}
+	return d.ReleaseChannel(ctx)
+}
+
+func readReleaseChannel(ctx context.Context, db *sql.DB) (string, error) {
+	var channel string
+	err := db.QueryRowContext(ctx, `SELECT release_channel FROM server_update_state WHERE id = 1`).Scan(&channel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: read release channel: %w", err)
+	}
+	return channel, nil
+}
+
+// writeReleaseChannel saves channel, or with unset only while none is
+// chosen.
+func writeReleaseChannel(ctx context.Context, db *sql.DB, channel string, unset bool) error {
+	if channel == "" {
+		return errors.New("store: release channel requires a channel")
+	}
+	query := `INSERT INTO server_update_state (id, release_channel) VALUES (1, ?)
+		 ON CONFLICT (id) DO UPDATE SET release_channel = excluded.release_channel`
+	if unset {
+		query += ` WHERE release_channel = ''`
+	}
+	if _, err := db.ExecContext(ctx, query, channel); err != nil {
+		return fmt.Errorf("store: write release channel: %w", err)
+	}
+	return nil
+}
+
+// releaseChannelSchema is the migration that adds release_channel.
+const releaseChannelSchema = 113
+
+// ChannelFile is the release channel of a database opened without
+// migrating it, for `aether-server update` on the host while the server
+// runs; the server reads a change at its next release check.
+type ChannelFile struct {
+	path string
+	db   *sql.DB
+}
+
+// OpenChannelFile opens the release channel of the database at path. A
+// database from before release channels reads as beta, which its
+// migration gives it, and cannot be changed until the server has
+// migrated it.
+func OpenChannelFile(path string) (*ChannelFile, error) {
+	schema, err := ReadSchemaVersion(path)
+	if err != nil {
+		return nil, err
+	}
+	f := &ChannelFile{path: path}
+	if schema < releaseChannelSchema {
+		return f, nil
+	}
+	if f.db, err = sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=busy_timeout(5000)"); err != nil {
+		return nil, fmt.Errorf("store: open %s: %w", path, err)
+	}
+	return f, nil
+}
+
+func (f *ChannelFile) ReleaseChannel(ctx context.Context) (string, error) {
+	if f.db == nil {
+		return "beta", nil
+	}
+	return readReleaseChannel(ctx, f.db)
+}
+
+func (f *ChannelFile) SetReleaseChannel(ctx context.Context, channel string) error {
+	if f.db == nil {
+		return f.predates()
+	}
+	return writeReleaseChannel(ctx, f.db, channel, false)
+}
+
+func (f *ChannelFile) ChooseReleaseChannel(ctx context.Context, channel string) (string, error) {
+	if f.db == nil {
+		return f.ReleaseChannel(ctx)
+	}
+	if err := writeReleaseChannel(ctx, f.db, channel, true); err != nil {
+		return "", err
+	}
+	return f.ReleaseChannel(ctx)
+}
+
+func (f *ChannelFile) predates() error {
+	return fmt.Errorf("store: the database at %s is at a schema from before release channels (below %d); restart aether-server onto this release first", f.path, releaseChannelSchema)
+}
+
+// Close closes the database.
+func (f *ChannelFile) Close() error {
+	if f.db == nil {
+		return nil
+	}
+	return f.db.Close()
 }
 
 func (d *DB) SchemaVersion(ctx context.Context) (int, error) {

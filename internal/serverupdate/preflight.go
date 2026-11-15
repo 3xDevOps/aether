@@ -56,10 +56,6 @@ func feed(releases Releases, baseURL string) Releases {
 	return repository(baseURL)
 }
 
-func (s *Service) releases() Releases {
-	return feed(s.cfg.Releases, s.cfg.Checker.BaseURL())
-}
-
 // Plan is what moving an installation to a release needs: where it lives
 // and where releases come from. The server fills it from its own state;
 // `aether-server update` fills it from the config file.

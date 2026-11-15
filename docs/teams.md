@@ -207,7 +207,7 @@ a role is never wider than the workspaces the member owns or was granted
 
 | Role | Where | In those workspaces |
 | --- | --- | --- |
-| super_admin | Every workspace | Everything an admin does, in all of them. Also members, roles, `aether server update`, run limits, the edge and audit history of everyone |
+| super_admin | Every workspace | Everything an admin does, in all of them. Also members, roles, `aether server update` and the release channel, run limits, the edge and audit history of everyone |
 | admin | Workspaces they own | Everything: settings, budgets, templates, schedules, mirrors, delete, and granting members |
 | admin | Workspaces they were granted | Acts as a collaborator |
 | collaborator (default) | Workspaces they were granted | Launch sessions, push, use templates, set schedules, add memory notes; view, message, steer and stop others' sessions |
