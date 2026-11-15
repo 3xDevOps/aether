@@ -324,6 +324,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [cancelNote, setCancelNote] = useState('')
 
   if (target.state === 'unknown') return null
   if (target.state === 'checking') {
@@ -368,6 +369,18 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const notesUrl = target.state === 'available' ? target.notesUrl : undefined
   const failedError = target.state === 'failed' || target.state === 'rolled_back' ? target.error : ''
   const NoticeIcon = failedError || error ? CircleAlert : ServerCog
+  const scheduleError = target.state === 'available' ? status?.schedule_error : ''
+  const notes = (
+    <>
+      {scheduleError && (
+        <div className="space-y-1">
+          <p className="text-muted">The server could not schedule it by itself:</p>
+          <p className={cn(verbatim, 'text-state-failed')}>{scheduleError}</p>
+        </div>
+      )}
+      {status?.decline_note && <p className="text-muted">{status.decline_note}</p>}
+    </>
+  )
 
   if (!superAdmin) {
     return (
@@ -388,6 +401,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
             </p>
           )}
           {failedError && <p className={cn(verbatim, 'text-state-failed')}>{failedError}</p>}
+          {notes}
         </div>
         {notesUrl && <div className={bannerActions}><NotesLink href={notesUrl} /></div>}
       </div>
@@ -396,10 +410,12 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
 
   const act = async (when: ServerUpdateWhen) => {
     setError(null)
+    setCancelNote('')
     setBusy(true)
     if (when !== 'cancel') clearSettled()
     try {
       const result = await client.serverUpdate(when)
+      if (result.not_declined) setCancelNote(result.not_declined)
       // The feed reaches workspace timelines only, so a server with no workspaces sends nothing else.
       applyProgress({
         phase: result.status,
@@ -466,6 +482,8 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
         )}
         {failedError && <p className={cn(verbatim, 'text-state-failed')}>{failedError}</p>}
         {error && <p className={cn(verbatim, 'text-state-failed')}>{error}</p>}
+        {cancelNote && <p className="text-muted">The update was cancelled. The server may schedule it again by itself: {cancelNote}</p>}
+        {notes}
         {(!capable || target.state === 'failed' || target.state === 'rolled_back') && (
           <>
             <p className="text-muted">

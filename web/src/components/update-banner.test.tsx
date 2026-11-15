@@ -268,6 +268,27 @@ describe('the server update banner', () => {
     expect(await screen.findByText('Scheduled by the server, applies when no session is active.')).toBeTruthy()
   })
 
+  test('shows why the server could not schedule an update itself, and the decline note, unchanged', async () => {
+    const reason = 'preflight: release v1.3.0 needs store schema 120, this database is at 121'
+    const client = seedServer({
+      status: serverUpdateStatus({ update_available: true, schedule_error: reason, decline_note: 'the cancelled build could not be recorded: disk full' }),
+    })
+    render(<UpdateHost client={client} />)
+    expect(await screen.findByText(reason)).toBeTruthy()
+    expect(screen.getByText('The server could not schedule it by itself:')).toBeTruthy()
+    expect(screen.getByText('the cancelled build could not be recorded: disk full')).toBeTruthy()
+  })
+
+  test('a cancel that could not record the build as declined says so', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({ update_available: true, pending: { version: 'v1.3.0', requested_by: alice.id, requested_at: '2026-08-14T10:06:00Z' } }),
+    })
+    client.serverUpdate = vi.fn(async () => ({ status: 'cancelled' as const, not_declined: 'store: database is locked' }))
+    render(<UpdateHost client={client} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText(/The update was cancelled\. The server may schedule it again by itself: store: database is locked/)).toBeTruthy()
+  })
+
   test('Update when idle schedules, and the banner then offers Cancel', async () => {
     const client = seedServer()
     render(<UpdateHost client={client} />)

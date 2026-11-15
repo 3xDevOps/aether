@@ -2016,6 +2016,10 @@ export interface ServerUpdateStatus {
   channel_pending?: boolean
   /** The running build is above the channel's: the server stays on it until the channel reaches it. */
   channel_wait?: boolean
+  /** Why the server last failed to schedule the newest release itself, such as its preflight. */
+  schedule_error?: string
+  /** The last cancel's `not_declined`: the build could not be recorded as declined. */
+  decline_note?: string
   /** The newest release of each channel whose signed pointer the last check verified. Absent from an older server, and after a restart until the first check. */
   channel_pointers?: Partial<Record<ReleaseChannel, ChannelPointer>>
   /** The newest release on `channel`; empty until a check on it has run. */
@@ -2117,6 +2121,8 @@ export interface ServerUpdateResult {
   version?: string
   requested_by?: string
   requested_at?: string
+  /** On a cancel: the release's build could not be recorded as declined, so the server may schedule it again by itself. */
+  not_declined?: string
 }
 
 /** How far one update has got. `restarting` is the last frame the socket
