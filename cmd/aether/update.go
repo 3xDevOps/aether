@@ -79,6 +79,9 @@ func runUpdate(args []string) error {
 		server = probeLinkedServer(ctx)
 	}
 	if match := matchServer(server); *tag == "" && match != "" {
+		if err := selfupdate.RefuseDowngrade(ctx, base, match); err != nil {
+			return err
+		}
 		*tag = match
 		fmt.Printf("installing %s to match the server\n", *tag)
 	} else if *tag == "" {
@@ -285,7 +288,7 @@ func matchServer(server linkedServer) string {
 	if !server.reachable {
 		return ""
 	}
-	return cli.MatchServer(selfupdate.Release{Version: version.Version}, selfupdate.Release{Version: server.version})
+	return cli.MatchServer(selfupdate.Running(), selfupdate.Release{Version: server.version})
 }
 
 // serverFirst refuses to move this client past a linked server that its

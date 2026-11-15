@@ -166,3 +166,78 @@ func TestCheckOffersABetaPromotedFromALaterNightly(t *testing.T) {
 		t.Fatalf("check = %+v, want v0.9.0-beta.2 (build 412) offered over v0.9.0-nightly.10 (build 400)", got)
 	}
 }
+
+func TestTagChannelTakesOnlyTheExactForms(t *testing.T) {
+	for tag, want := range map[string]string{
+		"v0.9.0":                       ChannelStable,
+		"v0.9.0-beta.2":                ChannelBeta,
+		"v0.9.0-nightly.10":            ChannelNightly,
+		"v1.0.0-rc.1-beta.2":           "",
+		"v1.0.0-beta.1-nightly.2":      "",
+		"v0.9.0-beta.2.1":              "",
+		"v0.9.0-beta.0":                "",
+		"v0.9.0-beta":                  "",
+		"v0.9.0-alpha.1":               "",
+		"v0.9.0-nightly.10-3-gabc1234": "",
+	} {
+		if got := TagChannel(tag); got != want {
+			t.Errorf("TagChannel(%q) = %q, want %q", tag, got, want)
+		}
+	}
+	m := channelManifest("v1.0.0-rc.1-beta.2", ChannelBeta, 412, 0)
+	data, sig := signWith(t, m, testKey)
+	if _, err := VerifyManifest(data, sig, m.Version); err == nil || !strings.Contains(err.Error(), "a tag of no channel") {
+		t.Fatalf("beta on %s: err = %v, want it refused", m.Version, err)
+	}
+}
+
+// Shell tooling reading the same signed bytes with jq must never see
+// another channel than the Go verifier does.
+func TestVerifyManifestRefusesRepeatedOrMiscasedKeys(t *testing.T) {
+	base, _ := signWith(t, channelManifest("v0.9.0-beta.2", ChannelBeta, 412, 0), testKey)
+	for insert, want := range map[string]string{
+		`"Channel": "nightly",`: `key "Channel" is not spelled "channel"`,
+		`"channel": "nightly",`: `key "channel" repeats`,
+		`"BUILD": 999,`:         `key "BUILD" is not spelled "build"`,
+	} {
+		data := bytes.Replace(base, []byte(`"schema": 1,`), []byte(`"schema": 1, `+insert), 1)
+		sig := []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(testKey, data)))
+		if _, err := VerifyManifest(data, sig, "v0.9.0-beta.2"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("with %s: err = %v, want %q", insert, err, want)
+		}
+	}
+}
+
+func TestRunningRefusesABuildThatIsNotANumber(t *testing.T) {
+	for _, bad := range []string{"", "4x", "-1", "99999999999999999999"} {
+		old := version.Build
+		version.Build = bad
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("version.Build=%q: Running did not panic", bad)
+				}
+			}()
+			Running()
+		}()
+		version.Build = old
+	}
+}
+
+func TestRefuseDowngradeReadsTheSignedBuild(t *testing.T) {
+	setVersion(t, "v0.9.0-beta.2", "abc1234")
+	oldBuild := version.Build
+	version.Build = "412"
+	t.Cleanup(func() { version.Build = oldBuild })
+	f, srv := newFakeRelease(t, "v0.9.0-beta.2", testAssets)
+	f.builds = map[string]Release{
+		"v0.9.0-nightly.10": {Channel: ChannelNightly, Build: 400},
+		"v0.9.0-nightly.13": {Channel: ChannelNightly, Build: 413},
+	}
+	if err := RefuseDowngrade(t.Context(), srv.URL, "v0.9.0-nightly.10"); err == nil || !strings.Contains(err.Error(), "v0.9.0-nightly.10 (build 400) is older than the running v0.9.0-beta.2 (build 412)") {
+		t.Fatalf("err = %v, want the lower build refused", err)
+	}
+	if err := RefuseDowngrade(t.Context(), srv.URL, "v0.9.0-nightly.13"); err != nil {
+		t.Fatalf("a higher build: %v", err)
+	}
+}

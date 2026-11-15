@@ -1,6 +1,7 @@
 package localgw
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,8 +20,14 @@ import (
 // because it replaces the running executable, which a test process must
 // never do to itself. The authorized variant because a dashboard click is
 // a GUI action: on macOS a binary this user cannot write goes through the
-// system's administrator dialog instead of a refusal.
-var applyUpdate = selfupdate.UpdateWithAuthorization
+// system's administrator dialog instead of a refusal. The gateway always
+// picks the target itself, so a lower build is refused.
+var applyUpdate = func(ctx context.Context, baseURL, tag string) ([]string, error) {
+	if err := selfupdate.RefuseDowngrade(ctx, baseURL, tag); err != nil {
+		return nil, err
+	}
+	return selfupdate.UpdateWithAuthorization(ctx, baseURL, tag)
+}
 
 // probeAccess is selfupdate.Probe behind a variable so tests can describe
 // a binary that is not the test process.
@@ -145,7 +152,7 @@ func updateTarget(check selfupdate.Check, serverVersion string) string {
 	if check.Dev || check.Disabled {
 		return ""
 	}
-	if core := cli.MatchServer(selfupdate.Release{Version: check.Version}, selfupdate.Release{Version: serverVersion}); core != "" {
+	if core := cli.MatchServer(selfupdate.Running(), selfupdate.Release{Version: serverVersion}); core != "" {
 		return core
 	}
 	if check.UpdateAvailable {

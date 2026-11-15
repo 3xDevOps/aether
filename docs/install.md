@@ -806,13 +806,18 @@ before signing have no manifest, so install those with the install script.
 
 The manifest also signs the release's `channel` (`nightly`, `beta` or
 `stable`), which must match the tag's form (`-nightly.N`, `-beta.N`, none),
-and its `build` and `hotfix` numbers. A release is newer than another when
-its `(build, hotfix)` is higher, whatever the tags say: `v0.9.0-beta.2`
-promoted from build 412 is newer than `v0.9.0-nightly.10` at build 400.
-Releases from before channels carry neither and count as build 0; between
-two of those, the version decides. The server refuses an older build
-without `--allow-downgrade`, and the same build on the same channel; the
-same build under another channel's tag installs.
+and its `build` and `hotfix` numbers. Releases from before channels carry
+none of the three and count as build 0. Release checks, `aether server
+update` and `sudo aether-server update` order a release by its `(build,
+hotfix)`, whatever the tags say: `v0.9.0-beta.2` at build 412 is newer than
+`v0.9.0-nightly.10` at build 400. Between two build-0 releases, the version
+decides. The server refuses a lower build, or the same build on the same
+channel, without `--allow-downgrade`; the same build under another
+channel's tag installs. `aether update` and the dashboard's **Update now**
+never pick a lower build on their own; `aether update --version <tag>`
+installs the release you name. The server does not report its build yet,
+so a client with a build does not install its server's release to match
+it, and the server decides whether a client is too old by version.
 The manifest also signs image digests ([edge.md](edge.md#verifying-an-image)).
 
 #### Verify a release by hand
