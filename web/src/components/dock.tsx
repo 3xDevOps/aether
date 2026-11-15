@@ -115,7 +115,6 @@ export function Dock({
           )
   const min = Math.min(requiredMinimum, max)
   const currentHeight = Math.min(max, Math.max(min, height))
-  // A finger cannot drag the edge, so touch toggles between half and full height.
   const halfHeight = Math.min(max, Math.max(min, Math.round(max / 2)))
   const full = currentHeight >= max
   const index = Math.max(
@@ -254,10 +253,16 @@ export function Dock({
           className={cn(
             focusRing,
             // Without `touch-none` the browser claims a pen or trackpad drag
-            // as a pan and cancels the pointer stream this listens to.
-            'absolute inset-x-0 -top-px z-10 h-1 cursor-row-resize touch-none bg-transparent transition-colors hover:bg-accent/20 focus-visible:bg-accent/20',
+            // as a pan and cancels the pointer stream this listens to. The
+            // strip ends at the dock edge so it cannot cover header controls.
+            'group absolute inset-x-0 -top-1.5 z-10 flex h-1.5 cursor-row-resize touch-none items-center justify-center bg-transparent transition-colors hover:bg-accent/20 focus-visible:bg-accent/20',
           )}
-        />
+        >
+          <span
+            aria-hidden="true"
+            className="h-1 w-8 rounded-full bg-icon-faint/70 transition-colors group-hover:bg-accent group-focus-visible:bg-accent"
+          />
+        </div>
       )}
       <div
         ref={headerRef}
@@ -379,7 +384,7 @@ export function Dock({
             {actions}
           </div>
         )}
-        {!collapsed && coarse && !fill && (
+        {!collapsed && !fill && (
           <Button
             className="max-[640px]:order-2"
             type="button"
@@ -387,8 +392,8 @@ export function Dock({
             size="icon"
             label={
               full
-                ? 'Shrink terminal to half the screen'
-                : 'Expand terminal to the full screen'
+                ? 'Shrink terminal to half its available height'
+                : 'Expand terminal to its available height'
             }
             aria-controls={dockID}
             onClick={() => onHeightChange(full ? halfHeight : max)}

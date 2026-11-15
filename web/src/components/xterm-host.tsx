@@ -542,6 +542,7 @@ export function useXterm({
       scrollback: Math.max(0, Math.floor(scrollback)),
       scrollOnEraseInDisplay: true,
       cursorBlink: false,
+      altClickMovesCursor: false,
       linkHandler: { activate: (_event, uri) => openLink(uri) },
     })
     const disposeResponder = installServerResponder(

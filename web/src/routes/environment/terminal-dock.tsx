@@ -263,8 +263,10 @@ export function TerminalDock({
     setCollapsed(false)
   }, [openOnMount, setCollapsed])
 
+  const selectedOnMount = useRef(false)
   useEffect(() => {
-    if (!openOnMount) return
+    if (!openOnMount || selectedOnMount.current) return
+    selectedOnMount.current = true
     if (!dock.tabs.includes('main')) {
       openTab()
     } else if (dock.activeTab !== 'main') {

@@ -81,6 +81,17 @@ describe('xterm links', () => {
   })
 })
 
+describe('xterm input', () => {
+  it('keeps Alt-click from moving the shell cursor', async () => {
+    let ready: Terminal | null = null
+    const view = render(<Probe onReady={(terminal) => (ready = terminal)} />)
+    await waitFor(() => expect(ready).not.toBeNull())
+
+    expect((ready as Terminal | null)?.options.altClickMovesCursor).toBe(false)
+    view.unmount()
+  })
+})
+
 describe('server-owned protocol responses', () => {
   it('suppresses actual parser queries while preserving mixed color setters, Unicode and real input', async () => {
     let ready: Terminal | null = null

@@ -1,10 +1,13 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AgentSetup } from '@/components/agents/agent-setup'
 import { ModeComparison } from '@/components/agents/mode-comparison'
 import type { Api } from '@/lib/api'
 import type { AgentInfo, GatewayCapabilities } from '@/lib/types'
 import { useStore } from '@/store'
 import { agentInfo, fakeApi } from '@/test/fixtures'
+
+const { terminalDock } = vi.hoisted(() => ({ terminalDock: vi.fn(() => null) }))
+vi.mock('@/routes/environment/terminal-dock', () => ({ TerminalDock: terminalDock }))
 
 const caps: GatewayCapabilities = { gateway: 'local', methods: ['*'], ws: ['events', 'attach'] }
 
@@ -21,6 +24,7 @@ const codex = agentInfo({
 const custom = agentInfo({ name: 'mycli', display_name: 'mycli', source: 'member', glyph: 'custom', enhanced: 'none', install_script: undefined })
 
 beforeEach(() => {
+  terminalDock.mockClear()
   useStore.setState(useStore.getInitialState(), true)
   useStore.setState({ capabilities: caps })
 })
@@ -223,5 +227,40 @@ describe('agent setup', () => {
     setUp(claude)
     expect(screen.queryByRole('button', { name: 'Install Claude Code' })).toBeNull()
     expect(screen.getByText(/aether terminal/).textContent).toContain('curl -fsSL https://claude.ai/install.sh | bash')
+  })
+})
+
+
+describe('copying setup commands', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it.each([
+    ['login', codex, 'Copy login command', 'codex login --device-auth', ['*']],
+    ['install', { ...codex, installed: false, enhanced_installed: false }, 'Copy install command', codex.install_script!, []],
+  ] as const)('copies the exact %s command without submitting terminal input', async (_kind, agent, label, command, methods) => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    useStore.setState({ capabilities: { ...caps, methods: [...methods], ws: ['terminal'] } })
+    setUp(agent)
+    expect(writeText).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: label }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(command))
+    expect(terminalDock).toHaveBeenCalled()
+    for (const [props] of terminalDock.mock.calls as unknown as [{ initialLine?: string; runCommand?: unknown }][]) {
+      expect(props.initialLine).toBeUndefined()
+      expect(props.runCommand).toBeUndefined()
+    }
+  })
+
+  it('selects the displayed login command when clipboard access fails', async () => {
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new Error('Clipboard denied')) } })
+    useStore.setState({ capabilities: { ...caps, ws: ['terminal'] } })
+    setUp(codex)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy login command' }))
+
+    await waitFor(() => expect(window.getSelection()?.toString()).toBe('codex login --device-auth'))
   })
 })
