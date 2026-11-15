@@ -430,7 +430,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
                 event.stopPropagation()
                 subsessions.onToggle()
               }}
-              className="size-4 coarse:size-11 -mr-2"
+              className="-mr-2"
             >
               <ChevronRight className={cn(chevronTurn, subsessions.expanded && 'rotate-90')} />
             </Button>
