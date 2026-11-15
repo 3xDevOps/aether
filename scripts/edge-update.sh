@@ -85,6 +85,37 @@ done
 
 command -v jq >/dev/null || die "jq not found; install it (docs/edge.md, \"Installing the updater\")"
 
+# Exits 0 when release $1 sorts before $2 by SemVer precedence. Only a
+# running image from before release channels orders this way; every other
+# order comes from its release-check.
+version_lt() {
+	awk -v a="$1" -v b="$2" '
+	function ident(x, y,   xn, yn) {
+		xn = (x ~ /^[0-9]+$/); yn = (y ~ /^[0-9]+$/)
+		if (xn && yn) return (x + 0 < y + 0) ? -1 : (x + 0 > y + 0)
+		if (xn) return -1
+		if (yn) return 1
+		return (x < y) ? -1 : (x > y)
+	}
+	function vcmp(a, b,   i, n, m, c, ap, bp, ac, bc, ai, bi) {
+		sub(/^v/, "", a); sub(/^v/, "", b); sub(/\+.*/, "", a); sub(/\+.*/, "", b)
+		ap = ""; bp = ""
+		if ((i = index(a, "-")) > 0) { ap = substr(a, i + 1); a = substr(a, 1, i - 1) }
+		if ((i = index(b, "-")) > 0) { bp = substr(b, i + 1); b = substr(b, 1, i - 1) }
+		split(a, ac, "."); split(b, bc, ".")
+		for (i = 1; i <= 3; i++)
+			if (ac[i] + 0 != bc[i] + 0) return (ac[i] + 0 < bc[i] + 0) ? -1 : 1
+		if (ap == bp) return 0
+		if (ap == "") return 1
+		if (bp == "") return -1
+		n = split(ap, ai, "."); m = split(bp, bi, ".")
+		for (i = 1; i <= n && i <= m; i++)
+			if ((c = ident(ai[i], bi[i])) != 0) return c
+		return (n < m) ? -1 : (n > m)
+	}
+	BEGIN { exit !(vcmp(a, b) < 0) }'
+}
+
 # Single-quotes $1 for the state file, which this script sources.
 quote() {
 	printf "'%s'" "$(printf '%s' "$1" | tr '\n' ' ' | sed "s/'/'\\\\''/g")"
@@ -193,30 +224,23 @@ verify_promotion() {
 	return 1
 }
 
-is_number() {
-	case "$1" in
-	'' | *[!0-9]*) return 1 ;;
-	esac
+# Exits 0 when version --json $1 has no build: the image predates release
+# channels, and its release-check takes only --tag, --digest and --from.
+predates_channels() {
+	printf '%s\n' "$1" | jq -e '.build == null and .hotfix == null' >/dev/null
 }
 
-# Runs release-check from image $1 for release $2 as digest $3, upgrading
-# from release $4, whose version --json is $5. It refuses a release this
-# host's channel does not take or that is not newer by build order. An
-# image from before release channels prints no build, takes only --tag,
-# --digest and --from, orders by version and holds a downgrade (exit 3)
-# rather than refusing it.
+# Runs release-check from image $1, release $4, whose version --json is
+# $5, for release $2 as digest $3. It refuses a release this host's
+# channel does not take or that is not newer by the build numbers both
+# signed manifests carry.
 release_check() {
-	b="$(printf '%s\n' "$5" | jq -r .build)" && h="$(printf '%s\n' "$5" | jq -r .hotfix)" || return 1
-	if [ "$b" = null ] && [ "$h" = null ]; then
+	if predates_channels "$5"; then
 		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json
-		return
+	else
+		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json \
+			--channel "$channel" --from-digest "$1"
 	fi
-	if ! is_number "$b" || ! is_number "$h"; then
-		say "$image@$1 prints build '$b' and hotfix '$h' in version --json, not two whole numbers"
-		return 1
-	fi
-	docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json \
-		--channel "$channel" --from-build "$b" --from-hotfix "$h"
 }
 
 # Verifies the running digest $1 as an update verifies a new one, so that
@@ -512,6 +536,10 @@ update() {
 	[ -n "$new_version" ] || die "$image@$new has no org.opencontainers.image.version label"
 	[ -n "$from_json" ] || from_json="$(version_json "$cur")" || exit 1
 	cur_version="$(printf '%s\n' "$from_json" | jq -r .version)"
+	if predates_channels "$from_json"; then
+		version_lt "$cur_version" "$new_version" ||
+			die "refusing $new_version ($new) on $channel: not newer than the running $cur_version"
+	fi
 	if [ "$channel" = latest ]; then
 		say "latest is not a promoted channel; trusting the release signature alone"
 	else

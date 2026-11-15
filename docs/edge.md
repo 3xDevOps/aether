@@ -774,17 +774,19 @@ aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is no
 
 Before you run a new digest, ask the edge you already run whether a release signed
 it ([Verified releases](install.md#verified-releases)) and whether the upgrade
-needs manual steps. `--from-build` and `--from-hotfix` are the `build` and
-`hotfix` that `docker exec <container> aether-edge version --json` prints, and
-`--channel` is the channel the host follows. It exits 1 when the release is
-not newer by build number or the channel does not take it (`stable` takes
+needs manual steps. `--from-digest` is the digest the edge runs: the build
+number of the running release comes from `--from`'s signed manifest, which must
+name that digest, and the binary's own build must match it. `--channel` is the
+channel the host follows. It exits 1 when either manifest cannot be fetched and
+verified, when the release is not newer by build number, or when the channel
+does not take it (`stable` takes
 stable releases, `beta` beta and stable, `nightly` all three, `latest` all but nightly),
 0 to go ahead, or 3 with each `aether-edge: hold: ...` reason on stderr:
 
 ```sh
 docker exec <container> aether-edge release-check \
   --tag <release-tag> --digest sha256:<digest> --from <running-tag> \
-  --from-build <build> --from-hotfix <hotfix> --channel stable
+  --from-digest sha256:<running-digest> --channel stable
 ```
 
 A digest that `nightly`, `beta` or `stable` names also carries a promotion
@@ -1040,8 +1042,10 @@ check first, run `docker run --rm -v <data>:/var/lib/aether-edge <old image> sch
 updates an edge that runs in Docker Compose to the newest release on a channel:
 `nightly`, `beta`, `stable` (the default) or `latest`.
 A systemd timer runs it daily at 04:00 UTC with up to an hour's random delay. It
-never moves to a lower build number, whatever the version says, and never runs a
-digest that a signed release does not name.
+never moves to a lower build number than the running release's signed manifest
+carries, whatever the version says (an edge whose image predates release
+channels compares versions instead), and never runs a digest that a signed
+release does not name.
 Before it switches, it checks with `cosign` that `promote-edge.yml` on `main`
 promoted the digest (except on `latest`), runs `aether-edge release-check` from
 the running image, and backs the database up to
