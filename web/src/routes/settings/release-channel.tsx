@@ -13,8 +13,7 @@ import {
 import { RadioPills, RadioPillsItem } from '@/components/ui/radio-pills'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { ReleaseChannel, ServerReleaseChannelSet } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import type { ChannelPointer, ReleaseChannel, ServerReleaseChannelSet } from '@/lib/types'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { useCapability, useIsSuperAdmin } from '@/store/hooks'
@@ -95,8 +94,7 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
     }
   }
 
-  const promotable = canSet && status.latest_channel === current && (current === 'nightly' || current === 'beta') && status.latest_version
-  const newest = status.latest_build ? `${status.latest_version} (build ${status.latest_build})` : status.latest_version
+  const promotable = canSet && (current === 'nightly' || current === 'beta')
 
   return (
     <SettingsSection title="Release channel" scope={canSet ? 'Server · super admin' : 'Server'}>
@@ -123,18 +121,11 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
         {notice && <p role="status" className="text-ui-sm text-muted">{notice}</p>}
         {error && <p role="alert" className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 text-state-failed select-text">{error}</p>}
       </SettingRow>
-      {promotable && (
-        <SettingRow
-          id="release-promote"
-          label="Promote"
-          help={`Newest ${current} build: ${newest}. The button opens the Promote workflow on GitHub; its Run button promotes.`}
-          control={
-            <a className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }))} href={promoteURL} target="_blank" rel="noreferrer">
-              Promote
-            </a>
-          }
-        />
-      )}
+      {promotable &&
+        (['beta', 'nightly'] as const).map((c) => {
+          const pointer = status.channel_pointers?.[c]
+          return pointer && <PromoteRow key={c} channel={c} pointer={pointer} />
+        })}
       <Dialog open={asking !== null} onOpenChange={(open) => !open && setAsking(null)}>
         <DialogContent>
           {asking?.kind === 'nightly' && <NightlyConfirm />}
@@ -155,6 +146,31 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
         </DialogContent>
       </Dialog>
     </SettingsSection>
+  )
+}
+
+function daysAgo(iso: string, now = Date.now()): string {
+  const at = Date.parse(iso)
+  if (Number.isNaN(at)) return ''
+  const days = Math.floor((now - at) / 86_400_000)
+  if (days < 1) return 'today'
+  return days === 1 ? '1 day ago' : `${days} days ago`
+}
+
+function PromoteRow({ channel, pointer }: { channel: 'beta' | 'nightly'; pointer: ChannelPointer }) {
+  const age = daysAgo(pointer.published_at)
+  const build = pointer.build ? ` (build ${pointer.build})` : ''
+  return (
+    <SettingRow
+      id={`release-promote-${channel}`}
+      label={`Newest ${channel}`}
+      help={`${pointer.version}${build}${age ? `, cut ${age}` : ''}. The button opens the Promote workflow on GitHub; its Run button promotes.`}
+      control={
+        <a className={buttonVariants({ variant: 'secondary', size: 'sm' })} href={promoteURL} target="_blank" rel="noreferrer" aria-label={`Promote the newest ${channel}`}>
+          Promote
+        </a>
+      }
+    />
   )
 }
 

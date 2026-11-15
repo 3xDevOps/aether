@@ -7454,12 +7454,13 @@ from a nightly is not older than that nightly.
   `target_error` verbatim. Anything else saves at once. Saving installs
   nothing; a pending update the new channel does not take is cancelled and
   the section says so. A server error shows as it came. On a nightly or beta
-  server a super admin also sees the newest release on that channel
-  (`latest_*` in `server.update_status`) with a **Promote** link to
+  server a super admin also sees the newest beta, with the days since it
+  was cut, and the newest nightly, from `channel_pointers` in
+  `server.update_status` (each present only when the last check verified
+  that pointer, and absent after a restart until the first check). Each has
+  a **Promote** link to
   `https://github.com/3xDevOps/aether/actions/workflows/promote.yml`. The
-  link only opens that page; its Run button promotes. The status carries no
-  pointer age and nothing about the other channels, so the section shows
-  neither.
+  link only opens that page; its Run button promotes.
 - **Channel wait.** While `server.update_status` reports `channel_wait`, the
   server row says the server stays on its build, with both builds, until the
   channel reaches it, instead of "up to date" or an offer. An update the

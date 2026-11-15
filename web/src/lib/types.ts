@@ -2016,6 +2016,8 @@ export interface ServerUpdateStatus {
   channel_pending?: boolean
   /** The running build is above the channel's: the server stays on it until the channel reaches it. */
   channel_wait?: boolean
+  /** The newest release of each channel whose signed pointer the last check verified. Absent from an older server, and after a restart until the first check. */
+  channel_pointers?: Partial<Record<ReleaseChannel, ChannelPointer>>
   /** The newest release on `channel`; empty until a check on it has run. */
   latest_channel?: string
   latest_build?: number
@@ -2042,6 +2044,15 @@ export interface ServerUpdateStatus {
   error?: string
   from_version?: string
   to_version?: string
+}
+
+/** A verified channel pointer: the release it names and when it was signed. */
+export interface ChannelPointer {
+  version: string
+  build?: number
+  hotfix?: number
+  /** RFC3339 UTC. */
+  published_at: string
 }
 
 export type ReleaseChannel = 'stable' | 'beta' | 'nightly'

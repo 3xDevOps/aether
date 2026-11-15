@@ -91,26 +91,47 @@ describe('release channel section', () => {
     expect(container.textContent).toBe('')
   })
 
-  it('offers Promote on a nightly server as a link that only opens GitHub', () => {
-    seed({ channel: 'nightly', latest_version: 'v0.9.0-nightly.13', latest_channel: 'nightly', latest_build: 420 })
-    const client = fakeApi()
-    render(<ReleaseChannelSection client={client} />)
-    const link = screen.getByRole('link', { name: 'Promote' })
-    expect(link.getAttribute('href')).toBe(promoteURL)
-    expect(link.getAttribute('target')).toBe('_blank')
-    expect(screen.getByText(/v0\.9\.0-nightly\.13 \(build 420\)/)).toBeDefined()
-    fireEvent.click(link)
-    expect(client.serverReleaseChannelSet).not.toHaveBeenCalled()
+  it('offers Promote for the newest beta and nightly, with days since the beta was cut, as links that only open GitHub', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-20T12:00:00Z') })
+    try {
+      seed({
+        channel: 'nightly',
+        channel_pointers: {
+          nightly: { version: 'v0.9.0-nightly.13', build: 420, published_at: '2026-11-20T08:00:00Z' },
+          beta: { version: 'v0.9.0-beta.1', build: 380, published_at: '2026-11-15T08:00:00Z' },
+        },
+      })
+      const client = fakeApi()
+      render(<ReleaseChannelSection client={client} />)
+      const beta = screen.getByRole('link', { name: 'Promote the newest beta' })
+      const nightly = screen.getByRole('link', { name: 'Promote the newest nightly' })
+      expect(beta.getAttribute('href')).toBe(promoteURL)
+      expect(nightly.getAttribute('target')).toBe('_blank')
+      expect(screen.getByText(/v0\.9\.0-beta\.1 \(build 380\), cut 5 days ago/)).toBeDefined()
+      expect(screen.getByText(/v0\.9\.0-nightly\.13 \(build 420\), cut today/)).toBeDefined()
+      fireEvent.click(beta)
+      expect(client.serverReleaseChannelSet).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('has no Promote on stable or for a member', () => {
-    seed({ channel: 'stable', latest_version: 'v0.9.0', latest_channel: 'stable' })
-    const { unmount } = render(<ReleaseChannelSection client={fakeApi()} />)
-    expect(screen.queryByRole('link', { name: 'Promote' })).toBeNull()
-    unmount()
-    seed({ channel: 'beta', latest_version: 'v0.9.0-beta.2', latest_channel: 'beta' }, bob)
+  it('hides a Promote row whose pointer the server did not verify, and all of them on stable or for a member', () => {
+    const pointers = {
+      nightly: { version: 'v0.9.0-nightly.13', published_at: '2026-11-20T08:00:00Z' },
+      beta: { version: 'v0.9.0-beta.1', published_at: '2026-11-15T08:00:00Z' },
+    }
+    seed({ channel: 'beta', channel_pointers: { beta: pointers.beta } })
+    const first = render(<ReleaseChannelSection client={fakeApi()} />)
+    expect(screen.getAllByRole('link')).toHaveLength(1)
+    first.unmount()
+    seed({ channel: 'stable', channel_pointers: pointers })
+    const second = render(<ReleaseChannelSection client={fakeApi()} />)
+    expect(screen.queryByRole('link')).toBeNull()
+    second.unmount()
+    seed({ channel: 'beta', channel_pointers: pointers }, bob)
     render(<ReleaseChannelSection client={fakeApi()} />)
-    expect(screen.queryByRole('link', { name: 'Promote' })).toBeNull()
+    expect(screen.queryByRole('link')).toBeNull()
   })
 })
 
