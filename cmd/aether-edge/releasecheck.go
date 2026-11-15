@@ -86,6 +86,7 @@ func releaseCheck(args []string, fetch func(context.Context, string) (selfupdate
 	if m.Edge.ImageDigest != *digest {
 		return fmt.Errorf("release %s signs the edge image %s, not %s; do not run it", *tag, m.Edge.ImageDigest, *digest)
 	}
+	before := func(boundary string) (bool, error) { return selfupdate.Behind(*from, boundary), nil }
 	if *tag != *from {
 		var running selfupdate.Manifest
 		if running, err = signedEdge(fetch, *from); err != nil {
@@ -106,21 +107,32 @@ func releaseCheck(args []string, fetch func(context.Context, string) (selfupdate
 		if err = selfupdate.Downgrade(running.Release(), m.Release()); err != nil {
 			return fmt.Errorf("refusing to upgrade: %w", err)
 		}
+		if running.Build > 0 {
+			before = buildBefore(fetch, running)
+		}
 	}
 	r := releaseReport{Version: m.Version, Commit: m.Commit, Edge: *m.Edge,
 		ApplicableSteps: []selfupdate.ManualStep{}, Reasons: []string{}}
-	if selfupdate.Behind(*from, m.Edge.MinUpgradeFrom) {
-		r.Reasons = append(r.Reasons, fmt.Sprintf("%s upgrades only from %s or later; upgrade %s to %s first",
-			*tag, m.Edge.MinUpgradeFrom, *from, m.Edge.MinUpgradeFrom))
+	if below, unordered := before(m.Edge.MinUpgradeFrom); below {
+		reason := fmt.Sprintf("%s upgrades only from %s or later; upgrade %s to %s first",
+			*tag, m.Edge.MinUpgradeFrom, *from, m.Edge.MinUpgradeFrom)
+		if unordered != nil {
+			reason = fmt.Sprintf("%s upgrades only from %s or later, and %s cannot be ordered against it: %v", *tag, m.Edge.MinUpgradeFrom, *from, unordered)
+		}
+		r.Reasons = append(r.Reasons, reason)
 	}
 	for _, s := range m.Edge.ManualSteps {
-		if !selfupdate.Behind(*from, s.Since) {
+		below, unordered := before(s.Since)
+		if !below {
 			continue
 		}
 		r.ApplicableSteps = append(r.ApplicableSteps, s)
 		if s.Blocking {
-			r.Reasons = append(r.Reasons, fmt.Sprintf("manual step %s (since %s) must be done first: %s; see %s",
-				s.ID, s.Since, s.Summary, s.DocURL))
+			reason := fmt.Sprintf("manual step %s (since %s) must be done first: %s; see %s", s.ID, s.Since, s.Summary, s.DocURL)
+			if unordered != nil {
+				reason += fmt.Sprintf(" (%s cannot be ordered against %s, so the step counts as needed: %v)", *from, s.Since, unordered)
+			}
+			r.Reasons = append(r.Reasons, reason)
 		}
 	}
 	r.Hold = len(r.Reasons) > 0
@@ -190,4 +202,37 @@ func readManifest(path, tag string) (selfupdate.Manifest, error) {
 		return selfupdate.Manifest{}, fmt.Errorf("saved %s: %w", path, err)
 	}
 	return m, nil
+}
+
+// buildBefore reports whether running, a release with a build, is below a
+// min_upgrade_from or manual step tag. A no-channel prerelease (-alpha.N,
+// -rc.N) cannot be a channel release, so it predates every numbered one. A
+// nightly tag cannot be ordered: nightlies are pruned, and the upgrade
+// record never names one. A beta or stable tag is ordered by its signed
+// manifest: none at all means it predates signed releases, so channels too.
+// A tag that cannot be ordered counts as above running, with the error: its
+// step is needed, its floor not met.
+func buildBefore(fetch func(context.Context, string) (selfupdate.Manifest, error), running selfupdate.Manifest) func(string) (bool, error) {
+	seen := map[string]selfupdate.Manifest{}
+	return func(boundary string) (bool, error) {
+		switch {
+		case boundary == running.Version, selfupdate.TagChannel(boundary) == "":
+			return false, nil
+		case selfupdate.TagChannel(boundary) == selfupdate.ChannelNightly:
+			return true, fmt.Errorf("%s is a nightly tag, which cannot be ordered by build", boundary)
+		}
+		b, ok := seen[boundary]
+		if !ok {
+			var err error
+			b, err = fetch(context.Background(), boundary)
+			if errors.Is(err, selfupdate.ErrUnsigned) {
+				return false, nil
+			}
+			if err != nil {
+				return true, err
+			}
+			seen[boundary] = b
+		}
+		return selfupdate.Newer(b.Release(), running.Release()), nil
+	}
 }

@@ -304,3 +304,63 @@ func TestReleaseCheckOrdersFromASavedManifest(t *testing.T) {
 		t.Errorf("without the saved manifest: err = %v, want it refused", err)
 	}
 }
+
+// With a build, the running release meets min_upgrade_from and crosses
+// manual steps by build, not by version, so crossing channel labels cannot
+// skip a step; a boundary it cannot order counts against it.
+func TestReleaseCheckOrdersUpgradeBoundariesByBuild(t *testing.T) {
+	edge := func(minFrom, since string) *selfupdate.Edge {
+		e := &selfupdate.Edge{Image: "ghcr.io/3xdevops/aether-edge", ImageDigest: edgeDigest("e"),
+			StoreSchema: 4, StoreCompatFloor: 3, Protocol: selfupdate.EdgeProtocol{Version: 2, MinVersion: 1},
+			MinUpgradeFrom: minFrom, ManualSteps: []selfupdate.ManualStep{}}
+		if since != "" {
+			e.ManualSteps = []selfupdate.ManualStep{{ID: "rotate", Since: since, Summary: "rotate the key", DocURL: "https://example.com/rotate", Blocking: true}}
+		}
+		return e
+	}
+	release := func(tag, channel string, build int, e *selfupdate.Edge) selfupdate.Manifest {
+		return selfupdate.Manifest{Version: tag, Channel: channel, Build: build, Edge: e}
+	}
+	none := edge("v0.5.0", "")
+	trusted := serveManifests(t, releaseKey,
+		release("v0.9.0-nightly.10", "nightly", 400, none),
+		release("v0.9.0-beta.1", "beta", 405, none),
+		release("v0.8.9-beta.3", "beta", 395, none),
+		release("v0.8.8", "", 0, none),
+		release("v0.9.0-beta.2", "beta", 412, edge("v0.5.0", "v0.9.0-beta.1")),
+		release("v0.9.0-beta.3", "beta", 413, edge("v0.8.9-beta.3", "v0.8.9-beta.3")),
+		release("v0.9.0-beta.4", "beta", 414, edge("v0.5.0", "v0.8.9-beta.4")),
+		release("v0.9.0-beta.5", "beta", 415, edge("v0.9.0-beta.1", "")),
+		release("v0.9.0-beta.6", "beta", 416, edge("v0.8.8", "v0.9.0-alpha.1")),
+		release("v0.9.0-beta.7", "beta", 418, edge("v0.5.0", "")),
+		release("v0.9.0", "stable", 417, edge("v0.5.0", "v0.9.0-nightly.12")),
+	)
+	other := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{9}, ed25519.SeedSize))
+	untrusted := serveManifests(t, other, release("v0.8.9-beta.4", "beta", 390, none))
+	fetch := func(ctx context.Context, tag string) (selfupdate.Manifest, error) {
+		if tag == "v0.8.9-beta.4" {
+			return untrusted(ctx, tag)
+		}
+		return trusted(ctx, tag)
+	}
+	for _, c := range []struct{ tag, want string }{
+		{"v0.9.0-beta.2", "manual step rotate (since v0.9.0-beta.1) must be done first"},
+		{"v0.9.0-beta.3", ""},
+		{"v0.9.0-beta.4", "manual step rotate (since v0.8.9-beta.4) must be done first: rotate the key; see https://example.com/rotate (v0.9.0-nightly.10 cannot be ordered against v0.8.9-beta.4, so the step counts as needed: "},
+		{"v0.9.0-beta.5", "v0.9.0-beta.5 upgrades only from v0.9.0-beta.1 or later; upgrade v0.9.0-nightly.10 to v0.9.0-beta.1 first"},
+		{"v0.9.0-beta.6", ""},
+		{"v0.9.0-beta.7", ""},
+		{"v0.9.0", "v0.9.0-nightly.12 is a nightly tag, which cannot be ordered by build"},
+	} {
+		var out bytes.Buffer
+		err := releaseCheck([]string{"--tag", c.tag, "--digest", edgeDigest("e"), "--from", "v0.9.0-nightly.10",
+			"--from-digest", edgeDigest("e"), "--channel", "beta", "--json"}, fetch, &out)
+		var hold *holdError
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("to %s: %v, want it to go ahead", c.tag, err)
+		case c.want != "" && (!errors.As(err, &hold) || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("to %s: err = %v, want a hold with %q", c.tag, err, c.want)
+		}
+	}
+}

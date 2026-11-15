@@ -46,6 +46,11 @@ var ErrNoRelease = errors.New("no release to update to")
 // errUnsigned ends the error for a release without a manifest.
 var errUnsigned = errors.New("it predates signed releases or is still being published, and no updater installs it")
 
+// ErrUnsigned is wrapped by a manifest fetch that found no manifest for
+// the tag, as opposed to any other failure: the release predates signed
+// releases, or is still being published.
+var ErrUnsigned = errUnsigned
+
 // Manifest is a release's verified aether-release.json.
 type Manifest struct {
 	Schema int `json:"schema"`

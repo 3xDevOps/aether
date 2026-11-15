@@ -1124,6 +1124,10 @@ updater does the rest.
   --manual-steps-done`. A hold because the running release is older than
   `min_upgrade_from` is refused with `--manual-steps-done passes only blocking
   manual steps`: upgrade by hand to a release at or above it first.
+  An edge whose release has a build number compares itself with
+  `min_upgrade_from` and each step's `since` by the builds in their signed
+  manifests; when one cannot be read, the step counts as needed and the floor as
+  not met, and the reason names the tag.
 - A `broken` state means the rollback failed, and every session exits 1 with
   `state is broken since <time>: <reason>`. Run the edge on a release you trust
   (put its digest in `.env`, restore a backup first if `schema --json` asks for
