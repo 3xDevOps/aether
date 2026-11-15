@@ -137,17 +137,19 @@ both get it wrong.
 
 Every manifest carries a signed `build`, a positive integer:
 
-- Each nightly takes the next build number: one above the highest
-  `build:` line in the messages of the annotated `-nightly.N` tags.
-  Those tags are never deleted, so pruning or yanking a release never
-  frees a number. Builds only increase along `main`.
+- Each nightly takes the next build number: one above the highest of
+  the `build:` lines in the messages of the annotated `-nightly.N` tags
+  and the builds the three pointers name. Those tags are never deleted,
+  so pruning or yanking a release never frees a number. Builds only
+  increase along `main`.
 - A beta or stable built from a nightly's commit carries that nightly's
   build. It is the same code, so it gets the same number.
 - A hotfix on `release/X.Y` carries the build of the stable it fixes and
   a signed `hotfix` count, 1 for the first. `(build, hotfix)` orders it
   above that stable and below every later nightly.
 - Releases from before channels have no `build` and count as `0`. Among
-  them, semver decides, as today.
+  them, semver decides, as today. Promoting one, which happens once, for
+  `v0.8.7`, signs build 1.
 
 Release A is newer than B when `(A.build, A.hotfix)` is higher. Equal
 non-zero numbers are the same code under another label; two pre-channel
@@ -295,12 +297,13 @@ run's key, as the last step after publishing:
 | Pointer | Written by | Key |
 | --- | --- | --- |
 | `nightly.json` | `nightly.yml` | nightly |
-| `beta.json` | `promote.yml` to beta or stable, when the new release is above it | release |
+| `beta.json` | `promote.yml` to beta or stable, and `release.yml` for a hotfix, when the new release is above it | release |
 | `stable.json` | `promote.yml` to stable, `release.yml` for a hotfix | release |
 
 A nightly run never touches the release key, and no beta or stable
 pointer waits on a nightly. `nightly.json` never names a beta or stable:
-each was promoted from a nightly with the same build. Writers share one
+each was promoted from a nightly with the same build, and a hotfix's fix
+is on `main` first, so a later nightly carries it. Writers share one
 concurrency group, `channels`, with `cancel-in-progress: false`, and each
 reads the pointer it replaces first.
 
@@ -680,13 +683,13 @@ it gains a `release/X.Y` mode. CI's push trigger (`ci.yml:4-5`) adds
    way. It becomes Latest and reaches every install through
    `/releases/latest`. Existing servers get `release_channel` `beta` from
    its migration.
-2. Publish the first `beta.json` naming that beta. Its manifest has no
-   `channel`; pre-channel manifests are accepted on beta.
+2. Publish the first `beta.json` naming that beta, at build 0. Its
+   manifest has no `channel`; pre-channel manifests are accepted on beta.
 3. Promote it to stable `v0.8.7`. The trusted signer gives it `channel`
-   and `build` even though its commit predates them. It becomes Latest, so
+   and build 1 even though its commit predates them. It becomes Latest, so
    pre-channel installs that missed step 1 still update, and new installs
    get stable.
-4. Turn on `nightly.yml`. The first nightly is `v0.9.0-nightly.1`, build 1.
+4. Turn on `nightly.yml`. The first nightly is `v0.9.0-nightly.1`, build 2.
 5. Switch the project's own server to nightly.
 
 From step 3, betas and nightlies are published as prereleases.
