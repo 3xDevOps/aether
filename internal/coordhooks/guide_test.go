@@ -24,7 +24,8 @@ func TestGuidanceOffersOnlyUsableOutcomes(t *testing.T) {
 			[]string{"END EVERY TURN WITH EXACTLY ONE REPORT", "- answered: ", "- needs-input: only", "use needs-input", "never report waiting"},
 			[]string{"- waiting", "--for"}},
 		{"enhanced interactive", Guide{Role: RoleInteractive, Wake: true},
-			[]string{"- answered: ", "- waiting: ", "use needs-input", "Not while aether_status shows protected", "reply to the person as message text before the report"}, []string{"without a report"}},
+			[]string{"- answered: ", "- waiting: ", "use needs-input", "Not while aether_status shows protected", "reply as message text before the report", "Say the result only there, none after"},
+			[]string{"without a report", "after the report"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			card := RoleCard(tc.g)
