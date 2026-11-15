@@ -311,3 +311,38 @@ func TestMirrorAdoptionRechecksReviewedCandidateAfterCASConflict(t *testing.T) {
 		t.Fatalf("reviewed candidate after CAS conflict = %+v, %v", adopted, err)
 	}
 }
+
+func TestFilesWriteRefusesMirroredBase(t *testing.T) {
+	e := newUnitEngine(t)
+	e.cfg.MirrorFetch = mirrorImportTransport
+	source, commit := mirrorImportSource(t, e, true)
+	const ws domain.WorkspaceID = "mirror-base-write"
+	req := MirrorRequest{SourceURL: source, Branch: "main", Generation: 1, Auth: domain.MirrorAuthPublic}
+	if _, err := e.ConfigureWorkspaceMirror(t.Context(), ws, req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.RefreshWorkspaceMirror(t.Context(), ws, req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation, commit); err != nil {
+		t.Fatal(err)
+	}
+	// A write to the mirrored base (files.write with no run_id) must be refused,
+	// since a direct update-ref never runs the receive-pack protection hook.
+	_, err := e.FilesWrite(t.Context(), ws, "", "main", "README.md", []byte("planted\n"), "", domain.GitIdentity{Name: "Mallory", Email: "m@example.test"}, nil)
+	if !errors.Is(err, ErrMirroredBase) {
+		t.Fatalf("write to mirrored base = %v, want ErrMirroredBase", err)
+	}
+	repo, rerr := e.existingRepoPath(ws)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if got := mirrorImportGit(t, e, repo, "rev-parse", "refs/heads/main"); got != commit {
+		t.Fatalf("mirrored base moved to %s, want unchanged %s", got, commit)
+	}
+	// A read reports the mirrored base as not writable.
+	meta, readErr := e.FilesRead(t.Context(), ws, "", "main", "README.md", MaxFileBytes)
+	if readErr == nil && meta.Writable {
+		t.Fatal("mirrored base reported writable")
+	}
+}

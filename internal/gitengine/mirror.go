@@ -499,6 +499,17 @@ func newIncomingRef() (string, error) {
 	return "refs/aether/incoming/" + hex.EncodeToString(buf[:]), nil
 }
 
+// isMirroredBase reports whether ref is the base branch a configured mirror
+// owns. It is a best-effort read: an unconfigured mirror or a missing key
+// returns false so non-mirrored workspaces are unaffected.
+func (e *Engine) isMirroredBase(ctx context.Context, repo, ref string) bool {
+	base, err := e.git(ctx, repo, "config", "--get", mirrorBaseConfig)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(base) == "refs/heads/"+ref
+}
+
 func (e *Engine) configuredMirror(ctx context.Context, repo string) (string, int64, error) {
 	base, err := e.git(ctx, repo, "config", "--get", mirrorBaseConfig)
 	if err != nil || base == "" {
