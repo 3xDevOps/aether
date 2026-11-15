@@ -159,8 +159,12 @@ type Service struct {
 	checkMu sync.Mutex
 	check   checkState
 	// pointers is each channel's verified pointer at the last check, for
-	// display. Guarded by checkMu.
-	pointers map[string]publishedPointer
+	// display. declineNote is why the last cancel recorded no declined
+	// build, and scheduleError why the server last failed to schedule the
+	// newest release by itself. Guarded by checkMu.
+	pointers      map[string]publishedPointer
+	declineNote   string
+	scheduleError string
 	// decideMu serializes what the server schedules by itself with the
 	// cancels, rollbacks and channel changes that decline or retire it. It
 	// is held only around store reads and writes, never the network.
@@ -328,6 +332,9 @@ func (s *Service) Status(ctx context.Context, p protocol.ServerUpdateStatusParam
 		}
 	}
 	out.Declined = wireDeclined(state.Declined)
+	s.checkMu.Lock()
+	out.DeclineNote, out.ScheduleError = s.declineNote, s.scheduleError
+	s.checkMu.Unlock()
 	if l := state.Last; l != nil {
 		out.Last = &protocol.ServerUpdateAttempt{
 			Version: l.Version,
@@ -410,7 +417,10 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 		}
 		// One pending update at a time: a second request replaces the
 		// first rather than queueing behind it.
-		if serr := s.cfg.Store.SetPendingServerUpdate(ctx, &pending); serr != nil {
+		s.decideMu.Lock()
+		serr := s.cfg.Store.SetPendingServerUpdate(ctx, &pending)
+		s.decideMu.Unlock()
+		if serr != nil {
 			return protocol.ServerUpdateResult{}, nil, serr
 		}
 		res.Status = protocol.ServerUpdateScheduled
@@ -461,21 +471,33 @@ func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.S
 	if state, err = s.cfg.Store.GetServerUpdate(ctx); err != nil {
 		return protocol.ServerUpdateResult{}, err
 	}
+	out := protocol.ServerUpdateResult{Status: protocol.ServerUpdateCancelled}
 	if state.Pending != nil {
 		if resolved.Version != state.Pending.Version {
 			resolved = s.known(state.Pending.Version)
 		}
-		if err := raiseDeclined(ctx, s.cfg.Store, resolved); err != nil {
+		recorded, err := raiseDeclined(ctx, s.cfg.Store, resolved)
+		if err != nil {
 			return protocol.ServerUpdateResult{}, err
 		}
+		note := ""
+		if !recorded {
+			// The cancel stands: an admin must always be able to stop an
+			// update. Only the mark that keeps the server from scheduling
+			// it again by itself is missing, and that is said.
+			note = fmt.Sprintf("%s was not recorded as declined: its build could not be read from its signed manifest; the server may schedule it again by itself", state.Pending.Version)
+		}
+		s.checkMu.Lock()
+		s.declineNote = note
+		s.checkMu.Unlock()
+		out.NotDeclined = note
 	}
 	if err := s.cfg.Store.SetPendingServerUpdate(ctx, nil); err != nil {
 		return protocol.ServerUpdateResult{}, err
 	}
-	out := protocol.ServerUpdateResult{Status: protocol.ServerUpdateCancelled}
 	if state.Pending != nil {
 		out.Version = state.Pending.Version
-		s.publish(ctx, actor, events.ServerUpdateCancelled, state.Pending.Version, "")
+		s.publish(ctx, actor, events.ServerUpdateCancelled, state.Pending.Version, out.NotDeclined)
 	}
 	return out, nil
 }

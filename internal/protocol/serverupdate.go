@@ -76,11 +76,16 @@ type ServerUpdateParams struct {
 // ServerUpdateResult is the result of server.update. Status is
 // "applying", "scheduled", or "cancelled"; the remaining fields echo the
 // update the call recorded and are empty for a cancel.
+//
+// NotDeclined, on a cancel, says that the cancelled release's build could
+// not be recorded as declined, so the server may schedule it again by
+// itself.
 type ServerUpdateResult struct {
 	Status      string `json:"status"`
 	Version     string `json:"version,omitempty"`
 	RequestedBy string `json:"requested_by,omitempty"`
 	RequestedAt string `json:"requested_at,omitempty"`
+	NotDeclined string `json:"not_declined,omitempty"`
 }
 
 // ServerUpdateStatusParams are the params of server.update_status.
@@ -145,7 +150,9 @@ type ServerUpdateAttempt struct {
 // itself: a super admin cancelled it or rolled back from it, or it failed;
 // the server schedules only a build above it. ChannelPointers is each
 // channel's verified pointer at the last check: its version, build and
-// published_at, so a frozen channel shows its age.
+// published_at, so a frozen channel shows its age. DeclineNote repeats
+// the last cancel's not_declined, and ScheduleError is why the server last
+// failed to schedule the newest release by itself, such as its preflight.
 type ServerUpdateStatusResult struct {
 	ServerVersion   string                    `json:"server_version"`
 	ServerBuild     int                       `json:"server_build,omitempty"`
@@ -154,6 +161,8 @@ type ServerUpdateStatusResult struct {
 	ChannelPending  bool                      `json:"channel_pending,omitempty"`
 	ChannelWait     bool                      `json:"channel_wait,omitempty"`
 	Declined        *ReleaseBuild             `json:"declined,omitempty"`
+	DeclineNote     string                    `json:"decline_note,omitempty"`
+	ScheduleError   string                    `json:"schedule_error,omitempty"`
 	ChannelPointers map[string]ChannelPointer `json:"channel_pointers,omitempty"`
 	LatestVersion   string                    `json:"latest_version,omitempty"`
 	LatestChannel   string                    `json:"latest_channel,omitempty"`

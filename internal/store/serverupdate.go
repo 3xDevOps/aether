@@ -34,9 +34,10 @@ type ServerUpdateStore interface {
 	SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) error
 	// SchemaVersion is the highest migration applied to this database.
 	SchemaVersion(ctx context.Context) (int, error)
-	// SetDeclinedServerUpdate records the build the server no longer
-	// schedules by itself.
-	SetDeclinedServerUpdate(ctx context.Context, declined DeclinedServerUpdate) error
+	// RaiseDeclinedServerUpdate records declined as the build the server
+	// no longer schedules by itself, unless a higher build is declined
+	// already: the mark only rises, in one statement.
+	RaiseDeclinedServerUpdate(ctx context.Context, declined DeclinedServerUpdate) error
 	// RetirePendingServerUpdate records last and clears the pending row
 	// only while it is still pending, reporting whether it was.
 	RetirePendingServerUpdate(ctx context.Context, pending PendingServerUpdate, last ServerUpdateAttempt) (bool, error)
@@ -70,7 +71,7 @@ type ServerUpdate struct {
 
 // DeclinedServerUpdate is the build the server no longer schedules by
 // itself: a super admin cancelled it or rolled back from it, or it
-// failed. Build 0 is a release whose build was not known.
+// failed. Build is always positive.
 type DeclinedServerUpdate struct {
 	Version string
 	Build   int
@@ -167,9 +168,9 @@ func (d *DB) SetPendingServerUpdate(ctx context.Context, pending *PendingServerU
 	return nil
 }
 
-func (d *DB) SetDeclinedServerUpdate(ctx context.Context, declined DeclinedServerUpdate) error {
-	if declined.Version == "" {
-		return errors.New("store: declined server update requires a version")
+func (d *DB) RaiseDeclinedServerUpdate(ctx context.Context, declined DeclinedServerUpdate) error {
+	if declined.Version == "" || declined.Build < 1 {
+		return errors.New("store: declined server update requires a version and a build")
 	}
 	_, err := d.db.ExecContext(ctx,
 		`INSERT INTO server_update_state (id, declined_version, declined_build, declined_hotfix)
@@ -177,7 +178,9 @@ func (d *DB) SetDeclinedServerUpdate(ctx context.Context, declined DeclinedServe
 		 ON CONFLICT (id) DO UPDATE SET
 		   declined_version = excluded.declined_version,
 		   declined_build = excluded.declined_build,
-		   declined_hotfix = excluded.declined_hotfix`,
+		   declined_hotfix = excluded.declined_hotfix
+		 WHERE declined_build < excluded.declined_build
+		    OR declined_build = excluded.declined_build AND declined_hotfix <= excluded.declined_hotfix`,
 		declined.Version, declined.Build, declined.Hotfix)
 	if err != nil {
 		return fmt.Errorf("store: write declined server update: %w", err)

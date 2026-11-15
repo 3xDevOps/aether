@@ -86,8 +86,8 @@ func backoff(n int) time.Duration {
 	return min(d, checkInterval)
 }
 
-// checkTimeout bounds one background check with what it schedules, so a
-// stalled release host fails it instead of holding the check.
+// checkTimeout bounds a check, and separately what it schedules, so a
+// stalled release host fails them instead of holding the check.
 const checkTimeout = time.Minute
 
 // refreshEvery is the least time between the checks that
@@ -127,9 +127,7 @@ func (s *Service) Start(ctx context.Context) error {
 				continue
 			case <-timer.C:
 			}
-			checkCtx, cancel := context.WithTimeout(ctx, checkTimeout)
-			s.checkAndSchedule(checkCtx)
-			cancel()
+			s.checkAndSchedule(ctx)
 		}
 	}()
 	return nil

@@ -36,16 +36,9 @@ func published() bool {
 	return selfupdate.ValidTag(version.Version) && version.ReleaseCore(version.Version) == version.Version
 }
 
-// refuses reports whether d declines r: r is d's release or not above
-// d's build. Build 0 declines by version alone.
+// refuses reports whether d declines r: r is not above d's build.
 func refuses(d *store.DeclinedServerUpdate, r selfupdate.Release) bool {
-	if d == nil {
-		return false
-	}
-	if r.Version == d.Version {
-		return true
-	}
-	return d.Build > 0 && (r.Build < d.Build || r.Build == d.Build && r.Hotfix <= d.Hotfix)
+	return d != nil && (r.Build < d.Build || r.Build == d.Build && r.Hotfix <= d.Hotfix)
 }
 
 func wireDeclined(d *store.DeclinedServerUpdate) *protocol.ReleaseBuild {
@@ -55,42 +48,27 @@ func wireDeclined(d *store.DeclinedServerUpdate) *protocol.ReleaseBuild {
 	return &protocol.ReleaseBuild{Version: d.Version, Build: d.Build, Hotfix: d.Hotfix}
 }
 
-// mergeDeclined is d raised to old's build, so the mark only rises. A
-// mark whose build was not known keeps its version beside a known build,
-// which then covers d's release by build.
-func mergeDeclined(old *store.DeclinedServerUpdate, d store.DeclinedServerUpdate) store.DeclinedServerUpdate {
-	if old == nil {
-		return d
+// raiseDeclined records r in st as declined, unless a higher build is
+// declined already, so the server schedules by itself only a build above
+// it. A super admin's own server.update ignores it. A release whose build
+// is not known is not recorded, reported false: a mark by version alone
+// could not be ordered against the next one.
+func raiseDeclined(ctx context.Context, st store.Store, r selfupdate.Release) (bool, error) {
+	if r.Build == 0 {
+		return false, nil
 	}
-	if old.Build == 0 && d.Build > 0 {
-		d.Version = old.Version
+	if err := st.RaiseDeclinedServerUpdate(ctx, store.DeclinedServerUpdate{Version: r.Version, Build: r.Build, Hotfix: r.Hotfix}); err != nil {
+		return false, fmt.Errorf("serverupdate: record %s as declined: %w", r.Version, err)
 	}
-	if old.Build > d.Build || old.Build == d.Build && old.Hotfix > d.Hotfix {
-		d.Build, d.Hotfix = old.Build, old.Hotfix
-	}
-	return d
-}
-
-// raiseDeclined records r in st as declined, keeping the highest build
-// declined so far, so the server schedules by itself only a build above
-// it. A super admin's own server.update ignores it.
-func raiseDeclined(ctx context.Context, st store.Store, r selfupdate.Release) error {
-	state, err := st.GetServerUpdate(ctx)
-	if err != nil {
-		return err
-	}
-	d := mergeDeclined(state.Declined, store.DeclinedServerUpdate{Version: r.Version, Build: r.Build, Hotfix: r.Hotfix})
-	if err := st.SetDeclinedServerUpdate(ctx, d); err != nil {
-		return fmt.Errorf("serverupdate: record %s as declined: %w", r.Version, err)
-	}
-	return nil
+	return true, nil
 }
 
 // decline is raiseDeclined under decideMu.
 func (s *Service) decline(ctx context.Context, r selfupdate.Release) error {
 	s.decideMu.Lock()
 	defer s.decideMu.Unlock()
-	return raiseDeclined(ctx, s.cfg.Store, r)
+	_, err := raiseDeclined(ctx, s.cfg.Store, r)
+	return err
 }
 
 // resolve is v's place in the release order, from its signed manifest
@@ -124,8 +102,12 @@ func (s *Service) known(v string) selfupdate.Release {
 // checkAndSchedule runs a release check, records the display pointers
 // and schedules what it found.
 func (s *Service) checkAndSchedule(ctx context.Context) {
-	s.showPointers(ctx, s.runCheck(ctx))
-	s.schedule(ctx)
+	checkCtx, cancel := context.WithTimeout(ctx, checkTimeout)
+	s.showPointers(checkCtx, s.runCheck(checkCtx))
+	cancel()
+	scheduleCtx, cancel := context.WithTimeout(ctx, checkTimeout)
+	defer cancel()
+	s.schedule(scheduleCtx)
 }
 
 // showPointers fetches the display pointers for st's channel outside the
@@ -155,26 +137,51 @@ func (s *Service) schedule(ctx context.Context) {
 	s.checkMu.Unlock()
 	latest := st.latest()
 	if !s.takes(ctx, st, latest) {
+		s.scheduled(nil, false)
 		return
 	}
 	pending := store.PendingServerUpdate{Version: latest.Version, RequestedBy: ServerActor, RequestedAt: s.cfg.Now().UTC()}
 	if _, err := preflight(ctx, s.plan(pending), latest.Version, false); err != nil {
 		slog.Warn("serverupdate: not scheduling the newest release", "version", latest.Version, "error", err)
+		s.scheduled(fmt.Errorf("not scheduling %s by itself: %w", latest.Version, err), errors.As(err, new(retryable)))
 		return
 	}
 	s.decideMu.Lock()
 	defer s.decideMu.Unlock()
 	if !s.takes(ctx, st, latest) {
+		s.scheduled(nil, false)
 		return
 	}
 	scheduled, err := s.cfg.Store.SchedulePendingServerUpdate(ctx, pending)
 	if err != nil {
 		slog.Warn("serverupdate: schedule the newest release", "version", latest.Version, "error", err)
+		s.scheduled(fmt.Errorf("not scheduling %s by itself: %w", latest.Version, err), true)
 		return
 	}
+	s.scheduled(nil, false)
 	if scheduled {
 		slog.Info("serverupdate: scheduled the newest release on the channel for the next idle moment", "version", latest.Version, "channel", st.Channel)
 		s.publish(ctx, ServerActor, events.ServerUpdateScheduled, latest.Version, "")
+	}
+}
+
+// scheduled records why the last self-schedule failed, "" when it did
+// not, for server.update_status. A failure worth retrying moves the next
+// check to checkRetry from now rather than the next 6-hourly one.
+func (s *Service) scheduled(err error, retry bool) {
+	s.checkMu.Lock()
+	defer s.checkMu.Unlock()
+	s.scheduleError = ""
+	if err == nil {
+		return
+	}
+	s.scheduleError = err.Error()
+	if next := s.cfg.Now().Add(checkRetry); retry && s.check.NextAt.After(next) {
+		s.check.NextAt = next
+		select {
+		case s.kick <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -203,6 +210,26 @@ func (s *Service) takes(ctx context.Context, st checkState, latest selfupdate.Re
 func (s *Service) stillPending(ctx context.Context, pending store.PendingServerUpdate) bool {
 	s.decideMu.Lock()
 	defer s.decideMu.Unlock()
+	return s.stillPendingLocked(ctx, pending)
+}
+
+// takePending clears pending as the update applies, under decideMu, only
+// while it is still the pending update: one cancelled or replaced during
+// the download is not applied. An update applied now clears whatever is
+// pending, as it always has.
+func (s *Service) takePending(ctx context.Context, pending store.PendingServerUpdate, scheduled bool) bool {
+	s.decideMu.Lock()
+	defer s.decideMu.Unlock()
+	if scheduled && !s.stillPendingLocked(ctx, pending) {
+		return false
+	}
+	if err := s.cfg.Store.SetPendingServerUpdate(ctx, nil); err != nil {
+		slog.Warn("serverupdate: clear the applied pending update", "error", err)
+	}
+	return true
+}
+
+func (s *Service) stillPendingLocked(ctx context.Context, pending store.PendingServerUpdate) bool {
 	state, err := s.cfg.Store.GetServerUpdate(ctx)
 	return err == nil && state.Pending != nil && state.Pending.Version == pending.Version &&
 		state.Pending.RequestedBy == pending.RequestedBy && state.Pending.RequestedAt.Equal(pending.RequestedAt)

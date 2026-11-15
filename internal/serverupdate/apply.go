@@ -118,7 +118,10 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	// A downgrade is applied by hand, now, so one cut short is not left
 	// pending for an idle moment.
 	if !scheduled && !allowDowngrade {
-		if err = s.cfg.Store.SetPendingServerUpdate(ctx, &pending); err != nil {
+		s.decideMu.Lock()
+		err = s.cfg.Store.SetPendingServerUpdate(ctx, &pending)
+		s.decideMu.Unlock()
+		if err != nil {
 			s.release()
 			return nil, err
 		}
@@ -154,8 +157,12 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 		s.publish(ctx, pending.RequestedBy, events.ServerUpdateScheduled, pending.Version, errBecameBusy.Error())
 		return nil, errBecameBusy
 	}
-	if err := s.cfg.Store.SetPendingServerUpdate(ctx, nil); err != nil {
-		slog.Warn("serverupdate: clear the applied pending update", "error", err)
+	if !s.takePending(ctx, pending, scheduled) {
+		if err := unswap(s.cfg.StateDir, rec); err != nil {
+			return nil, s.fail(ctx, pending, fmt.Errorf("the update was cancelled or replaced during the download, and undoing the swap failed: %w", err))
+		}
+		s.release()
+		return nil, errNoLongerPending
 	}
 	// The restart runs after the RPC response has been written, by which
 	// point the request context may be on its way out; the restarting
@@ -165,8 +172,8 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 }
 
 // errNoLongerPending is a scheduled update cancelled or replaced during
-// its preflight.
-var errNoLongerPending = errors.New("the scheduled update was cancelled or replaced during its preflight")
+// its preflight or download.
+var errNoLongerPending = errors.New("the scheduled update was cancelled or replaced before it applied")
 
 // errBecameBusy is a scheduled update undone because the server stopped
 // being idle while the release downloaded.
@@ -196,7 +203,7 @@ func (s *Service) failOrRetry(ctx context.Context, pending store.PendingServerUp
 		}
 	}
 	if scheduled && !errors.Is(err, errNotTaken) {
-		if derr := s.decline(ctx, s.known(pending.Version)); derr != nil {
+		if derr := s.decline(ctx, s.resolve(ctx, pending.Version)); derr != nil {
 			slog.Error("serverupdate: a failed scheduled update stays eligible", "version", pending.Version, "error", derr)
 		}
 	}

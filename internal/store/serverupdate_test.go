@@ -163,7 +163,7 @@ func TestReleaseChannelMigration(t *testing.T) {
 }
 
 // A retire clears only the pending update it names; one scheduled in
-// between stays. The declined build survives in the store.
+// between stays. The declined build survives in the store and only rises.
 func TestRetireClearsOnlyThePendingItNames(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
@@ -178,8 +178,13 @@ func TestRetireClearsOnlyThePendingItNames(t *testing.T) {
 	if err != nil || retired {
 		t.Fatalf("retire of a replaced pending = %v, %v; want nothing retired", retired, err)
 	}
-	if err = db.SetDeclinedServerUpdate(ctx, DeclinedServerUpdate{Version: "v0.9.0-nightly.13", Build: 413}); err != nil {
-		t.Fatal(err)
+	for _, d := range []DeclinedServerUpdate{{Version: "v0.9.0-nightly.13", Build: 413}, {Version: "v0.9.0-nightly.12", Build: 412}} {
+		if err = db.RaiseDeclinedServerUpdate(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = db.RaiseDeclinedServerUpdate(ctx, DeclinedServerUpdate{Version: "v0.9.0-nightly.14"}); err == nil {
+		t.Fatal("a declined mark without a build was stored")
 	}
 	got, err := db.GetServerUpdate(ctx)
 	if err != nil || got.Pending == nil || got.Pending.Version != second.Version || got.Last != nil || got.Declined == nil || got.Declined.Build != 413 {

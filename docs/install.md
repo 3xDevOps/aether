@@ -735,12 +735,18 @@ release from before channels or one the preflight refuses. It schedules
 nothing while it has not chosen its channel, or when it runs a build from
 source (no signed build number, a version past a tag, or dirty);
 `server.update_status` still offers the release. An update the server
-scheduled that rolls back is declined like a failed one. A super admin's `--cancel`, an `--allow-downgrade`
+scheduled that rolls back is declined like a failed one; the restored
+binary records that, which it can because only a binary with this
+behaviour schedules updates as the server. A super admin's `--cancel`, an `--allow-downgrade`
 update, and a scheduled update that fails (after 3 tries for a network
 error) mark that build declined in the database; `server.update_status`
 shows it as `declined`, and the server schedules only a higher build by
 itself. A cancel or rollback whose mark cannot be saved is refused with
-the error. A super admin's own `aether server update` ignores the mark.
+the error. A cancel whose release's build cannot be read from its signed
+manifest still cancels, and says in `not_declined` (and
+`server.update_status` `decline_note`) that the server may schedule it
+again. `schedule_error` says why the server last failed to schedule the
+newest release by itself; a network failure retries within 5 minutes. A super admin's own `aether server update` ignores the mark.
 `AETHER_NO_UPDATE_CHECK=1` in `/etc/aether/aether-server.env` turns off the
 check and with it these updates.
 

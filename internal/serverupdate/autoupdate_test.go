@@ -288,7 +288,9 @@ func TestDeclineDuringSchedulingHolds(t *testing.T) {
 	go func() { e.svc.schedule(t.Context()); close(done) }()
 	<-probing
 	declined := make(chan error, 1)
-	go func() { declined <- e.svc.decline(t.Context(), e.svc.known("v0.9.0-nightly.13")) }()
+	go func() {
+		declined <- e.svc.decline(t.Context(), e.svc.known("v0.9.0-nightly.13"))
+	}()
 	select {
 	case err := <-declined:
 		if err != nil {
@@ -375,18 +377,73 @@ func TestUnstampedBuildSchedulesNothing(t *testing.T) {
 	e.wantPending(t, "", "")
 }
 
-// A version-only declined mark is kept beside a later mark with a build.
-func TestDeclinedVersionSurvivesABuildMark(t *testing.T) {
+// A cancel whose release's build cannot be read still cancels, and says
+// the release was not recorded as declined; no mark by version alone is
+// kept.
+func TestCancelWithoutABuildSaysItDidNotDecline(t *testing.T) {
 	e := autoEnv(t, selfupdate.ChannelNightly)
-	if err := e.svc.decline(t.Context(), selfupdate.Release{Version: "v0.9.0-nightly.14"}); err != nil {
+	e.busy = domain.ServerBusy{Runs: 1}
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.14", When: protocol.ServerUpdateIdle}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.decline(t.Context(), selfupdate.Release{Version: "v0.9.0-nightly.13", Build: 413}); err != nil {
-		t.Fatal(err)
+	e.setMissing(selfupdate.ManifestName)
+	res, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel})
+	if err != nil || res.Status != protocol.ServerUpdateCancelled || !strings.Contains(res.NotDeclined, "was not recorded as declined") {
+		t.Fatalf("cancel = %+v, %v; want cancelled with the note", res, err)
 	}
-	publishPointer(t, e.rel, "nightly", pointer("nightly", "v0.9.0-nightly.14", 414), releasetest.NightlyKey)
-	e.svc.checkAndSchedule(t.Context())
 	e.wantPending(t, "", "")
+	st, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
+	if err != nil || st.Declined != nil || st.DeclineNote != res.NotDeclined {
+		t.Fatalf("status = %+v, %v; want no mark and the note", st, err)
+	}
+}
+
+// A cancel during the download of a scheduled update stands: the download
+// is undone and nothing is installed. So does a member's idle update of
+// another release scheduled meanwhile, which stays pending.
+func TestUpdateReplacedDuringTheDownloadIsNotApplied(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		replace func(t *testing.T, e *env)
+		pending string
+	}{
+		{"cancel", func(t *testing.T, e *env) {
+			if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateCancel}); err != nil {
+				t.Fatal(err)
+			}
+		}, ""},
+		{"member's idle update", func(t *testing.T, e *env) {
+			if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.14", When: protocol.ServerUpdateIdle}); err != nil {
+				t.Fatal(err)
+			}
+		}, "v0.9.0-nightly.14"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := autoEnv(t, selfupdate.ChannelNightly)
+			e.busy = domain.ServerBusy{Runs: 1}
+			e.svc.checkAndSchedule(t.Context())
+			e.wantPending(t, "v0.9.0-nightly.13", ServerActor)
+			e.busy, e.underSystemd = domain.ServerBusy{}, true
+			e.stalled, e.resume = make(chan struct{}), make(chan struct{})
+			done := make(chan struct{})
+			go func() { e.svc.Tick(t.Context()); close(done) }()
+			<-e.stalled
+			tc.replace(t, e)
+			close(e.resume)
+			<-done
+			if got := e.read(t, e.self); got != "the old binary" {
+				t.Fatalf("aether-server = %q, want the download undone", got)
+			}
+			if tc.pending == "" {
+				e.wantPending(t, "", "")
+			} else {
+				e.wantPending(t, tc.pending, "mem_a")
+			}
+			if state, err := e.db.GetServerUpdate(t.Context()); err != nil || state.Last != nil {
+				t.Fatalf("state = %+v, %v; want no outcome recorded", state, err)
+			}
+		})
+	}
 }
 
 // A check that ran on the old channel schedules nothing once the channel

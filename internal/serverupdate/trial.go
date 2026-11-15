@@ -434,7 +434,7 @@ func (t *Trial) Commit(ctx context.Context, st store.Store, bus events.Bus) erro
 	// An update the server scheduled itself that rolled back is declined,
 	// so the next check does not schedule it again.
 	if outcome == store.ServerUpdateRolledBack && domain.MemberID(rec.RequestedBy) == ServerActor {
-		if err = raiseDeclined(ctx, st, selfupdate.Release{Version: rec.ToVersion, Build: rec.ToBuild, Hotfix: rec.ToHotfix}); err != nil {
+		if _, err = raiseDeclined(ctx, st, selfupdate.Release{Version: rec.ToVersion, Build: rec.ToBuild, Hotfix: rec.ToHotfix}); err != nil {
 			return err
 		}
 	}
