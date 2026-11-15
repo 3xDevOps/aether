@@ -1127,7 +1127,8 @@ updater does the rest.
   An edge whose release has a build number compares itself with
   `min_upgrade_from` and each step's `since` by the builds in their signed
   manifests; when one cannot be read, the step counts as needed and the floor as
-  not met, and the reason names the tag.
+  not met, and the reason names the tag. A boundary that names a beta not yet
+  published therefore holds nightly hosts until that beta is published.
 - A `broken` state means the rollback failed, and every session exits 1 with
   `state is broken since <time>: <reason>`. Run the edge on a release you trust
   (put its digest in `.env`, restore a backup first if `schema --json` asks for

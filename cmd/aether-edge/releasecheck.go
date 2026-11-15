@@ -204,14 +204,21 @@ func readManifest(path, tag string) (selfupdate.Manifest, error) {
 	return m, nil
 }
 
+// firstBuiltRelease is the first release with a signed build: the plan's
+// migration promotes it, build 1, from the last release before channels.
+// Every release from it on is signed, so a missing manifest at or above it
+// is not one from before channels.
+const firstBuiltRelease = "v0.8.7"
+
 // buildBefore reports whether running, a release with a build, is below a
 // min_upgrade_from or manual step tag. A no-channel prerelease (-alpha.N,
 // -rc.N) cannot be a channel release, so it predates every numbered one. A
 // nightly tag cannot be ordered: nightlies are pruned, and the upgrade
 // record never names one. A beta or stable tag is ordered by its signed
-// manifest: none at all means it predates signed releases, so channels too.
-// A tag that cannot be ordered counts as above running, with the error: its
-// step is needed, its floor not met.
+// manifest. Without one, a tag below firstBuiltRelease predates signed
+// releases, so channels too; any other may not be published yet, or was
+// withdrawn. A tag that cannot be ordered counts as above running, with
+// the error: its step is needed, its floor not met.
 func buildBefore(fetch func(context.Context, string) (selfupdate.Manifest, error), running selfupdate.Manifest) func(string) (bool, error) {
 	seen := map[string]selfupdate.Manifest{}
 	return func(boundary string) (bool, error) {
@@ -225,7 +232,7 @@ func buildBefore(fetch func(context.Context, string) (selfupdate.Manifest, error
 		if !ok {
 			var err error
 			b, err = fetch(context.Background(), boundary)
-			if errors.Is(err, selfupdate.ErrUnsigned) {
+			if errors.Is(err, selfupdate.ErrUnsigned) && selfupdate.Behind(boundary, firstBuiltRelease) {
 				return false, nil
 			}
 			if err != nil {

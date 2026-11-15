@@ -334,6 +334,7 @@ func TestReleaseCheckOrdersUpgradeBoundariesByBuild(t *testing.T) {
 		release("v0.9.0-beta.6", "beta", 416, edge("v0.8.8", "v0.9.0-alpha.1")),
 		release("v0.9.0-beta.7", "beta", 418, edge("v0.5.0", "")),
 		release("v0.9.0", "stable", 417, edge("v0.5.0", "v0.9.0-nightly.12")),
+		release("v0.9.0-nightly.11", "nightly", 401, edge("v0.9.0-beta.9", "v0.9.0-beta.9")),
 	)
 	other := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{9}, ed25519.SeedSize))
 	untrusted := serveManifests(t, other, release("v0.8.9-beta.4", "beta", 390, none))
@@ -350,11 +351,13 @@ func TestReleaseCheckOrdersUpgradeBoundariesByBuild(t *testing.T) {
 		{"v0.9.0-beta.5", "v0.9.0-beta.5 upgrades only from v0.9.0-beta.1 or later; upgrade v0.9.0-nightly.10 to v0.9.0-beta.1 first"},
 		{"v0.9.0-beta.6", ""},
 		{"v0.9.0-beta.7", ""},
+		{"v0.9.0-nightly.11", "v0.9.0-nightly.11 upgrades only from v0.9.0-beta.9 or later, and v0.9.0-nightly.10 cannot be ordered against it: release v0.9.0-beta.9 has no signed aether-release.json"},
+		{"v0.9.0-nightly.11", "manual step rotate (since v0.9.0-beta.9) must be done first"},
 		{"v0.9.0", "v0.9.0-nightly.12 is a nightly tag, which cannot be ordered by build"},
 	} {
 		var out bytes.Buffer
 		err := releaseCheck([]string{"--tag", c.tag, "--digest", edgeDigest("e"), "--from", "v0.9.0-nightly.10",
-			"--from-digest", edgeDigest("e"), "--channel", "beta", "--json"}, fetch, &out)
+			"--from-digest", edgeDigest("e"), "--channel", "nightly", "--json"}, fetch, &out)
 		var hold *holdError
 		switch {
 		case c.want == "" && err != nil:
