@@ -951,10 +951,22 @@ func (d *DB) reportMemory(ctx context.Context, report *CoordReport) (*Memory, er
 	}
 	// An isolated run writes nothing other runs read.
 	var permission domain.Permission
-	if err := d.db.QueryRowContext(ctx, `SELECT permission FROM runs WHERE id = ?`, report.RunID).Scan(&permission); err != nil {
+	var ownerRole domain.Role
+	var ownerPending bool
+	if err := d.db.QueryRowContext(ctx, `
+		SELECT r.permission, COALESCE(m.role, ''), COALESCE(m.pending, 0)
+		FROM runs r LEFT JOIN members m ON m.id = r.member_id AND m.merged_into = ''
+		WHERE r.id = ?`, report.RunID).Scan(&permission, &ownerRole, &ownerPending); err != nil {
 		return nil, fmt.Errorf("read the permission of session %s: %w", report.RunID, err)
 	}
 	if permission == domain.PermissionIsolated {
+		return nil, nil
+	}
+	// A viewer's sessions only read team memory. Mirror the Push gate that
+	// memory.add applies, so an outcome note is never written for a run whose
+	// owner (for example after a demotion that left the session running) may
+	// not push to the workspace.
+	if ownerPending || ownerRole == domain.RoleViewer || ownerRole == "" {
 		return nil, nil
 	}
 	body := report.Summary
