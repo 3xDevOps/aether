@@ -11,7 +11,8 @@
 # An image version is deleted only when every tag it carries is one of the
 # nightly's own: <tag>, <tag>-amd64, <tag>-arm64, its commit and
 # sha-<abbreviated commit>. A version that also carries another tag, such as a beta
-# rebuilt to the same digest or a channel tag, is kept.
+# rebuilt to the same digest, is kept; a nightly whose image a channel tag
+# still carries keeps its release and every image.
 set -eu
 
 dry_run=false
@@ -67,6 +68,21 @@ for package in $packages; do
 done
 
 while read -r tag commit; do
+	# A host on a channel tag runs that image, and promote-edge.yml reads
+	# its release's manifest to order the next move, so a release whose
+	# image a channel tag still carries is kept whole.
+	channel=$(cat "$tmp"/versions-* | awk -v tag="$tag" '{
+		n = split($2, t, ","); ours = 0; ch = ""
+		for (i = 1; i <= n; i++) {
+			if (t[i] == tag) ours = 1
+			if (t[i] ~ /^(nightly|beta|stable|latest)$/) ch = t[i]
+		}
+		if (ours && ch != "") { print ch; exit }
+	}')
+	if [ -n "$channel" ]; then
+		echo "keeping release $tag: its image is still $channel"
+		continue
+	fi
 	for package in $packages; do
 		while read -r id tags; do
 			[ -n "$tags" ] || continue

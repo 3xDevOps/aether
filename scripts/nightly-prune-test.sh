@@ -100,6 +100,19 @@ grep -qx 'gh release delete v0.9.0-nightly.1 --repo 3xDevOps/Aether --yes' "$STA
 [ "$(grep -n 'release delete' "$STATE/log" | cut -d: -f1)" -gt "$(grep -n -- '-X DELETE' "$STATE/log" | tail -1 | cut -d: -f1)" ] ||
 	fail "the release was deleted before its images"
 
+# A nightly that aether-edge:nightly still carries, because a newer
+# nightly's edge move failed, keeps its release and its images.
+reset
+printf '%s\n' "v0.9.0-nightly.1 $c1" "v0.9.0-nightly.0 2222222222222222222222222222222222222222" >"$STATE/prune"
+cat >>"$STATE/versions" <<'EOF2'
+20 v0.9.0-nightly.0,nightly,sha-2222222
+21 v0.9.0-nightly.0-amd64
+EOF2
+prune || fail "carried: $(cat "$tmp/err")"
+grep -qx 'keeping release v0.9.0-nightly.0: its image is still nightly' "$tmp/out" || fail "carried output: $(cat "$tmp/out")"
+if grep -q -e 'release delete v0.9.0-nightly.0' -e 'versions/2[01]$' "$STATE/log"; then fail "deleted what :nightly carries: $(cat "$STATE/log")"; fi
+grep -qx 'gh release delete v0.9.0-nightly.1 --repo 3xDevOps/Aether --yes' "$STATE/log" || fail "the other nightly was not pruned"
+
 # Nothing to prune: no package listing, nothing deleted.
 reset
 : >"$STATE/prune"
