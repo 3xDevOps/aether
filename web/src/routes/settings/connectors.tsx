@@ -185,7 +185,7 @@ function Setup({
         <Step n={2}>
           <p>{guide.paste}</p>
           {url ? <CopyableCommand command={url} /> : edgeNote ?? <p className="text-muted">The URL appears with the code.</p>}
-          {at && !signsInAt(info, at) && <p className="text-muted">This is this server’s own URL, where the connector you are reconnecting was added. Its page asks for a code.</p>}
+          {at && !atUniversal(info, at) && <p className="text-muted">This is this server’s own URL, where the connector you are reconnecting was added. Its page asks for a code.</p>}
           {url && info.universal_url && !universal && !at && (
             <p className="text-muted">
               This is this server’s own URL. To use the one URL <Code>{info.universal_url}</Code> instead, link a GitHub account in <strong>Profile › Sign-ins › Link a GitHub account</strong>, or run <Code>aether member link --github &lt;login&gt;</Code>.
@@ -239,6 +239,7 @@ function Connectors({ client }: { client: Api }) {
     known: Set<string>
     replaces?: Connector
     into?: string
+    info: ListInfo
   } | null>(null)
   // The move or reconnect in progress, kept past an attempt's expiry until
   // its replacement calls Aether or the member stops it, so a new code
@@ -307,7 +308,7 @@ function Connectors({ client }: { client: Api }) {
         setAttempt(null)
       }
       if (!old) {
-        const added = next.find((c) => !attempt.known.has(c.id) && appOf(c) === attempt.app && (!c.resource || sameURL(info, c.resource, attempt.into)))
+        const added = next.find((c) => !attempt.known.has(c.id) && appOf(c) === attempt.app && (!c.resource || sameURL(attempt.info, c.resource, attempt.into)))
         if (added || final) finish()
         if (added) setConnected(added)
         else if (final) setExpired(true)
@@ -315,7 +316,7 @@ function Connectors({ client }: { client: Api }) {
       }
       // A replacement that called Aether wins over one whose tokens may
       // never have arrived.
-      const candidates = next.filter((c) => !attempt.known.has(c.id) && sameURL(info, c.resource, attempt.into) &&
+      const candidates = next.filter((c) => !attempt.known.has(c.id) && sameURL(attempt.info, c.resource, attempt.into) &&
         (old.client_id ? c.client_id === old.client_id : c.redirect_host === old.redirect_host))
       let added: Connector | undefined
       try {
@@ -381,7 +382,7 @@ function Connectors({ client }: { client: Api }) {
       clearTimeout(expiry)
       clearInterval(timer)
     }
-  }, [attempt, info, read, client])
+  }, [attempt, read, client])
 
   const start = async (forApp: App, next: Target | null = null) => {
     setMintError(null)
@@ -417,6 +418,7 @@ function Connectors({ client }: { client: Api }) {
       known,
       replaces: next?.replaces,
       into,
+      info: rest,
     })
   }
 
