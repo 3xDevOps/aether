@@ -144,7 +144,7 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
             <p>
               macOS will ask for an administrator password: {path} is in a
               directory this account cannot write to. The dialog is labelled
-              osascript, the tool Aether asks through. Aether never sees your
+              osascript, the tool Cloudfield asks through. Cloudfield never sees your
               password.
             </p>
           )}
@@ -253,21 +253,21 @@ export function CliBanner({
       <div className={bannerContent}>
         {current && (
           <p>
-            <span className="font-medium">Aether {version} is the newest release.</span>{' '}
+            <span className="font-medium">Cloudfield {version} is the newest release.</span>{' '}
             <span className="font-normal text-muted">Nothing was downloaded.</span>
           </p>
         )}
         {!current && !installed && (
           <>
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-              <p className="font-medium">Aether {version} is available.</p>
+              <p className="font-medium">Cloudfield {version} is available.</p>
               <p className="text-ui-sm text-muted">You are running {update.cli.version}.</p>
             </div>
             {serverHint && <p className="text-ui-sm text-muted">{serverHint}</p>}
             <HowItInstalls update={update} />
           </>
         )}
-        {installLead && <p className="font-medium">Aether {version} is installed.</p>}
+        {installLead && <p className="font-medium">Cloudfield {version} is installed.</p>}
         {flow.name === 'applying' && (
           <p className="text-muted">{applyingLine}</p>
         )}

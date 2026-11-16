@@ -231,7 +231,7 @@ func (s *Server) launchDefaultsResult(ctx context.Context, member domain.MemberI
 	}
 	agents, err := s.ListAgents(ctx, member, account)
 	if err != nil {
-		reason := "Aether could not list the agents on this account to check it: " + rpcError(err).Message
+		reason := "Cloudfield could not list the agents on this account to check it: " + rpcError(err).Message
 		if saved.Agent != "" {
 			unknown("agent", saved.Agent, reason)
 		}
@@ -276,7 +276,7 @@ func (s *Server) launchDefaultsResult(ctx context.Context, member domain.MemberI
 		}
 		models, known := s.cfg.Runs.CachedAgentModels(account, name)
 		if !known || (models.Source != protocol.ModelSourceAgent && models.Source != protocol.ModelSourceCache) {
-			unknown("agents."+name+".model", a.Model, "Aether has no current list of the models "+name+" offers on this account to check it against")
+			unknown("agents."+name+".model", a.Model, "Cloudfield has no current list of the models "+name+" offers on this account to check it against")
 			continue
 		}
 		if !slices.ContainsFunc(models.Models, func(m protocol.AgentModel) bool { return m.ID == a.Model }) {

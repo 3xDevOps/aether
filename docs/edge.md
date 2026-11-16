@@ -236,7 +236,7 @@ GitHub accounts bound to a member.
 
 An invitation's link is `https://<relay host>/join/<server id>/<invitation
 id>#<secret>`. Opening it shows a page that opens the desktop app (**Open in
-Aether**) and offers the link to **Copy**, or run `aether link <link>`. The
+Cloudfield**) and offers the link to **Copy**, or run `aether link <link>`. The
 secret is the link's fragment, which a browser never sends, so no request to the
 edge carries it. There is no claim page, so no claim secret passes through the
 edge.
@@ -592,10 +592,11 @@ at https://<relay host>/mcp; upgrade it ...` for a server at protocol 2.
 SQLite database. Run it with a systemd unit ([Installing](#installing)) or as the
 image `ghcr.io/3xdevops/aether-edge` ([In a container](#in-a-container)). It
 answers on two host names, written `<signin-host>` and `<relay-host>` below (such
-as `auth.example.com` and `edge.example.com`). Either a reverse proxy terminates
+as `auth.example.com` and `edge.example.com`), and on two more for each extra
+[address pair](#more-than-one-address-pair). Either a reverse proxy terminates
 TLS and passes plain HTTP to a loopback port (`--proxy-listen`; the packaged unit
 expects nginx), or the edge listens on `:443` itself with Let's Encrypt
-certificates for its two names (`--listen`, the default).
+certificates for its names (`--listen`, the default).
 
 ### Requirements
 
@@ -603,7 +604,7 @@ certificates for its two names (`--listen`, the default).
   IPv4 address. The edge limits requests by client address, so no other proxy or
   load balancer may sit between clients and the edge's own proxy.
 - Outbound HTTPS to `github.com`, `api.github.com` and Let's Encrypt.
-- Two DNS names, a GitHub OAuth app, and egress bandwidth ([Egress
+- Two DNS names and a GitHub OAuth app per address pair, and egress bandwidth ([Egress
   budget](#egress-budget)).
 
 ### GitHub OAuth app
@@ -686,13 +687,13 @@ install it with the unit and the environment file (`<arch>` is `amd64` or
 `arm64`):
 
 ```sh
-base=https://github.com/3xDevOps/Aether/releases/download/<release-tag>
+base=https://github.com/3xDevOps/cloudfield/releases/download/<release-tag>
 curl -fLO "$base/aether-edge-linux-<arch>"
 curl -fLO "$base/checksums.txt"
 sha256sum --check --ignore-missing checksums.txt
 sudo install -m 0755 aether-edge-linux-<arch> /usr/local/bin/aether-edge
 
-src=https://raw.githubusercontent.com/3xDevOps/Aether/<release-tag>/packaging
+src=https://raw.githubusercontent.com/3xDevOps/cloudfield/<release-tag>/packaging
 sudo curl -fsSL -o /etc/systemd/system/aether-edge.service "$src/systemd/aether-edge.service"
 sudo useradd --system --home-dir /var/lib/aether-edge --no-create-home --shell /usr/sbin/nologin aether-edge
 sudo install -d -m 0700 /etc/aether-edge
@@ -715,18 +716,22 @@ the secret in as a systemd credential. If the file is missing the start fails wi
 ### In a container
 
 The release publishes `ghcr.io/3xdevops/aether-edge` for linux/amd64 and
-linux/arm64, running as uid and gid 65532. `<release-tag>` never moves. `latest`
-moves with every release, alphas included, and can migrate the database on an
-unattended restart, so keep it out of production. `stable` moves to a release an
-admin promoted after it qualified and soaked
-([CONTRIBUTING.md](../CONTRIBUTING.md#releases)). In production pin `stable` by
-digest (`ghcr.io/3xdevops/aether-edge:stable@sha256:<digest>`, from `docker
+linux/arm64, running as uid and gid 65532. `<release-tag>` never moves. The
+other tags are release channels, the same three Cloudfield servers follow
+([install.md](install.md#release-channel)), and each moves only when a
+workflow promotes a release onto it ([Promoting an edge
+release](#promoting-an-edge-release-to-stable)). `stable` is the one to run:
+an admin moves it to a release that qualified and soaked 24 hours. `beta`
+and `nightly` carry builds that have soaked less. `latest` follows GitHub's
+Latest release with no promotion attestation, and can migrate the database
+on an unattended restart, so keep it out of production. In production pin `stable`
+by digest (`ghcr.io/3xdevops/aether-edge:stable@sha256:<digest>`, from `docker
 buildx imagetools inspect ghcr.io/3xdevops/aether-edge:stable`) and change it
 deliberately.
 
 Put the edge and the proxy on one container network, publish only the proxy's
 ports, give the proxy a fixed address and trust that address alone, never the
-network's subnet. The proxy passes both host names to `http://aether-edge:8443`:
+network's subnet. The proxy passes every host name of every pair to `http://aether-edge:8443`:
 
 ```sh
 docker volume create aether-edge-data
@@ -773,24 +778,35 @@ aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is no
 
 Before you run a new digest, ask the edge you already run whether a release signed
 it ([Verified releases](install.md#verified-releases)) and whether the upgrade
-needs manual steps. It exits 0 to go ahead, or 3 with each `aether-edge: hold:
-...` reason on stderr:
+needs manual steps. `--from-digest` is the index digest the edge runs: the build
+number of the running release comes from `--from`'s signed manifest, which must
+name that digest. `--from-manifest <file>` reads a saved copy of that manifest,
+with its signature in `<file>.sig`, instead of downloading it, and
+`--keep-manifests <dir>` saves each manifest it downloads and verifies there as
+`<tag>.json` and `<tag>.json.sig`. `--channel` is the
+channel the host follows. It exits 1 when either manifest cannot be fetched and
+verified, when the release is not newer by build number, or when the channel
+does not take it (`stable` takes
+stable releases, `beta` beta and stable, `nightly` all three, `latest` all but nightly),
+0 to go ahead, or 3 with each `aether-edge: hold: ...` reason on stderr:
 
 ```sh
 docker exec <container> aether-edge release-check \
-  --tag <release-tag> --digest sha256:<digest> --from <running-tag>
+  --tag <release-tag> --digest sha256:<digest> --from <running-tag> \
+  --from-digest sha256:<running-digest> --channel stable
 ```
 
-A digest that `stable` names also carries a promotion attestation from
-`promote-edge.yml` on `main`. A host that follows `stable` requires it. The
-printed predicate must name `stable`, the digest and the tag `release-check`
-verified:
+A digest that `nightly`, `beta` or `stable` names also carries a promotion
+attestation from `promote-edge.yml` on `main`, signed in the repository under
+its old name or its current one. A host that follows one of them requires it.
+The printed predicate must name that channel, the digest and the tag
+`release-check` verified:
 
 ```sh
 cosign verify-attestation --new-bundle-format \
   --type https://github.com/3xDevOps/aether/edge-promotion/v1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main \
+  --certificate-identity-regexp '^https://github\.com/3xDevOps/(aether|cloudfield)/\.github/workflows/promote-edge\.yml@refs/heads/main$' \
   ghcr.io/3xdevops/aether-edge@sha256:<digest>
 ```
 
@@ -821,6 +837,88 @@ and names the problem, such as `no GitHub OAuth app is configured; set
 | `--openai-challenge` | `AETHER_EDGE_OPENAI_CHALLENGE` | None. OpenAI's domain verification token, served as `text/plain` at `https://<relay host>/.well-known/openai-apps-challenge`; unset answers 404 |
 | `--dev-listen` | `AETHER_EDGE_DEV_LISTEN` | None. Plain HTTP on a loopback address for local testing |
 | none | `AETHER_EDGE_GITHUB_CLIENT_SECRET` | None. The secret itself, instead of a file; setting both is refused |
+| `--origin-pairs` | `AETHER_EDGE_ORIGIN_PAIRS` | None. More origin pairs, each with its own GitHub OAuth app ([More than one address pair](#more-than-one-address-pair)) |
+
+### More than one address pair
+
+An edge can serve more than one pair of a sign-in origin and a relay origin, as
+when it moves to new host names and servers enrolled at the old ones must keep
+working. `--signin-origin` and `--relay-origin` stay the first pair, so an older
+edge image, which ignores `AETHER_EDGE_ORIGIN_PAIRS`, still serves it after a
+rollback. `AETHER_EDGE_ORIGIN_PAIRS` lists the others, comma-separated, each as
+four fields separated by spaces:
+
+```sh
+AETHER_EDGE_ORIGIN_PAIRS=https://<signin-host-2> https://<relay-host-2> <github-client-id-2> /run/credentials/aether-edge.service/github-client-secret-2
+```
+
+The fields are the sign-in origin, the relay origin, the client id of a GitHub
+OAuth app whose callback URL is `https://<signin-host-2>/signin/github/callback`,
+and a file holding that app's client secret. An OAuth app has one callback URL, so
+each sign-in origin needs its own app. Accounts are keyed by GitHub user id, so
+both apps sign a person in to the same account. Every host name of every pair
+must differ, and each needs [DNS](#dns) and, behind a proxy, its own `server`
+block. Under systemd, load the secret with a drop-in (`sudo systemctl edit
+aether-edge`):
+
+```ini
+[Service]
+LoadCredential=github-client-secret-2:/etc/aether-edge/github-client-secret-2
+```
+
+A request is served by the pair its host name belongs to: the sign-in pages,
+cookies, connector metadata, join links and the `421 Misdirected Request` answer
+to a wrong host all stay on that pair, and no pair is preferred. Sign-in cookies
+are per host, so a browser signs in on each sign-in origin separately. Device
+tokens work through every relay origin.
+
+Without a reverse proxy the edge obtains certificates for every host name of
+every pair itself. Behind one, add each pair's two host names to the proxy: a
+`server` block and a certificate each under nginx, or `|| Host(...)` terms in the
+router rule under Traefik ([`compose.yaml`](../packaging/edge/compose.yaml)).
+Probe `/healthz` and the certificate expiry on each of them
+([Monitoring](#monitoring)).
+
+A server enrolls at the relay origin it dialed. Every grant and connector
+assertion for it names that origin as issuer, whichever relay origin the client
+came in on, because the server refuses any other. Moving a server to another
+address means enrolling it there. With more than one pair, the edge's `ready`
+message lists every relay origin in `relay_origins`; a server that does not know
+the field ignores it.
+
+From edge protocol 6 the edge sends every connector request to the server with
+`Aether-Edge-Relay-Origin`, the relay origin the client sent it to, replacing
+any such header a client sends. A server at protocol 6 serves its connector at
+each relay origin its edge announced and at the one it enrolled at: metadata,
+issuer and the `resource` it requires name the origin the client used, and each
+token is bound to the URL it was issued for, so a token issued at
+`https://<relay host 1>/mcp` is refused at `https://<relay host 2>/mcp`
+(`the access token is for <url>, not <url>`), and a `resource` at any other
+origin gets `invalid_target`. An origin the edge did not announce in the
+current control connection gets `421 the edge relayed this request from
+"<origin>", which is not one of the relay origins it announced: ...`.
+
+| Edge | Server | Connector at another relay origin of the edge |
+| --- | --- | --- |
+| 6 | 6 | Works, bound to that origin |
+| 5 or below | 6 | Only the server's own relay origin, as before. The server ignores the header, which an older edge passes through from the client |
+| 6 | 5 or below | Only the server's own relay origin; `resource` at another gets `invalid_target`. The server ignores the header |
+
+Update the edge to protocol 6 before adding a pair. `MinVersion` stays 1, so
+no version refuses another. Tokens are stored with the URL they were issued
+for, so they survive a server restart, an edge restart and a reconnect. While
+the edge stops serving an origin, its tokens reach nothing; they work again,
+within their lifetimes, once the edge serves it again. A server that enrolls at
+another relay origin of the same edge keeps accepting tokens issued at the one
+it left while the edge speaks protocol 6 and announces it; below 6 it accepts
+only the origin it enrolled at.
+
+`/metrics` counts per address: `aether_edge_servers_by_origin{origin}` (servers
+holding a control channel by the relay origin they enrolled at),
+`aether_edge_device_logins_total{origin}` (device sign-ins by sign-in origin)
+and `aether_edge_connector_requests_total{origin,protocol}` (connector requests
+by the relay origin they came in on and the protocol version of the server they
+were for, `0` when it was not connected).
 
 ### Firewall
 
@@ -851,7 +949,7 @@ Encrypt account.
    sudo apt-get install nginx certbot python3-certbot-nginx
    ```
 
-2. Get a certificate for each host name. Port 80 must be open. The deploy hook
+2. Get a certificate for each host name, those of extra pairs too. Port 80 must be open. The deploy hook
    reloads nginx after each renewal:
 
    ```sh
@@ -874,7 +972,7 @@ Encrypt account.
    nginx. `nginx -t` prints `syntax is ok` and `test is successful`:
 
    ```sh
-   src=https://raw.githubusercontent.com/3xDevOps/Aether/<release-tag>/packaging
+   src=https://raw.githubusercontent.com/3xDevOps/cloudfield/<release-tag>/packaging
    curl -fsSL "$src/nginx/aether-edge.conf.example" |
      sed -e 's/<signin-host>/auth.example.com/g' -e 's/<relay-host>/edge.example.com/g' |
      sudo tee /etc/nginx/conf.d/aether-edge.conf >/dev/null
@@ -933,7 +1031,7 @@ exported.
 `/healthz` (`aether-edge healthcheck`) is liveness. `/readyz` (`aether-edge
 healthcheck --ready`) answers 200 when the database answers within a second, the
 public listener serves and the edge is not stopping, and 503 otherwise. From
-outside the edge's network, probe `/healthz` on both names and the certificate
+outside the edge's network, probe `/healthz` on every host name and each one's certificate
 expiry (`openssl x509 -noout -checkend 1814400`).
 
 The edge logs to the journal (`journalctl -u aether-edge`), including client
@@ -1031,11 +1129,15 @@ check first, run `docker run --rm -v <data>:/var/lib/aether-edge <old image> sch
 ### Automatic updates
 
 `aether-edge-update` ([`scripts/edge-update.sh`](../scripts/edge-update.sh))
-updates an edge that runs in Docker Compose to the newest release on a channel.
+updates an edge that runs in Docker Compose to the newest release on a channel:
+`nightly`, `beta`, `stable` (the default) or `latest`.
 A systemd timer runs it daily at 04:00 UTC with up to an hour's random delay. It
-never downgrades and never runs a digest that a signed release does not name.
+never moves to a lower build number than the running release's signed manifest
+carries, whatever the version says (an edge whose image predates release
+channels compares versions instead), and never runs a digest that a signed
+release does not name.
 Before it switches, it checks with `cosign` that `promote-edge.yml` on `main`
-promoted the digest (except on `latest`), runs `aether-edge release-check` from
+promoted the digest onto the host's channel (except on `latest`), runs `aether-edge release-check` from
 the running image, and backs the database up to
 `backups/pre-update-<version>-<UTC time>.db`. A blocking manual step holds the
 update: it exits 3 and changes nothing. After `docker compose up -d --wait` it
@@ -1053,6 +1155,11 @@ fixed address, put it in `AETHER_EDGE_TRUSTED_PROXIES`, and keep
 `forwardedHeaders.trustedIPs` and `forwardedHeaders.insecure` unset on the entry
 point the edge uses.
 
+The hosted Cloudfield Edge service follows `stable`, like any host left on the
+default.
+
+#### Installing the updater
+
 At the release tag you install, copy `scripts/edge-update.sh` to
 `/usr/local/sbin/aether-edge-update`, `packaging/edge/aether-edge-update.env.example`
 to `/etc/aether-edge-update.env` (set `AETHER_EDGE_UPDATE_RELAY_URL`; the file
@@ -1067,6 +1174,21 @@ sudo aether-edge-update --check            # verifies the running digest; change
 sudo systemctl daemon-reload
 sudo systemctl enable --now aether-edge-update.timer aether-edge-update-recover.service
 ```
+
+`AETHER_EDGE_DIGEST` must be the release's index digest, the `Digest:` that
+`docker buildx imagetools inspect ghcr.io/3xdevops/aether-edge:<release-tag>`
+prints, not a platform digest. Otherwise every run stops with `the running
+release <tag> signs the edge image <index digest>, not the running <digest>; pin
+the edge to the index digest <index digest>`.
+
+To change channel, set `AETHER_EDGE_UPDATE_CHANNEL` and run `sudo
+aether-edge-update --check`: it accepts a running release promoted on the old
+channel, but the next one must be promoted on the new channel. An edge that
+leaves `nightly` stays on its build until the new channel reaches it; until
+then each run exits 1 with `refusing to upgrade: <tag> (build <n>) is older
+than the running <tag> (build <n>)`. An edge
+whose image prints no `build` in `version --json` predates channels and cannot
+verify a nightly release: update it once on `beta` or `stable` first.
 
 Without cosign or jq `--check` fails with `cosign not found` or `jq not found`.
 An edge whose image predates `version --json`, `release-check`, `backup` and
@@ -1096,6 +1218,11 @@ updater does the rest.
   --manual-steps-done`. A hold because the running release is older than
   `min_upgrade_from` is refused with `--manual-steps-done passes only blocking
   manual steps`: upgrade by hand to a release at or above it first.
+  An edge whose release has a build number compares itself with
+  `min_upgrade_from` and each step's `since` by the builds in their signed
+  manifests; when one cannot be read, the step counts as needed and the floor as
+  not met, and the reason names the tag. A boundary that names a beta not yet
+  published therefore holds nightly hosts until that beta is published.
 - A `broken` state means the rollback failed, and every session exits 1 with
   `state is broken since <time>: <reason>`. Run the edge on a release you trust
   (put its digest in `.env`, restore a backup first if `schema --json` asks for
@@ -1103,13 +1230,90 @@ updater does the rest.
   `/var/lib/aether-edge-update/state`.
 - A digest in `/var/lib/aether-edge-update/failed` is skipped on every session. Delete
   its line to try it again.
+- `/var/lib/aether-edge-update/releases/<tag>.json` and `.json.sig` are the signed
+  manifests `release-check` verified, kept so updates still order after GitHub
+  prunes the release the edge runs (nightlies after 14 days). An update switches
+  only once the new release's copy is kept; otherwise nothing changes and the
+  next run retries. A copy that does not verify is
+  refused with `saved <file>: ... is not signed by a trusted release key`; delete
+  both files and the next run downloads them again. Without a copy, `release-check`
+  downloads the manifest, so an edge whose release was pruned before a copy was
+  kept stops with `the running release: release <tag> has no signed
+  aether-release.json`: upgrade it by hand to the channel's current release
+  ([First upgrade](#first-upgrade)).
 - A host that reboots mid-update is recovered at boot by
   `aether-edge-update-recover.service`, or by `sudo aether-edge-update --recover`.
+- An updater copied before the repository took its current name refuses every
+  promotion made since: each run exits 1 with `<tag> (<digest>) on <channel> has
+  no valid promotion attestation from promote-edge.yml on main`, after cosign's
+  error naming the signer it got. Install the new updater on every host before
+  the first promotion after the rename, from the release you install:
+
+  ```sh
+  curl -fsSL -o edge-update.sh https://raw.githubusercontent.com/3xDevOps/cloudfield/<release-tag>/scripts/edge-update.sh
+  sudo install -m 0755 edge-update.sh /usr/local/sbin/aether-edge-update
+  sudo aether-edge-update --check
+  ```
 
 `sudo aether-edge-update --rollback` returns to the previous release. If that
 release cannot run the migrated database it changes nothing and exits 1 with the
 backup's age, because restoring loses every account, device and server change
-since. To roll back anyway, add `--restore-backup`.
+since. To roll back anyway, add `--restore-backup`. While the edge's
+`AETHER_EDGE_ORIGIN_PAIRS` is set, it also refuses a release whose `version
+--json` reports an edge protocol below 6, which serves only the first
+[address pair](#more-than-one-address-pair), and exits 1 with `... reports no
+edge protocol 6 or later in version --json`. Remove the setting first, or add
+`--drop-origin-pairs` to cut off the servers enrolled at the other pairs. The
+rollback after a failed update returns to the release that ran before and is
+never refused.
+
+### Promoting an edge release to stable
+
+This is for maintainers. The image tags `nightly`, `beta` and `stable` move
+only through `.github/workflows/promote-edge.yml`, which copies the exact
+index the release signed and attested; it never builds, and never moves a
+tag to a lower build. Each move publishes an `edge-promotion/v1` attestation
+naming the tag's channel, which hosts check ([Verifying an
+image](#verifying-an-image)). The attestation is signed by `promote-edge.yml`
+on `main`, which hosts pin, so only a run of that file on `main` moves a tag.
+
+| Tag | Moved by | When |
+| --- | --- | --- |
+| `nightly` | `nightly.yml` calling `promote-edge.yml` | each nightly it publishes; the tag takes only a nightly release |
+| `beta` | `promote.yml` calling `promote-edge.yml` | each time Promote moves `beta.json`, on a promotion to stable too. A hotfix moves `beta.json` only when it is above it, and never `:beta`, which follows at the next Promote |
+| `stable` | an admin dispatching `promote-edge.yml` | by hand, as below |
+
+Promote never waits on `stable`: an admin promotes a release's image once
+it has been published for 24 hours. Edges on the previous stable keep
+working meanwhile, because their compat floors let an older edge serve
+updated servers. A stable that raises a compat floor cannot wait, so promote
+its image at once with `soak_override_reason`.
+
+```sh
+docker buildx imagetools inspect ghcr.io/3xdevops/aether-edge:<tag>   # Digest:
+gh workflow run promote-edge.yml -f tag=<tag> -f digest=sha256:<digest>
+# sooner than 24 hours after publication:
+gh workflow run promote-edge.yml -f tag=<tag> -f digest=sha256:<digest> -f soak_override_reason='<why>'
+```
+
+The run refuses, with these errors:
+
+- `release <tag> is a draft; promote only a published release`;
+- `<tag> is a <channel> release, which aether-edge:stable does not take`
+  (`stable` takes a stable release, or one from before channels; `beta` anything
+  but a nightly);
+- `<tag> was published <n> hours ago; wait until 24 hours have passed or give soak_override_reason`;
+- `ghcr.io/3xdevops/aether-edge:<tag> is <digest>, not <digest>` when the
+  digest you passed is not the tag's index;
+- `ghcr.io/3xdevops/aether-edge:stable carries <tag>; release-check refuses to move it to <tag> (see its output above); promote a release between them first if <tag> upgrades only from a later one`
+  when the new release is not above the carried one by build, or its
+  `min_upgrade_from` is above the carried one. A blocking manual step does
+  not refuse the move: edges on the channel hold until their operator
+  takes it.
+
+The admin check applies to a dispatch for `stable` only. `beta` moves only
+from `promote.yml` and `nightly` only from `nightly.yml`, each running on
+`main`; `promote-edge.yml` refuses a call from any other workflow or ref.
 
 ### Operator commands
 

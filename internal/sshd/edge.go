@@ -16,6 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -28,7 +29,7 @@ const (
 
 // connIdentity is who an authenticated connection is. device and deviceKey
 // are set on connections that authenticated with an edge device key,
-// relayed or direct. clientVersion and legacyClient come from the SSH
+// relayed or direct. client and legacyClient come from the SSH
 // banner; see parseClientBanner. connector and connectorClient are set on
 // a ChatGPT or Claude connector's calls, whose device is the one its
 // pairing code was minted on.
@@ -36,7 +37,7 @@ type connIdentity struct {
 	member          domain.MemberID
 	device          domain.DeviceID
 	deviceKey       string
-	clientVersion   string
+	client          selfupdate.Release
 	legacyClient    bool
 	connector       string
 	connectorClient string

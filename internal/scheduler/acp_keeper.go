@@ -77,7 +77,7 @@ func (d *acpDriver) startKeeper(ctx context.Context, entry *supervised, managed 
 // errKeeperNotStopped marks a failed keeper start whose keeper, and the
 // agent it may have started, could not be stopped: starting the agent again
 // would run two.
-var errKeeperNotStopped = errors.New("the keeper that failed to start could not be stopped, so Aether did not start the agent again")
+var errKeeperNotStopped = errors.New("the keeper that failed to start could not be stopped, so Cloudfield did not start the agent again")
 
 func keeperNotStopped(err error) error { return fmt.Errorf("%w: %w", errKeeperNotStopped, err) }
 

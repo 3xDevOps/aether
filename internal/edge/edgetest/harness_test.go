@@ -78,6 +78,12 @@ type harness struct {
 	proxies []netip.Prefix
 	// reviewer, when set, is the edge's reviewer account.
 	reviewer *edge.ReviewerAccount
+	// pairB, when set, has the edge serve a second origin pair, signinB
+	// and relayB on 127.0.0.2 and 127.0.0.3, with its own OAuth app, as
+	// --origin-pairs does. pairBAddrs are their front addresses.
+	pairB           bool
+	signinB, relayB string
+	pairBAddrs      [2]string
 
 	mu        sync.Mutex
 	skew      time.Duration
@@ -139,8 +145,28 @@ func (h *harness) startEdge() {
 	if h.renamed {
 		h.signinURL, h.relayURL = h.relayURL, h.signinURL
 	}
+	var morePairs []edge.Pair
+	var frontB []net.Listener
+	if h.pairB {
+		for i, host := range []string{"127.0.0.2", "127.0.0.3"} {
+			addr := h.pairBAddrs[i]
+			if addr == "" {
+				addr = host + ":0"
+			}
+			ln, lerr := net.Listen("tcp", addr)
+			if lerr != nil {
+				t.Skipf("%s is not a loopback address on this host: %v", host, lerr)
+			}
+			h.pairBAddrs[i] = ln.Addr().String()
+			frontB = append(frontB, ln)
+		}
+		h.signinB, h.relayB = "http://"+h.pairBAddrs[0], "http://"+h.pairBAddrs[1]
+		app := h.github.app()
+		app.ClientID, app.ClientSecret = "fake-client-id-2", "fake-client-secret-2"
+		morePairs = []edge.Pair{{SigninOrigin: h.signinB, RelayOrigin: h.relayB, GitHub: app}}
+	}
 	svc, err := edge.New(edge.Config{
-		DataDir: h.edgeDir, SigninOrigin: h.signinURL, RelayOrigin: h.relayURL,
+		DataDir: h.edgeDir, SigninOrigin: h.signinURL, RelayOrigin: h.relayURL, MorePairs: morePairs,
 		GitHub: h.github.app(), Clock: h.now, ConnectorClientHosts: []string{"127.0.0.1"}, Reviewer: h.reviewer,
 	})
 	if err != nil {
@@ -166,6 +192,9 @@ func (h *harness) startEdge() {
 	}
 	go func() { _ = n.back.Serve(back) }()
 	go func() { _ = n.front.Serve(front) }()
+	for _, ln := range frontB {
+		go func() { _ = n.front.Serve(ln) }()
+	}
 	h.mu.Lock()
 	h.node = n
 	h.mu.Unlock()
@@ -672,6 +701,8 @@ type (
 )
 
 func (noRuns) StopTerminal(context.Context, domain.MemberID) error { return nil }
+
+func (noRuns) ForgetOMPAccount(context.Context, domain.MemberID) {}
 
 // agent.list asks about agents no run here uses.
 func (noRuns) WakeRefusal(string, domain.LaunchMode) error { return nil }

@@ -1,0 +1,224 @@
+name: Nightly
+
+# Builds the newest main commit with green push CI as vX.Y.Z-nightly.N, at
+# most every 4 hours or at once by an admin's "build now", signs it with the
+# nightly key in the nightly environment, moves nightly.json and
+# aether-edge:nightly, and once a day prunes nightlies older than 14 days.
+# Nothing runs until an admin sets the repository variable NIGHTLY_ENABLED
+# to true; pruning also needs NIGHTLY_PRUNE_ENABLED. CONTRIBUTING.md,
+# Releases, says what must exist first.
+run-name: ${{ github.event_name == 'workflow_dispatch' && 'Nightly, build now' || 'Nightly' }}
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+    # The daily prune.
+    - cron: '7 4 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+# One run at a time, never cancelled: a cancelled signer can leave a tag
+# without its release, which the next run then resumes.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  policy:
+    if: vars.NIGHTLY_ENABLED == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The job's if compares without case; this takes only the exact,
+      # case-sensitive value true.
+      - name: Require NIGHTLY_ENABLED to be exactly true
+        env:
+          NIGHTLY_ENABLED: ${{ vars.NIGHTLY_ENABLED }}
+        run: |
+          if [ "$NIGHTLY_ENABLED" != true ]; then
+            echo "::error::NIGHTLY_ENABLED is '$NIGHTLY_ENABLED', not true; set it with gh variable set NIGHTLY_ENABLED --body true, and check gh variable list --org for one of that name"
+            exit 1
+          fi
+      - name: Require main
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::nightly runs only from refs/heads/main, not $GITHUB_REF"
+            exit 1
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - name: Require an admin for build now
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
+
+  plan:
+    needs: policy
+    if: vars.NIGHTLY_ENABLED == 'true'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      tag: ${{ steps.plan.outputs.tag }}
+      commit: ${{ steps.plan.outputs.commit }}
+      build: ${{ steps.plan.outputs.build }}
+      first-pointer: ${{ steps.plan.outputs.first-pointer }}
+      tools: ${{ steps.plan.outputs.tools }}
+    steps:
+      # The full history and every tag: the walk back from main's head and
+      # the build: lines of the nightly tags.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build main's nightly-plan
+        run: go build -o "$RUNNER_TEMP/nightly-plan" ./scripts/nightly-plan
+      - name: Choose the commit, tag and build
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_PLAN: ${{ runner.temp }}/nightly-plan
+          EVENT: ${{ github.event_name }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          sh scripts/nightly-plan.sh > "$RUNNER_TEMP/plan"
+          cat "$RUNNER_TEMP/plan" >> "$GITHUB_OUTPUT"
+          echo "tools=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Nightly"
+            echo
+            sed 's/^/- /' "$RUNNER_TEMP/plan"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The first job in the nightly environment, and only when there is
+  # something to build, so a quiet run deploys nothing. It signs a probe
+  # with the key and has main's keys verify it before anything is built,
+  # tagged or pushed, so a key main does not trust fails here, not in the
+  # signer after the tag exists.
+  signing-key:
+    needs: plan
+    if: vars.NIGHTLY_ENABLED == 'true' && needs.plan.outputs.run == 'true'
+    environment: nightly
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.plan.outputs.tools }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build main's nightly-plan
+        run: go build -o "$RUNNER_TEMP/nightly-plan" ./scripts/nightly-plan
+      - name: Require a nightly key main trusts
+        env:
+          AETHER_NIGHTLY_SIGNING_KEY: ${{ secrets.AETHER_NIGHTLY_SIGNING_KEY }}
+        run: '"$RUNNER_TEMP/nightly-plan" key-check'
+
+  # Every pointer writer runs in the channels group, so no two read and
+  # replace a pointer at once. Groups are repository-wide, so this is
+  # promote.yml's group too: GitHub keeps one pending entry per group, and
+  # a pending entry here cancels a pending Promote and the other way round.
+  # On the job, not the workflow, a 30-minute run only joins it when it
+  # builds. CONTRIBUTING.md, Releases, gives the remedy.
+  release-build:
+    needs: [plan, signing-key]
+    if: vars.NIGHTLY_ENABLED == 'true' && needs.plan.outputs.run == 'true'
+    concurrency:
+      group: channels
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/release-build.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      commit: ${{ needs.plan.outputs.commit }}
+      tools-commit: ${{ needs.plan.outputs.tools }}
+      channel: nightly
+      build: ${{ fromJSON(needs.plan.outputs.build) }}
+      hotfix: 0
+      pointer: nightly
+      first-pointer: ${{ needs.plan.outputs.first-pointer == 'true' }}
+      signing-environment: nightly
+    secrets:
+      AETHER_NIGHTLY_SIGNING_KEY: ${{ secrets.AETHER_NIGHTLY_SIGNING_KEY }}
+      ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+  edge-nightly:
+    needs: [plan, release-build]
+    if: vars.NIGHTLY_ENABLED == 'true' && needs.plan.outputs.run == 'true'
+    permissions:
+      contents: read
+      actions: read
+      attestations: write
+      id-token: write
+      artifact-metadata: write
+      packages: write
+    uses: ./.github/workflows/promote-edge.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      digest: ${{ needs.release-build.outputs.edge-digest }}
+      channel: nightly
+
+  prune:
+    needs: policy
+    if: vars.NIGHTLY_ENABLED == 'true' && vars.NIGHTLY_PRUNE_ENABLED == 'true' && github.event.schedule == '7 4 * * *'
+    permissions:
+      contents: write
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require NIGHTLY_PRUNE_ENABLED to be exactly true
+        env:
+          NIGHTLY_PRUNE_ENABLED: ${{ vars.NIGHTLY_PRUNE_ENABLED }}
+        run: |
+          if [ "$NIGHTLY_PRUNE_ENABLED" != true ]; then
+            echo "::error::NIGHTLY_PRUNE_ENABLED is '$NIGHTLY_PRUNE_ENABLED', not true; set it with gh variable set NIGHTLY_PRUNE_ENABLED --body true, and check gh variable list --org for one of that name"
+            exit 1
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build main's nightly-plan
+        run: go build -o "$RUNNER_TEMP/nightly-plan" ./scripts/nightly-plan
+      - name: Prune nightlies older than 14 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_PLAN: ${{ runner.temp }}/nightly-plan
+        run: sh scripts/nightly-prune.sh | tee -a "$GITHUB_STEP_SUMMARY"

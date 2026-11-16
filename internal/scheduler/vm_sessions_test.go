@@ -4,9 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -30,7 +29,7 @@ func TestASessionVMGetsItsOwnAgentDatabases(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	profile := harness.Profile{Name: "agent", VMState: []harness.VMState{{Dir: ".agent/db", Env: "AGENT_DB_HOME"}, {Dir: ".agent/index"}}}
+	profile := harness.Profile{Name: "agent", VMState: []harness.VMState{{Dir: ".agent/db", Env: "AGENT_DB_HOME"}, {Dir: ".agent/index", Seed: []string{"login.json"}}}}
 	run := &domain.Run{ID: "run-1"}
 	member := &domain.Member{ID: "member"}
 	for _, vm := range []bool{false, true} {
@@ -43,10 +42,15 @@ func TestASessionVMGetsItsOwnAgentDatabases(t *testing.T) {
 			t.Fatal(err)
 		}
 		var state []runtime.Mount
+		seeded := false
 		for _, m := range plan.Mounts {
 			if m.ContainerPath == "/root/.agent/db" || m.ContainerPath == "/root/.agent/index" {
 				state = append(state, m)
 			}
+			seeded = seeded || m == runtime.Mount{HostPath: filepath.Join(s.vmDatabasesRoot(), "run-1"), ContainerPath: "/root/.agent/index/login.json", Kind: runtime.MountSeed}
+		}
+		if seeded != vm {
+			t.Errorf("VM %v: the index's login is seeded: %v", vm, seeded)
 		}
 		if !vm {
 			if len(state) != 0 || plan.Env["AGENT_DB_HOME"] != "" {
@@ -70,81 +74,44 @@ type vmFakeRuntime struct{ *fakeRuntime }
 
 func (vmFakeRuntime) SessionVMs() {}
 
-func TestOnlyOneVMSessionRunsAnAgentWithUnmovableDatabases(t *testing.T) {
+// A login mounted on its own, as an isolated session or a shared account
+// mounts it, sits inside the session's own copy of the directory, which the
+// VM seeds from it before covering it.
+func TestAVMSessionSeedsALoginMountedInsideItsState(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, func(cfg *Config) {
-		cfg.RunContainerTTL = time.Hour
-		cfg.Harnesses["omp"] = HarnessSpec{TUIArgs: []string{"fake-omp", "{task}"}}
-		cfg.Runtime = vmFakeRuntime{cfg.Runtime.(*fakeRuntime)}
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "home-caches"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Homes: homes, Store: db, StateDir: t.TempDir(), Runtime: vmRuntime{}}}
+	member := &domain.Member{ID: "member"}
+	homePath, err := homes.Path(member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(homePath, ".copilot"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(homePath, ".copilot", "config.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	copilot, _ := harness.Lookup("copilot")
+	run := &domain.Run{ID: "run-iso", Permission: domain.PermissionIsolated}
+	plan, err := s.BuildEnvironmentPlan(context.Background(), run, &domain.Workspace{ID: "ws"}, member, copilot, EnvironmentPurposeRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := slices.IndexFunc(plan.Mounts, func(m runtime.Mount) bool { return m.ContainerPath == "/root/.copilot/config.json" && m.Kind == "" })
+	state := slices.IndexFunc(plan.Mounts, func(m runtime.Mount) bool { return m.ContainerPath == "/root/.copilot" && m.Kind == runtime.MountState })
+	seed := slices.IndexFunc(plan.Mounts, func(m runtime.Mount) bool {
+		return m.ContainerPath == "/root/.copilot/config.json" && m.Kind == runtime.MountSeed
 	})
-	ctx := t.Context()
-	launch := func(task string) (*domain.Run, error) {
-		return e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, task, "omp", domain.LaunchTUI)
-	}
-	first, err := launch("first")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = launch("second"); err == nil || !strings.Contains(err.Error(), "oh-my-pi keeps its logins in a SQLite database that two session VMs cannot share") || !strings.Contains(err.Error(), string(first.ID)) {
-		t.Fatalf("a second live launch = %v", err)
-	}
-	runs, err := e.db.ListRunsByMember(ctx, e.member.ID)
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("a refused launch left %d sessions, %v", len(runs), err)
-	}
-	if err = e.sched.CloseRun(ctx, first.ID, e.member.ID, domain.RunMerged); err != nil {
-		t.Fatal(err)
-	}
-	e.waitStoreStatus(t, first.ID, domain.RunMerged)
-	second, err := launch("second")
-	if err != nil {
-		t.Fatalf("a launch beside a closed session = %v", err)
-	}
-	if _, err = e.sched.Relaunch(ctx, first.ID, e.member.ID); err == nil || !strings.Contains(err.Error(), string(second.ID)) {
-		t.Fatalf("relaunch beside a live session = %v", err)
-	}
-	if err = e.sched.Kill(ctx, second.ID, e.member.ID); err != nil {
-		t.Fatal(err)
-	}
-	e.waitStoreStatus(t, second.ID, domain.RunAbandoned)
-	// The killed session counts until its VM is gone.
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		_, err = e.sched.Relaunch(ctx, first.ID, e.member.ID)
-		if err != nil && strings.Contains(err.Error(), "after this one closed") {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("relaunch after another session used the databases = %v", err)
-		}
-	}
-}
-
-func TestVMSingleCountsTheOwnersHomeOnlyForADirectoryLogin(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, func(cfg *Config) { cfg.Runtime = vmFakeRuntime{cfg.Runtime.(*fakeRuntime)} })
-	ctx := t.Context()
-	grace := &domain.Member{DisplayName: "Grace", PublicKey: testPublicKey(t), Color: "#3cb44b", Role: domain.RoleCollaborator}
-	if err := e.db.CreateMember(ctx, grace); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.cfg.Homes.PrepareLoginMountpoint(grace.ID, ".omp/agent", true); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.cfg.Homes.PrepareLoginMountpoint(grace.ID, ".copilot/config.json", false); err != nil {
-		t.Fatal(err)
-	}
-	for _, agent := range []string{"omp", "copilot"} {
-		live := &domain.Run{WorkspaceID: e.ws.ID, MemberID: grace.ID, Harness: agent, Mode: domain.LaunchTUI, Status: domain.RunNeedsAttention}
-		if err := e.db.CreateRun(ctx, live); err != nil {
-			t.Fatal(err)
-		}
-		profile, _ := harness.Lookup(agent)
-		err := e.sched.vmSingleConflict(ctx, profile, agent, e.member.ID, grace.ID, "")
-		if agent == "omp" && (err == nil || !strings.Contains(err.Error(), "Grace's session "+string(live.ID)) || !strings.Contains(err.Error(), "ask them to close it, or launch on another account")) {
-			t.Errorf("omp on Grace's account beside her live session = %v", err)
-		}
-		if agent == "copilot" && err != nil {
-			t.Errorf("copilot on Grace's account, whose database stays in the launcher's home = %v", err)
-		}
+	if login < 0 || state < login || seed < state {
+		t.Fatalf("login %d, state %d, seed %d in %+v", login, state, seed, plan.Mounts)
 	}
 }

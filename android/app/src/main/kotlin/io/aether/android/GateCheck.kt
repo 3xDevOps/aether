@@ -128,7 +128,7 @@ private fun splitTag(tag: String): Pair<List<String>, List<String>?> {
 
 fun gateDetails(gate: Gate, targets: List<UpdateTarget>): String =
     buildString {
-        append("This Aether app (${gate.clientVersion}) is too old for the server ")
+        append("This Cloudfield app (${gate.clientVersion}) is too old for the server ")
         append("(${gate.serverVersion} needs ${gate.minClientVersion} or newer).\n")
         append("Install ${gate.tag}:\n")
         for (target in targets) append(target.url).append('\n')

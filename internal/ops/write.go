@@ -724,7 +724,7 @@ func decidable(in decideInput, l links, shown ...string) error {
 	for _, text := range shown {
 		if len([]rune(text)) > maxText {
 			return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-				"session %s's request is longer than the connector shows; decide it in the Aether dashboard%s", in.RunID, at(l.run(in.RunID)))}
+				"session %s's request is longer than the connector shows; decide it in the Cloudfield dashboard%s", in.RunID, at(l.run(in.RunID)))}
 		}
 	}
 	if in.Action != shown[0] {
@@ -769,7 +769,7 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 		}
 		if option == "" {
 			return "", nil, &protocol.Error{Code: protocol.CodeInvalidState,
-				Message: fmt.Sprintf("session %s's request offers no %s option, and the connector never answers for always; decide it in the Aether dashboard%s", in.RunID, want, at(l.run(in.RunID)))}
+				Message: fmt.Sprintf("session %s's request offers no %s option, and the connector never answers for always; decide it in the Cloudfield dashboard%s", in.RunID, want, at(l.run(in.RunID)))}
 		}
 		var res protocol.RunInputRespondResult
 		if err := c.act(ctx, protocol.MethodRunInputRespond, protocol.RunInputRespondParams{RunID: in.RunID, RequestID: in.AnswerID, OptionID: option}, &res); err != nil {

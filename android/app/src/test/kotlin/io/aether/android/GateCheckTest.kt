@@ -22,7 +22,7 @@ private fun body(
         "\"server_version\":\"$serverVersion\",\"server_behind\":false,\"supervised\":false$gateFields}\n"
 }
 
-private const val APK = "https://github.com/3xDevOps/Aether/releases/download/v0.8.1/aether-android.apk"
+private const val APK = "https://github.com/3xDevOps/cloudfield/releases/download/v0.8.1/aether-android.apk"
 
 class GateCheckTest {
     @Test
@@ -110,7 +110,7 @@ class GateCheckTest {
     fun theDetailsNameBothVersionsAndTheDownload() {
         val gate = gateFor(parseGateCheck(body(target = "v0.8.1")))!!
         assertEquals(
-            "This Aether app (v0.7.0) is too old for the server (v0.8.0 needs v0.8.0 or newer).\nInstall v0.8.1:\n$APK\n",
+            "This Cloudfield app (v0.7.0) is too old for the server (v0.8.0 needs v0.8.0 or newer).\nInstall v0.8.1:\n$APK\n",
             gateDetails(gate, listOf(UpdateTarget(APK))),
         )
     }

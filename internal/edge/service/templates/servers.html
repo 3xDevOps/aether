@@ -6,7 +6,7 @@
 <td>{{.Name}}</td>
 <td><code>{{.ID}}</code></td>
 <td>{{.Role}}</td>
-<td>{{if eq .Kind "hosted"}}Aether's hardware{{else}}its owner's hardware{{end}}</td>
+<td>{{if eq .Kind "hosted"}}Cloudfield's hardware{{else}}its owner's hardware{{end}}</td>
 <td>{{if eq .AccessPolicy "account"}}signing in is enough{{else}}approved devices only{{end}}</td>
 <td>{{if .Online}}online{{else}}not connected{{end}}</td>
 <td>{{if .Owner}}<form method="post" action="/servers/remove">

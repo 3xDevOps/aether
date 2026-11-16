@@ -47,6 +47,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 	if s.dictationInstalled() {
 		features = append(features, protocol.FeatureDictation)
 	}
+	floor := s.minClient()
 	return protocol.ServerInfoResult{
 		ServerVersion:         s.cfg.release,
 		ProtocolVersion:       protocol.Version,
@@ -56,7 +57,11 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		TailnetIdentityAuth:   s.cfg.WhoIs != nil,
 		TailnetDashboardError: dashboardErr,
 		DashboardURL:          dashboardURL,
-		MinClientVersion:      s.minClientVersion(),
+		MinClientVersion:      floor.Version,
+		Build:                 s.cfg.build,
+		Hotfix:                s.cfg.hotfix,
+		MinClientBuild:        floor.Build,
+		MinClientHotfix:       floor.Hotfix,
 		Features:              features,
 	}, nil
 }

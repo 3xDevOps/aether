@@ -63,6 +63,8 @@ func TestEdgeIdentityMigrationKeepsMembersAndCascadeChildren(t *testing.T) {
 	if err != nil || len(defs) != 1 {
 		t.Fatalf("harness definitions after migration = %d, %v; want 1", len(defs), err)
 	}
+	// An existing database gains the row that keeps it on beta.
+	before["server_update_state"]++
 	after := rowCounts(t, db.db)
 	for table, n := range before {
 		if after[table] != n {
@@ -117,6 +119,7 @@ func TestJoinSecretMigrationDropsOpenInvitations(t *testing.T) {
 	}
 	before["identity_invitations"]--
 	before["member_devices"]--
+	before["server_update_state"]++
 	after := rowCounts(t, db.db)
 	for table, n := range before {
 		if after[table] != n {

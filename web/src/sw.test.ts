@@ -236,7 +236,7 @@ describe('service worker', () => {
   it('still shows something for a push it cannot read', async () => {
     const { self, dispatch } = worker()
     await dispatch('push', { data: null })
-    expect(self.registration.showNotification).toHaveBeenCalledWith('Aether', expect.objectContaining({ body: 'A session needs you.', tag: 'aether' }))
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Cloudfield', expect.objectContaining({ body: 'A session needs you.', tag: 'aether' }))
   })
 
   it('opens the run in a window when no dashboard is open', async () => {

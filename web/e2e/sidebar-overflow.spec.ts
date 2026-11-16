@@ -20,7 +20,7 @@ test('a long session title does not let the session list scroll sideways', async
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(alice.url)
-  const sessions = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+  const sessions = page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' })
   await expect(sessions.getByRole('button', { name: new RegExp(task) })).toBeVisible({ timeout: 30_000 })
 
   const { scrollWidth, clientWidth } = await sessions.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))

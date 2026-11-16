@@ -363,7 +363,7 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 				grant := sshd.ConnectorGrant{Member: conns[0].Member, Provider: conns[0].Provider, Subject: conns[0].Subject}
 				_, perr := s2.ssh.ConnectorLocal(grant, conns[0].ID, "Test client", conns[0].Scopes).Call(t.Context(), protocol.MethodMemberInvite, json.RawMessage(`{}`))
 				if want := "member.invite: Test client connector " + conns[0].ID +
-					" cannot call this method; no connector can, so use the Aether app or the aether CLI"; perr == nil || perr.Message != want {
+					" cannot call this method; no connector can, so use the Cloudfield app or the aether CLI"; perr == nil || perr.Message != want {
 					t.Fatalf("member.invite through alice's connector = %v, want %q", perr, want)
 				}
 				bobID := s1.memberOf(t, bob).ID

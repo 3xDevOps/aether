@@ -1,7 +1,7 @@
 # Agents
 
-Aether does not install or bundle coding agents. You install the agent CLI in
-your [environment](environments.md) (your own persistent container shell) and
+Cloudfield does not install or bundle coding agents. You install the agent CLI
+in your [environment](environments.md) (your own persistent container shell) and
 sign in with the vendor's own login. Sessions then launch that CLI inside a
 container. This guide lists which agents work, how to sign in to each, and what
 does not work. Terms such as run, subsession and workspace are in the
@@ -9,7 +9,7 @@ does not work. Terms such as run, subsession and workspace are in the
 
 ## Supported agents
 
-Aether launches an agent in one of two modes. **Standard** shows the agent's
+Cloudfield launches an agent in one of two modes. **Standard** shows the agent's
 own terminal UI. **Enhanced** drives the agent over the Agent Client Protocol
 and shows messages, tool calls and permission prompts as dashboard controls
 ([Enhanced sessions](enhanced-sessions.md)). A third mode, **Background**, runs the
@@ -275,18 +275,18 @@ Some agents serve ACP from their own CLI (`omp acp`, `opencode acp`,
 `copilot --acp`, `gemini --acp`, `agent --force acp`). Installing the agent
 installs that. Claude Code, Codex and pi need a separate npm adapter package:
 `claude-agent-acp`, `codex-acp` and `pi-acp`. `aether agent add <name>
---enhanced` installs the agent and its adapter, pinned to the version Aether
+--enhanced` installs the agent and its adapter, pinned to the version Cloudfield
 tests against. The dashboard's **Set up** does the same when you pick Enhanced.
 
 `claude-agent-acp` and `codex-acp` each install their own copy of the agent's
 CLI, which moves only with the adapter's pin. An Enhanced Claude Code or Codex
 session runs the `claude` or `codex` on the session's `PATH` instead, the one
 Standard sessions run, by setting `CLAUDE_CODE_EXECUTABLE` or `CODEX_PATH` to
-it. A CLI in `~/.local/bin` is the one Aether
+it. A CLI in `~/.local/bin` is the one Cloudfield
 [updates before launch](#updates-before-launch), so a new model reaches
-Enhanced sessions with the next CLI update, without an Aether release. The
+Enhanced sessions with the next CLI update, without a Cloudfield release. The
 adapter runs its own copy instead when the CLI is not on `PATH`, or its
-`--version` is older than the adapter's copy or prints no version Aether can
+`--version` is older than the adapter's copy or prints no version Cloudfield can
 read within 10 seconds. Update a CLI in your home in `aether terminal`, with
 `claude update` or the `npm install` line under [Codex](#codex), and one
 installed in the image by rebuilding the image. A `CLAUDE_CODE_EXECUTABLE` or
@@ -302,7 +302,7 @@ Run each login in your environment's shell, which `aether terminal` opens from
 your computer. API keys set in the server's environment
 (`/etc/aether/aether-server.env` with the shipped systemd unit) replace the
 login. To send an agent through a model gateway such as LiteLLM or OpenRouter,
-also set the base-URL variable its section names. A variable Aether does not
+also set the base-URL variable its section names. A variable Cloudfield does not
 pass through, such as Claude Code's `ANTHROPIC_AUTH_TOKEN`, goes in a
 [workspace secret](environments.md#secrets).
 
@@ -321,8 +321,8 @@ Claude Code refuses `--dangerously-skip-permissions` as root, so every `claude`
 session gets `IS_SANDBOX=1`.
 
 Claude Code reruns a model call that ends without text, adding the hidden
-prompt `[Your previous response had no visible output...]`. An Aether turn ends
-with a report and no text after it, so every `claude` session gets
+prompt `[Your previous response had no visible output...]`. A Cloudfield turn
+ends with a report and no text after it, so every `claude` session gets
 `CLAUDE_CODE_TERMINAL_MCP_TOOLS=mcp__aether__aether_report`, which exempts a
 turn in which `aether_report` succeeded since the last user message. A report
 through `aether-internal report` runs as the shell tool and still gets the
@@ -344,19 +344,20 @@ key** comes filled in with it. Codex reads no base-URL variable; for a gateway,
 set `openai_base_url` in `~/.codex/config.toml`.
 
 A Standard Codex run starts `codex app-server` in the session's sandbox and
-attaches the Codex terminal to it with `codex --remote`. Aether follows the same
-session through that app-server: Codex reports the start and end of each turn,
-and mail and your messages from the dashboard or `aether message` arrive as a
-new turn when Codex is idle, or as a steer added to the running turn. They show
-in the terminal as prompts, under Aether's attribution banner. Press Esc in the
-terminal to stop a turn. Aether loads no hooks into Standard Codex, so remove
-any copy of its hooks from `~/.codex/hooks.json`: it would announce mail twice.
+attaches the Codex terminal to it with `codex --remote`. Cloudfield follows the
+same session through that app-server: Codex reports the start and end of each
+turn, and mail and your messages from the dashboard or `aether message` arrive
+as a new turn when Codex is idle, or as a steer added to the running turn. They
+show in the terminal as prompts, under Cloudfield's attribution banner. Press
+Esc in the terminal to stop a turn. Cloudfield loads no hooks into Standard
+Codex, so remove any copy of its hooks from `~/.codex/hooks.json`: it would
+announce mail twice.
 
 Standard sessions need Codex 0.131.0 or newer. With an older one, the session's terminal
 prints:
 
 ```text
-codex-cli 0.130.0 is too old: Aether attaches Codex's terminal to its app-server, which needs Codex 0.131.0 or newer.
+codex-cli 0.130.0 is too old: Cloudfield attaches Codex's terminal to its app-server, which needs Codex 0.131.0 or newer.
 Update it here, then start a new session:
   npm install -g --prefix "$HOME/.local" @openai/codex@latest
 ```
@@ -364,11 +365,11 @@ Update it here, then start a new session:
 If the app-server exits before it listens, the terminal prints
 `codex app-server exited before listening on /tmp/aether-codex/app-server.sock:`
 with its exit status and the end of its log, `/tmp/aether-codex/app-server.log`.
-If Aether cannot reach the app-server, the session shows **Needs you** with a reason
+If Cloudfield cannot reach the app-server, the session shows **Needs you** with a reason
 starting `codex app-server unavailable:` and the real error.
 
 The app-server ends with the Codex terminal. In the login shell that follows,
-`codex resume <session>` continues the session, but without Aether's status
+`codex resume <session>` continues the session, but without Cloudfield's status
 reports and message delivery. The `codex --remote ... resume` command Codex
 prints on exit no longer works.
 
@@ -390,7 +391,7 @@ the agent database under `~/.omp/agent/`. `ANTHROPIC_API_KEY` or
 
 `omp` is a shipped name, and a shipped name always wins over a definition you
 stored with `aether agent add omp`. To launch your own build, register it under
-a name Aether does not ship.
+a name Cloudfield does not ship.
 
 #### OpenCode
 
@@ -401,8 +402,9 @@ or `OPENAI_BASE_URL` for a gateway. OpenCode settings and plugins live in
 `~/.config/opencode`, the root `aether config` and **Files** use. That root does
 not follow `XDG_CONFIG_HOME`, `OPENCODE_CONFIG_DIR` or `OPENCODE_CONFIG`.
 
-Aether never updates OpenCode, because an upgrade can cross a major version that
-Aether's launch wrapper refuses. Update it yourself in `aether terminal`.
+Cloudfield never updates OpenCode, because an upgrade can cross a major version
+that Cloudfield's launch wrapper refuses. Update it yourself in `aether
+terminal`.
 
 #### GitHub Copilot CLI
 
@@ -455,7 +457,7 @@ Log in with `NO_OPEN_BROWSER=1 agent login` and open the printed URL. The login
 lands in `~/.config/cursor/auth.json`. `CURSOR_API_KEY` in the server's
 environment is the API-key alternative.
 
-Aether passes `--force`, which approves everything. In an Enhanced session, a Cursor
+Cloudfield passes `--force`, which approves everything. In an Enhanced session, a Cursor
 team whose admin enables auto-run controls without "Run Everything" overrides
 `--force`, and the agent asks again.
 
@@ -478,9 +480,9 @@ Google sign-in inside a session sandbox.
 
 ### Install hooks by hand
 
-Claude Code, Copilot, pi, oh-my-pi and OpenCode load Aether's inbox hooks for
-you on a Standard session that has a task. Codex needs none: its app-server hands it
-mail. Gemini CLI and Cursor CLI do not load hooks.
+Claude Code, Copilot, pi, oh-my-pi and OpenCode load Cloudfield's inbox hooks
+for you on a Standard session that has a task. Codex needs none: its app-server
+hands it mail. Gemini CLI and Cursor CLI do not load hooks.
 Without hooks, mail reaches those agents only when they run
 `aether-internal inbox`.
 
@@ -538,11 +540,11 @@ Updates skip OpenCode, agents you defined, shipped names an administrator
 overrides, agents installed in the image, and an account owner's installation
 that a recipient's session borrows. A `codex`, `pi`, `copilot` or `gemini` in
 `~/.local/bin` that `npm` did not install is not updated and reports, for
-example, `codex in ~/.local/bin was not installed with npm, so Aether cannot
+example, `codex in ~/.local/bin was not installed with npm, so Cloudfield cannot
 update it`.
 
-Aether does not roll an update back. To turn updates off for the whole server,
-run `sudo aether-server config set agent-update false`, then restart it.
+Cloudfield does not roll an update back. To turn updates off for the whole
+server, run `sudo aether-server config set agent-update false`, then restart it.
 
 ## Usage limits
 
@@ -555,7 +557,7 @@ or a session. Only native subscription logins count: API keys, pi, oh-my-pi,
 OpenCode, Copilot, Gemini, Cursor and Antigravity have no quota display. A row
 can read `unauthenticated`, `unsupported`, `unavailable`, `stale` or `error`.
 Missing data is never shown as zero. Re-authenticating is up to you, in your
-environment. Aether does not refresh OAuth files.
+environment. Cloudfield does not refresh OAuth files.
 
 Results stay cached for 60 seconds. The vendor endpoints are not public APIs and
 can change without notice.
@@ -573,8 +575,8 @@ not exhausted.
 | Agent | Moves to another account | Does not |
 | --- | --- | --- |
 | `claude` | Enhanced and Background sessions; Standard sessions while lifecycle reporting is on | Transient 429s ("Server is temporarily limiting requests (not your usage limit)") |
-| `codex` | Enhanced sessions, and Background sessions over ACP | Background `codex exec`, and Standard sessions: Aether reads neither |
-| `opencode` | Nothing qualifies: Aether cannot read OpenCode usage, so the session stops with the no-fallback reason | Everything else |
+| `codex` | Enhanced sessions, and Background sessions over ACP | Background `codex exec`, and Standard sessions: Cloudfield reads neither |
+| `opencode` | Nothing qualifies: Cloudfield cannot read OpenCode usage, so the session stops with the no-fallback reason | Everything else |
 | `pi`, `omp`, `copilot`, `gemini`, `cursor`, `antigravity` | Never | All usage-limit errors |
 
 If a vendor changes its signal, the session fails or ends its turn with the vendor's
@@ -593,10 +595,10 @@ installed on the launch's account, and Standard otherwise.
   shell, and the session stays open until you Close, Kill or Delete it.
 - Enhanced sessions the agent over ACP next to a login shell. Close and reopen work
   like Standard.
-- Background sessions the agent once. On exit Aether commits and publishes the
-  branch, records `completed` or `failed`, and destroys the container. It cannot
-  be reopened. `codex`, `omp`, `opencode`, `copilot`, `gemini` and `cursor` run
-  the task over ACP when their server is installed
+- Background sessions the agent once. On exit Cloudfield commits and publishes
+  the branch, records `completed` or `failed`, and destroys the container. It
+  cannot be reopened. `codex`, `omp`, `opencode`, `copilot`, `gemini` and
+  `cursor` run the task over ACP when their server is installed
   ([Background sessions](enhanced-sessions.md#background-sessions)). Claude Code keeps
   `claude -p`.
 
@@ -652,6 +654,9 @@ Their logins and other files stay shared:
 | `codex` | `~/.codex/vm-sqlite`, every `*.sqlite` | `CODEX_SQLITE_HOME` |
 | `opencode` | `~/.local/share/opencode/vm-db/opencode.db` | `OPENCODE_DB` |
 | `cursor` | `~/.cursor/ai-tracking` and `~/.local/state/cursor/agent-stores` | `CURSOR_AGENT_STORE_DIR` for the second |
+| `omp` | `~/.local/share/omp`, `~/.local/state/omp`, `~/.cache/omp` | omp's XDG layout, below |
+| `copilot` | `~/.copilot` | mounted over the home's, seeded |
+| `antigravity` | `~/.gemini/antigravity-cli` | mounted over the home's, seeded |
 
 The agent's history and indexes in those databases belong to that session
 only. A variable the workspace already sets is kept, and then the agent
@@ -661,24 +666,104 @@ shares that database again; so does Codex when `~/.codex/config.toml` sets
 starts signed out of OpenCode Console; provider logins in `auth.json` stay
 shared.
 
-`omp`, `copilot` and `antigravity` keep such databases where no setting moves
-them (oh-my-pi's logins, Copilot's session index beside its login,
-Antigravity's conversations). Only one VM session at a time runs each of them
-on a home: the launcher's, and for oh-my-pi on a shared account also the
-owner's, whose `~/.omp/agent` it mounts. Every session that still has its VM
-counts, sleeping ones and ones shutting down too. A launch, or a move to a
-fallback account, that would make a second one is refused:
+Copilot keeps its session index, `~/.copilot/session-store.db`, beside its
+login, and Antigravity keeps `conversation_summaries.db` beside its login and
+`settings.json`; no setting moves the databases without the login. Each
+session therefore gets its own `~/.copilot` or `~/.gemini/antigravity-cli`,
+and every time its VM starts cold (not when it wakes from sleep) the VM copies
+these files into it from the home, or from the account owner's login on a
+shared account:
 
-```text
-scheduler: oh-my-pi keeps its logins in a SQLite database that two session VMs cannot share, and Ada's session run-k3v9q2m7xd already runs it on the same home; close or kill it first
-```
+| Agent | Copied at each cold start |
+| --- | --- |
+| `copilot` | `config.json` (the login), `settings.json`, `mcp-config.json` |
+| `antigravity` | `antigravity-oauth-token` (the login), `settings.json`, `cache/onboarding.json` |
 
-A closed session of one of them does not reopen while another runs it on the
-same home, nor after one did since it closed, because its VM kept the
-databases open: launch a new session instead. The member's environment
-terminal and the agent started by hand in a session's shell open the same
-databases from another kernel, so do not run the agent there, `aether agent
-login` included, while a VM session runs it.
+A copy is safe because neither login rotates: Copilot stores a GitHub OAuth
+app token, and Antigravity a Google refresh token, which Google does not
+replace when it is used. Signing in or out takes effect at the next cold
+start of a session, not in a running one. Everything else in those
+directories, such as Copilot's plugins, agents and skills, is the session's
+own and starts empty.
+
+#### oh-my-pi in session VMs
+
+oh-my-pi keeps its logins in `~/.omp/agent/agent.db`, among about a dozen
+SQLite databases spread through `~/.omp`. In session VMs the server holds the
+logins instead: it runs omp's own auth broker, `omp auth-broker serve`, for
+each account a session uses, from the oh-my-pi release pinned at
+`/usr/local/libexec/aether/omp`. `aether-server vm install` puts it there, and
+the server downloads it in the background when it starts without it; until
+then omp in VMs cannot sign in. The broker opens the account's
+`~/.omp/agent/agent.db`, the one copy of its logins, and refreshes them, so no
+session's refresh signs another out.
+
+Every VM, sessions and the member's environment terminal alike, reaches the
+broker at `127.0.0.1:47630` and gets these variables. An omp session always
+gets them; any other VM keeps a value its workspace sets:
+
+| Variable | Value |
+| --- | --- |
+| `OMP_AUTH_BROKER_URL` | `http://127.0.0.1:47630` |
+| `OMP_AUTH_BROKER_TOKEN` | `aether-session`; the session's own socket identifies it, not the token |
+| `OMP_AUTH_BROKER_SNAPSHOT_TTL_MS` | `0`, so no login is cached on disk |
+| `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `~/.local/share`, `~/.local/state`, `~/.cache`, their defaults |
+
+With the XDG variables set and an `omp` directory in each, omp keeps every
+database under `~/.local/share/omp`, `~/.local/state/omp` and `~/.cache/omp`,
+never in `~/.omp/agent`. An omp session's VM has its own copy of those three;
+`~/.omp/plugins`, `~/.omp/agent/sessions` and `~/.omp/agent/blobs` stay shared
+from the home on top of it, so plugins and saved sessions are the member's;
+an Isolated session keeps its own, so nothing it writes there reaches the home.
+omp's memories, history and model cache are each session's own. Settings in
+`~/.omp/agent/config.yml` stay shared.
+
+The server checks every request: a session reaches only the broker of the
+account it runs on, while it is open and its launcher may still launch on that
+account. A session on another member's account may only read the logins,
+refresh one and report usage; storing, disabling or blocking the owner's
+logins is refused. Revoking a share cuts off the session's open requests
+within 10 seconds, and omp then reports that its broker is unreachable.
+
+A broker runs as a transient systemd unit,
+`aether-omp-broker-<member id>.service`, as the system user `aether-omp`,
+which the server adds with its own group and no login. It has no
+capabilities, a read-only view of the host, and none of the server's data
+directory except that member's `~/.omp/agent` and its own
+`<data dir>/omp-broker/<member id>`. The server binds `~/.omp/agent` at
+`<data dir>/omp-broker/<member id>.agent` first, resolved without leaving the
+home, so a symlink in the home cannot show the broker anything else. The bind
+is idmapped: the broker sees the files the member's sessions own as its own
+and creates its files as theirs, so on the host they stay the session user's,
+as Docker sessions on the same server, or after `session-runtime` goes back to
+`docker`, need them. Only what root owns there, such as the directory the
+server made, is handed to the session user first. The server starts a broker
+when a session first asks for that account and restarts it on the first
+request after the server itself restarts, so an update's oh-my-pi takes over;
+omp in running sessions reconnects. Removing a member, or merging them into
+another, stops their broker. `journalctl -u aether-omp-broker-<member id>`
+shows its log.
+
+Sign in to omp in the environment terminal: its `/login` stores the login
+through the broker.
+
+An omp session whose VM was made before the server ran brokers opens
+`~/.omp/agent/agent.db` itself. While one still has its VM, sleeping or
+shutting down included, the broker of its account and of its launcher's home
+does not start, and omp in newer sessions reports that, naming the session;
+such a closed session does not reopen. Close or kill it, and launch a new
+session instead.
+
+Only an omp, Copilot or Antigravity session has its own copy of that agent's
+databases. The environment terminal, and the agent started by hand in a
+session of another agent, use the home's `~/.local/share/omp`,
+`~/.local/state/omp`, `~/.cache/omp`, `~/.copilot` and
+`~/.gemini/antigravity-cli` from another kernel, as do two such VMs at once,
+so do not run the agent in two of them at a time. In a VM other than an omp
+session, a workspace that sets an XDG variable to a directory without an
+`omp` directory makes omp open `~/.omp/agent/agent.db`, which the broker holds
+open, and one that sets `OMP_AUTH_BROKER_URL` takes omp off this broker; do
+not run omp there while VM sessions use the account.
 
 ### Choose a model
 
@@ -708,7 +793,7 @@ so check the name: `fable` is `Fable 5.2` once Claude Code knows Fable 5.2. For
 other agents, type the model name. Any id is accepted; Claude Code also takes a
 full model id such as `claude-fable-5-2` that its list shows only as an alias.
 
-The list is cached for an hour and discovered again after Aether updates the
+The list is cached for an hour and discovered again after Cloudfield updates the
 agent; `aether agent models <name> --refresh` or the dashboard's refresh button
 discovers it now. A failed discovery shows the CLI's real error, for example
 `codex exited 127: sh: 3: codex: not found` or
@@ -754,12 +839,12 @@ For Enhanced sessions the effort is set over ACP after the model; see
 [enhanced-sessions.md](enhanced-sessions.md#launch-an-enhanced-session).
 
 If a launch fails because the CLI rejects its own arguments, the installed CLI
-has drifted from what Aether expects. Install a compatible version in your
+has drifted from what Cloudfield expects. Install a compatible version in your
 environment.
 
 ### Agent instructions and the team memory brief
 
-Aether gives each session its role card and the co-author rule
+Cloudfield gives each session its role card and the co-author rule
 ([agent instructions](coordination.md#agent-instructions)), followed by the
 [team memory brief](memory.md#what-sessions-see-automatically). How the text
 reaches the agent depends on the agent:
@@ -767,7 +852,7 @@ reaches the agent depends on the agent:
 | Agent | Delivery |
 | --- | --- |
 | `claude`, `pi`, `omp` | `--append-system-prompt` |
-| `codex` | `-c developer_instructions=...`, passed to `codex app-server`, which replaces any `developer_instructions` in your `config.toml`. Aether copies the top-level value of `~/.codex/config.toml` in first. A value in a Codex profile, a project `.codex/config.toml` or a workspace `CODEX_HOME` is replaced for that launch: put such instructions in `AGENTS.md` |
+| `codex` | `-c developer_instructions=...`, passed to `codex app-server`, which replaces any `developer_instructions` in your `config.toml`. Cloudfield copies the top-level value of `~/.codex/config.toml` in first. A value in a Codex profile, a project `.codex/config.toml` or a workspace `CODEX_HOME` is replaced for that launch: put such instructions in `AGENTS.md` |
 | `opencode`, `copilot` | An instructions file the agent loads through its config or `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` |
 | `gemini`, `cursor`, `antigravity` | After the task prompt. A launch with no task gets none |
 | Enhanced sessions | Over ACP ([Enhanced sessions](enhanced-sessions.md#instructions-and-the-session-log)) |
@@ -798,18 +883,18 @@ in.
 | `--login <path>` | A login file, such as `--login ~/.cursor/auth.json`. With it the Agents page shows **Login found**. Without it setup never shows the agent as logged in |
 
 The name is what you choose at launch, and it need not match the executable.
-`aether agent add mycursor --standard "agent {task}"` runs `agent`. Aether ships
-inbox hooks for a fixed set of names, so a differently named agent gets none and
-`aether-internal skill` says `no packaged integration`.
+`aether agent add mycursor --standard "agent {task}"` runs `agent`. Cloudfield
+ships inbox hooks for a fixed set of names, so a differently named agent gets
+none and `aether-internal skill` says `no packaged integration`.
 
 Your definition shapes launches only in your own containers, and runs only on
 your own account. Shipped names and the reserved names `custom` and `fake` cannot
 be registered. An administrator can pin a definition for every member with
 `--agent-definitions` (or `AETHER_AGENT_DEFINITIONS`), which wins over member
 registrations and is the only way to change a shipped agent. An override
-replaces the shipped definition, so Aether stops passing its status reporter,
-inbox hooks and instructions flags to it, because nothing checks that the
-override is still that CLI.
+replaces the shipped definition, so Cloudfield stops passing its status
+reporter, inbox hooks and instructions flags to it, because nothing checks that
+the override is still that CLI.
 
 For inbox support, status reporting and the contract the CLI has to follow, see
 [Integrating an unsupported agent](harness-integration.md).
@@ -830,7 +915,7 @@ uses it to prove the whole lifecycle without a vendor account.
 ## Incoming coordination hooks
 
 When agents run subsessions or share files, other sessions and people send them
-messages. Aether keeps those in a durable mailbox and tells the agent to read it.
+messages. Cloudfield keeps those in a durable mailbox and tells the agent to read it.
 The reading itself is a command, `aether-internal inbox`. The agent learns mail
 is waiting in one of two ways. A **hook** runs at a boundary such as a prompt or
 a finished tool call. **Idle wake** starts a new turn in a session that has been
@@ -853,16 +938,17 @@ wake pauses until a turn completes. Copilot has no idle wake, so mail waits for
 the next hook boundary. pi, oh-my-pi and OpenCode wake only their main
 session, and only while idle.
 
-Hooks that you installed yourself and Aether's managed ones do not double up for
-Claude Code. If an OpenCode, pi or oh-my-pi setting disables extensions, Aether
-leaves it alone and skips the managed hooks. For OpenCode, `OPENCODE_PURE=1` or
-`true` in the workspace environment disables Aether's plugins too. The session still
-launches but reports nothing, and is judged on silence.
+Hooks that you installed yourself and Cloudfield's managed ones do not double up
+for Claude Code. If an OpenCode, pi or oh-my-pi setting disables extensions,
+Cloudfield leaves it alone and skips the managed hooks. For OpenCode,
+`OPENCODE_PURE=1` or `true` in the workspace environment disables Cloudfield's
+plugins too. The session still launches but reports nothing, and is judged on
+silence.
 
 ## Status reporting
 
-An agent with status reporting tells Aether when it is working and when it is
-waiting. The dashboard shows a waiting session as **Needs you**
+An agent with status reporting tells Cloudfield when it is working and when it
+is waiting. The dashboard shows a waiting session as **Needs you**
 ([failure-handling.md](failure-handling.md#needs-you)). Standard sessions of
 `claude`, `codex`, `pi`, `omp` and `opencode` report both ends of a turn.
 While Codex asks you a question in its terminal, the session waits with the reason
@@ -900,15 +986,16 @@ mounts.
   hooks at all. A [subsession](teams.md#subsessions) refuses them Standard, so they run
   Enhanced there.
 - Standard Codex needs Codex 0.131.0 or newer. Its app-server ends with its
-  terminal, so a `codex resume` in the shell runs without Aether's status and
-  message delivery.
+  terminal, so a `codex resume` in the shell runs without Cloudfield's status
+  and message delivery.
 - Only Claude Code and Codex show subscription usage and can move to another
   account on a usage limit.
-- Sharing an `omp` account shares the whole `~/.omp/agent` directory. oh-my-pi
-  loads extensions and MCP commands from there, so a recipient's session can plant
-  code that runs in the owner's sessions. Share an `omp` account only with
-  someone you would give your home to ([security.md](security.md#account-sharing)).
-- Aether does not update OpenCode, and does not roll back any update.
+- In Docker sessions, sharing an `omp` account shares the whole `~/.omp/agent`
+  directory. oh-my-pi loads extensions and MCP commands from there, so a
+  recipient's session can plant code that runs in the owner's sessions. In
+  session VMs only the logins are shared, through the account's broker.
+  Share an `omp` account only with someone you would give your home to ([security.md](security.md#account-sharing)).
+- Cloudfield does not update OpenCode, and does not roll back any update.
 - The Environment has no browser, so every OAuth login needs your own browser.
 
 Next: [Environments](environments.md).

@@ -56,7 +56,7 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
       <p className="text-ui-sm text-muted">
         {source?.enabled
           ? 'Link a clone on this computer to pull session branches. The base branch stays server-owned.'
-          : <>Link a clone on this computer and Aether pushes <Code>{workspace.base_branch}</Code> for you. Linking adds an <Code>aether</Code> remote; your history and origin stay as they are.</>}
+          : <>Link a clone on this computer and Cloudfield pushes <Code>{workspace.base_branch}</Code> for you. Linking adds an <Code>aether</Code> remote; your history and origin stay as they are.</>}
       </p>
       {!local && <Button size="sm" variant="secondary" onClick={() => { setLocal(true); onLocalChange?.(true) }}>Link local repository</Button>}
       {local && <RepoStep client={client} caps={caps} workspace={workspace} mirrored={source?.enabled === true} sourcePending={source === null} back={back} cancel={<Button size="sm" variant="secondary" onClick={() => { setLocal(false); onLocalChange?.(false) }}>Cancel</Button>} onNext={onNext ?? (() => { setLocal(false); onLocalChange?.(false) })} />}

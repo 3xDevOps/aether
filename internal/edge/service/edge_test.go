@@ -103,6 +103,7 @@ func (p *fakeProvider) app() *OAuthApp {
 type fakeLink struct {
 	mu       sync.Mutex
 	servers  map[string]string
+	enrolled map[string]string
 	revoked  []string
 	unenroll []string
 	deleted  []deletion
@@ -149,6 +150,20 @@ func (l *fakeLink) Version(serverID string) int {
 		return edgeproto.Version
 	}
 	return 0
+}
+
+// Origin is the origin enrolled names for a connected server, testRelay
+// when it names none.
+func (l *fakeLink) Origin(serverID string) string {
+	if !l.Online(serverID) {
+		return ""
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if o := l.enrolled[serverID]; o != "" {
+		return o
+	}
+	return testRelay
 }
 
 func (l *fakeLink) ReadMCPBody(_ http.ResponseWriter, r *http.Request) ([]byte, bool) {
@@ -202,7 +217,9 @@ type harness struct {
 	client *http.Client
 }
 
-func newHarness(t *testing.T) *harness {
+// newHarness starts an edge on testSignin and testRelay; each configure
+// then edits its Config.
+func newHarness(t *testing.T, configure ...func(*Config, *fakeProvider)) *harness {
 	t.Helper()
 	provider := newFakeProvider(t)
 	ts := httptest.NewUnstartedServer(nil)
@@ -210,13 +227,17 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(ts.Close)
 	clock := &fakeClock{t: time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)}
 	dataDir := t.TempDir()
-	svc, err := New(Config{
+	cfg := Config{
 		DataDir:      dataDir,
 		SigninOrigin: testSignin,
 		RelayOrigin:  testRelay,
 		GitHub:       provider.app(),
 		Clock:        clock.Now,
-	})
+	}
+	for _, f := range configure {
+		f(&cfg, provider)
+	}
+	svc, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

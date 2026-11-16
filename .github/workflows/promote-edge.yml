@@ -1,10 +1,26 @@
-name: Promote edge to stable
+name: Promote edge
 
-# Moves ghcr.io/3xdevops/aether-edge:stable to a published release's image,
-# by copying the exact index the release signed and attested. It never
-# builds and never moves stable to an older release. docs/install.md,
-# Promoting an edge release to stable, describes when to run it.
+# Moves ghcr.io/3xdevops/aether-edge:<channel> to a published release's
+# image, by copying the exact index the release signed and attested. It
+# never builds and never moves a channel to an older build. An admin
+# dispatches it for stable; promote.yml calls it for beta and nightly.yml
+# for nightly. docs/edge.md, Promoting an edge release to stable,
+# describes when to run it.
 on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Published release tag to promote
+        required: true
+        type: string
+      digest:
+        description: Index digest of ghcr.io/3xdevops/aether-edge:<tag>, sha256:<64 hex>
+        required: true
+        type: string
+      channel:
+        description: Image tag to move, beta or nightly; the caller's own checks cover the call
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
@@ -27,14 +43,10 @@ defaults:
   run:
     shell: bash
 
-# One promotion at a time, so two cannot interleave their checks of the
-# version stable carries.
-concurrency:
-  group: promote-edge
-  cancel-in-progress: false
-
 env:
   IMAGE: ghcr.io/3xdevops/aether-edge
+  # A dispatch has no channel input and moves stable.
+  CHANNEL: ${{ inputs.channel || 'stable' }}
   CRANE_VERSION: v0.22.1
   CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
 
@@ -46,37 +58,60 @@ jobs:
     outputs:
       allowed: ${{ steps.select.outputs.allowed }}
     steps:
+      # Hosts trust only a promotion attestation whose signer is
+      # promote-edge.yml@refs/heads/main, and a called workflow runs at its
+      # caller's ref, so a run from any other ref could not move a host
+      # anyway.
+      - name: Require main and a known channel
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::promote-edge runs only from refs/heads/main, not $GITHUB_REF"
+            exit 1
+          fi
+          case $CHANNEL in
+          nightly | beta | stable) ;;
+          *)
+            echo "::error::channel $CHANNEL is not nightly, beta or stable"
+            exit 1
+            ;;
+          esac
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      # Moving stable is an admin's own dispatch. beta moves only from
+      # Promote, which ran its admin check before it built the release, and
+      # nightly only from nightly.yml, which built a green main commit; in a
+      # called workflow GITHUB_WORKFLOW_REF names the caller.
       - name: Check the promoter
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
-        # A re-run keeps the dispatcher as GITHUB_ACTOR, so whoever started
-        # this attempt must be an admin too.
         run: |
-          allowed=true
-          # Hosts trust only a promotion attestation whose source ref is
-          # main, so a run from any other ref could not move a host anyway.
-          if [ "$GITHUB_REF" != refs/heads/main ]; then
-            allowed=false
-            echo "::error::promote-edge runs only from refs/heads/main, not $GITHUB_REF"
-          fi
-          for user in "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"; do
-            permission=$(gh api \
-              "repos/${GITHUB_REPOSITORY}/collaborators/${user}/permission" \
-              --jq '.permission' 2>/dev/null || true)
-            # A failed lookup deliberately refuses the promotion.
-            if [ "$permission" != admin ]; then
-              allowed=false
-              echo "::error::$user is not an admin of $GITHUB_REPOSITORY; only admins promote edge releases"
+          case $CHANNEL in
+          stable) sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR" ;;
+          *)
+            caller=promote.yml
+            if [ "$CHANNEL" = nightly ]; then caller=nightly.yml; fi
+            if [ "$GITHUB_WORKFLOW_REF" != "$GITHUB_REPOSITORY/.github/workflows/$caller@refs/heads/main" ]; then
+              echo "::error::only $caller on main moves $CHANNEL, not $GITHUB_WORKFLOW_REF"
+              exit 1
             fi
-          done
-          echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
-          [ "$allowed" = true ]
+            ;;
+          esac
+          echo "allowed=true" >> "$GITHUB_OUTPUT"
 
   promote:
     needs: publisher-policy
     if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
     environment: edge-promotion
+    # One move of a channel's tag at a time, so two cannot interleave their
+    # checks of what it carries. Per channel: promote.yml's calls are
+    # already one at a time, and GitHub would cancel a call left pending
+    # behind a stable dispatch in a shared group.
+    concurrency:
+      group: promote-edge-${{ inputs.channel || 'stable' }}
+      cancel-in-progress: false
     permissions:
       contents: read
       actions: read
@@ -98,6 +133,17 @@ jobs:
         with:
           ref: refs/heads/main
           persist-credentials: false
+      # Re-running this job alone skips publisher-policy, and for a call
+      # also its caller's admin check. A scheduled nightly has no admin
+      # behind it, so its caller rule is checked again instead.
+      - name: Require an admin, or nightly.yml on main for nightly
+        run: |
+          if [ "$CHANNEL" != nightly ]; then
+            sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
+          elif [ "$GITHUB_WORKFLOW_REF" != "$GITHUB_REPOSITORY/.github/workflows/nightly.yml@refs/heads/main" ]; then
+            echo "::error::only nightly.yml on main moves nightly, not $GITHUB_WORKFLOW_REF"
+            exit 1
+          fi
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
@@ -111,7 +157,10 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Validate the inputs
         run: |
-          sh scripts/android-version-code.sh "$TAG" >/dev/null
+          if ! [[ $TAG =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::tag $TAG is not vX.Y.Z or vX.Y.Z-<prerelease>"
+            exit 1
+          fi
           if ! [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::digest $DIGEST is not sha256:<64 lowercase hex>"
             exit 1
@@ -128,40 +177,16 @@ jobs:
       - name: Verify the signed manifest names this edge image
         id: manifest
         run: |
-          report=$(go run ./cmd/aether-edge release-check --tag "$TAG" --digest "$DIGEST" --from "$TAG" --json)
-          echo "commit=$(printf '%s' "$report" | jq -er .commit)" >> "$GITHUB_OUTPUT"
-          echo "min_upgrade_from=$(printf '%s' "$report" | jq -er .edge.min_upgrade_from)" >> "$GITHUB_OUTPUT"
-      - name: Require the release run to have qualified the edge
-        env:
-          COMMIT: ${{ steps.manifest.outputs.commit }}
-        # Until release.yml has an edge-qualify job, the whole release run
-        # must have succeeded.
-        run: |
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?event=push&branch=$TAG&per_page=100" |
-            jq -c --arg sha "$COMMIT" '[.workflow_runs[] | select(.head_sha == $sha)] | max_by(.run_number) // empty')
-          if [ -z "$run" ]; then
-            echo "::error::no release workflow run built $TAG from $COMMIT"
-            exit 1
-          fi
-          id=$(printf '%s' "$run" | jq -r .id)
-          url=$(printf '%s' "$run" | jq -r .html_url)
-          qualify=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?filter=latest&per_page=100" |
-            jq -s '[.[].jobs[] | select(.name == "edge-qualify" or (.name | startswith("edge-qualify ")))]')
-          if [ "$(printf '%s' "$qualify" | jq length)" -gt 0 ]; then
-            if ! printf '%s' "$qualify" | jq -e 'all(.conclusion == "success")' >/dev/null; then
-              echo "::error::edge-qualify did not succeed in $url"
-              exit 1
-            fi
-            evidence="edge-qualify succeeded in $url"
-          else
-            if [ "$(printf '%s' "$run" | jq -r '.status + " " + (.conclusion // "")')" != "completed success" ]; then
-              echo "::error::the release run $url has not succeeded, and it has no edge-qualify job"
-              exit 1
-            fi
-            evidence="the release run $url succeeded (it has no edge-qualify job)"
-          fi
-          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          go build -o "$RUNNER_TEMP/aether-edge" ./cmd/aether-edge
+          mkdir "$RUNNER_TEMP/kept"
+          "$RUNNER_TEMP/aether-edge" release-check --tag "$TAG" --digest "$DIGEST" --from "$TAG" --from-digest "$DIGEST" \
+            --channel "$CHANNEL" --keep-manifests "$RUNNER_TEMP/kept" --json >/dev/null
+          channel=$(jq -r '.channel // ""' "$RUNNER_TEMP/kept/$TAG.json")
+          # Whatever the tag carries now, even nothing.
+          sh scripts/edge-channel-takes.sh "$CHANNEL" "$channel"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
       - name: Require a 24-hour soak
+        if: env.CHANNEL == 'stable'
         env:
           PUBLISHED_AT: ${{ steps.release.outputs.published_at }}
         run: |
@@ -182,81 +207,81 @@ jobs:
             echo "::error::$IMAGE:$TAG is $tagged, not $DIGEST"
             exit 1
           fi
-          verify() {
-            for attempt in 1 2 3; do
-              gh attestation verify "oci://$1" --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-                --source-ref "refs/tags/$TAG" --deny-self-hosted-runners && return 0
-              [ "$attempt" = 3 ] || sleep 10
-            done
-            return 1
-          }
-          verify "$IMAGE@$DIGEST"
+          sh scripts/edge-attestation.sh verify "$IMAGE@$DIGEST" "$TAG"
           anonymous=$(mktemp -d)
           DOCKER_CONFIG=$anonymous crane manifest "$IMAGE@$DIGEST" > "$RUNNER_TEMP/index.json"
           platforms=$(jq -er '.manifests | select(length == 2) | map(.digest) | join(" ")' "$RUNNER_TEMP/index.json")
           for platform in $platforms; do
-            verify "$IMAGE@$platform"
+            sh scripts/edge-attestation.sh verify "$IMAGE@$platform" "$TAG"
             DOCKER_CONFIG=$anonymous crane manifest "$IMAGE@$platform" >/dev/null
           done
-      # Hosts following stable hold at a release they cannot upgrade from,
-      # so stable must not skip past a release's min_upgrade_from.
-      - name: Refuse to move stable backwards or past min_upgrade_from
+      # The run is the one the image's attestation names: a promote.yml run
+      # for a release Promote built, release.yml for a pushed tag.
+      - name: Require the run that built the release to have qualified the edge
+        run: |
+          evidence=$(sh scripts/edge-attestation.sh qualify "$IMAGE@$DIGEST" "$TAG")
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+      # By the signed manifests' (build, hotfix), the order hosts use. Hosts
+      # on the channel hold at a release they cannot upgrade from, so the
+      # tag must not skip past min_upgrade_from; a blocking manual step only
+      # makes them wait for their operator. A release from before channels
+      # orders as latest does, by version, so stable keeps taking them
+      # until the first channel stable.
+      - name: Refuse to move the channel backwards or past min_upgrade_from
         id: order
         env:
-          MIN_UPGRADE_FROM: ${{ steps.manifest.outputs.min_upgrade_from }}
+          RELEASE_CHANNEL: ${{ steps.manifest.outputs.channel }}
         run: |
-          if ! current=$(crane digest "$IMAGE:stable" 2>"$RUNNER_TEMP/stable.err"); then
-            if ! grep -q MANIFEST_UNKNOWN "$RUNNER_TEMP/stable.err"; then
-              echo "::error::cannot read $IMAGE:stable: $(cat "$RUNNER_TEMP/stable.err")"
+          if ! current=$(crane digest "$IMAGE:$CHANNEL" 2>"$RUNNER_TEMP/current.err"); then
+            if ! grep -q MANIFEST_UNKNOWN "$RUNNER_TEMP/current.err"; then
+              echo "::error::cannot read $IMAGE:$CHANNEL: $(cat "$RUNNER_TEMP/current.err")"
               exit 1
             fi
-            echo "$IMAGE:stable does not exist yet" >> "$GITHUB_STEP_SUMMARY"
+            echo "$IMAGE:$CHANNEL does not exist yet" >> "$GITHUB_STEP_SUMMARY"
             echo "move=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           carried=$(crane config --platform linux/amd64 "$IMAGE@$current" |
             jq -er '.config.Labels["org.opencontainers.image.version"]')
-          want=$(sh scripts/android-version-code.sh "$TAG")
-          have=$(sh scripts/android-version-code.sh "$carried")
-          if [ "$want" -lt "$have" ]; then
-            echo "::error::$IMAGE:stable carries $carried; $TAG is older, and stable never moves backwards"
-            exit 1
-          fi
-          if [ "$have" -lt "$(sh scripts/android-version-code.sh "$MIN_UPGRADE_FROM")" ]; then
-            echo "::error::$IMAGE:stable carries $carried; $TAG upgrades only from $MIN_UPGRADE_FROM or later, so promote a release between them first"
-            exit 1
-          fi
-          if [ "$want" -eq "$have" ]; then
+          if [ "$carried" = "$TAG" ]; then
             if [ "$current" != "$DIGEST" ]; then
-              echo "::error::$IMAGE:stable carries $carried as $current, not $DIGEST"
+              echo "::error::$IMAGE:$CHANNEL carries $carried as $current, not $DIGEST"
               exit 1
             fi
-            echo "$IMAGE:stable already is $TAG, \`$DIGEST\`; nothing moved" >> "$GITHUB_STEP_SUMMARY"
+            echo "$IMAGE:$CHANNEL already is $TAG, \`$DIGEST\`; nothing moved" >> "$GITHUB_STEP_SUMMARY"
             exit 0
+          fi
+          order=$CHANNEL
+          if [ "$CHANNEL" = stable ] && [ -z "$RELEASE_CHANNEL" ]; then order=latest; fi
+          status=0
+          "$RUNNER_TEMP/aether-edge" release-check --tag "$TAG" --digest "$DIGEST" --from "$carried" --from-digest "$current" \
+            --channel "$order" --json > "$RUNNER_TEMP/order.json" || status=$?
+          if [ "$status" != 0 ]; then
+            if ! jq -e '.hold and (.reasons | length) == ([.applicable_steps[] | select(.blocking)] | length)' "$RUNNER_TEMP/order.json" >/dev/null 2>&1; then
+              echo "::error::$IMAGE:$CHANNEL carries $carried; release-check refuses to move it to $TAG (see its output above); promote a release between them first if $TAG upgrades only from a later one"
+              exit 1
+            fi
           fi
           echo "previous=$carried $current" >> "$GITHUB_OUTPUT"
           echo "move=true" >> "$GITHUB_OUTPUT"
       # crane tag writes the same manifest bytes under the new tag, so
       # stable has the digest the release signed and attested.
-      - name: Move stable
+      - name: Move the channel tag
         if: steps.order.outputs.move == 'true'
         env:
           PREVIOUS: ${{ steps.order.outputs.previous }}
         run: |
-          crane tag "$IMAGE@$DIGEST" stable
-          moved=$(crane digest "$IMAGE:stable")
+          crane tag "$IMAGE@$DIGEST" "$CHANNEL"
+          moved=$(crane digest "$IMAGE:$CHANNEL")
           if [ "$moved" != "$DIGEST" ]; then
-            echo "::error::$IMAGE:stable is $moved after the move, not $DIGEST"
+            echo "::error::$IMAGE:$CHANNEL is $moved after the move, not $DIGEST"
             exit 1
           fi
-          gh attestation verify "oci://$IMAGE:stable" --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-            --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
+          sh scripts/edge-attestation.sh verify "$IMAGE@$moved" "$TAG"
           anonymous=$(mktemp -d)
-          test "$(DOCKER_CONFIG=$anonymous crane digest "$IMAGE:stable")" = "$DIGEST"
+          test "$(DOCKER_CONFIG=$anonymous crane digest "$IMAGE:$CHANNEL")" = "$DIGEST"
           {
-            echo "### $IMAGE:stable"
+            echo "### $IMAGE:$CHANNEL"
             echo
             echo "| | |"
             echo "| --- | --- |"
@@ -267,11 +292,12 @@ jobs:
             echo "| Qualification | $EVIDENCE |"
             echo "| Soak override | ${REASON:-none} |"
           } >> "$GITHUB_STEP_SUMMARY"
-      # Also after a no-op, so a stable promoted before this step existed
-      # gains the attestation hosts require.
+      # Also after a no-op, so a release promoted before this step existed
+      # gains the attestation hosts require. channel is the tag moved, which
+      # is what hosts on it verify, not the release's own channel.
       - name: Write the promotion predicate
         run: |
-          jq -n --arg tag "$TAG" --arg digest "$DIGEST" '{channel: "stable", tag: $tag, digest: $digest}' \
+          jq -n --arg channel "$CHANNEL" --arg tag "$TAG" --arg digest "$DIGEST" '{channel: $channel, tag: $tag, digest: $digest}' \
             > "$RUNNER_TEMP/promotion.json"
       - name: Attest the promotion
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -292,7 +318,7 @@ jobs:
               --format json > "$RUNNER_TEMP/verified.json"; then
               jq -e --slurpfile want "$RUNNER_TEMP/promotion.json" \
                 'any(.[]; .verificationResult.statement.predicate == $want[0])' "$RUNNER_TEMP/verified.json" >/dev/null
-              echo "Promotion attestation: \`$IMAGE@$DIGEST\` as stable $TAG" >> "$GITHUB_STEP_SUMMARY"
+              echo "Promotion attestation: \`$IMAGE@$DIGEST\` as $CHANNEL $TAG" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             [ "$attempt" = 5 ] || sleep 5
@@ -309,8 +335,8 @@ jobs:
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
               --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/promote-edge.yml@refs/heads/main" \
               "$IMAGE@$DIGEST"); then
-              printf '%s\n' "$atts" | jq -e --arg t "$TAG" --arg d "$DIGEST" \
-                '.payload | @base64d | fromjson | .predicate | select(.channel == "stable" and .tag == $t and .digest == $d)' >/dev/null
+              printf '%s\n' "$atts" | jq -e --arg c "$CHANNEL" --arg t "$TAG" --arg d "$DIGEST" \
+                '.payload | @base64d | fromjson | .predicate | select(.channel == $c and .tag == $t and .digest == $d)' >/dev/null
               exit 0
             fi
             [ "$attempt" = 5 ] || sleep 5

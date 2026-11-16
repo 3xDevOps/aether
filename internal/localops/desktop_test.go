@@ -65,7 +65,7 @@ func TestInstallDesktopLinuxRegistersLauncher(t *testing.T) {
 	for _, want := range []string{
 		"Exec=\"" + filepath.Join(wantApp, "aether-desktop") + "\" --no-sandbox %U\n",
 		"Icon=" + filepath.Join(wantApp, desktopIcon) + "\n",
-		"MimeType=x-scheme-handler/aether;\n",
+		"MimeType=x-scheme-handler/aether;x-scheme-handler/cloudfield;\n",
 	} {
 		if !strings.Contains(string(entry), want) {
 			t.Errorf("launcher missing %q:\n%s", want, entry)

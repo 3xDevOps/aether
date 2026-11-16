@@ -1,12 +1,12 @@
 # The VM helper
 
 A session that runs in a Cloud Hypervisor VM, rather than a Docker container
-(see the [plan](plans/2026-11-13-microvm-sessions.md)), has one Aether process
-inside it from the first instruction on: `aether-internal guest`, the helper.
-It is PID 1 of the VM, does what Docker and its init do for a container, and
-serves the API the server uses in place of `docker exec` and `docker attach`.
-The code is in `internal/guest/helper`; the server's client of the API is
-`internal/guest`.
+(see the [plan](plans/2026-11-13-microvm-sessions.md)), has one Cloudfield
+process inside it from the first instruction on: `aether-internal guest`, the
+helper. It is PID 1 of the VM, does what Docker and its init do for a container,
+and serves the API the server uses in place of `docker exec` and `docker
+attach`. The code is in `internal/guest/helper`; the server's client of the API
+is `internal/guest`.
 
 The helper is the `aether-server` binary itself. The kernel boots the
 read-only helper disk, which holds that binary as `/init`, and passes it the
@@ -99,6 +99,8 @@ x86 kernels cap the whole line at 2047 bytes, and `KernelArgs` fails past it.
 | `aether.checkout=<serial>,<key>,<target>` | Mount the checkout disk with virtio serial `<serial>` for the git service under `<key>` and bind its checkout at `<target>`. |
 | `aether.sock=<port>,<path>` | Listen on `<path>` and relay each connection to vsock port `<port>` on the host. |
 | `aether.serve=<port>,<path>` | Listen on vsock port `<port>` for the host and relay each connection to `<path>` (below). |
+| `aether.loopback=<port>,<path>` | Listen on `127.0.0.1:<port>` and relay each connection to the socket at `<path>` in the VM, for a program that reaches a server only by an HTTP address, such as omp's auth broker. |
+| `aether.seed=<target>,<file>` | Follows the state mount at `<target>`: at every boot, before binding it, copy `<target>/<file>` as the home shows it into the mount's directory, or remove the copy when the home has none. |
 
 Paths are escaped per segment as in a URL, so a space or a comma in a path
 does not split an argument.
@@ -397,7 +399,7 @@ port
 | --- | --- |
 | `Setup` | Called before `Boot` on every boot and server restart. When the checkout's top directory belongs to someone other than the session user, as when a session starts again from an image with another user, it hands every file of the checkout to that user. On a checkout's first boot it sets `aether.base`, `aether.branch`, `aether.workspace` and the origin remote, and renames `aether-prepared` to the run branch, running git as the checkout's owner so the session can keep writing everything git wrote. Then it starts the checkout's diff watch. |
 | `Watch` | Streams the checkout's diff watch, starting it if it does not run: each snapshot's `run.diff` payload, each moved HEAD, and at most one file change report a second. A snapshot or HEAD counts as delivered only once the server acknowledges it; a refusal, or no `Watch` open at all, is a history gap the watch retries, as a failed publication on the server is. |
-| `Flush` | Takes the last snapshot, returns once `Watch` delivered it, and stops the diff watch until the next `Watch`. |
+| `Flush` | Waits for a `Watch`, which the server opens again at once if it was waiting to retry one and then retries every second, then takes the last snapshot, returns once `Watch` delivered it, and stops the diff watch until the next `Watch`. When the first `Watch` to start after the call fails, or none opens within the server's 60-second bound on the call, the snapshot is a history gap the next `Watch` retries. |
 | `Objects` | Streams a pack of what `wants` reach and no `haves` do. |
 | `Patch` | Renders the live diff. |
 | `Head` | Returns the commit HEAD names. |
@@ -431,7 +433,7 @@ workspace's.
 The final commit is built on the server, so the member's signing key never
 enters the VM. The VM stages the checkout; the server copies the tree,
 checks it, and writes the commit with `git commit-tree`, authored by the
-member, committed by Aether, the message cleaned as `git commit -m` cleans
+member, committed by Cloudfield, the message cleaned as `git commit -m` cleans
 it, and signed. `Install` then moves the staged objects into the checkout,
 adds the commit object, the only one the server sends, and makes it HEAD,
 moving HEAD only from the commit it was staged on. As on the server's disk,

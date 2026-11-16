@@ -198,7 +198,7 @@ func readState(home *os.Root, rel string) ([]byte, error) {
 	case hasMultipleLinks(info):
 		return nil, errors.New("it has another hard link")
 	case info.Size() > maxStateBytes:
-		return nil, fmt.Errorf("it is %d bytes, over the %d MiB Aether copies; remove old entries from it (Claude Code's grows with its \"projects\" history)", info.Size(), maxStateBytes>>20)
+		return nil, fmt.Errorf("it is %d bytes, over the %d MiB Cloudfield copies; remove old entries from it (Claude Code's grows with its \"projects\" history)", info.Size(), maxStateBytes>>20)
 	}
 	return io.ReadAll(io.LimitReader(f, maxStateBytes))
 }

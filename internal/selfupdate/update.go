@@ -103,7 +103,8 @@ func hasACL(p string) bool {
 // Linux server host - with tag's release assets from baseURL, returning
 // the paths it replaced in order. It prints nothing: callers report. It
 // never asks for privileges: a binary this user cannot write is refused
-// with the sudo command to run.
+// with the sudo command to run. It creates no second names: the caller
+// runs Link, whose failure must never fail the update.
 func Update(ctx context.Context, baseURL, tag string) ([]string, error) {
 	return update(ctx, baseURL, tag, nil)
 }
@@ -180,9 +181,16 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 	}
 	targets := []struct{ asset, dst string }{{primary + suffix, self}}
 	for _, name := range companions {
-		path := filepath.Join(dir, name)
-		if _, err := os.Stat(path); err != nil {
+		path, ok := Beside(self, name)
+		if !ok {
 			continue
+		}
+		// A companion that is a link may resolve outside dir, which the
+		// check above did not cover.
+		if d := filepath.Dir(path); !authorize && d != dir {
+			if err := CheckWritable(d); err != nil {
+				return nil, err
+			}
 		}
 		targets = append(targets, struct{ asset, dst string }{name + suffix, path})
 	}
@@ -198,7 +206,11 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 		}
 	}()
 	for _, t := range targets {
-		s, serr := stageIn(ctx, m, t.asset, t.dst, stageDir)
+		in := stageDir
+		if !authorize {
+			in = filepath.Dir(t.dst)
+		}
+		s, serr := stageIn(ctx, m, t.asset, t.dst, in)
 		if serr != nil {
 			return nil, serr
 		}
@@ -231,10 +243,16 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 // the user is asked once. The staged file stays for Discard: root copied
 // it rather than renaming it, so committed is never set.
 func (s *Staged) installWithAuthorization(ctx context.Context, admin adminInstaller, tag string) error {
-	prompt := fmt.Sprintf("Aether wants to replace %s with aether %s. "+
-		"macOS shows this request as osascript, the tool Aether asks through. "+
-		"Aether never sees your password.", s.dst, tag)
-	err := admin(ctx, macinstall.Request{Src: s.tmp, Dst: s.dst, SHA256: s.sum}, prompt)
+	prompt := fmt.Sprintf("Cloudfield wants to replace %s with aether %s. "+
+		"macOS shows this request as osascript, the tool Cloudfield asks through. "+
+		"Cloudfield never sees your password.", s.dst, tag)
+	req := macinstall.Request{Src: s.tmp, Dst: s.dst, SHA256: s.sum}
+	for _, n := range newNames {
+		if filepath.Base(s.dst) == n.bin {
+			req.Link = filepath.Join(filepath.Dir(s.dst), n.link)
+		}
+	}
+	err := admin(ctx, req, prompt)
 	switch {
 	case err == nil:
 		return verifyInstalled(s.dst, s.sum)

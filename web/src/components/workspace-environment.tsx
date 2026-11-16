@@ -32,7 +32,7 @@ const variablesHelp =
 
 const egressHelp = (
   <>
-    Sessions launched while this is on reach the internet only through Aether&apos;s proxy, and only the hosts listed
+    Sessions launched while this is on reach the internet only through Cloudfield&apos;s proxy, and only the hosts listed
     here, which start as the ones agents and package managers need. Turning it on or off applies to runs launched
     afterwards; the host list applies at once to runs started with it on. <Code>*.example.com</Code> allows every
     subdomain of example.com.

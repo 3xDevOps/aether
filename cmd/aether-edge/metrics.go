@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"flag"
@@ -45,7 +46,7 @@ func metricsHandler(svc *edge.Service, rl *relay.Relay, listener *listenerState)
 	})
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		writeMetrics(w, rl.Metrics(), svc.GitHubErrors())
+		writeMetrics(w, rl.Metrics(), svc.GitHubErrors(), svc.DeviceLogins())
 	})
 	return mux
 }
@@ -193,7 +194,7 @@ func healthcheck(args []string, getenv func(string) string, stdout io.Writer) er
 
 var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
 
-func writeMetrics(w io.Writer, m relay.Metrics, githubErrors uint64) {
+func writeMetrics(w io.Writer, m relay.Metrics, githubErrors uint64, deviceLogins map[string]uint64) {
 	throttled, draining := 0, 0
 	if m.Throttled {
 		throttled = 1
@@ -242,5 +243,27 @@ aether_edge_github_errors_total %d
 	slices.Sort(reasons)
 	for _, r := range reasons {
 		_, _ = fmt.Fprintf(w, "aether_edge_refusals_total{reason=\"%s\"} %d\n", labelEscaper.Replace(r), m.Refusals[r])
+	}
+	_, _ = fmt.Fprint(w, `# HELP aether_edge_servers_by_origin Servers holding a control channel by the relay origin they enrolled at.
+# TYPE aether_edge_servers_by_origin gauge
+`)
+	for _, o := range slices.Sorted(maps.Keys(m.ServersByOrigin)) {
+		_, _ = fmt.Fprintf(w, "aether_edge_servers_by_origin{origin=\"%s\"} %d\n", labelEscaper.Replace(o), m.ServersByOrigin[o])
+	}
+	_, _ = fmt.Fprint(w, `# HELP aether_edge_device_logins_total Device sign-ins since the edge started by the sign-in origin they completed on.
+# TYPE aether_edge_device_logins_total counter
+`)
+	for _, o := range slices.Sorted(maps.Keys(deviceLogins)) {
+		_, _ = fmt.Fprintf(w, "aether_edge_device_logins_total{origin=\"%s\"} %d\n", labelEscaper.Replace(o), deviceLogins[o])
+	}
+	_, _ = fmt.Fprint(w, `# HELP aether_edge_connector_requests_total Connector requests since the edge started by the relay origin they came in on and the protocol version of the server they were for, 0 when it was not connected.
+# TYPE aether_edge_connector_requests_total counter
+`)
+	keys := slices.SortedFunc(maps.Keys(m.ConnectorRequests), func(a, b relay.ConnectorKey) int {
+		return cmp.Or(strings.Compare(a.Origin, b.Origin), cmp.Compare(a.Protocol, b.Protocol))
+	})
+	for _, k := range keys {
+		_, _ = fmt.Fprintf(w, "aether_edge_connector_requests_total{origin=\"%s\",protocol=\"%d\"} %d\n",
+			labelEscaper.Replace(k.Origin), k.Protocol, m.ConnectorRequests[k])
 	}
 }

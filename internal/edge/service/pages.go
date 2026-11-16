@@ -214,11 +214,12 @@ func (s *Service) joinPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.render(w, http.StatusOK, "join", s.view(nil, "Join an Aether server", struct {
+	relay := s.pair(r).relay
+	s.render(w, http.StatusOK, "join", s.view(nil, "Join a Cloudfield server", struct {
 		App  template.URL
 		Link string
 	}{
-		App:  template.URL("aether://join?edge=" + url.QueryEscape(s.relayOrigin) + "&server=" + server + "&invitation=" + invitation),
-		Link: s.relayOrigin + "/join/" + server + "/" + invitation,
+		App:  template.URL("aether://join?edge=" + url.QueryEscape(relay) + "&server=" + server + "&invitation=" + invitation),
+		Link: relay + "/join/" + server + "/" + invitation,
 	}))
 }

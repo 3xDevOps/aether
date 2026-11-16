@@ -237,12 +237,12 @@ sessions, managed Claude Code launches and native pi/omp/OpenCode integrations a
 resumed by mail while idle; elsewhere, in Background sessions and while status
 shows protected, never report waiting: wait inside your turn with
 inbox --wait 30 instead.
---until, only with waiting and at most 4 times, names a condition Aether
+--until, only with waiting and at most 4 times, names a condition Cloudfield
 watches for you: pr:<owner>/<repo>#<n>:merged,
 pr:<owner>/<repo>#<n>:checks[@<head-sha>] (name the commit you pushed) or
 run:<run-id>:finished. One already resolved comes back in the result's
 resolved list: act on it in this turn. Otherwise, when the first one
-resolves, fails or expires (7 days), Aether writes what it saw and what to
+resolves, fails or expires (7 days), Cloudfield writes what it saw and what to
 do next to your inbox, which wakes you once. A new waiting report with --until replaces the conditions;
 waiting without --until keeps them; any other report, a person's prompt or
 a relaunch cancels them.
@@ -394,7 +394,7 @@ request with its original key.
 `
 
 const backgroundOutcomes = `Verify the changed behavior and collect required screenshots and evidence
-BEFORE reporting success. This Background session finishes at turn end: Aether
+BEFORE reporting success. This Background session finishes at turn end: Cloudfield
 commits the work, publishes the session branch and records completed or failed.
 It takes one success or failure report and no new work afterwards.
 `
@@ -405,7 +405,7 @@ Use a new key only for a new operation; receipt means durable storage, not read.
 `
 
 func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) {
-	if _, err := fmt.Fprintf(out, "Aether coordination skill %s\nCLI build: %s\n", SchemaVersion, version.String()); err != nil {
+	if _, err := fmt.Fprintf(out, "Cloudfield coordination skill %s\nCLI build: %s\n", SchemaVersion, version.String()); err != nil {
 		return ExitFailure, fmt.Errorf("write skill header: %w", err)
 	}
 	if status == nil {

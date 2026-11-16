@@ -43,7 +43,7 @@ beforeEach(async () => {
   })
 })
 
-const nav = () => within(screen.getByRole('navigation', { name: 'Aether' }))
+const nav = () => within(screen.getByRole('navigation', { name: 'Cloudfield' }))
 // jsdom counts a header inside main as a banner; a browser does not.
 const topBanners = () => screen.queryAllByRole('banner').filter((header) => !header.closest('main'))
 const runList = () => within(nav().getByRole('region', { name: 'Sessions' }))
@@ -216,6 +216,7 @@ describe('run rows', () => {
       }
     }
 
+    fireEvent.click(runList().getByRole('button', { name: '1 finished' }))
     expect(shown('Failed', 'bump the linter')).toEqual({ unopened: true, muted: false })
     expect(shown('Completed', 'port the parser')).toEqual({ unopened: true, muted: false })
     expect(shown('Merged', 'tidy the readme')).toEqual({ unopened: false, muted: true })
@@ -230,7 +231,7 @@ describe('run rows', () => {
       runs: {
         ...s.runs,
         run_parent: toRecord(run({ id: 'run_parent', task: 'coordinate' })),
-        run_child: toRecord(run({ id: 'run_child', task: 'finished check', status: 'completed', parent_run_id: 'run_parent' })),
+        run_child: toRecord(run({ id: 'run_child', task: 'running check', parent_run_id: 'run_parent' })),
         run_waiting: toRecord(run({ id: 'run_waiting', task: 'question for you', status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which schema?', parent_run_id: 'run_parent' })),
       },
     }))
@@ -241,10 +242,46 @@ describe('run rows', () => {
     expect(disclosure.querySelector('svg')?.getAttribute('class')).toContain('rotate-90')
     fireEvent.click(disclosure)
     expect(disclosure.getAttribute('aria-expanded')).toBe('false')
-    expect(runList().queryByText('finished check')).toBeNull()
+    expect(runList().queryByText('running check')).toBeNull()
     expect(runList().getByText('question for you')).toBeDefined()
     fireEvent.click(runList().getByRole('button', { name: 'Expand 1 subsession' }))
-    expect(runList().getByText('finished check')).toBeDefined()
+    expect(runList().getByText('running check')).toBeDefined()
+  })
+
+  it('leaves finished subsessions out until asked, and keeps a failed one listed', () => {
+    const child = (id: string, task: string, over: Parameters<typeof run>[0]) =>
+      toRecord(run({ id, task, parent_run_id: 'run_parent', ...over }))
+    useStore.setState((s) => ({
+      runs: {
+        ...s.runs,
+        run_parent: toRecord(run({ id: 'run_parent', task: 'coordinate' })),
+        run_reported: child('run_reported', 'reported check', { status: 'needs-attention', state: 'finished', review: 'ready' }),
+        run_stopped: child('run_stopped', 'stopped check', { status: 'completed', reason: 'stopped by parent session run_parent' }),
+        run_failed: child('run_failed', 'failed check', { status: 'needs-attention', state: 'failed', outcome_unseen: true }),
+      },
+    }))
+    render(<AppShell />)
+
+    expect(runList().getByRole('button', { name: /^Working · coordinate · 3 subsessions · 1 failed · 2 done · / })).toBeDefined()
+    expect(runList().getByText('failed check')).toBeDefined()
+    expect(runList().queryByText('reported check')).toBeNull()
+    expect(runList().queryByText('stopped check')).toBeNull()
+    const finished = runList().getByRole('button', { name: '2 finished' })
+    expect(finished.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(finished)
+    expect(runList().getByText('reported check')).toBeDefined()
+    expect(runList().getByText('stopped check')).toBeDefined()
+    fireEvent.click(runList().getByRole('button', { name: 'Hide finished' }))
+    expect(runList().queryByText('reported check')).toBeNull()
+
+    act(() => useStore.getState().navigate('run', { runId: 'run_stopped' }))
+    expect(runList().getByRole('button', { name: /stopped check/ }).getAttribute('aria-current')).toBe('page')
+    expect(runList().queryByText('reported check')).toBeNull()
+    expect(runList().getByRole('button', { name: '2 finished' })).toBeDefined()
+
+    fireEvent.click(runList().getByRole('button', { name: 'Collapse 1 subsession' }))
+    expect(runList().queryByRole('button', { name: '2 finished' })).toBeNull()
+    expect(runList().queryByText('failed check')).toBeNull()
   })
 
   it('opens and turns the subsession arrow when the first child arrives', async () => {
@@ -255,7 +292,7 @@ describe('run rows', () => {
     act(() => useStore.setState((s) => ({
       runs: {
         ...s.runs,
-        run_child: toRecord(run({ id: 'run_child', task: 'new check', status: 'completed', parent_run_id: 'run_parent' })),
+        run_child: toRecord(run({ id: 'run_child', task: 'new check', parent_run_id: 'run_parent' })),
       },
     })))
 
@@ -622,10 +659,10 @@ describe('sidebar visibility', () => {
     expect(useStore.getState().sidebarCollapsed).toBe(false)
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
-    expect(screen.queryByRole('navigation', { name: 'Aether' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Cloudfield' })).toBeNull()
 
     fireEvent.click(within(screen.getByRole('main')).getByRole('button', { name: 'Open sidebar' }))
-    expect(screen.getByRole('navigation', { name: 'Aether' })).toBeDefined()
+    expect(screen.getByRole('navigation', { name: 'Cloudfield' })).toBeDefined()
   })
 })
 
@@ -675,7 +712,7 @@ describe('phone shell', () => {
     atViewport(390, { pointer: 'coarse' })
     render(<AppShell />)
 
-    expect(screen.queryByRole('navigation', { name: 'Aether' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Cloudfield' })).toBeNull()
     const tabs = within(screen.getByRole('navigation', { name: 'Main navigation' }))
     fireEvent.click(tabs.getByRole('button', { name: 'More pages' }))
 

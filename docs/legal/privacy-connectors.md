@@ -1,4 +1,4 @@
-# Aether connector for ChatGPT and Claude: privacy policy
+# Cloudfield connector for ChatGPT and Claude: privacy policy
 
 > **DRAFT. Not published and not in effect.** The project owner and legal
 > counsel must approve this text before it is hosted at the URL entered as
@@ -13,23 +13,23 @@ Effective: [date of publication]
 
 ## What this policy covers
 
-The Aether connector lets ChatGPT, from OpenAI, and Claude, from Anthropic,
-read and act on the coding agents running on an Aether server you are a
+The Cloudfield connector lets ChatGPT, from OpenAI, and Claude, from Anthropic,
+read and act on the coding agents running on a Cloudfield server you are a
 member of. It is reached at `https://edge.onaether.dev/mcp`. This policy
-covers what the connector collects, returns, stores and logs. The Aether
+covers what the connector collects, returns, stores and logs. The Cloudfield
 Android app, the dashboard and the edge's other functions are covered by
-the [Aether privacy policy](../privacy.md).
+the [Cloudfield privacy policy](../privacy.md).
 
-Aether is self-hosted. Three parties handle connector data:
+Cloudfield is self-hosted. Three parties handle connector data:
 
 | Party | Role |
 | --- | --- |
-| 3xDevOps, publisher of Aether, operating `edge.onaether.dev` and `auth.onaether.dev` (the project edge) | Signs you in with GitHub and relays each connector request to your server |
-| The administrator of the Aether server you connect | Runs the server that executes every tool call and holds your runs. 3xDevOps does not operate it unless it is your administrator |
+| 3xDevOps, publisher of Cloudfield, operating `edge.onaether.dev` and `auth.onaether.dev` (the project edge) | Signs you in with GitHub and relays each connector request to your server |
+| The administrator of the Cloudfield server you connect | Runs the server that executes every tool call and holds your runs. 3xDevOps does not operate it unless it is your administrator |
 | OpenAI (ChatGPT) or Anthropic (Claude), whichever app you connect | Sends tool calls and receives tool results inside your conversation, under its own privacy policy |
 
 Contact for this policy: [team@onaether.dev]. Issues:
-<https://github.com/3xDevOps/Aether/issues>.
+<https://github.com/3xDevOps/cloudfield/issues>.
 
 ## What the connector receives from ChatGPT or Claude
 
@@ -47,14 +47,14 @@ files, location, or any OpenAI or Anthropic user id.
 ## What it returns to ChatGPT or Claude
 
 - Ids, states, times, workspace and agent names, branch names, file paths,
-  counts and links to the Aether dashboard.
+  counts and links to the Cloudfield dashboard.
 - Text written by you, your teammates, agents and GitHub users: run titles,
   tasks, reports, agent conversations and terminal output, diffs, commit
   subjects and git author names, pull request reviews and comments with the
   GitHub usernames that wrote them, questions and messages, and
   team memory notes with their author's name.
 
-No tool returns member email addresses or logins. Every member of an Aether
+No tool returns member email addresses or logins. Every member of a Cloudfield
 server can read every run on it, so results can include your teammates'
 work. Once a result reaches OpenAI or Anthropic, its handling is governed
 by their policies, not this one.
@@ -67,11 +67,11 @@ by their policies, not this one.
 | Project edge, journal | Requests the edge refuses before relaying, with path and client IP; relay errors; failed TLS handshakes with client IP. No request bodies or tokens | [journald retention on the deployed edge] |
 | Project edge, database | Your edge account (GitHub user id, login, verified primary email, display name), browser sessions (hashed, 30 days after last use), the servers you can reach, and one monthly total of relayed bytes | As described in [What an edge stores](../privacy.md#what-an-edge-stores) |
 | Project edge, memory | Request and result bodies and tokens while relaying them. TLS ends at the edge so it can route the request | Not written to disk |
-| Your Aether server, connectors table | Your member id, device, app client id and name, redirect host, granted scopes, created and last-used times, and SHA-256 hashes of the tokens | Until revoked, or your member or device is removed |
-| Your Aether server, tokens | Access tokens valid 1 hour; refresh tokens valid 30 days and replaced on every use | Hashes only |
-| Your Aether server, log | One line per write call: connector id, member id, method, target id and result. A line when a connector is authorized, created or revoked. Read calls are not logged | The server administrator's log retention |
-| Your Aether server, audit history | Each call that changes something made through a connector or the built-in assistant, including refused calls; connectors created, revoked, or removed with your member, device or edge sign-in; and, from any client including the dashboard and CLI, account shares and revocations, member approvals, removals and role changes, device and sign-in removals, member merges, and Slack link codes and unlinks. Each entry: time, member, how the call arrived (connector with its client and id, assistant, dashboard or CLI), method, workspace, target id and outcome. Never tokens, parameters or message bodies. Read calls are not recorded | For each member, the newest 10,000 call entries and, separately, the newest 10,000 changes that took effect. Entries outlive the member and connector they name |
-| Your Aether server, runs and messages | Runs launched and messages sent through the connector, marked `via ChatGPT` or `via Claude` | With the run, under the server's retention |
+| Your Cloudfield server, connectors table | Your member id, device, app client id and name, redirect host, granted scopes, created and last-used times, and SHA-256 hashes of the tokens | Until revoked, or your member or device is removed |
+| Your Cloudfield server, tokens | Access tokens valid 1 hour; refresh tokens valid 30 days and replaced on every use | Hashes only |
+| Your Cloudfield server, log | One line per write call: connector id, member id, method, target id and result. A line when a connector is authorized, created or revoked. Read calls are not logged | The server administrator's log retention |
+| Your Cloudfield server, audit history | Each call that changes something made through a connector or the built-in assistant, including refused calls; connectors created, revoked, or removed with your member, device or edge sign-in; and, from any client including the dashboard and CLI, account shares and revocations, member approvals, removals and role changes, device and sign-in removals, member merges, and Slack link codes and unlinks. Each entry: time, member, how the call arrived (connector with its client and id, assistant, dashboard or CLI), method, workspace, target id and outcome. Never tokens, parameters or message bodies. Read calls are not recorded | For each member, the newest 10,000 call entries and, separately, the newest 10,000 changes that took effect. Entries outlive the member and connector they name |
+| Your Cloudfield server, runs and messages | Runs launched and messages sent through the connector, marked `via ChatGPT` or `via Claude` | With the run, under the server's retention |
 
 ## Why
 
@@ -88,7 +88,7 @@ to train models. The code does none of these.]
   [TODO: true only once #591, which checks every call against the granted
   scopes, is deployed; until then scopes choose which tools are listed but
   the server does not check each call against them.]
-- Revoke a connector in the Aether app under **Settings → ChatGPT and
+- Revoke a connector in the Cloudfield app under **Settings → ChatGPT and
   Claude**, or with `aether mcp revoke <id>`. Removing it in ChatGPT or
   Claude alone does not revoke it on the server.
 - Delete your edge account at `https://auth.onaether.dev/account`.

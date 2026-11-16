@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -77,7 +78,7 @@ func TestPlanMountsRoutesEachMountAndForwardsSockets(t *testing.T) {
 		{Volume: guest.VolumeData, Source: "tmp", Target: "/tmp"},
 		{Volume: guest.VolumeData, Source: "docker", Target: "/var/lib/docker"},
 	}
-	if !slices.Equal(p.mounts, wantMounts) {
+	if !reflect.DeepEqual(p.mounts, wantMounts) {
 		t.Errorf("mounts = %+v", p.mounts)
 	}
 	wantSockets := []guest.Socket{{Port: 1025, Path: "/run/aether/coord3.sock"}, {Port: 1026, Path: "/run/aether-signing/agent.sock"}}
@@ -109,5 +110,37 @@ func TestPlanMountsRoutesEachMountAndForwardsSockets(t *testing.T) {
 	}
 	if _, err := planMounts(nil, []runtime.Mount{{HostPath: filepath.Join(dir, "gone"), ContainerPath: "/x"}}, false, dir, trusted); err == nil {
 		t.Error("a missing mount source was planned")
+	}
+}
+
+func TestPlanMountsGivesASocketALoopbackPortAndSeedsStateMounts(t *testing.T) {
+	dir, err := os.MkdirTemp("", "vmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	broker := filepath.Join(dir, "broker")
+	if err = os.Mkdir(broker, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	listen(t, filepath.Join(broker, "broker.sock"))
+	mounts := []runtime.Mount{
+		{HostPath: broker, ContainerPath: "/run/aether-omp", ReadOnly: true, Port: 47630},
+		{HostPath: filepath.Join(dir, "state"), Subpath: "0", ContainerPath: "/root/.copilot", Kind: runtime.MountState},
+		{ContainerPath: "/root/.copilot/config.json", Kind: runtime.MountSeed},
+	}
+	p, err := planMounts(nil, mounts, false, dir, func(d string) bool { return d == broker })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []guest.Loopback{{Port: 47630, Path: "/run/aether-omp/broker.sock"}}; !slices.Equal(p.loopbacks, want) {
+		t.Errorf("loopbacks = %+v", p.loopbacks)
+	}
+	want := []guest.Mount{{Volume: guest.VolumeState, Source: "0", Target: "/root/.copilot", Seed: []string{"config.json"}}}
+	if !reflect.DeepEqual(p.mounts, want) {
+		t.Errorf("mounts = %+v", p.mounts)
+	}
+	if _, err = planMounts(nil, []runtime.Mount{{ContainerPath: "/root/.x/login", Kind: runtime.MountSeed}}, false, dir, nil); err == nil {
+		t.Error("a seed no state mount covers was planned")
 	}
 }

@@ -1475,7 +1475,7 @@ func TestNoFallbackReason(t *testing.T) {
 		measured fallback.Measured
 		want     string
 	}{
-		{"opencode", fallback.Measured{ada: 100}, "Aether cannot read opencode's usage, so its sessions do not move to another account"},
+		{"opencode", fallback.Measured{ada: 100}, "Cloudfield cannot read opencode's usage, so its sessions do not move to another account"},
 		{"claude", fallback.Measured{ada: 100}, "no other account is shared to fall back on"},
 		{"claude", fallback.Measured{ada: 100, grace: 97}, "no fallback has usage left"},
 		{"claude", fallback.Measured{ada: 100, grace: fallback.Unknown}, "no account that may have usage left can run claude here"},

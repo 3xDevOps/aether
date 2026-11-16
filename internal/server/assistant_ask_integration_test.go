@@ -141,7 +141,7 @@ func TestIntegrationAssistantAskCard(t *testing.T) {
 		shown[c.CardID] = c.Card
 	}
 	if shown[long] != protocol.AssistantAskWaitingInAether || shown[save] != protocol.AssistantAskWaitingInAether || !strings.Contains(shown[launch], task) {
-		t.Fatalf("pending cards = %v, want the launch's text and the long and env.save cards waiting in Aether", shown)
+		t.Fatalf("pending cards = %v, want the launch's text and the long and env.save cards waiting in Cloudfield", shown)
 	}
 	card := shown[launch]
 
@@ -161,9 +161,9 @@ func TestIntegrationAssistantAskCard(t *testing.T) {
 		{"a card no turn of the grant raised", conA, protocol.AssistantAskParams{CardID: "card-orphan", Decision: protocol.AssistantAskApprove, Card: "Save your environment"},
 			protocol.CodeNotFound, "assistant: no such pending confirmation: card-orphan"},
 		{"a long card", conA, protocol.AssistantAskParams{CardID: long, Decision: protocol.AssistantAskApprove, Card: "x"},
-			protocol.CodeDenied, "card " + long + " is long or shows a saved preference, so it is decided only in Aether"},
+			protocol.CodeDenied, "card " + long + " is long or shows a saved preference, so it is decided only in Cloudfield"},
 		{"control without the scope", conA, protocol.AssistantAskParams{CardID: save, Decision: protocol.AssistantAskApprove, Card: textOf(t, env, a, save)},
-			protocol.CodeDenied, "card " + save + " is decided only in Aether: env.save needs the control scope"},
+			protocol.CodeDenied, "card " + save + " is decided only in Cloudfield: env.save needs the control scope"},
 		{"the dashboard", env.srv.ssh.Local(env.member.ID), protocol.AssistantAskParams{CardID: launch, Decision: protocol.AssistantAskApprove, Card: card},
 			protocol.CodeDenied, "assistant.ask is for ChatGPT and Claude connectors"},
 		{"the assistant", env.srv.ssh.AssistantLocal(env.member.ID), protocol.AssistantAskParams{CardID: launch, Decision: protocol.AssistantAskApprove, Card: card},

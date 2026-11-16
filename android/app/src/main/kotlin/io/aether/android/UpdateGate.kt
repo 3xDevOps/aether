@@ -87,7 +87,7 @@ class UpdateGate(
             val read = installFacts(context)
             val answer =
                 try {
-                    gateAnswer(post(call, if (refresh) "{\"refresh\":true}" else "{}"))
+                    gateAnswer(postGateway(call, if (refresh) "{\"refresh\":true}" else "{}"))
                 } catch (e: IOException) {
                     Result.failure(e)
                 }
@@ -152,7 +152,7 @@ class UpdateGate(
     private fun copyDetails() {
         val shown = gate ?: return
         val clipboard = activity.getSystemService(ClipboardManager::class.java)
-        clipboard.setPrimaryClip(ClipData.newPlainText("Aether update", gateDetails(shown, targets())))
+        clipboard.setPrimaryClip(ClipData.newPlainText("Cloudfield update", gateDetails(shown, targets())))
         // Android 13 and newer confirm a copy themselves.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             Toast.makeText(activity, R.string.update_gate_copied, Toast.LENGTH_SHORT).show()
@@ -160,7 +160,7 @@ class UpdateGate(
     }
 }
 
-private fun post(call: GatewayCall, body: String): String {
+fun postGateway(call: GatewayCall, body: String): String {
     val connection = URL(call.url).openConnection() as HttpURLConnection
     try {
         connection.requestMethod = "POST"

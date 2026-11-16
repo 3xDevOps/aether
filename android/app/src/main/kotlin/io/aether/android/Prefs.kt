@@ -14,6 +14,7 @@ private const val UPDATE_ANSWERED_AT = "update_answered_at"
 private const val UPDATE_CHECK = "update_check"
 private const val UPDATE_BEHIND_SINCE = "update_behind_since"
 private const val UPDATE_DISMISSED = "update_dismissed"
+private const val UPDATE_VIA = "update_via"
 private const val PUSH_ENDPOINT = "push_endpoint"
 private const val PUSH_P256DH = "push_p256dh"
 private const val PUSH_AUTH = "push_auth"
@@ -89,6 +90,7 @@ fun Context.storedUpdate(): StoredUpdate {
         behindSince = prefs.getLong(UPDATE_BEHIND_SINCE, 0),
         dismissed = prefs.getString(UPDATE_DISMISSED, null),
         failureDismissedAt = prefs.getLong(UPDATE_FAILURE_DISMISSED_AT, 0),
+        via = prefs.getString(UPDATE_VIA, null) ?: VIA_CLI,
     )
 }
 
@@ -103,6 +105,7 @@ fun Context.storeUpdate(update: StoredUpdate) {
         .putLong(UPDATE_BEHIND_SINCE, update.behindSince)
         .putString(UPDATE_DISMISSED, update.dismissed)
         .putLong(UPDATE_FAILURE_DISMISSED_AT, update.failureDismissedAt)
+        .putString(UPDATE_VIA, update.via)
         .apply()
 }
 

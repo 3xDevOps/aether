@@ -149,7 +149,7 @@ export function AssistantComposer({ textarea, running, dock }: {
             rows={2}
             value={draft}
             readOnly={busy}
-            placeholder={running ? 'Queue a prompt for after this turn' : 'Ask Aether'}
+            placeholder={running ? 'Queue a prompt for after this turn' : 'Ask Cloudfield'}
             className="resize-none [field-sizing:content] max-md:[--composer-lines:6.5rem]"
             style={{ maxHeight: 'var(--composer-lines, 10rem)' }}
             onFocus={() => setFocused(true)}

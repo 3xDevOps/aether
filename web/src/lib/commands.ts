@@ -490,7 +490,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       done: 'Deleted',
       confirm: {
         title: 'Delete this session?',
-        body: 'The session, transcript, and coordination records will be removed from Aether.',
+        body: 'The session, transcript, and coordination records will be removed from Cloudfield.',
         action: 'Delete session',
         stopsChildren: true,
       },
@@ -706,7 +706,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   if (ctx.cap.hasMethod('assistant.status') && canLaunch({ cap: ctx.cap, role })) {
     list.push({
       id: 'assistant',
-      label: 'Ask Aether',
+      label: 'Ask Cloudfield',
       Icon: Sparkles,
       value: 'assistant question help chat',
       perform: () => useStore.getState().setAssistantOpen(true),

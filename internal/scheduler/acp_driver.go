@@ -43,7 +43,7 @@ const (
 	// that losing it again stops the session instead of reopening it, so an
 	// agent that drops every session is not reopened in a loop.
 	acpLostAgain  = 5 * time.Minute
-	oneShotResume = "Aether's server restarted and interrupted your previous turn. Continue the task where you stopped."
+	oneShotResume = "Cloudfield's server restarted and interrupted your previous turn. Continue the task where you stopped."
 )
 
 // Claude Code stored its title within a second of the prompt in every
@@ -526,7 +526,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			if how == openWake {
 				after = "the session woke"
 			}
-			d.notice(entry.runID, "warning", "Agent restarted", "Aether could not reattach to the agent after "+after+", so it restarted the agent and restored its session: "+err.Error())
+			d.notice(entry.runID, "warning", "Agent restarted", "Cloudfield could not reattach to the agent after "+after+", so it restarted the agent and restored its session: "+err.Error())
 		}
 	}
 	stderr := &tailBuffer{max: acpStderrTail}

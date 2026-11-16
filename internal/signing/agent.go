@@ -31,7 +31,7 @@ const (
 
 var (
 	errClosed   = errors.New("signing: the agent service is closed")
-	errReadOnly = errors.New("signing: the agent is read-only; Aether holds this key")
+	errReadOnly = errors.New("signing: the agent is read-only; Cloudfield holds this key")
 )
 
 // Serve starts the member's agent unless it is running and returns the host

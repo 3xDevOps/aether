@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/3xDevOps/Aether/internal/envname"
 )
 
 // Config is the local linked-server configuration written by `aether link`.
@@ -206,16 +208,34 @@ const ConfigDirEnv = "AETHER_CONFIG_DIR"
 // Path is the linked-server config file: $AETHER_CONFIG_DIR/aether/config.json
 // when that variable is set, otherwise ~/.config/aether/config.json on
 // Linux, ~/Library/Application Support/aether/config.json on macOS, and
-// %AppData%\aether\config.json on Windows.
+// %AppData%\aether\config.json on Windows. A cloudfield directory beside
+// aether is used instead when it exists. Neither is ever moved, because an
+// older CLI on the same machine reads only aether.
 func Path() (string, error) {
-	dir := os.Getenv(ConfigDirEnv)
+	dir := envname.Getenv(ConfigDirEnv)
 	if dir == "" {
 		var err error
 		if dir, err = os.UserConfigDir(); err != nil {
 			return "", fmt.Errorf("cli: config dir: %w", err)
 		}
 	}
-	return filepath.Join(dir, "aether", "config.json"), nil
+	name := "aether"
+	if hasDir(dir, "cloudfield") {
+		name = "cloudfield"
+	}
+	return filepath.Join(dir, name, "config.json"), nil
+}
+
+// hasDir reports whether dir holds a directory named exactly name. A
+// case-insensitive volume would let Stat find "Cloudfield", the directory
+// another program may own, so the entries are compared byte for byte.
+func hasDir(dir, name string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil || !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == name }) {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(dir, name))
+	return err == nil && info.IsDir()
 }
 
 // Dir is the directory that holds config.json, the device key and the

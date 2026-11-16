@@ -2651,7 +2651,36 @@ WHERE type = 'coord.message.acked' AND json_extract(payload, '$.to_run_id') <> '
 	`
 ALTER TABLE child_settings ADD COLUMN off TEXT NOT NULL DEFAULT '[]';
 `,
+	// v113: the release channel the server follows, set by a super admin.
+	// Empty means not chosen yet: a new server chooses from the channel
+	// pointers at its first release check. A server that existed before
+	// channels follows beta (existingDatabaseMigrations). The declined
+	// build is the one the server no longer schedules by itself.
+	`
+ALTER TABLE server_update_state ADD COLUMN release_channel TEXT NOT NULL DEFAULT '';
+ALTER TABLE server_update_state ADD COLUMN declined_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE server_update_state ADD COLUMN declined_build INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE server_update_state ADD COLUMN declined_hotfix INTEGER NOT NULL DEFAULT 0;
+`,
 }
+
+// existingDatabaseMigrations run after their version's migration, in the
+// same transaction, only on a database this migrator did not create (see
+// newDatabaseMarker): what a server that predates the change keeps, which
+// a new one must not get.
+var existingDatabaseMigrations = map[int]string{
+	113: `INSERT INTO server_update_state (id, release_channel) VALUES (1, 'beta')
+	ON CONFLICT (id) DO UPDATE SET release_channel = 'beta';`,
+}
+
+// newDatabaseMarker is set in the transaction of migration 1, so a database
+// this migrator created carries it however early a run is interrupted. A
+// database with applied versions and no marker is a server that existed
+// before it, including one a build without the marker left interrupted at
+// the version before a migration in existingDatabaseMigrations: that
+// cannot be told from a real one and gets the pre-channel setting, the
+// safe side.
+const newDatabaseMarker = `PRAGMA user_version = 1`
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
 // reference with ON DELETE CASCADE. See applyMigration.
@@ -2734,9 +2763,14 @@ func migrateOnce(db *sql.DB) error {
 	).Scan(&current); err != nil {
 		return fmt.Errorf("store: read schema version: %w", err)
 	}
+	var born int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&born); err != nil {
+		return fmt.Errorf("store: read database birth marker: %w", err)
+	}
+	existing := current > 0 && born == 0
 	for current < len(migrations) {
 		var err error
-		current, err = applyMigration(db, current+1)
+		current, err = applyMigration(db, current+1, existing)
 		if err != nil {
 			return err
 		}
@@ -2757,7 +2791,7 @@ func migrateOnce(db *sql.DB) error {
 // transaction and DROP TABLE would otherwise fire ON DELETE CASCADE into
 // every referencing table. PRAGMA foreign_key_check must come back empty
 // before it commits.
-func applyMigration(db *sql.DB, version int) (int, error) {
+func applyMigration(db *sql.DB, version int, existing bool) (int, error) {
 	ctx := context.Background()
 	conn, err := db.Conn(ctx)
 	if err != nil {
@@ -2818,6 +2852,16 @@ func applyMigration(db *sql.DB, version int) (int, error) {
 	}
 	if _, err := tx.Exec(migrations[version-1]); err != nil {
 		return 0, fmt.Errorf("store: apply migration %d: %w", version, err)
+	}
+	if version == 1 {
+		if _, err := tx.Exec(newDatabaseMarker); err != nil {
+			return 0, fmt.Errorf("store: mark new database: %w", err)
+		}
+	}
+	if extra := existingDatabaseMigrations[version]; existing && extra != "" {
+		if _, err := tx.Exec(extra); err != nil {
+			return 0, fmt.Errorf("store: apply migration %d to an existing database: %w", version, err)
+		}
 	}
 	if fkOff {
 		if err := checkForeignKeys(tx); err != nil {

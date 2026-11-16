@@ -283,7 +283,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        updates?.resume()
+        updates?.resume(gatewayUrl, mode == ConnectionMode.EDGE)
         push.resume()
         if (mode == ConnectionMode.EDGE && gateway?.isActive != true &&
             gatewayError.visibility != View.VISIBLE
@@ -830,6 +830,7 @@ class MainActivity : ComponentActivity() {
                     web.loadUrl(url + pendingSuffix)
                     pendingSuffix = ""
                     gate?.check(url)
+                    updates?.resume(url, true)
                 },
                 onExited = {
                     gatewayUrl = null

@@ -264,7 +264,7 @@ function EverythingElse({ rest, stats, metric }: { rest: number; stats: SystemSt
         </p>
       )}
       <p className="flex justify-between gap-2">
-        <span>Aether server, Docker and host processes</span>
+        <span>Cloudfield server, Docker and host processes</span>
         <span className="tabular-nums">{amount(metric, host)}</span>
       </p>
     </div>

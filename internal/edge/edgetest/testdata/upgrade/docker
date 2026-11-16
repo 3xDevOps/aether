@@ -1,32 +1,48 @@
 #!/bin/sh
 # docker for scripts/edge-update.sh in TestEdgeUpgrade: the real docker
 # ($QUALIFY_DOCKER), with the updater's image mapped to the test registry
-# ($QUALIFY_IMAGE) and back in the digests it reads. release-check is
-# answered here instead: the image's binary trusts only the real release
-# keys and fetches from github.com. Release <tag> signs the digest in
-# $QUALIFY_RELEASES/<tag>.
+# ($QUALIFY_IMAGE) and back in the digests it reads. A release-check run
+# from one of the test's signed builds ($QUALIFY_SIGNED/<digest>) is real:
+# it runs on the test network ($QUALIFY_NETWORK), where github.com is the
+# test's fake, trusting its certificate ($QUALIFY_CA). Any other image's
+# binary trusts only the real release keys, so its release-check is
+# answered here instead: release <tag> signs the digest in
+# $QUALIFY_RELEASES/<tag>, and --keep-manifests keeps
+# $QUALIFY_RELEASES/<tag>.json and .sig when the test signed them, or a
+# placeholder.
 set -eu
 from=ghcr.io/3xdevops/aether-edge
 to=$QUALIFY_IMAGE
 
-check=0
+check=0 running=""
 for a; do
 	shift
 	case $a in
 	"$from"*) a=$to${a#"$from"} ;;
 	release-check) check=1 ;;
 	esac
+	[ "$check" = 1 ] || case $a in "$to@"*) running=${a#"$to@"} ;; esac
 	set -- "$@" "$a"
 done
 
+if [ "$check" = 1 ] && [ -n "$running" ] && [ -f "$QUALIFY_SIGNED/$running" ]; then
+	shift
+	exec "$QUALIFY_DOCKER" run --network "$QUALIFY_NETWORK" -v "$QUALIFY_CA:/run/qualify/ca.pem:ro" \
+		-e SSL_CERT_FILE=/run/qualify/ca.pem "$@"
+fi
+
 if [ "$check" = 1 ]; then
-	tag="" digest=""
-	while [ $# -gt 1 ]; do
-		case $1 in
-		--tag) tag=$2 ;;
-		--digest) digest=$2 ;;
+	tag="" digest="" from="" keep="" mount="" saved=0 prev=""
+	for a; do
+		case $prev in
+		--tag) tag=$a ;;
+		--digest) digest=$a ;;
+		--from) from=$a ;;
+		--keep-manifests) keep=$a ;;
+		-v) mount=$a ;;
 		esac
-		shift
+		case $a in --from-manifest=*) saved=1 ;; esac
+		prev=$a
 	done
 	signed=$(cat "$QUALIFY_RELEASES/$tag" 2>/dev/null) || {
 		echo "aether-edge: download the $tag manifest: GET https://github.com/3xDevOps/Aether/releases/download/$tag/aether-release.json: 404 Not Found" >&2
@@ -35,6 +51,21 @@ if [ "$check" = 1 ]; then
 	if [ "$signed" != "$digest" ]; then
 		echo "aether-edge: release $tag signs the edge image $signed, not $digest; do not run it" >&2
 		exit 1
+	fi
+	if [ -n "$keep" ]; then
+		dir=${mount%%:*}
+		[ "${mount#*:}" = "$keep" ] || { echo "docker: --keep-manifests $keep is not the mounted ${mount#*:}" >&2; exit 2; }
+		for r in "$tag" "$from"; do
+			[ "$r" != "$from" ] || [ "$saved" = 0 ] || continue
+			[ -f "$QUALIFY_RELEASES/$r" ] || continue
+			if [ -f "$QUALIFY_RELEASES/$r.json" ]; then
+				cp "$QUALIFY_RELEASES/$r.json.sig" "$dir/$r.json.sig"
+				cp "$QUALIFY_RELEASES/$r.json" "$dir/$r.json"
+				continue
+			fi
+			echo sig >"$dir/$r.json.sig"
+			cp "$QUALIFY_RELEASES/$r" "$dir/$r.json"
+		done
 	fi
 	printf '{"version":"%s","hold":false,"reasons":[],"applicable_steps":[]}\n' "$tag"
 	exit 0

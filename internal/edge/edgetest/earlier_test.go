@@ -105,7 +105,7 @@ func TestServerVerifiesGrants(t *testing.T) {
 	}
 	googleGrant := base64.RawURLEncoding.EncodeToString(payload) + "." +
 		base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, append([]byte("aether-edge-grant-v1\x00"), payload...)))
-	if got, want := open(google.ConnID, googleGrant, edgeproto.KindSSH), `sign-in provider "google" is not supported: Aether signs in with GitHub only`; !strings.Contains(got, want) {
+	if got, want := open(google.ConnID, googleGrant, edgeproto.KindSSH), `sign-in provider "google" is not supported: Cloudfield signs in with GitHub only`; !strings.Contains(got, want) {
 		t.Errorf("grant for a Google account: server answered %q, want %q", got, want)
 	}
 	_, signed := grant(key, func(*edgeproto.Grant) {})

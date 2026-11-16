@@ -46,6 +46,10 @@ func (s *stubUpdates) Update(_ context.Context, _ domain.MemberID, p protocol.Se
 	return s.result, s.restart, nil
 }
 
+func (s *stubUpdates) SetChannel(_ context.Context, _ domain.MemberID, p protocol.ServerReleaseChannelSetParams) (protocol.ServerReleaseChannelSetResult, error) {
+	return protocol.ServerReleaseChannelSetResult{Channel: p.Channel, Saved: !p.DryRun}, nil
+}
+
 func updateEnv(t *testing.T, svc *stubUpdates) *testEnv {
 	t.Helper()
 	return newTestEnv(t, func(c *Config) { c.Services.ServerUpdate = svc })

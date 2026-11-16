@@ -4,10 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/acme/autocert"
+
+	"github.com/3xDevOps/Aether/internal/envname"
 )
 
 func envOf(vars map[string]string) func(string) string {
@@ -241,6 +246,145 @@ func TestEnvExampleListsEveryVariable(t *testing.T) {
 			if !regexp.MustCompile(`(?m)^#?` + string(m[1]) + `=`).Match(example) {
 				t.Errorf("%s reads %s, which packaging/edge/aether-edge.env.example does not list", name, m[1])
 			}
+		}
+	}
+}
+
+func TestOriginPairs(t *testing.T) {
+	dir := t.TempDir()
+	secret, blank := filepath.Join(dir, "github-client-secret-2"), filepath.Join(dir, "blank")
+	if err := os.WriteFile(secret, []byte("fake-secret-2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blank, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pair := "https://auth.example.net https://edge.example.net fake-id-2 " + secret
+	o, err := parseOptions(origins, envOf(map[string]string{"AETHER_EDGE_ORIGIN_PAIRS": pair + " , https://auth3.example.net https://edge3.example.net fake-id-3 " + secret}))
+	if err != nil || len(o.morePairs) != 2 || o.signinOrigin != "https://auth.example.test" || o.relayOrigin != "https://edge.example.test" {
+		t.Fatalf("two more pairs: %+v %v", o, err)
+	}
+	if p := o.morePairs[0]; p.SigninOrigin != "https://auth.example.net" || p.RelayOrigin != "https://edge.example.net" ||
+		p.GitHub.ClientID != "fake-id-2" || p.GitHub.ClientSecret != "fake-secret-2" {
+		t.Fatalf("first more pair: %+v %+v", p, p.GitHub)
+	}
+	want := []string{"auth.example.test", "edge.example.test", "auth.example.net", "edge.example.net", "auth3.example.net", "edge3.example.net"}
+	if got := certHosts(o); !slices.Equal(got, want) {
+		t.Errorf("certificate hosts %v, want %v", got, want)
+	}
+	if err = autocert.HostWhitelist(certHosts(o)...)(t.Context(), "edge3.example.net"); err != nil {
+		t.Errorf("certificate for the third pair's relay host refused: %v", err)
+	}
+	if o, err = parseOptions(origins, envOf(nil)); err != nil || o.morePairs != nil {
+		t.Fatalf("no more pairs: %+v %v", o.morePairs, err)
+	}
+	if got := certHosts(o); !slices.Equal(got, want[:2]) {
+		t.Errorf("certificate hosts of one pair %v, want %v", got, want[:2])
+	}
+	for _, tt := range []struct{ pairs, want string }{
+		{"https://auth.example.net https://edge.example.net fake-id-2", "is not <signin origin> <relay origin> <GitHub client id> <client secret file>"},
+		{"https://auth.example.net https://edge.example.test fake-id-2 " + secret, "has the host name edge.example.test of --relay-origin"},
+		{"https://auth.example.net https://AUTH.example.net:8443 fake-id-2 " + secret, "has the host name auth.example.net of https://auth.example.net"},
+		{"http://auth.example.net https://edge.example.net fake-id-2 " + secret, "--origin-pairs must be https://host[:port]"},
+		{"https://auth.example.net https://edge.example.net fake-id-2 " + filepath.Join(dir, "missing"), "the client secret file of https://auth.example.net"},
+		{"https://auth.example.net https://edge.example.net fake-id-2 " + blank, "holds no secret"},
+		{"https://auth.example.net https://edge.example.net fake-id-2 " + secret + ",", "has an empty pair: remove the extra comma"},
+	} {
+		if _, err := parseOptions(append(slices.Clone(origins), "--origin-pairs", tt.pairs), envOf(nil)); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("--origin-pairs %q: %v, want %q", tt.pairs, err, tt.want)
+		}
+	}
+	var many []string
+	for i := range 16 {
+		many = append(many, fmt.Sprintf("https://auth%d.example.org https://edge%d.example.org fake-id %s", i, i, secret))
+	}
+	if _, err := parseOptions(append(slices.Clone(origins), "--origin-pairs", strings.Join(many, ",")), envOf(nil)); err == nil ||
+		!strings.Contains(err.Error(), "names 16 pairs, which with --signin-origin and --relay-origin make 17; an edge serves at most 16 pairs") {
+		t.Errorf("17 pairs: %v", err)
+	}
+	if _, err := parseOptions(append(slices.Clone(devOrigins), "--dev-listen", "127.0.0.1:8080", "--origin-pairs",
+		"http://127.0.0.2:8080 http://127.0.0.3:8080 fake-id-2 "+secret), envOf(nil)); err != nil {
+		t.Errorf("a second loopback pair in development mode: %v", err)
+	}
+}
+
+// Every AETHER_EDGE_ variable is also read as CLOUDFIELD_EDGE_, which wins
+// when both are set and falls back when it is empty, as serve reads them
+// through envname.Getenv.
+func TestEveryVariableTakesItsCloudfieldName(t *testing.T) {
+	dir := t.TempDir()
+	secretFile := filepath.Join(dir, "secret")
+	if err := os.WriteFile(secretFile, []byte("fake-secret-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pair := func(n string) string {
+		return "https://auth" + n + ".example.net https://edge" + n + ".example.net fake-id-" + n + " fake-secret-" + n
+	}
+	// Each configuration is valid alone; the second of each pair differs
+	// in every value, so the result shows which one was read.
+	configs := [][2]map[string]string{{{
+		"AETHER_EDGE_LISTEN": ":8443", "AETHER_EDGE_PROXY_LISTEN": "10.0.0.2:8080", "AETHER_EDGE_TRUSTED_PROXIES": "10.0.0.0/8",
+		"AETHER_EDGE_SIGNIN_ORIGIN": "https://auth.example.test", "AETHER_EDGE_RELAY_ORIGIN": "https://edge.example.test",
+		"AETHER_EDGE_ACME_EMAIL": "ops@example.test", "AETHER_EDGE_ACME_DIRECTORY": "https://acme.example.test/dir",
+		"AETHER_EDGE_EGRESS_BUDGET": "1000", "AETHER_EDGE_OPENAI_CHALLENGE": "fake-challenge",
+		"AETHER_EDGE_GITHUB_CLIENT_ID": "fake-id", "AETHER_EDGE_GITHUB_CLIENT_SECRET": "fake-secret",
+		"AETHER_EDGE_ORIGIN_PAIRS": pair("2"), "AETHER_EDGE_DATA": "/srv/edge-a", "AETHER_EDGE_METRICS_LISTEN": "127.0.0.1:9100",
+	}, {
+		"AETHER_EDGE_LISTEN": ":9443", "AETHER_EDGE_PROXY_LISTEN": "10.0.0.3:8080", "AETHER_EDGE_TRUSTED_PROXIES": "10.1.0.0/16",
+		"AETHER_EDGE_SIGNIN_ORIGIN": "https://auth.example.org", "AETHER_EDGE_RELAY_ORIGIN": "https://edge.example.org",
+		"AETHER_EDGE_ACME_EMAIL": "other@example.test", "AETHER_EDGE_ACME_DIRECTORY": "https://acme.example.org/dir",
+		"AETHER_EDGE_EGRESS_BUDGET": "2000", "AETHER_EDGE_OPENAI_CHALLENGE": "other-challenge",
+		"AETHER_EDGE_GITHUB_CLIENT_ID": "other-id", "AETHER_EDGE_GITHUB_CLIENT_SECRET": "other-secret",
+		"AETHER_EDGE_ORIGIN_PAIRS": pair("3"), "AETHER_EDGE_DATA": "/srv/edge-b", "AETHER_EDGE_METRICS_LISTEN": "127.0.0.1:9200",
+	}}, {{
+		"AETHER_EDGE_DEV_LISTEN": "127.0.0.1:8080", "AETHER_EDGE_SIGNIN_ORIGIN": "http://localhost:8080", "AETHER_EDGE_RELAY_ORIGIN": "http://127.0.0.1:8080",
+		"AETHER_EDGE_GITHUB_CLIENT_ID": "fake-id", "AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE": secretFile,
+	}, {
+		"AETHER_EDGE_DEV_LISTEN": "127.0.0.1:9090", "AETHER_EDGE_SIGNIN_ORIGIN": "http://localhost:9090", "AETHER_EDGE_RELAY_ORIGIN": "http://127.0.0.1:9090",
+		"AETHER_EDGE_GITHUB_CLIENT_ID": "other-id", "AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE": filepath.Join(dir, "missing"),
+	}}, {{
+		"AETHER_EDGE_SIGNIN_ORIGIN": "https://auth.example.test", "AETHER_EDGE_RELAY_ORIGIN": "https://edge.example.test",
+		"AETHER_EDGE_REVIEWER_ACCOUNT_FILE": filepath.Join(dir, "reviewer-a.json"),
+	}, {
+		"AETHER_EDGE_SIGNIN_ORIGIN": "https://auth.example.test", "AETHER_EDGE_RELAY_ORIGIN": "https://edge.example.test",
+		"AETHER_EDGE_REVIEWER_ACCOUNT_FILE": filepath.Join(dir, "reviewer-b.json"),
+	}}}
+	source, err := os.ReadFile("options.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range regexp.MustCompile(`"(AETHER_EDGE_[A-Z_]+)"`).FindAllStringSubmatch(string(source), -1) {
+		if !slices.ContainsFunc(configs, func(c [2]map[string]string) bool { _, ok := c[0][name[1]]; return ok }) {
+			t.Errorf("options.go reads %s, which no configuration here sets", name[1])
+		}
+	}
+	type parsed struct {
+		o   options
+		err string
+	}
+	parse := func(env map[string]string) parsed {
+		o, err := parseOptions(nil, func(name string) string { return envname.Get(func(k string) string { return env[k] }, name) })
+		return parsed{o, fmt.Sprint(err)}
+	}
+	for i, c := range configs {
+		want, other := parse(c[0]), parse(c[1])
+		if reflect.DeepEqual(want, other) {
+			t.Fatalf("configuration %d: its two halves parse the same: %+v", i, want)
+		}
+		renamed, both, emptyNew := map[string]string{}, map[string]string{}, map[string]string{}
+		for name, v := range c[0] {
+			renamed[envname.New(name)] = v
+			both[envname.New(name)], both[name] = v, c[1][name]
+			emptyNew[envname.New(name)], emptyNew[name] = "", v
+		}
+		if got := parse(renamed); !reflect.DeepEqual(got, want) {
+			t.Errorf("configuration %d under CLOUDFIELD_ names:\n got %+v\nwant %+v", i, got, want)
+		}
+		if got := parse(both); !reflect.DeepEqual(got, want) {
+			t.Errorf("configuration %d with both names set, CLOUDFIELD_ must win:\n got %+v\nwant %+v", i, got, want)
+		}
+		if got := parse(emptyNew); !reflect.DeepEqual(got, want) {
+			t.Errorf("configuration %d with empty CLOUDFIELD_ names must read AETHER_ ones:\n got %+v\nwant %+v", i, got, want)
 		}
 	}
 }

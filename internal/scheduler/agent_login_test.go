@@ -193,7 +193,7 @@ func TestRefusedTurnIsRememberedForTheAccountUntilATurnWorks(t *testing.T) {
 	e, rt, run := newClaudeACPEnv(t)
 	rt.fixture.RefuseNext.Store(1)
 	refuse(t, e, run.ID)
-	waitReason(t, e, run.ID, refused+"Aether restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: "+claudeSignIn)
+	waitReason(t, e, run.ID, refused+"Cloudfield restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: "+claudeSignIn)
 	if problem, blocks := loginProblem(t, e); problem != refusedProblem || blocks {
 		t.Fatalf("after one refusal = %q, %v, want %q without blocking a launch", problem, blocks, refusedProblem)
 	}
@@ -242,7 +242,7 @@ func TestATurnSignedInByTheWorkspaceKeepsTheRefusal(t *testing.T) {
 	rt.fixture.RefuseNext.Store(1)
 	refuse(t, e, run.ID)
 	waitFor(t, "the restarted agent", func() bool { return len(rt.all()) == before+1 && e.sched.acp.session(run.ID) != nil })
-	waitReason(t, e, run.ID, refused+"Aether restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: "+claudeSignIn)
+	waitReason(t, e, run.ID, refused+"Cloudfield restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: "+claudeSignIn)
 	e.ws.Environment.Variables["ANTHROPIC_API_KEY"] = "fixture-key"
 	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
 		t.Fatal(err)
@@ -299,7 +299,7 @@ func TestRefusalAfterSigningInAgainRestartsTheAgent(t *testing.T) {
 	rt.fixture.RefuseNext.Store(1)
 	refuse(t, e, run.ID)
 	waitFor(t, "the restarted agent", func() bool { return len(rt.all()) == before+1 && e.sched.acp.session(run.ID) != nil })
-	waitReason(t, e, run.ID, refused+"Aether restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: "+claudeSignIn)
+	waitReason(t, e, run.ID, refused+"Cloudfield restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: "+claudeSignIn)
 
 	writeClaudeLogin(t, e, signedIn())
 	rt.fixture.RefuseNext.Store(1)

@@ -1,15 +1,19 @@
-# Install, upgrade and remove Aether
+# Install, upgrade and remove Cloudfield
 
-This guide installs, upgrades and removes Aether on every platform. For the
+The product is named Cloudfield. Its commands, variables, paths and hostnames,
+and what the apps and the CLI print, still say `aether` or Aether until later
+releases.
+
+This guide installs, upgrades and removes Cloudfield on every platform. For the
 shortest path to a first session, follow [quickstart.md](quickstart.md), then come
-back here for other platforms, options and errors. Aether's terms are defined
-in the [glossary](README.md#concepts).
+back here for other platforms, options and errors. Cloudfield's terms are
+defined in the [glossary](README.md#concepts).
 
 ## What gets installed where
 
-Aether has two parts. The server, `aether-server`, runs on one Linux machine:
-it keeps your repositories and runs each agent in its own Docker container or
-[virtual machine](#hosts-for-vm-sessions). A
+Cloudfield has two parts. The server, `aether-server`, runs on one Linux
+machine: it keeps your repositories and runs each agent in its own Docker
+container or [virtual machine](#hosts-for-vm-sessions). A
 client is any machine you work from: the `aether` CLI, the desktop app and the
 Android app all connect to that server.
 
@@ -44,7 +48,8 @@ flowchart LR
   between members ([teams.md](teams.md#agent-accounts)) needs Docker Engine
   26.0 or newer; `docker version --format '{{.Server.Version}}'` prints yours.
 - git, and `ssh-keygen` (package `openssh-client` on Debian and Ubuntu), which
-  git uses to sign the commits Aether makes for members who connected GitHub.
+  git uses to sign the commits Cloudfield makes for members who connected
+  GitHub.
 - At least 2.5 GiB of available memory and 6 GiB of free disk, plus disk for
   the images the server pulls on first use. A session starts only while 2 GiB of
   memory (a tenth of RAM above 20 GiB) plus 512 MiB per session starting stays
@@ -82,14 +87,20 @@ Both first open `/dev/kvm` and stop with the error when they cannot, such as
 then writes nothing. They install `qemu-img`, `mkfs.ext4`,
 `/usr/libexec/virtiofsd`, `iptables`, `nft` and `ip` with `apt-get` when
 missing (Debian 12 or Ubuntu 24.04 and newer ship `virtiofsd` at that path), Cloud Hypervisor
-v54.1 at `/usr/local/bin/cloud-hypervisor` after checking its SHA-256, and the
+v54.1 at `/usr/local/bin/cloud-hypervisor` after checking its SHA-256, the
+oh-my-pi release whose auth broker holds session VMs' omp logins at
+`/usr/local/libexec/aether/omp` after checking its SHA-256
+([harnesses.md](harnesses.md#oh-my-pi-in-session-vms)), and the
 release's guest kernel `aether-vmlinux-x86_64` at
 `/usr/local/lib/aether/vmlinux` after checking it against the signed release
 manifest, noting the release in `vmlinux.release` beside it. Nothing is
 replaced until every download has checked out. A `vm-kernel` set to another
 path, or a development build, keeps the kernel already there. With
-`session-runtime vm` the server manages `/usr/local/bin/cloud-hypervisor`:
-replace it, and the next start puts the pinned one back. `install` leaves
+`session-runtime vm` the server manages `/usr/local/bin/cloud-hypervisor` and
+`/usr/local/libexec/aether/omp`: replace either, and the next start puts the
+pinned one back, the omp in the background after the server is up. The server
+also adds the system user `aether-omp` that omp's auth brokers run as.
+`install` leaves
 Sysbox out: sessions and environment terminals run their own Docker daemon in
 their VM.
 
@@ -131,7 +142,7 @@ session would hold the memory of its busiest moment.
 On Linux or macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh
 ```
 
 The script needs `curl`, and `sha256sum` or `shasum`. It downloads the
@@ -161,7 +172,7 @@ in `/usr/local/bin` that would run first.
   macOS or with `--client`, it names the install that needs no `sudo`:
 
   ```sh
-  curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client --role none --bin-dir "$HOME/.local/bin"
+  curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client --role none --bin-dir "$HOME/.local/bin"
   ```
 
   Otherwise it says that installing `aether-server` needs root, passwordless
@@ -201,7 +212,7 @@ In Windows PowerShell 5.1 or PowerShell 7, download the installer, review it,
 then run it:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 
@@ -222,8 +233,8 @@ installs only the CLI), or `AETHER_VERSION`, `AETHER_BIN_DIR`, `AETHER_ROLE`,
 PowerShell cannot check the manifest's signature, so the script checks SHA-256
 and size only.
 
-To reinstall or upgrade, close Aether and rerun the script with the same
-`-BinDir`. If Aether still runs, the script prints the `Stop-Process -Id
+To reinstall or upgrade, close Cloudfield and rerun the script with the same
+`-BinDir`. If Cloudfield still runs, the script prints the `Stop-Process -Id
 <pids>` (and `schtasks /End /TN aether-daemon`) to run, and changes nothing.
 If only the desktop step fails, it prints the `gui build` command to rerun.
 
@@ -248,8 +259,9 @@ stopped by default (as admin: `Start-Service ssh-agent` and
 
 ### Windows Defender and SmartScreen
 
-Aether's Windows binaries and locally built desktop apps are not code-signed,
-so SmartScreen, Smart App Control or an antivirus may warn about or block them.
+Cloudfield's Windows binaries and locally built desktop apps are not
+code-signed, so SmartScreen, Smart App Control or an antivirus may warn about or
+block them.
 
 | What you see | What it is | What to do |
 | --- | --- | --- |
@@ -265,7 +277,7 @@ as a software developer, and open an issue with the detection name.
 
 ## Manual install
 
-Every [release](https://github.com/3xDevOps/Aether/releases) publishes
+Every [release](https://github.com/3xDevOps/cloudfield/releases) publishes
 `checksums.txt` and these assets, where `<arch>` is `amd64` or `arm64`: the
 CLI as `aether-linux-<arch>`, `aether-darwin-<arch>` and
 `aether-windows-<arch>.exe`; `aether-server-linux-<arch>`;
@@ -334,7 +346,7 @@ that ran it, and the app starts that one (`AETHER_BIN` overrides it). If that
 CLI is moved or deleted, the app's error names the path; restore it, set
 `AETHER_BIN`, or rerun `gui build`. The dashboard ships inside the CLI, and
 `aether update` rebuilds the app ([Upgrading](#upgrading)). On Windows, close
-Aether before rebuilding by hand.
+Cloudfield before rebuilding by hand.
 
 On Windows the app runs its dashboard server without opening a console window.
 To diagnose startup failures, run `aether gui` in a terminal.
@@ -346,22 +358,23 @@ Google Play yet; every release carries `aether-android.apk`. What it stores and
 sends is in [privacy.md](privacy.md), its licences in [notices.md](notices.md).
 
 1. On the phone, download `aether-android.apk` from the
-   [latest release](https://github.com/3xDevOps/Aether/releases/latest).
+   [latest release](https://github.com/3xDevOps/cloudfield/releases/latest).
 2. When Android asks, allow your browser to install apps, then open the file.
-3. Choose how the app reaches your server: **Aether Edge** or **Tailscale**.
+3. Choose how the app reaches your server: **Cloudfield Edge** or **Tailscale**.
 
 | Mode | You need | How it works |
 | --- | --- | --- |
-| **Aether Edge** | A GitHub account the server lets in | The app runs its own copy of the `aether` CLI. Sign in with GitHub in the browser, pick your server, check its host key and tap **Link and pin**. A server that admits only approved devices makes the phone wait for approval ([teams.md](teams.md#through-an-edge)). |
+| **Cloudfield Edge** | A GitHub account the server lets in | The app runs its own copy of the `aether` CLI. Sign in with GitHub in the browser, pick your server, check its host key and tap **Link and pin**. A server that admits only approved devices makes the phone wait for approval ([teams.md](teams.md#through-an-edge)). |
 | **Tailscale** | The phone on the server's tailnet, and the server's dashboard on (`web-port`, see [networking.md](networking.md#the-dashboard)) | Type the server's MagicDNS name, such as `my-server.tailnet-name.ts.net`. The app opens the server's HTTPS dashboard; your tailnet login identifies you. |
 
-In **Aether Edge** mode SSH runs end to end; the edge relays encrypted bytes.
+In **Cloudfield Edge** mode SSH runs end to end; the edge relays encrypted
+bytes.
 The app keeps a device key and edge tokens in private storage, excluded from
 backups. Uninstalling the app or clearing its storage deletes the key, so the
 phone signs in as a new device and may need approval again. To switch mode or
 check for updates, long-press the app icon and choose **Connection**.
 
-**Share** text or a link to Aether's **New session** from any app and the
+**Share** text or a link to Cloudfield's **New session** from any app and the
 dashboard opens a new session with it as the prompt, cut to 8000 characters;
 nothing starts until you send it. Back walks the dashboard's history, returns
 to its home from a page a share or notification opened, and leaves the app
@@ -372,12 +385,16 @@ ntfy, then turn on **Notify this device when a session needs me** in the
 dashboard's Settings ([networking.md](networking.md#in-the-android-app)).
 
 About once an hour, when you bring it to the front, the app checks for a
-release and shows a banner. **Download update** fetches the new APK; open it
-and Android installs it over the app, keeping your data. A Google Play install
-gets **Open Google Play** once the release is 7 days old. In **Aether Edge**
-mode the server refuses an older app: a screen such as `This app (v0.7.0) is
-too old for the server (v0.8.0 needs v0.8.0 or newer).` stays until you
-install the update it links.
+release and shows a banner. In **Cloudfield Edge** mode it offers the release
+the server runs, from the gateway's `update.check`, and nothing newer until the
+server updates. In **Tailscale** mode it runs the bundled CLI's check, which
+follows the `config.json` that CLI has, and `stable` (`beta` until the first
+stable exists) when it has none. **Download update** fetches the new APK; open
+it and Android installs it over the app, keeping your data. A Google Play
+install gets **Open Google Play** once a stable release is 7 days old; Play
+carries no beta or nightly. In **Cloudfield Edge** mode the server refuses an
+older app: a screen such as `This app (v0.7.0) is too old for the server (v0.8.0
+needs v0.8.0 or newer).` stays until you install the update it links.
 
 Android installs an APK over the app only when both carry the same signing
 key; uninstall an APK you built from a checkout first. The release key's
@@ -401,7 +418,7 @@ nothing written.
 | Question | Default | What it decides |
 | --- | --- | --- |
 | `Continue without Docker` | no | Asked only when Docker does not answer. No stops with `nothing written; install or start Docker, then run setup again`. |
-| `SSH listen address for Aether, not the system sshd` | `:2222` | The address and port clients connect to. |
+| `SSH listen address for Cloudfield, not the system sshd` | `:2222` | The address and port clients connect to. |
 | `Data directory` | `/var/lib/aether` | Where the server keeps everything ([data directory](#what-lives-in-the-data-directory)). |
 | `Use Tailscale to reach this server` | yes, when tailscaled names its tailnet | Asked only when Tailscale runs on the host. Yes signs people in by their tailnet login. No turns tailnet sign-in off and the edge on. |
 | `Let anyone on the tailnet join without an admin approving them` | no | Asked after a tailnet yes ([networking.md](networking.md#who-is-let-in)). |
@@ -416,7 +433,7 @@ valid for 30 minutes (`sudo aether-server edge claim-code` prints a new one).
 Setup starts nothing; it ends on `next:`: start the service, then on your
 machine link it. On a tailnet that is `aether link <MagicDNS name>`, or
 **Tailscale** in the app's Connect step; through the edge, `aether login` and
-`aether link --claim <code>`, or **Aether relay** with the claim link; with
+`aether link --claim <code>`, or **Cloudfield relay** with the claim link; with
 neither, `aether link <this-host>:2222`. When the edge is not
 `https://edge.onaether.dev`, both client commands carry `--edge <url>`, because
 a claim code names no edge.
@@ -477,7 +494,7 @@ after the key and value of `config set`.
 | `min-free-disk` | `0` (5% of the filesystem, 5 to 20 GiB) | Free-space reserve below which new sessions are refused. Negative turns the check off. |
 | `checkout-ttl` | `72h` | How long a finished session's checkout is kept after the session ends. It also stays while the session's container is kept. Negative keeps it forever. |
 | `run-container-ttl` | `168h` | How long a closed session's container is kept so the session can be relaunched. A relaunched session's clock restarts at its next close. |
-| `run-sleep-after` | `30m`; `5m` for session VMs | How long an idle Enhanced Claude Code session keeps its container running before Aether stops it until its next use, and how long an idle session VM runs before Aether saves it to disk ([Idle sleep](failure-handling.md#idle-sleep)). A value you set applies to both. `0` keeps every session awake. |
+| `run-sleep-after` | `30m`; `5m` for session VMs | How long an idle Enhanced Claude Code session keeps its container running before Cloudfield stops it until its next use, and how long an idle session VM runs before Cloudfield saves it to disk ([Idle sleep](failure-handling.md#idle-sleep)). A value you set applies to both. `0` keeps every session awake. |
 | `browser-image` | `ghcr.io/3xdevops/aether-browser:<release>` | The image a session's **Browser** tab starts from. Set it and updates stop moving it. |
 | `conflict-coordination` | on | Let overlapping sessions message each other ([coordination.md](coordination.md)). |
 
@@ -678,7 +695,7 @@ session:
 
 ```
 aether-server v0.8.7-beta.12 -> v0.8.7-beta.13
-https://github.com/3xDevOps/Aether/releases/tag/v0.8.7-beta.13
+https://github.com/3xDevOps/cloudfield/releases/tag/v0.8.7-beta.13
 checking and downloading the release ... done in 4.12s
 stopping aether-server; sessions keep running ... done in 2.31s
 copying the 9.1 GB database to /var/lib/aether/server-update/aether.db.pre-update so a failed start can roll back ... done in 21.43s
@@ -725,8 +742,179 @@ sudo mv /var/lib/aether/server-update/aether.db.pre-update /var/lib/aether/aethe
 sudo systemctl start aether-server
 ```
 
-The server checks for releases every 6 hours and prompts admins;
-`AETHER_NO_UPDATE_CHECK=1` in `/etc/aether/aether-server.env` turns that off.
+### Release channel
+
+Cloudfield ships three release channels. A channel takes its own releases and
+those of every channel above it in stability:
+
+| Channel | Takes | Where its releases come from |
+| --- | --- | --- |
+| `stable` | stable releases | an admin promotes a beta |
+| `beta` | beta and stable | an admin promotes a nightly |
+| `nightly` | all three | the newest `main` commit whose CI is green, built at most every 4 hours |
+
+The tag shows the channel (`v0.9.0-nightly.12`, `v0.9.0-beta.2`, `v0.9.0`),
+and the signed manifest carries it too ([Verified
+releases](#verified-releases)). Nightly builds come straight from `main`:
+breaking changes arrive when they merge, and a nightly can contain a
+security issue that a later build fixes. Run `nightly` only to develop
+Cloudfield. A promotion rebuilds the same commit under the new tag and keeps its
+build number, so a nightly and the beta promoted from it are the same code.
+
+A server follows one channel, the `release_channel` setting. Its release
+check, `aether server update` and `sudo aether-server update` with no
+`--version` take the newest release on that channel, read from the
+channel's signed pointer ([Verified releases](#verified-releases)). A server
+that existed before channels follows `beta`. A new server chooses at its
+release checks: `stable` when `stable.json` is published and verifies, `beta`
+once `stable.json` itself (not its signature) has answered 404 at two checks
+in a row, so one 404 while the asset is replaced does not decide it. Until
+then, and on any other answer, such as on a first boot without network, the
+server follows `beta` and `server.update_status` reports `channel_pending`.
+
+Any member sees the channel: `server.update_status` carries it. Only a super
+admin changes it, in the dashboard's **Settings → Server → Release channel**
+(Stable, Beta and Nightly, with the confirmations below) or as root on the
+host:
+
+```sh
+sudo aether-server update --channel beta          # prints what changes
+sudo aether-server update --channel beta --yes    # saves it
+```
+
+Without `--yes` it prints the confirmation and changes nothing. A plain
+`sudo aether-server update` only reads the channel, following `beta` while
+the server has not chosen. Saving installs nothing: the server checks the
+new channel at its next release check, and `sudo aether-server update`
+installs what it finds.
+
+A server never installs a lower build because its channel changed. Moving
+to nightly asks first (`aether-server update --channel nightly` prints the
+same text):
+
+```
+Switch to nightly builds?
+
+Not recommended unless you are developing Cloudfield.
+
+- Nightly builds come from Cloudfield's main branch. Breaking changes
+  arrive as soon as they merge.
+- A nightly build may contain security issues that a later build fixes.
+- You cannot go back right away. This server stays on its nightly build
+  until the channel you return to catches up with it.
+```
+
+Leaving `nightly` for a channel below its build, the server stays on its
+build until that channel reaches it, then updates as usual:
+
+```
+Switch to beta?
+
+This server runs v0.9.0-nightly.12 (build 412). Beta is at v0.9.0-beta.1 (build 380). The server stays on its current build until beta reaches build 412, then updates as usual. It never installs an older build.
+```
+
+Meanwhile `server.update_status` reports `channel_wait`, and `sudo
+aether-server update` prints
+`aether-server v0.9.0-nightly.12 (build 412) stays on its build until beta reaches it: beta is at v0.9.0-beta.1 (build 380)`.
+The same build under the lower channel's tag installs. Each channel keeps
+its own pointer mark in `server-update/check.json`, so switching away and
+back never lets an older pointer in.
+
+A pending update waiting for an idle moment applies only a release the
+server's channel takes. `--when idle` refuses any other with the message
+below; the dashboard's switch retires a pending one, recording it as failed
+with the reason, and one left pending after a switch on the host fails at
+the idle moment. When the switch cannot fetch a pending update's manifest to
+check it, the update stays pending (`kept`, with `kept_error` giving the
+fetch error) and is refused at its idle moment if the new channel does not
+take it. `--when now` installs any release.
+
+```
+release preflight failed: the server no longer takes this update: v0.9.0-nightly.13 is a nightly release, which an install on beta does not take; update with --when now to install it anyway
+```
+
+Clients follow their server. `aether update` and the desktop app take the
+release of the channel their default linked server follows, and by default
+never one above that server; a member who cannot update the server, or
+`--force`, can ([Update a client](#update-a-client)). The Android app in
+Cloudfield Edge mode offers the server's release; in Tailscale mode its bundled
+CLI follows its own `config.json`, and `stable` when it has none
+([Android app](#android-app)).
+
+### Automatic updates
+
+On every channel, a server applies updates by itself when idle. Its check
+runs every 6 hours. When it finds a release on the server's channel above
+the running build, the server schedules it as `aether server update --when
+idle` would, and applies it once no session is working, no terminal is
+attached and no SSH connection into a session is open. `server.update_status`
+marks that pending update `by_server`, and the timeline names `server` as
+its actor, not a member.
+
+The server schedules nothing when:
+
+- It has not chosen its channel yet, it runs a build from source (a version
+  past a tag, or dirty), or it runs a release from before channels, which has
+  no signed build. `server.update_status` still offers the release; a server
+  on `v0.8.7-beta.N` shows the update and stays until a super admin runs
+  `aether server update` or `sudo aether-server update`. Self-applying starts
+  once it runs `v0.8.7`, build 1.
+- The release is from before channels, has no signed build, or fails the
+  update preflight. `schedule_error` in `server.update_status` says why the
+  server last failed to schedule the newest release; it retries on a backoff
+  from 5 minutes, and declines the release after 3 failures in a row.
+- A member's update is already pending. The server never replaces it.
+- The release's build is not above a declined one (below).
+
+See it with any member's `aether server update --status`. It prints the
+server's version, the latest release on its channel, `update available`,
+when the check ran and why it failed, and the phase of the current update.
+A server-scheduled update shows as `pending update: <tag>, requested by
+server at <time>`, and `waiting: 1 session is still working` says what holds
+it. `last attempt:` gives the outcome and error of the previous update. The
+channel, `channel_wait`, `declined`, `decline_note` and `schedule_error` are
+in `server.update_status` ([local-gateway.md](local-gateway.md)), which the
+dashboard's Settings reads; `--status` does not print them.
+
+Turn it off with `AETHER_NO_UPDATE_CHECK=1` (any non-empty value) in
+`/etc/aether/aether-server.env`, then restart the server. That stops the
+release check and so these updates, including one the server scheduled
+earlier. A member's scheduled update still applies.
+
+A server never schedules again a build a super admin turned down. Each of
+these records that build as declined in the database: `--cancel`, an update
+with `--allow-downgrade`, an update that failed (after 3 tries for a network
+error), and a server-scheduled update whose new binary failed its start and
+rolled back. The server then schedules only a build above the declined one,
+so a rollback holds until a newer build ships. A super admin's own
+`aether server update` ignores the mark, and so does `--version`. Recording
+comes first: a cancel or rollback whose mark cannot be saved is refused with
+the error. A cancel whose release's build cannot be read from its signed
+manifest still cancels, and says in `not_declined` (`decline_note` in
+`server.update_status`) that the server may schedule it again.
+
+A cancel is refused once an update is past the point of no return, from the
+start of `--when now` and once a scheduled update has downloaded, and a new
+update is refused meanwhile:
+
+```
+a server update is already being applied: v0.9.0-nightly.13 is applying now and can no longer be cancelled
+```
+
+An update whose download could not be undone refuses the next one until
+`aether-server` restarts and puts the previous binaries back. `--when idle`
+cannot go with `--allow-downgrade`; the CLI refuses with `aether server
+update: --allow-downgrade applies now only; drop --when idle`. A release that is not above the running build is refused
+without `--allow-downgrade`:
+
+```
+refusing to downgrade: v0.9.0-nightly.12 (build 412) is older than the running v0.9.0-nightly.13 (build 413); pass --allow-downgrade (allow_downgrade) to install it anyway
+```
+
+The same build on the same channel reads `is the same build as the running`
+instead. `--allow-downgrade` never crosses a database schema: a release whose
+schema is below the database's fails with `this database is at schema <n> and
+<tag> only knows schema <m>; it could not open it`.
 
 ### Update a client
 
@@ -734,8 +922,9 @@ The server checks for releases every 6 hours and prompts admins;
 aether update
 ```
 
-It installs the latest release when it is newer, after checking its
-signature, then rebuilds the desktop app if one is installed (`--no-app` skips
+It installs the newest release on the channel its default linked server
+follows (the top-level fields of `config.json`; `gui_server` does not decide)
+when that is newer, after checking its signature, then rebuilds the desktop app if one is installed (`--no-app` skips
 that). `--version <tag>` picks a release, and `--check`, with `--json` for a
 script, only reports whether a newer one exists. When this CLI is behind its
 server, it installs the server's release instead. When the server is behind
@@ -762,6 +951,10 @@ One from `v0.7.0-alpha.12` or older needs one restart by hand:
 `systemctl --user restart aether-daemon` (macOS:
 `launchctl kickstart -k gui/$(id -u)/com.aether.daemon`; Windows:
 `schtasks /End /TN aether-daemon`, then `schtasks /Run /TN aether-daemon`).
+With no linked server, or one that does not answer and was never read, the
+CLI and the desktop app follow `stable`, and `beta` until the first `stable.json`
+exists. A running desktop gateway keeps the last channel it read while the server is down; a one-shot `aether update` does not, and checks stable then. Each channel's
+pointer mark is in `update.json` beside `config.json`.
 `AETHER_NO_UPDATE_CHECK=1` turns off release checks in the CLI and dashboard.
 
 ### What an update does not change
@@ -803,6 +996,26 @@ updaters install a release only when the signature verifies against a key
 built into the running binary, the manifest names the tag, and each binary
 matches; otherwise they print the error and change nothing. Releases from
 before signing have no manifest, so install those with the install script.
+
+The manifest also signs the release's `channel` (`nightly`, `beta` or
+`stable`), which must match the tag's form (`-nightly.N`, `-beta.N`, none),
+and its `build` and `hotfix` numbers. Releases from before channels carry
+none of the three and count as build 0. Release checks, `aether server
+update` and `sudo aether-server update` order a release by its `(build,
+hotfix)`, whatever the tags say: `v0.9.0-beta.2` at build 412 is newer than
+`v0.9.0-nightly.10` at build 400. Between two build-0 releases, the version
+decides. The server refuses a lower build, or the same build on the same
+channel, without `--allow-downgrade`; the same build under another
+channel's tag installs. `aether update` and the dashboard's **Update now**
+never pick a lower build on their own; `aether update --version <tag>`
+installs the release you name. `server.info` reports the server's `build`
+and `min_client_build`, and a client sends its build in its SSH banner as
+`v0.9.0-beta.2+b.412` (`+b.412.h.1` for a hotfix). When both carry a
+build, the server refuses a client below its build and the client matches
+its server by build; when either is build 0, the version decides, as
+before. A server from before builds ignores the build in the banner. A
+match to a lower build is refused, and `aether update --version <tag>`
+installs it anyway.
 The manifest also signs image digests ([edge.md](edge.md#verifying-an-image)).
 
 #### Verify a release by hand
@@ -935,7 +1148,7 @@ you had none.
 ### Windows client
 
 Sign out of every edge as under [Client](#client) (`edge-tokens.json` is in
-`%APPDATA%\aether`), close Aether, and run this in PowerShell. A line for
+`%APPDATA%\aether`), close Cloudfield, and run this in PowerShell. A line for
 something you never installed prints an error; the rest still run:
 
 ```powershell
@@ -1000,7 +1213,8 @@ to your originals, holding local edits from when it paused.
   not check the release signature.
 - The Android app is not on Google Play, needs a UnifiedPush distributor for
   notifications ([networking.md](networking.md#in-the-android-app)) and has
-  no port forwarding. Join and claim links open only in **Aether Edge** mode.
+  no port forwarding. Join and claim links open only in **Cloudfield Edge**
+  mode.
 - On Linux the desktop app runs Electron with `--no-sandbox`; the dashboard
   page still has no Node.js access.
 
@@ -1022,7 +1236,7 @@ Test-Path "$env:LOCALAPPDATA\Programs\Aether Desktop\aether-desktop.exe"
 if (Test-Path $link) { (New-Object -ComObject WScript.Shell).CreateShortcut($link).TargetPath }
 ```
 
-It must point at `aether-desktop.exe`, not the CLI. If not, close Aether and
+It must point at `aether-desktop.exe`, not the CLI. If not, close Cloudfield and
 run `& "$env:LOCALAPPDATA\Programs\Aether\aether.exe" gui build`, which prints
 `launcher <path>` for the shortcut it writes. A missing entry alone is not a
 Defender quarantine (check **Protection history**). If it still fails, open an

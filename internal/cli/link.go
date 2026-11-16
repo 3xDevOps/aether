@@ -208,7 +208,8 @@ func Link(ctx context.Context, opts LinkOptions, prev Config) (LinkResult, error
 // client gives every call but server.info, nil when there is none. A link
 // calls only server.info, so it asks here to report the refusal at once.
 func UpgradeRequired(info protocol.ServerInfoResult) *protocol.Error {
-	if !selfupdate.Behind(version.Version, info.MinClientVersion) {
+	floor := selfupdate.Release{Version: info.MinClientVersion, Build: info.MinClientBuild, Hotfix: info.MinClientHotfix}
+	if !selfupdate.Ahead(floor, selfupdate.Running()) {
 		return nil
 	}
 	return protocol.UpgradeRequired(version.Version, info.ServerVersion, info.MinClientVersion)

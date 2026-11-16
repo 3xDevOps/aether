@@ -116,9 +116,9 @@ func (s *Scheduler) measureCapacity(ctx context.Context) ([]runtime.FilesystemCa
 	if s.cfg.MinFreeBytes >= 0 {
 		data, err := s.dataFilesystem()
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: Aether data filesystem: %w", ErrCapacityUnknown, err)
+			return nil, nil, fmt.Errorf("%w: Cloudfield data filesystem: %w", ErrCapacityUnknown, err)
 		}
-		filesystems = append(filesystems, runtime.FilesystemCapacity{Name: "Aether data filesystem", TotalBytes: data.TotalBytes, FreeBytes: data.FreeBytes})
+		filesystems = append(filesystems, runtime.FilesystemCapacity{Name: "Cloudfield data filesystem", TotalBytes: data.TotalBytes, FreeBytes: data.FreeBytes})
 	}
 	provider, ok := s.cfg.Runtime.(runtime.CapacityRuntime)
 	if !ok {

@@ -110,9 +110,28 @@ func TestUpdatePackagedChecksButNeverApplies(t *testing.T) {
 
 func TestServerFirstRefusesWhenAnAdminCanUpdateTheServer(t *testing.T) {
 	var out bytes.Buffer
-	err := serverFirst(&out, "v0.9.0", linkedServer{reachable: true, version: "v0.8.0", admin: true, capable: true})
+	err := serverFirst(&out, selfupdate.Release{Version: "v0.9.0"}, linkedServer{reachable: true, version: "v0.8.0", admin: true, capable: true})
 	if err == nil || !strings.HasPrefix(err.Error(), "update the server first: aether server update") {
 		t.Fatalf("err = %v, want the server-first refusal", err)
+	}
+}
+
+// With builds on both sides a client never moves ahead of its server,
+// whatever the tags say: v0.9.0-beta.3 at build 430 is ahead of a server
+// on v0.9.0-nightly.10 at build 400, though beta sorts below nightly.
+func TestServerFirstOrdersByBuild(t *testing.T) {
+	server := linkedServer{reachable: true, version: "v0.9.0-nightly.10", build: 400, admin: true, capable: true}
+	var out bytes.Buffer
+	err := serverFirst(&out, selfupdate.Release{Version: "v0.9.0-beta.3", Build: 430}, server)
+	if err == nil || !strings.HasPrefix(err.Error(), "update the server first") {
+		t.Fatalf("err = %v, want the server-first refusal", err)
+	}
+	if err := serverFirst(&out, selfupdate.Release{Version: "v0.9.0-beta.3", Build: 390}, server); err != nil {
+		t.Fatalf("a lower build: %v, want the install to proceed", err)
+	}
+	latest := selfupdate.Check{Latest: "v0.9.0-beta.3", LatestBuild: 430}
+	if got := targetRelease("v0.9.0-beta.3", latest, server); got.Build != 430 {
+		t.Fatalf("target = %+v, want the release check's build", got)
 	}
 }
 
@@ -126,7 +145,7 @@ func TestServerFirstProceeds(t *testing.T) {
 		"manual server": {reachable: true, version: "v0.8.0", admin: true, manual: []string{"sudo aether update"}},
 	} {
 		var out bytes.Buffer
-		if err := serverFirst(&out, "v0.9.0", server); err != nil {
+		if err := serverFirst(&out, selfupdate.Release{Version: "v0.9.0"}, server); err != nil {
 			t.Errorf("%s: err = %v, want the install to proceed", name, err)
 		}
 	}
@@ -134,7 +153,7 @@ func TestServerFirstProceeds(t *testing.T) {
 
 func TestServerFirstNeutralizesTheServersVersion(t *testing.T) {
 	var out bytes.Buffer
-	if err := serverFirst(&out, "v0.9.0", linkedServer{reachable: true, version: "v0.8.0-rc\x1b[2J"}); err != nil {
+	if err := serverFirst(&out, selfupdate.Release{Version: "v0.9.0"}, linkedServer{reachable: true, version: "v0.8.0-rc\x1b[2J"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "the server runs v0.8.0-rc [2J") {
@@ -161,6 +180,29 @@ func TestMatchServerInstallsTheServersRelease(t *testing.T) {
 	} {
 		if got := matchServer(tc.server); got != tc.want {
 			t.Errorf("%s: matchServer = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The client matches its server by the server's gate order: by build when
+// both report one, else by version, so a client the gate refuses always
+// has the server's release to move to. Installing it still goes through
+// selfupdate.RefuseDowngrade, which reads the signed build.
+func TestMatchServerFollowsTheServersGate(t *testing.T) {
+	oldVersion, oldBuild := version.Version, version.Build
+	version.Version, version.Build = "v0.9.0-beta.2", "412"
+	t.Cleanup(func() { version.Version, version.Build = oldVersion, oldBuild })
+	for name, tc := range map[string]struct {
+		server linkedServer
+		want   string
+	}{
+		"server without a build, newer by version": {linkedServer{reachable: true, version: "v0.9.0-nightly.10"}, "v0.9.0-nightly.10"},
+		"lower build, newer by version":            {linkedServer{reachable: true, version: "v0.9.0-nightly.10", build: 400}, ""},
+		"higher build":                             {linkedServer{reachable: true, version: "v0.9.0-nightly.14", build: 420}, "v0.9.0-nightly.14"},
+		"same code on another channel":             {linkedServer{reachable: true, version: "v0.9.0-nightly.12", build: 412}, ""},
+	} {
+		if got := matchServer(tc.server); got != tc.want {
+			t.Errorf("%s: matchServer = %q, want %q", name, got, tc.want)
 		}
 	}
 }

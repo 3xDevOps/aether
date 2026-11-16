@@ -35,7 +35,7 @@ test('a member picks an account shared with them to launch on, and the server re
 
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' })).newPage()
   await page.goto(bob.url)
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New session' }).click()
+  await page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: 'New session' }).click()
   const dialog = page.getByRole('dialog', { name: 'New session' })
   await expect(dialog.getByRole('radio', { name: /^Claude Code/ })).toBeChecked()
   const accounts = dialog.getByRole('radiogroup', { name: 'Account' })

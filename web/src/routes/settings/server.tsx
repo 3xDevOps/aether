@@ -11,9 +11,11 @@ import { releaseFinishedPlan } from '@/lib/commands'
 import { api, type Api } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { buildLabel } from '@/lib/version'
 import { rootCommand, useSysbox } from '@/lib/use-sysbox'
 import { workspaceRuns } from '@/routes/board/selectors'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
+import { ReleaseChannelSection } from '@/routes/settings/release-channel'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin, useIsSuperAdmin, useSelf, useStateContext } from '@/store/hooks'
 
@@ -32,6 +34,7 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
   const navigate = useStore((s) => s.navigate)
   const clearDismissed = useStore((s) => s.clearDismissedUpdates)
   const checkForUpdates = useCheckForUpdates(client)
+  const channel = useStore((s) => s.serverUpdate?.channel)
   useEffect(() => {
     const read = () =>
       client.serverInfo().then(
@@ -51,8 +54,12 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
   const failed = [server, cli].find((t) => t.state === 'check_failed')
   const current = server.state === 'up_to_date' ? server : cli.state === 'up_to_date' ? cli : null
   const checking = server.state === 'checking' || cli.state === 'checking'
-  const checkedLine =
-    current && !update && checkedTime(current.checkedAt) ? `Up to date. Checked ${checkedTime(current.checkedAt)}.` : ''
+  const waiting = server.state === 'channel_wait' ? server : null
+  const checkedLine = waiting
+    ? `Stays on ${buildLabel(waiting.build, waiting.hotfix) || waiting.version} until ${waiting.channel} reaches it.`
+    : current && !update && checkedTime(current.checkedAt)
+      ? `Up to date${channel ? ` on ${channel}` : ''}. Checked ${checkedTime(current.checkedAt)}.`
+      : ''
   return (
     <>
       <SettingsSection title="Status">
@@ -60,7 +67,7 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
           id="version"
           label="Version"
           help={[
-            `Aether ${info.server_version}, protocol ${info.protocol_version}.`,
+            `Cloudfield ${info.server_version}, protocol ${info.protocol_version}.`,
             update && `${update.text}.`,
             checking ? 'Checking for updates…' : checkedLine,
             packaged && packagedLine(packaged),
@@ -110,6 +117,7 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
           control={<Button size="sm" variant="secondary" onClick={() => navigate('insights', { tab: 'system' })}>Open Insights › System</Button>}
         />
       </SettingsSection>
+      <ReleaseChannelSection client={client} />
       {admin && (caps.hasMethod('server.sysbox.status') || caps.hasMethod('run.release') || caps.hasMethod('server.run_limits')) && (
         <SettingsSection title="Admin" scope="Server · admins">
           {superAdmin && <RunLimitsRow client={client} />}

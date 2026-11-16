@@ -4,9 +4,9 @@
 # to stable, for a digest the test promoted. $QUALIFY_PROMOTED/<digest>
 # holds its release tag.
 set -eu
-identity=https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main
+identity='^https://github\.com/3xDevOps/(aether|cloudfield)/\.github/workflows/promote-edge\.yml@refs/heads/main$'
 case " $* " in
-" verify-attestation "*" --certificate-identity $identity "*) ;;
+" verify-attestation "*" --certificate-identity-regexp $identity "*) ;;
 *)
 	echo "cosign stub: unexpected arguments: $*" >&2
 	exit 1

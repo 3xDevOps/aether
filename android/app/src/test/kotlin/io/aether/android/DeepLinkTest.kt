@@ -121,4 +121,33 @@ class DeepLinkTest {
         assertNull(edgeDeepLinkSuffix(JOIN.replace("aether://join", "aether://JOIN")))
         assertNull(edgeDeepLinkSuffix(JOIN.replace("invitation=$INVITATION", "invitation=%zz")))
     }
+
+    @Test
+    fun aCloudfieldLinkDoesWhatItsAetherTwinDoes() {
+        val links =
+            listOf(
+                "aether://run/01k4x7m2qc",
+                "AETHER://run/run-7k2m9q4xbd",
+                "aether://run/short",
+                "aether://workspace/01k4x7m2qc",
+                JOIN,
+                CLAIM,
+                "aether://claim/?edge=https://edge.example.test&server=$SERVER#$SECRET",
+                "aether://join?edge=http://[::1]:8080&server=$SERVER&invitation=$INVITATION#$SECRET",
+                JOIN.replace("aether://join", "aether://JOIN"),
+                JOIN.removeSuffix(SECRET).removeSuffix("#"),
+            )
+        for (link in links) {
+            val twin = "cloudfield" + link.substring("aether".length)
+            assertEquals(link, deepLinkUrl(BASE, link), deepLinkUrl(BASE, twin))
+            assertEquals(link, isEdgeOnlyLink(link), isEdgeOnlyLink(twin))
+            assertEquals(link, edgeDeepLinkSuffix(link), edgeDeepLinkSuffix(twin))
+        }
+        assertEquals("$BASE?run=01k4x7m2qc", deepLinkUrl(BASE, "cloudfield://run/01k4x7m2qc"))
+        assertEquals("$BASE?run=01k4x7m2qc", deepLinkUrl(BASE, "CloudField://run/01k4x7m2qc"))
+        assertTrue(isEdgeOnlyLink(JOIN.replace("aether://", "cloudfield://")))
+        assertNotNull(edgeDeepLinkSuffix(CLAIM.replace("aether://", "cloudfield://")))
+        assertNull(deepLinkUrl(BASE, "cloud://run/01k4x7m2qc"))
+        assertNull(edgeDeepLinkSuffix(CLAIM.replace("aether://", "aethercloudfield://")))
+    }
 }

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -16,10 +17,11 @@ import (
 // The localops calls the rebuild makes, behind variables so a test can
 // stand in for an installed app and a real Electron build.
 var (
-	lookupRealUser      = localops.LookupRealUser
-	installedDesktopApp = localops.InstalledDesktopApp
-	rebuildAppArgv      = localops.RebuildAppArgv
-	desktopAppRunning   = localops.DesktopAppRunning
+	lookupRealUser       = localops.LookupRealUser
+	installedDesktopApp  = localops.InstalledDesktopApp
+	installedDesktopApps = localops.InstalledDesktopApps
+	rebuildAppArgv       = localops.RebuildAppArgv
+	desktopAppRunning    = localops.DesktopAppRunning
 )
 
 // rebuildDesktopApp rebuilds an installed desktop app with the CLI that
@@ -46,14 +48,17 @@ func rebuildDesktopAppTo(newBin string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	app, ok := installedDesktopApp(runtime.GOOS, who)
-	if !ok {
+	apps := installedDesktopApps(runtime.GOOS, who)
+	if len(apps) == 0 {
 		return nil
 	}
+	app := apps[0]
 	// Sampled before the build, not after: the install swap renames the
 	// running app's directory aside, so by the time the build returns the
-	// process no longer looks like it is running out of the app path.
-	wasRunning := desktopAppRunning(runtime.GOOS, app)
+	// process no longer looks like it is running out of the app path. Every
+	// app counts: the one running can be the legacy-named app beside a
+	// renamed one.
+	wasRunning := slices.ContainsFunc(apps, func(app string) bool { return desktopAppRunning(runtime.GOOS, app) })
 	argv := rebuildAppArgv(newBin, who, false)
 	_, _ = fmt.Fprintf(out, "rebuilding the desktop app at %s\n", app)
 	ctx, stop := signal.NotifyContext(context.Background(), terminationSignals...)
@@ -72,7 +77,7 @@ func rebuildDesktopAppTo(newBin string, out io.Writer) error {
 			err, strings.Join(argv, " "))
 	}
 	if wasRunning {
-		_, _ = fmt.Fprintln(out, "restart the Aether app to use the new version")
+		_, _ = fmt.Fprintln(out, "restart the Cloudfield app to use the new version")
 	}
 	return nil
 }

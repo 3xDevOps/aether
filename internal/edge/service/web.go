@@ -53,7 +53,7 @@ const pageCSP = "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 
 
 // pageHeaders sets the headers every page carries.
 func (s *Service) pageHeaders(csp string, next http.Handler) http.Handler {
-	hsts := strings.HasPrefix(s.signinOrigin, "https://")
+	hsts := strings.HasPrefix(s.pairs[0].signin, "https://")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", csp)

@@ -14,7 +14,7 @@ flowchart LR
     C[Client] -->|tailnet| T[Tailscale]
     C -->|GitHub sign-in| E[Edge relay]
     C -->|SSH key| L["LAN, VPN or public IP"]
-    T --> S["Aether server :2222"]
+    T --> S["Cloudfield server :2222"]
     E -->|server dials out| S
     L --> S
 ```
@@ -192,7 +192,7 @@ a protected key first. Without a usable key the handshake fails with
 
 ### Everyone else
 
-An unknown key is refused with `no Aether member for this key`. An admin
+An unknown key is refused with `no Cloudfield member for this key`. An admin
 creates a one-time code (`--ttl` is in seconds, default 24 hours):
 
 ```sh
@@ -377,7 +377,8 @@ through a UnifiedPush distributor, and this phone has none.` Install ntfy and
 turn the switch on, or, in **Tailscale** mode, open the dashboard in Chrome
 and install it there.
 A distributor that refuses shows its reason, such as `The push distributor
-refused to register Aether: ACTION_REQUIRED` (sign in to it, then try again).
+refused to register Cloudfield: ACTION_REQUIRED` (sign in to it, then try
+again).
 
 An assistant card's notification follows the dashboard's rules: **Review…**
 opens the card, where you approve it, **Decline** declines it without opening
@@ -390,7 +391,7 @@ you have given notification access can still press **Decline** for you.
 **Decline** refuses a card from a server other than the one chosen under
 **Connection** now, with the error `This card is from <old>, and the app now
 connects to <new>.`
-Older Android cannot require that, so there, and in **Aether Edge** mode,
+Older Android cannot require that, so there, and in **Cloudfield Edge** mode,
 where the identity is the CLI the app runs only while it is open, a card's
 notification only opens it. While it runs the notification reads
 `Declining…` with no buttons; then `Declined` with the card's text, or
@@ -423,10 +424,10 @@ Limits:
   only on the tailnet or LAN fails with `refusing to connect to <ip>: not a
   public address` in the server's `push: notification not delivered` log
   line. Use ntfy.sh or an ntfy server with a public address.
-- In **Aether Edge** mode, switching to another server through the gateway
+- In **Cloudfield Edge** mode, switching to another server through the gateway
   keeps the registration on the first one, which goes on notifying the
   phone. Turn notifications off before you switch, and on again after.
-- In **Aether Edge** mode the server learns a new address from the
+- In **Cloudfield Edge** mode the server learns a new address from the
   distributor only while the app is open; until then notifications go to the
   old one, which the server drops once the push service reports it gone.
 - ntfy keeps a connection open, which its authors measure at about 0-1% of
