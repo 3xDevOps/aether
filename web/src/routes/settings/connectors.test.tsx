@@ -223,12 +223,35 @@ it('reconnects a connector on the server’s own URL there with a code, even whe
   expect(within(panel).getByText(own)).toBeTruthy()
 })
 
-it('treats a connector at the edge’s other address as on the universal URL, with no move offered', async () => {
-  const other = 'https://edge.other.example/mcp'
-  show({ connectorList: vi.fn().mockResolvedValue({ connectors: [{ ...claude, resource: other }], ...signedIn, universal_urls: [universal, other] }) })
+const other = 'https://edge.other.example/mcp'
+const twoAddresses = { ...signedIn, universal_urls: [universal, other] }
+
+it('treats a connector at the edge’s other address as on the universal URL: no move, and a reconnect signs in there', async () => {
+  const client = show({ connectorList: vi.fn().mockResolvedValue({ connectors: [{ ...claude, resource: other }], ...twoAddresses }) })
   expect(await screen.findByText('Universal URL')).toBeTruthy()
-  expect(screen.queryByText(other)).toBeNull()
   expect(screen.queryByRole('button', { name: 'Move Claude (claude.ai) to the universal URL' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Reconnect Claude (claude.ai)' }))
+  const dialog = await screen.findByRole('alertdialog')
+  expect(dialog.textContent).toContain('Connect Aether again in Claude and sign in')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Reconnect' }))
+  const panel = await screen.findByRole('tabpanel', { name: 'Claude' })
+  expect(await within(panel).findByText(other)).toBeTruthy()
+  expect(within(panel).getByText(/No code is needed/)).toBeTruthy()
+  expect(within(panel).queryByText(/This is this server’s own URL/)).toBeNull()
+  expect(client.connectorCode).not.toHaveBeenCalled()
+})
+
+it('finds a new connector that connected at the edge’s other address', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  show({
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [], ...twoAddresses }).mockResolvedValueOnce({ connectors: [], ...twoAddresses })
+      .mockResolvedValue({ connectors: [{ ...chatgpt, resource: other }], ...twoAddresses }),
+  })
+  await screen.findByText('No connectors yet')
+  fireEvent.click(screen.getByRole('button', { name: 'Watch for the connection' }))
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(await screen.findByText('ChatGPT (chatgpt.com) connected')).toBeTruthy()
 })
 
 async function move(name: string) {

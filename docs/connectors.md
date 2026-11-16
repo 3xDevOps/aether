@@ -80,7 +80,9 @@ minutes. Running `aether mcp` again replaces a code you have not used.
 That URL's page asks for a code even when the universal URL needs none, so a
 connector added there reconnects with one. `aether mcp code` prints a code
 alone. In Settings, **Reconnect** on such a connector shows the server's own
-URL and a code.
+URL and a code. A connector added at the universal URL of another address of
+the edge is not such a connector: it shows as **Universal URL** and
+reconnects with the sign-in.
 
 ## Add it in ChatGPT
 

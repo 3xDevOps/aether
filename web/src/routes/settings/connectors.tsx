@@ -142,6 +142,17 @@ function SignInStep({ watching, busy, expired, onWatch }: { watching: boolean; b
   )
 }
 
+type ListInfo = Omit<ConnectorList, 'connectors'>
+
+const atUniversal = (info: ListInfo, url?: string | null) =>
+  !!url && (url === info.universal_url || (info.universal_urls ?? []).includes(url))
+
+// The universal URL at any address of the edge is one place: the same
+// page, the same sign-in, and a connector added at one counts at another.
+const sameURL = (info: ListInfo, a?: string, b?: string) => a === b || (atUniversal(info, a) && atUniversal(info, b))
+
+const signsInAt = (info: ListInfo, url?: string) => !!info.sign_in && (!url || sameURL(info, url, info.url))
+
 function Setup({
   app,
   info,
@@ -154,7 +165,7 @@ function Setup({
   onMint,
 }: {
   app: App
-  info: Omit<ConnectorList, 'connectors'>
+  info: ListInfo
   edgeNote: ReactNode
   code: ConnectorCode | null
   at?: string
@@ -165,7 +176,7 @@ function Setup({
 }) {
   const guide = guides[app]
   const url = at ?? code?.url ?? info.url ?? null
-  const universal = url !== null && url === info.universal_url
+  const universal = atUniversal(info, url)
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {universal && <p>Install Aether from the {app === 'chatgpt' ? 'ChatGPT' : 'Claude'} directory where it is listed, or add it as a custom connector:</p>}
@@ -174,7 +185,7 @@ function Setup({
         <Step n={2}>
           <p>{guide.paste}</p>
           {url ? <CopyableCommand command={url} /> : edgeNote ?? <p className="text-muted">The URL appears with the code.</p>}
-          {at && <p className="text-muted">This is this server’s own URL, where the connector you are reconnecting was added. Its page asks for a code.</p>}
+          {at && !signsInAt(info, at) && <p className="text-muted">This is this server’s own URL, where the connector you are reconnecting was added. Its page asks for a code.</p>}
           {url && info.universal_url && !universal && !at && (
             <p className="text-muted">
               This is this server’s own URL. To use the one URL <Code>{info.universal_url}</Code> instead, link a GitHub account in <strong>Profile › Sign-ins › Link a GitHub account</strong>, or run <Code>aether member link --github &lt;login&gt;</Code>.
@@ -182,7 +193,7 @@ function Setup({
           )}
         </Step>
         <Step n={3}>
-          {info.sign_in && !at
+          {signsInAt(info, at)
             ? <SignInStep watching={watching} busy={busy} expired={expired} onWatch={onMint} />
             : (
                 <>
@@ -211,7 +222,7 @@ function Connectors({ client }: { client: Api }) {
   const servesEdge = useCapability().hasMethod('server.edge')
   const route = useStore((s) => s.route)
   const [connectors, setConnectors] = useState<Connector[] | null>(null)
-  const [info, setInfo] = useState<Omit<ConnectorList, 'connectors'>>({})
+  const [info, setInfo] = useState<ListInfo>({})
   const [listError, setListError] = useState<Failure | null>(null)
   const [edge, setEdge] = useState<ServerEdge | null>(null)
   const [edgeError, setEdgeError] = useState<string | null>(null)
@@ -296,7 +307,7 @@ function Connectors({ client }: { client: Api }) {
         setAttempt(null)
       }
       if (!old) {
-        const added = next.find((c) => !attempt.known.has(c.id) && appOf(c) === attempt.app && (!c.resource || c.resource === attempt.into))
+        const added = next.find((c) => !attempt.known.has(c.id) && appOf(c) === attempt.app && (!c.resource || sameURL(info, c.resource, attempt.into)))
         if (added || final) finish()
         if (added) setConnected(added)
         else if (final) setExpired(true)
@@ -304,7 +315,7 @@ function Connectors({ client }: { client: Api }) {
       }
       // A replacement that called Aether wins over one whose tokens may
       // never have arrived.
-      const candidates = next.filter((c) => !attempt.known.has(c.id) && c.resource === attempt.into &&
+      const candidates = next.filter((c) => !attempt.known.has(c.id) && sameURL(info, c.resource, attempt.into) &&
         (old.client_id ? c.client_id === old.client_id : c.redirect_host === old.redirect_host))
       let added: Connector | undefined
       try {
@@ -370,7 +381,7 @@ function Connectors({ client }: { client: Api }) {
       clearTimeout(expiry)
       clearInterval(timer)
     }
-  }, [attempt, read, client])
+  }, [attempt, info, read, client])
 
   const start = async (forApp: App, next: Target | null = null) => {
     setMintError(null)
@@ -389,7 +400,7 @@ function Connectors({ client }: { client: Api }) {
     // code even when the universal URL takes the sign-in.
     const into = next?.kind === 'move' ? rest.universal_url : next?.replaces.resource ?? rest.url
     const at = into && into !== rest.url ? into : undefined
-    const signIn = rest.sign_in && !at
+    const signIn = signsInAt(rest, at)
     const code = signIn ? null : await client.connectorCode()
     if (run !== starts.current) return
     // Signing in needs nothing from here, so it may be done already: what
@@ -427,8 +438,8 @@ function Connectors({ client }: { client: Api }) {
     setExpired(false)
   }
 
-  // A connector added at a URL other than the one shown reconnects there, with a code.
-  const signsIn = (c: Connector) => !!info.sign_in && (!c.resource || c.resource === info.url)
+  // A connector on the server's own URL reconnects there, with a code.
+  const signsIn = (c: Connector) => signsInAt(info, c.resource)
   const tooOld = listError?.old === true
   const edgeNote = edge && !edge.edge_url
     ? <p className="text-muted">This server has no edge, so ChatGPT and Claude cannot reach it. An admin turns one on: <Link href={`${docs}/edge.md#turning-it-on`}>Edge guide</Link>.</p>
@@ -471,7 +482,7 @@ function Connectors({ client }: { client: Api }) {
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-muted">
               <span>
                 {target.kind === 'move' ? 'Moving' : 'Reconnecting'} {label(target.replaces)}
-                {attempt ? '' : `: ${target.at || !info.sign_in ? 'get a new code' : 'watch for the connection'} to continue`}. It is revoked only once its replacement calls Aether; another move or reconnect waits until this one ends.
+                {attempt ? '' : `: ${signsInAt(info, target.at) ? 'watch for the connection' : 'get a new code'} to continue`}. It is revoked only once its replacement calls Aether; another move or reconnect waits until this one ends.
               </span>
               <Button size="sm" variant="ghost" onClick={stop}>Stop</Button>
             </div>
@@ -506,8 +517,8 @@ function Connectors({ client }: { client: Api }) {
         <SettingRow label="No connectors yet" help="One appears here once you select Allow on the Aether page." />
       )}
       {connectors?.map((c) => {
-        const atUniversal = !!c.resource && (c.resource === info.universal_url || (info.universal_urls ?? []).includes(c.resource))
-        const movable = !!c.resource && !!info.universal_url && !atUniversal && info.url === info.universal_url
+        const universal = atUniversal(info, c.resource)
+        const movable = !!c.resource && !!info.universal_url && !universal && info.url === info.universal_url
         return (
           <SettingRow
             key={c.id}
@@ -515,7 +526,7 @@ function Connectors({ client }: { client: Api }) {
             help={(
               <>
                 <span className="block">{scopeList(c)}</span>
-                {c.resource && <span className="block">{atUniversal ? 'Universal URL' : <>This server’s own URL, <Code>{c.resource}</Code></>}</span>}
+                {c.resource && <span className="block">{universal ? 'Universal URL' : <>This server’s own URL, <Code>{c.resource}</Code></>}</span>}
                 Added <RelativeTime at={c.created_at} />
                 {' · '}{c.last_used_at ? <>last used <RelativeTime at={c.last_used_at} /></> : 'never used'}
               </>

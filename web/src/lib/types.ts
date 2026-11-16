@@ -2280,8 +2280,8 @@ export interface Connector {
  * connector.list: the member's connectors and how they add one. `url` is
  * the URL to add; `universal_url` the edge's one URL for every server,
  * which differs from `url` until the member links a GitHub account;
- * `universal_urls` that URL at every address of the edge, when it has
- * more than one; `sign_in` means the consent page takes the edge sign-in,
+ * `universal_urls` that URL at every address of the edge, `universal_url`
+ * among them; `sign_in` means the consent page takes the edge sign-in,
  * no code.
  */
 export interface ConnectorList {
