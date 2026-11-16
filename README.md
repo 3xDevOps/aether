@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/assets/aether-banner.svg" alt="Cloudfield" width="100%">
-
 # Cloudfield - Multiplayer Cloud Agent Runtime
 
 **A self-hostable development environment and controller for AI coding agents running in the cloud, for teams of engineers & *multiplayer* control.**
