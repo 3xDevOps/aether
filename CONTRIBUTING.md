@@ -167,7 +167,7 @@ Run these before you open a pull request:
 | `make lint-workflows` | Workflow mistakes (actionlint, with ShellCheck on embedded scripts) |
 | `make test` | Go unit tests, with the race detector |
 | `make test-scripts` | Installer, deploy, release and CI script tests, with every outside command stubbed |
-| `make public-audit` | Private data that must not enter the public tree |
+| `make public-audit` | Private data that must not enter the public tree, and the old product name in dashboard copy, edge pages and listings |
 | `cd web && bun run typecheck && bun run test` | Dashboard type errors and component tests (`bun install --frozen-lockfile` first) |
 
 `make fmt-check` uses the `gofmt` on your `PATH`, and a Go newer than the

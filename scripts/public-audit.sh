@@ -59,6 +59,32 @@ if paths=$(git ls-files --cached --others --exclude-standard | grep -E "$legacy_
 	failed=1
 fi
 
+# The product is named Cloudfield. Each line below still says the old name
+# on purpose and goes when what it names is renamed: the connector entry a
+# member adds in ChatGPT or Claude, the Slack bot and the desktop app, the
+# server's wake prompt, the symbol fonts, and two listing images not yet
+# shot again.
+old_name_kept='Name it <strong>Aether</strong>
+Install Aether from the
+Add Aether again in
+Connect Aether again
+the Aether bot
+or quit Aether.
+/^Aether has
+Aether Symbols
+Aether Nerd Symbols
+The Aether mark and wordmark
+The Aether board on a phone'
+if matches=$(git grep --untracked -n -I -w -e Aether -- \
+	'web/src' 'web/public/sw.js' 'internal/edge/service/templates' \
+	'packaging/claude-connector' 'packaging/chatgpt-plugin' 'android/listing' \
+	':(exclude)web/src/**/*.test.ts' ':(exclude)web/src/**/*.test.tsx' |
+	grep -v -E '^[^:]+:[0-9]+:[[:space:]]*(//|/\*|\*)' |
+	grep -v -F -e "$old_name_kept"); then
+	printf '%s\n' "$matches"
+	failed=1
+fi
+
 if [ "$failed" -ne 0 ]; then
 	echo 'public audit: FAIL' >&2
 	exit 1
