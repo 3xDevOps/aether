@@ -47,7 +47,7 @@ func TestConnectorAtEveryRelayOrigin(t *testing.T) {
 	h.startEdge()
 	relayB := h.relayB
 	baseB := relayB + edgeproto.MCPPath(s.id)
-	s.waitEnrolled()
+	backOnline(t, h, s)
 
 	for _, base := range []string{baseA, baseB} {
 		var prm, asm map[string]any
@@ -150,7 +150,7 @@ func TestConnectorAtEveryRelayOrigin(t *testing.T) {
 	h.stopEdge()
 	h.pairB = false
 	h.startEdge()
-	s.waitEnrolled()
+	backOnline(t, h, s)
 	mustCall(t, baseA, rotated.AccessToken)
 	if resp, body := toolsList(t, baseA, atB.AccessToken, nil); resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("B's token at A while the edge serves A only: %s %q", resp.Status, body)
@@ -159,11 +159,29 @@ func TestConnectorAtEveryRelayOrigin(t *testing.T) {
 	h.stopEdge()
 	h.pairB = true
 	h.startEdge()
-	s.waitEnrolled()
+	backOnline(t, h, s)
 	mustCall(t, baseB, atB.AccessToken)
 	if a := refresh(baseB, atB.RefreshToken, baseB); a.Error != "" {
 		t.Errorf("B's refresh token at B once the edge serves B again: %+v", a)
 	}
+}
+
+// backOnline waits until the restarted edge holds s's control channel
+// again and s's agent has made that session live. The server's own status
+// file can still say connected from before the restart until its agent
+// notices the old connection ended, and the relay counts the server online
+// as it sends Ready, before the agent has read it.
+func backOnline(t *testing.T, h *harness, s *serverNode) {
+	t.Helper()
+	eventually(t, "server back on the restarted edge", func() error {
+		switch {
+		case !h.relay().Online(s.id):
+			return errors.New("not online at the edge")
+		case !s.agent.Connected():
+			return errors.New("online at the edge, but the agent has not read Ready yet")
+		}
+		return nil
+	})
 }
 
 // connectAt authorizes a connector at base, a server's own connector URL,
@@ -311,7 +329,7 @@ func TestConnectorAtEdgeProtocol5(t *testing.T) {
 	h.stopEdge()
 	h.pairB = true
 	h.startEdge()
-	s.waitEnrolled()
+	backOnline(t, h, s)
 	if v := s.agent.EdgeVersion(); v != edgeproto.VersionRelayOrigin-1 {
 		t.Fatalf("EdgeVersion = %d, want %d", v, edgeproto.VersionRelayOrigin-1)
 	}
