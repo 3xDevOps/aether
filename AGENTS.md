@@ -161,8 +161,8 @@ feat(cli)!: drop the aether dash command
 Many sessions share the same CI runners.
 
 - Keep a pull request as a draft while you iterate. Pull request CI runs
-  only `changes`, `audit`, `lint`, `build-and-test` and `dashboard`; the
-  merge queue runs the full suite.
+  only `changes`, `audit`, `lint`, `build-and-test`, `store-tests` and
+  `dashboard`; the merge queue runs the full suite.
 - Push milestones freely; Greptile reviews them. Do not wait on CI or rerun
   it between pushes.
 - Run the checks for what you changed locally first; see

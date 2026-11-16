@@ -191,7 +191,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build proto chatgpt-plugin claude-connector agents-image browser-image browser-smoke edge-image test test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
+.PHONY: all build proto chatgpt-plugin claude-connector agents-image browser-image browser-smoke edge-image test test-store test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
 
 all: build
 
@@ -219,6 +219,15 @@ browser-smoke:
 
 test:
 	go test $(TEST_RACE) -parallel 16 -timeout 20m $(TEST_PKGS)
+
+# internal/store under the race detector, which CI runs as a job of its own
+# and leaves out of `test`. Its migration tests spend their time in the
+# transpiled SQLite library, so checkptr is off for that library's packages
+# only; it stays on for every project package.
+STORE_GCFLAGS := modernc.org/...=-d=checkptr=0
+
+test-store:
+	go test -race -gcflags='$(STORE_GCFLAGS)' -parallel 16 -timeout 20m ./internal/store
 
 # The `integration`-tagged tests (real Docker, real git), in the packages that
 # carry them - the unit tests are `make test`'s job. CI shards it with

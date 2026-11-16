@@ -3,12 +3,12 @@ name: CI
 on:
   push:
     branches: [main, 'release/[0-9]*.[0-9]*']
-  # A pull request runs changes, audit, lint, build-and-test and dashboard
-  # only. The merge queue and the nightly run on main run every job, except
-  # that the merge queue boots VMs only for a change that can affect them. A
-  # push to main runs only changes and CI gate when its commit passed the
-  # merge queue and changed nothing a cache key hashes. A push to a
-  # release/X.Y hotfix branch runs every job and boots the VMs:
+  # A pull request runs changes, audit, lint, build-and-test, store-tests
+  # and dashboard only. The merge queue and the nightly run on main run
+  # every job, except that the merge queue boots VMs only for a change that
+  # can affect them. A push to main runs only changes and CI gate when its
+  # commit passed the merge queue and changed nothing a cache key hashes. A
+  # push to a release/X.Y hotfix branch runs every job and boots the VMs:
   # release.yml reads its verdict.
   pull_request:
   merge_group:
@@ -243,7 +243,7 @@ jobs:
       - name: Unit tests
         env:
           TEST_RACE: ${{ github.event_name != 'pull_request' && '-race' || '' }}
-        run: make test
+        run: make test TEST_SKIP=./internal/store
       # Only root keeps other owners, set-user-ID bits and file capabilities
       # when it extracts an image, as the server does.
       - name: Image store tests as root
@@ -267,6 +267,27 @@ jobs:
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
+
+  # internal/store under -race, on every event. In build-and-test it took
+  # most of the job and starved the timing-sensitive tests beside it.
+  store-tests:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      - name: Store tests
+        run: make test-store
 
   dashboard:
     needs: changes
@@ -318,6 +339,7 @@ jobs:
       - audit
       - lint
       - build-and-test
+      - store-tests
       - dashboard
       - suite
     runs-on: ubuntu-latest

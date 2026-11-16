@@ -39,6 +39,12 @@ detector slows ten to twenty times (`internal/store` takes 26 s without it and
 over five minutes with it). CI runs pull requests without `-race` and the
 merge queue and `main` with it.
 
+`make test-store` runs `internal/store` alone under `-race` with
+`-gcflags='modernc.org/...=-d=checkptr=0'`: checkptr, which `-race` turns
+on, is off for the SQLite library's packages and stays on for every project
+package. CI runs it on every event as the `store-tests` job and leaves
+`internal/store` out of `build-and-test`'s `make test`.
+
 ```sh
 make test                                   # everything
 make test TEST_PKGS=./internal/store        # only these packages
@@ -898,7 +904,7 @@ the server". Nothing Cloudfield builds or installs is excluded.
 The `CI` workflow (`.github/workflows/ci.yml`) runs on every pull request,
 every merge queue entry, every push to `main` or a `release/X.Y` hotfix
 branch and nightly on `main` at 08:00 UTC. A pull request, draft or ready, runs `changes`, `audit`, `lint`,
-`build-and-test` and `dashboard`. Every other job lives in
+`build-and-test`, `store-tests` and `dashboard`. Every other job lives in
 `.github/workflows/ci-suite.yml`, which `ci.yml` calls as the `suite` job, so
 a run that skips them shows one skipped `suite` check; in a run that calls it
 each job shows as `suite / <job>`. The merge queue runs every job, so the full
@@ -944,7 +950,8 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 | --- | --- | --- |
 | `audit` | `scripts/public-audit.sh` | `make public-audit` |
 | `lint` | Formatting, workflow lint, `make lint` (golangci-lint, which includes `go vet` and shadow), then the script and native hook tests; `make vulncheck` as advice on every session that runs the full suite | `make fmt-check lint-workflows lint test-scripts test-native-hooks` |
-| `build-and-test` | Unit tests (`-race` on the merge queue and `main` only), then `make build` | `make test build` |
+| `build-and-test` | Unit tests except `internal/store` (`-race` on the merge queue and `main` only), then `make build` | `make test TEST_SKIP=./internal/store build` |
+| `store-tests` | `internal/store`'s unit tests, always with `-race` | `make test-store` |
 | `integration (server-rest, browser)`, `integration (server-flows, scheduler, rest, agents, smoke)` | [Integration tests](#integration-tests), the [smoke tests](#real-agent-smoke-tests), [real agents against a mock model](#real-agents-against-a-mock-model) and [the browser companion](#the-browser-companion), on amd64 | See the table under Integration tests |
 | `arm64` | Standard and browser image builds, smoke tests and browser runtime tests on arm64 | Same commands on an arm64 host |
 | `dashboard` | `bun run typecheck` and `bun run test` | Same, from `web/` |
@@ -960,7 +967,7 @@ A pull request that changes only `docs/**` or root-level `*.md` files runs
 
 | Mode | Jobs | True for |
 | --- | --- | --- |
-| `go` | `lint`, `build-and-test` | Everything except `web/` (other than `web/embed.go`), `android/` and `docs/` |
+| `go` | `lint`, `build-and-test`, `store-tests` | Everything except `web/` (other than `web/embed.go`), `android/` and `docs/` |
 | `web` | `dashboard` | `web/`, `cmd/aether/`, `internal/localgw/`, `internal/webgate/`, `go.mod`, `Makefile`, `.github/actions/`, `ci.yml` |
 | `caches` | The full suite on a push to `main` | `go.mod`, `go.sum`, `.golangci.yml`, `.github/`, `images/`, the fonts the browser image copies from `web/public/fonts/`, the web and desktop package manifests and lockfiles, `web/.bun-version`, the Gradle files |
 | `vm` | `kvm` in the merge queue and on a push to `main` | `internal/runtime/vm/`, `internal/vmimage/`, the packages the VM code runs (`internal/guest/`, `internal/acpkeeper/`, `internal/version/`, `internal/devexec/`, `internal/disk/`, `internal/egress/`, `internal/gitengine/`, `internal/rootfs/`), `images/kernel/`, the `kvm*_test.go` files, the files of `internal/runtime/` the VM engine shares (`session.go`, `stream.go`, `managed_exec.go`, `docker_image.go`, `docker_cgroup.go`), files named `vm*.go` or `*_vm.go` (and their tests) anywhere under `internal/`, `go.mod`, `go.sum`, `vm.mk`, `kvm.yml` and `cmd/aether-server/vm.go` |
