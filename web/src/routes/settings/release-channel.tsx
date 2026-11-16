@@ -124,18 +124,17 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
         control={
           canSet ? (
             <div className="flex items-center gap-2">
-              {checking && <span role="status" className="flex items-center gap-1.5 text-ui-sm text-muted"><Spinner />Checking {checking}…</span>}
-            <RadioPills aria-label="Release channel" value={current} disabled={busy} onValueChange={(v) => void choose(v as ReleaseChannel)}>
-              {channels.map((c) => (
-                <RadioPillsItem key={c} value={c}>{label[c]}</RadioPillsItem>
-              ))}
-            </RadioPills>
+              <RadioPills aria-label="Release channel" value={current} disabled={busy} onValueChange={(v) => void choose(v as ReleaseChannel)}>
+                {channels.map((c) => (
+                  <RadioPillsItem key={c} value={c}>{label[c]}</RadioPillsItem>
+                ))}
+              </RadioPills>
             </div>
-          ) : (
-            <Badge>{label[current]}</Badge>
-          )
+          ) : undefined
         }
       >
+        {checking && <p role="status" className="flex items-center gap-1.5 text-ui-sm text-muted"><Spinner />Checking {checking}…</p>}
+        {!canSet && <div><Badge>{label[current]}</Badge></div>}
         {notice && <p role="status" className="text-ui-sm text-muted">{notice}</p>}
         {error && <p role="alert" className="max-h-28 overflow-auto min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 text-state-failed select-text">{error}</p>}
       </SettingRow>

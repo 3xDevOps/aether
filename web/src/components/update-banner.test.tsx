@@ -288,6 +288,7 @@ describe('the server update banner', () => {
     render(<UpdateHost client={client} />)
     expect(await screen.findByText(reason)).toBeTruthy()
     expect(screen.getByText('The server could not schedule it by itself:')).toBeTruthy()
+    expect(screen.getByText('The server could not record the cancelled build as declined, so it may schedule it again:')).toBeTruthy()
     expect(screen.getByText('the cancelled build could not be recorded: disk full')).toBeTruthy()
   })
 
@@ -298,7 +299,8 @@ describe('the server update banner', () => {
     client.serverUpdate = vi.fn(async () => ({ status: 'cancelled' as const, not_declined: 'store: database is locked' }))
     render(<UpdateHost client={client} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
-    expect(await screen.findByText(/The update was cancelled\. The server may schedule it again by itself: store: database is locked/)).toBeTruthy()
+    expect(await screen.findByText('The update was cancelled. The server could not record the cancelled build as declined, so it may schedule it again:')).toBeTruthy()
+    expect(screen.getByText('store: database is locked')).toBeTruthy()
   })
 
   test('a cancel the server refuses shows its error as returned', async () => {
