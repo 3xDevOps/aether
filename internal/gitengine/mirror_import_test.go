@@ -315,7 +315,13 @@ func TestMirrorAdoptionRechecksReviewedCandidateAfterCASConflict(t *testing.T) {
 func TestFilesWriteRefusesMirroredBase(t *testing.T) {
 	e := newUnitEngine(t)
 	e.cfg.MirrorFetch = mirrorImportTransport
-	source, commit := mirrorImportSource(t, e, true)
+	source, _ := mirrorImportSource(t, e, true)
+	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("upstream\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mirrorImportGit(t, e, source, "add", "README.md")
+	mirrorImportGit(t, e, source, "-c", "user.name=Source", "-c", "user.email=source@example.test", "commit", "-m", "add readme")
+	commit := mirrorImportGit(t, e, source, "rev-parse", "HEAD")
 	const ws domain.WorkspaceID = "mirror-base-write"
 	req := MirrorRequest{SourceURL: source, Branch: "main", Generation: 1, Auth: domain.MirrorAuthPublic}
 	if _, err := e.ConfigureWorkspaceMirror(t.Context(), ws, req); err != nil {
@@ -342,7 +348,10 @@ func TestFilesWriteRefusesMirroredBase(t *testing.T) {
 	}
 	// A read reports the mirrored base as not writable.
 	meta, readErr := e.FilesRead(t.Context(), ws, "", "main", "README.md", MaxFileBytes)
-	if readErr == nil && meta.Writable {
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if meta.Writable {
 		t.Fatal("mirrored base reported writable")
 	}
 }
