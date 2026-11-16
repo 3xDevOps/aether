@@ -33,7 +33,7 @@ fun Context.callServer(method: String, params: JSONObject, timeoutMs: Int = 15_0
         when (connectionMode()) {
             ConnectionMode.TAILSCALE -> storedDashboardUrl()
             ConnectionMode.EDGE ->
-                LiveGateway.url ?: throw ServerCallException("Aether is not connected through Aether Edge right now. Open the app and try again.")
+                LiveGateway.url ?: throw ServerCallException("Cloudfield is not connected through Cloudfield Edge right now. Open the app and try again.")
             null -> null
         } ?: throw ServerCallException("The app is not connected to a server.")
     return callDashboard(dashboard, method, params, timeoutMs)
