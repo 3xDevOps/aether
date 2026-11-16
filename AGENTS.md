@@ -1,6 +1,6 @@
-# Aether
+# Cloudfield
 
-Aether is a self-hosted development environment for coding agents. The public
+Cloudfield is a self-hosted development environment for coding agents. The public
 repository contains one Go server, one Go CLI, an embedded dashboard, and the
 operational guides needed to run them on your own hardware.
 
@@ -15,9 +15,9 @@ prose, and repetition.
 
 ## Audience
 
-The reader is a software developer who is new to Aether. Assume working
+The reader is a software developer who is new to Cloudfield. Assume working
 fluency with git, a shell, containers, and coding-agent CLIs such as Claude
-Code, Codex, and opencode. Do not assume any knowledge of Aether's own
+Code, Codex, and opencode. Do not assume any knowledge of Cloudfield's own
 concepts - workspace, session, harness, tool snapshot - and introduce each one
 where it first appears.
 
@@ -156,7 +156,7 @@ refactor(store): collapse sessions into workspaces
 feat(cli)!: drop the aether dash command
 ```
 
-## Working in parallel as an Aether agent
+## Working in parallel as a Cloudfield agent
 
 Many sessions share the same CI runners.
 
@@ -180,7 +180,7 @@ Many sessions share the same CI runners.
   reviewer (a subagent is enough) reviews dark-mode screenshots at the
   affected widths as a senior product designer would. Apply or rebut each
   point and re-shoot until none blocks.
-  Aether is dark-first, so every screenshot is dark mode; force
+  Cloudfield is dark-first, so every screenshot is dark mode; force
   `colorScheme: 'dark'` in headless browsers.
 
 ## Repository shape

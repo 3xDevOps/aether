@@ -1,7 +1,7 @@
-# Contributing to Aether
+# Contributing to Cloudfield
 
-How to build Aether from source, run your build beside an installed release,
-test it, put it on a test server, and get it merged. Aether has a Linux
+How to build Cloudfield from source, run your build beside an installed release,
+test it, put it on a test server, and get it merged. Cloudfield has a Linux
 server (`aether-server`) that runs coding agents in containers, a client CLI
 (`aether`) for Linux, macOS and Windows, and a web dashboard built into both
 binaries. Terms such as session, workspace and environment are explained in the
@@ -67,7 +67,7 @@ aether v0.7.1-beta.1-12-gabc1234-dirty (abc1234)
 ```
 
 That is 12 commits past the release `v0.7.1-beta.1`, at commit `abc1234`,
-with uncommitted changes. Aether ranks it above that release and below the
+with uncommitted changes. Cloudfield ranks it above that release and below the
 next one. A checkout without tags stamps a bare commit hash (run
 `git fetch --tags`), and a plain `go build` reports `dev`. Neither compares
 with a release, so update checks and version gates never count them as
@@ -184,7 +184,7 @@ CI on a pull request runs only the fast jobs, and one that changes only
 `docs/` or root-level `*.md` files runs the public audit and nothing else. The
 merge queue runs the full suite on every change before it reaches `main`
 ([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)). Inside an
-Aether run, unset the session's `AETHER_*` variables before testing, or some
+Cloudfield run, unset the session's `AETHER_*` variables before testing, or some
 tests fail
 ([how](docs/testing.md#running-the-docker-suites-inside-a-session)).
 
@@ -367,14 +367,14 @@ Gatekeeper warn, and auto-update refuses them. Treat them as test builds.
 
 </details>
 
-Every icon Aether ships is generated from `web/public/aether-mark.png`. After
+Every icon Cloudfield ships is generated from `web/public/aether-mark.png`. After
 changing it, run `python3 scripts/make-icons.py` (needs `pillow` and
 `fonttools[woff]`) and commit what it writes.
 
 ## Android shell
 
 `android/` is a Kotlin WebView app that loads a server's dashboard or, in
-Aether Edge mode, the local gateway of the `aether` CLI it carries
+Cloudfield Edge mode, the local gateway of the `aether` CLI it carries
 ([docs/install.md](docs/install.md#android-app)). It builds in containers
 pinned by digest, so it needs Docker and no Android SDK:
 
@@ -445,7 +445,7 @@ has the local check and how to force the CI jobs on a branch.
 
 Commit messages, pull request titles and code style follow
 [AGENTS.md](AGENTS.md#commits). Update the guide in `docs/` that a change
-affects in the same pull request. An agent working inside an Aether run ends
+affects in the same pull request. An agent working inside a Cloudfield run ends
 every pull request description with `Opened from Aether session <session id>`, using
 the `run_id` that `aether-internal status` reports.
 
@@ -461,7 +461,7 @@ never put live credentials in a report.
 
 ## Releases
 
-Aether ships on three release channels, `nightly`, `beta` and `stable`
+Cloudfield ships on three release channels, `nightly`, `beta` and `stable`
 ([install.md](docs/install.md#release-channel) describes them for
 operators). `nightly.yml` builds a nightly from the newest `main` commit with
 green CI. An admin promotes a nightly to beta and a beta to stable with

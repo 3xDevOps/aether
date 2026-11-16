@@ -1,6 +1,6 @@
 # Conflict coordination
 
-Aether's conflict radar identifies active sessions that edit the same files. When
+Cloudfield's conflict radar identifies active sessions that edit the same files. When
 coordination is enabled, each session also gets a small, durable channel for
 communicating with other live sessions in its workspace, whether or not the radar
 has found an overlap yet. The channel is advisory:
@@ -44,7 +44,7 @@ behaves the same at either path. Containers created before this release lack
 file written into a member's home call `/usr/local/bin/aether-internal`. A
 Default or Isolated session also gets the binary at `/usr/local/bin/sudo`, the
 [sudo shim](security.md#sudo-in-a-default-session). The coordination directory
-and the executable mounts are constructed by Aether, not requested by a session.
+and the executable mounts are constructed by Cloudfield, not requested by a session.
 
 The container has no coordination token or identity flag. The mounted socket
 is the identity: a connection accepted by a session's socket is treated as that
@@ -157,8 +157,8 @@ live sessions in the sender's workspace with `state: "workspace"`, most recently
 active first. Sending never requires a session to be listed. Every peer
 carries its task summary, its `activity` (what it is doing) with its
 `reason` (`reason_truncated` when cut at 512 bytes), `wait` while it shows a
-reported wait (what Aether last verified about it, or why it cannot vouch for
-it; see [Waits Aether can check](failure-handling.md#waits-aether-can-check)),
+reported wait (what Cloudfield last verified about it, or why it cannot vouch for
+it; see [Waits Cloudfield can check](failure-handling.md#waits-cloudfield-can-check)),
 and `run_status`. A `run_status` of `needs-attention` only means the
 agent is parked: read `activity` to tell waiting on agents, CI or a process
 from a request for a person. Each session appears once, under its first route,
@@ -315,7 +315,7 @@ as sent. When the window runs out the `-32004` message says `the request was not
 delivered and nothing applied` or `the request was sent and may already have
 applied`.
 
-Aether does not type automated coordination messages into terminals. There
+Cloudfield does not type automated coordination messages into terminals. There
 are five ways to notice mail:
 
 1. **An active inbox wait wins.** An agent expecting a reply should use
@@ -338,7 +338,7 @@ are five ways to notice mail:
    and as a steer mid-turn, with or without a task. A working session also
    hears once about each new set of overlapping edits, as the hooks below
    announce them. Mail that an `aether-internal inbox --wait` is waiting for
-   goes to that call instead. Aether loads no Codex hooks; see
+   goes to that call instead. Cloudfield loads no Codex hooks; see
    [Codex](harnesses.md#codex).
 5. **An Enhanced session is prompted by the server.** When mail arrives or a
    turn ends with mail unread, and the agent is idle with nothing
@@ -643,7 +643,7 @@ success or failure before its final turn ends. A subsession's card also names
 its parent and says to ask it with `aether-internal ask` before asking the
 user; a session with extra repositories (`--repo`) gets a line naming them.
 
-The `waiting` line appears only where Aether resumes an idle session when
+The `waiting` line appears only where Cloudfield resumes an idle session when
 mail arrives: Enhanced sessions and Standard sessions that load a native Claude
 Code, pi, omp or OpenCode integration. A protected session is never woken, so its line tells it
 to wait in its turn while `coord.status` returns `protected: true`. Any other
@@ -664,7 +664,7 @@ capabilities lack `coord.report`, else
 `background` when `AETHER_BACKGROUND=1` (set in every Background container),
 else `interactive`. `AETHER_BACKGROUND=1` also drops answered, needs-input
 and waiting. The waiting line needs `AETHER_ENHANCED=1` or
-`AETHER_IDLE_WAKE=1`, which Aether sets on a Standard launch that loads a
+`AETHER_IDLE_WAKE=1`, which Cloudfield sets on a Standard launch that loads a
 native integration file (Claude Code, pi, OMP and OpenCode; Copilot CLI's
 hooks cannot wake it) or attaches Codex to its app-server, and a status
 without `protected: true`.
@@ -793,7 +793,7 @@ touch they check `aether-internal status` for overlapping peers and send a
 short note, whose replies land in the parent's inbox. Subagents otherwise see the MCP tools and
 project files, not the parent's system prompt.
 A missing coordination socket also produces no output, so a user-level hook
-can stay installed outside Aether. An existing but broken socket or other
+can stay installed outside Cloudfield. An existing but broken socket or other
 failure returns nonzero and the actual error on stderr, never a success hint.
 Stop hooks request at most one continuation for pending mail. Native
 repeat-stop guards prevent a continuation loop.
@@ -1313,7 +1313,7 @@ until a person presses **Retry Enhanced**), a turn `failed` (such as `enhanced
 turn failed: ... Authentication required`) other than by its own failure
 report, or a turn was cut short (`turn interrupted`, `turn ended: <reason>`,
 `Usage limit reached on ...`, or the agent's own usage-limit message when
-Aether did not move the session), or its wait broke (`wait broken: ...`). A permission prompt or question waiting for a
+Cloudfield did not move the session), or its wait broke (`wait broken: ...`). A permission prompt or question waiting for a
 person sends nothing, nor does a subsession whose result already reached its
 parent. New work starts a new spell. A subsession a person paused sends none. A subsession's
 `needs-input` question goes to its owner, and the parent is told in its inbox
@@ -1407,7 +1407,7 @@ What a report does depends on the session:
 - **Background session** (`headless`). Success or failure still finishes the session
   after its turn ends, or on process exit. For an agent without a status
   reporter, the first `--poll-interval` check two minutes after the report
-  finishes it; outstanding input requests prevent that finish. Aether commits
+  finishes it; outstanding input requests prevent that finish. Cloudfield commits
   the work (`aether:` for success, `wip:` for failure), publishes the session
   branch, records `completed` or `failed`, and cleans up its container.
   A Close or Kill that lands first wins. A session completed by its success
@@ -1519,7 +1519,7 @@ named resolved but its wake never reached the agent, or its source went
 unread for an hour
 ([exit codes](quickstart.md#from-a-script-or-agent)).
 
-Before accepting `coord.report`, Aether captures evidence for the session. The
+Before accepting `coord.report`, Cloudfield captures evidence for the session. The
 capture retains a private Git evidence commit and the PTY transcript up to
 16 MiB, then stores factual context, provenance, unresolved facts, and a next
 action with the report. Evidence is retained for 30 days. Unavailable or
@@ -1590,7 +1590,7 @@ the same rule as a [report reminder](enhanced-sessions.md#report-reminder)
 prompt. Background sessions, and Standard sessions of other agents, are not held.
 
 Coordination also does not provide a universal inbound terminal hook. When a
-human messages a Standard session, Aether delivers the message through the
+human messages a Standard session, Cloudfield delivers the message through the
 agent's serialized PTY input path and records the delivery separately.
 
 ## Retention and shutdown
@@ -1604,7 +1604,7 @@ retention does not grant live input or wake authority. Explicit Kill, Delete,
 and subsession cancellation still destroy the
 container; a negative TTL requests immediate cleanup. Recovery rebinds
 `coord3.sock` for retained sessions. When a session's sandbox is destroyed,
-Aether releases the coordination directory and retires the session's unread mail
+Cloudfield releases the coordination directory and retires the session's unread mail
 after any required evidence capture has completed; the messages stay listed
 until the session is deleted. With `--conflict-coordination=false`, sessions
 still receive their identity socket and agent instructions without report

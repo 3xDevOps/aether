@@ -1,10 +1,10 @@
 # Security model
 
-What Aether isolates, what it leaves exposed, and who can see or act on what.
-Read it before you run Aether for other people or let someone join your
+What Cloudfield isolates, what it leaves exposed, and who can see or act on what.
+Read it before you run Cloudfield for other people or let someone join your
 server.
 
-The Aether server runs on your Linux host and starts every agent in a sandbox:
+The Cloudfield server runs on your Linux host and starts every agent in a sandbox:
 a Docker container, or with `session-runtime vm` a virtual machine. A member is
 a person admitted to the server. Each member has a home directory on the server
 and an environment, a long-lived sandbox where they install and sign in to
@@ -51,7 +51,7 @@ credentials out of the report.
 ## The agent container
 
 The container is the only isolation boundary. It is not a VM: every session
-shares the host's kernel, and Aether builds no second boundary inside it.
+shares the host's kernel, and Cloudfield builds no second boundary inside it.
 
 With `session-runtime vm`, the boundary is a Cloud Hypervisor virtual machine
 with its own kernel instead
@@ -247,7 +247,7 @@ Two things in an Isolated session still reach outside it:
 
 ### Sudo in a Default session
 
-A Default session's `sudo` is Aether's shim at `/usr/local/bin/sudo`, ahead of
+A Default session's `sudo` is Cloudfield's shim at `/usr/local/bin/sudo`, ahead of
 the image's on `PATH`. Docker's `no-new-privileges` stops the image's own:
 `/usr/bin/sudo` fails with `sudo: The "no new privileges" flag is set, which
 prevents sudo from running as root.`
@@ -474,13 +474,13 @@ The private key is never in your home. The server keeps it in
 your sessions and environment through a read-only SSH agent mounted at
 `/run/aether-signing/agent.sock`, which `SSH_AUTH_SOCK` names. git signs
 through it with `ssh-keygen`. The agent lists and signs with your key and
-refuses to add, remove, lock or unlock keys. Aether signs its end-of-session
+refuses to add, remove, lock or unlock keys. Cloudfield signs its end-of-session
 commits with the same key, read from the data directory.
 
 Root in any of your sessions can read and replace the token and `~/.gitconfig`, and
 can sign anything with your key while the session lives. It cannot copy the key or
-make Aether sign with another one. The token carries gh's default scopes
-(`repo`, `read:org`, `gist`) plus the `admin:ssh_signing_key` scope Aether
+make Cloudfield sign with another one. The token carries gh's default scopes
+(`repo`, `read:org`, `gist`) plus the `admin:ssh_signing_key` scope Cloudfield
 needs to register the key, so an agent can push to the workspace's origin,
 open pull requests, and add or remove signing keys on your account: a key it
 registers signs commits that GitHub shows as Verified. It can also plant
@@ -552,7 +552,7 @@ someone who can run code in the workspace.
 ## The assistant
 
 The [assistant](assistant.md) is an agent that runs in a sandbox of its own
-per member, driven from the dashboard. Its Aether tools act as you, with your
+per member, driven from the dashboard. Its Cloudfield tools act as you, with your
 permissions, and it uses the account you signed it in to.
 
 - Its home is `<data>/assistant/<member>/home` and its instructions are
@@ -591,7 +591,7 @@ permissions, and it uses the account you signed it in to.
   messaging or stopping a session and saving your environment wait for you to
   approve a card. An unanswered card expires after 10 minutes, or 24 hours
   when a connector turn raised it. In a connector turn, auto-approval never
-  passes a call the connector's scopes do not cover. Only your own Aether
+  passes a call the connector's scopes do not cover. Only your own Cloudfield
   devices decide a card (`assistant.confirm`), and a connector its own
   turns' cards (see [ChatGPT and Claude connectors](#chatgpt-and-claude-connectors)),
   never the assistant's tool socket. A card approved
@@ -693,7 +693,7 @@ session branches and pull requests go. A source URL must not contain credentials
 | --- | --- | --- |
 | `github` | The configuring admin's own gh login, with all its scopes. | The admin's home. |
 | `public` | None. | None. |
-| `deploy-key` | An ed25519 key Aether generates for the mirror. | `<data-dir>/mirrors/<workspace>/private_key.<generation>`, mode `0600`. |
+| `deploy-key` | An ed25519 key Cloudfield generates for the mirror. | `<data-dir>/mirrors/<workspace>/private_key.<generation>`, mode `0600`. |
 
 - Mirroring private source shares its code with every member and run in the
   workspace. It does not lend them the admin's GitHub login.
@@ -741,7 +741,7 @@ phone's browser checks every other link ([privacy.md](privacy.md)). It holds
 the `RECORD_AUDIO` permission and grants the microphone only to the
 dashboard's origin, when you press the dashboard's mic button; every other
 origin and every other WebView permission request is denied. The audio goes to
-your Aether server for transcription and the app does not store it.
+your Cloudfield server for transcription and the app does not store it.
 
 ### Push notifications
 
@@ -765,7 +765,7 @@ library adds two exported components, as every UnifiedPush app has: a
 receiver for the distributor's broadcasts, which acts only on a registration
 it made and hands the app only what decrypts with its keys, and a service the
 distributor binds to keep the app running while it delivers. Any app can
-also open Aether at a dashboard route, as an `aether://` link can, or take
+also open Cloudfield at a dashboard route, as an `aether://` link can, or take
 down one of its notifications; a route is only shown, never acted on.
 
 ### Terminal image uploads
@@ -935,7 +935,7 @@ there is no terminal, file, settings or git-writing tool.
   reply, capped at 4 KiB, with saved preferences matched word for word
   withheld; a paraphrase still gets out, a risk the owner accepted. Your
   approval rules and auto-approval pass a connector turn's calls as they do a
-  dashboard turn's, so content the external host reads, which Aether cannot
+  dashboard turn's, so content the external host reads, which Cloudfield cannot
   see, can steer them; a method outside the connector's scopes, as they are
   when the call is made, never passes without a card, and a revoked
   connector's waiting prompts do not run. A connector decides only cards its own turns raised, and
@@ -948,7 +948,7 @@ there is no terminal, file, settings or git-writing tool.
   without them. Approving needs the scope of the method's own tool. A card
   over 2,000 characters, one showing a saved preference, or one whose summary
   holds a line break or a character not printed as itself is decided only
-  in Aether. The assistant's tool socket cannot call `assistant.ask` or
+  in Cloudfield. The assistant's tool socket cannot call `assistant.ask` or
   `assistant.confirm`, and no connector can create a rule or change
   auto-approval.
 - Audit history: a connector's write calls, refused ones included, and its
@@ -1025,7 +1025,7 @@ there is no terminal, file, settings or git-writing tool.
   server's instructions tell the assistant never to follow it. Outside that
   field are only fixed labels, ids, states, counts, times, links, workspace
   and agent names, branch names, file paths and the server's own errors.
-  ChatGPT and Claude ask you before each write tool; Aether adds no
+  ChatGPT and Claude ask you before each write tool; Cloudfield adds no
   confirmation of its own. A permission request is only ever allowed or
   denied once: the connector never picks an "always" option, refuses a
   decision whose `action` text differs from the pending request's, and
@@ -1172,7 +1172,7 @@ again would forget the marks.
 What the mark cannot do:
 
 - **Withheld updates.** Serving an old pointer forever, or a 404, stalls
-  updates without moving anything backward. Aether cannot tell a stalled
+  updates without moving anything backward. Cloudfield cannot tell a stalled
   channel from a quiet one except by the signed `published_at`, which the
   dashboard's Release channel section shows as the pointer's age. A frozen
   channel stalls security fixes too. Until an install has verified a pointer
@@ -1274,10 +1274,10 @@ When the `aether` CLI lives in a directory only root can write, such as
 macOS dialog titled `osascript`. It authorizes one fixed command that copies
 the download, staged in `~/Library/Caches/aether/update` (mode `0700`), into
 place as root after checking its SHA-256. Your password goes to macOS, never
-through Aether. A same-user process can make the update fail or stall, not
+through Cloudfield. A same-user process can make the update fail or stall, not
 install other bytes: the digest is part of the command. A mismatch afterwards
 reports `installed <path> does not match the release checksum; do not run it`.
-Where Aether cannot offer the dialog, the banner shows `sudo aether update`
+Where Cloudfield cannot offer the dialog, the banner shows `sudo aether update`
 ([local-gateway.md](local-gateway.md#localv1-verbs)).
 
 ## Vulnerability scanning

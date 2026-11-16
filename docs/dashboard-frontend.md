@@ -1,6 +1,6 @@
 # Dashboard SPA (`web/`)
 
-The dashboard is the browser client for Aether. A **workspace** is one
+The dashboard is the browser client for Cloudfield. A **workspace** is one
 repository and base branch; a **session** is one agent working on its own branch
 in its own sandbox, a container or virtual machine on the server. The dashboard shows a member's sessions, lets them launch,
 watch, message and review them, and holds the pages for agents, files,
@@ -489,7 +489,7 @@ contribute to that group's count. Relationships come from the session snapshot's
 ### App header
 
 `top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
-Its first row shows the Aether mark and lowercase `aether` wordmark on the left, then **Board**,
+Its first row shows the Cloudfield mark and lowercase `aether` wordmark on the left, then **Board**,
 **Activity**, **Insights**, **Memory**, **Files**, **Environment**, **Agents** and
 **Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
 styling and current-page selection. A `ResizeObserver` measures the row and
@@ -763,7 +763,7 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   `other_member` says that member (`other_owner`) owns the session, so it asks
   even with auto-approval on; for a launch it says their account pays.
 - **Action cards** (`components/assistant/action-card.tsx`,
-  `lib/assistant-actions.ts`): `assistantView` takes each Aether tool call out
+  `lib/assistant-actions.ts`): `assistantView` takes each Cloudfield tool call out
   of its step block as a card: one whose `tool_name` ends in an `aether_*`
   tool (Claude Code's `mcp__aether__aether_launch_session`, or the bare name), or
   a Codex call titled `mcp.aether.aether_*`, whose `{server, tool, arguments}`
@@ -1535,7 +1535,7 @@ team reads write it onto the stored info, which is the gauge's only reader. The 
 stays optional and the gauge stays hidden if the read fails. What `statfs`
 answers is the whole filesystem holding the data directory, not the directory
 itself, and the gauge is labelled as that: it is the number that says whether
-the box is running out of room, and claiming it as Aether's own usage would be
+the box is running out of room, and claiming it as Cloudfield's own usage would be
 an invention.
 
 `account.usage` is the quota RPC used by Settings > **Usage**. Its params
@@ -2098,9 +2098,9 @@ message. *Cause* is the session's `cause` in words; it is shown only while the
 session is live and shows the state the server chose, so not for a paused session
 or a request shown as "Waiting for *name*".
 
-A session that shows a reported wait carries `wait`, what Aether verified about
-the conditions the agent named ([Waits Aether can
-check](failure-handling.md#waits-aether-can-check)). `waitLine` words it,
+A session that shows a reported wait carries `wait`, what Cloudfield verified about
+the conditions the agent named ([Waits Cloudfield can
+check](failure-handling.md#waits-cloudfield-can-check)). `waitLine` words it,
 and `stateWords` puts that in place of the agent's summary, even one that
 reads "Waiting for ...", which moves to the tooltip as "The agent reported:
 *summary*":
@@ -2219,7 +2219,7 @@ they come from the room, which the session's `state` does not cover, so push and
 | `state` `disconnected` (labelled Disconnected) | owner | the reason: Agent disconnected: … / Enhanced could not start: … |
 | `state` `needs-you` with a `blocked: <summary>` reason | owner | Blocked: … |
 | `state` `needs-you` with a `needs input: <question>` reason | owner | Agent asks: …, with **Reply** |
-| `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
+| `state` `needs-you` with a usage limit Cloudfield will not resume | owner | Usage limit reached on …, with **Open** |
 | `state` `needs-you` with an Enhanced `turn interrupted` or `turn ended: <stop reason>` reason | owner | Turn interrupted · reply to continue / Stopped: the reply reached its token limit · reply to continue, with **Reply** |
 | `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the session to see its request, with **Open** |
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
@@ -3288,7 +3288,7 @@ failed read shows the server's error with **Retry**. Conversation rows carry no 
 For a session with `acp: true` (Enhanced, or Background over ACP) the rows come
 from its [session item log](enhanced-sessions.md#instructions-and-the-session-log) instead.
 With no conversation rows or older-history control, the pane shows a
-decorative, low-contrast Aether mark above the session's title, workspace, agent
+decorative, low-contrast Cloudfield mark above the session's title, workspace, agent
 and mode, branch, owner and creation time. The title and each metadata row
 are centered in the conversation pane, including when long metadata needs
 scrolling. The overview gives way to the conversation as rows arrive. History
@@ -3373,7 +3373,7 @@ prose stays in the conversation as `assistant` rows, and the work between
 two pieces of prose (thoughts, tool calls, plans, subagent launches and
 answered requests) joins one `steps` block. The prose after the last block
 is the answer. The `aether-internal report` call (or `aether_report` tool)
-that ends an Aether turn joins the block before the prose it follows, so a
+that ends a Cloudfield turn joins the block before the prose it follows, so a
 reply written before reporting stays the answer. A segment without work,
 such as `ping` and `pong`, has no block. The
 block's header names the work ("Read 12 files, ran 5 commands and edited 3
@@ -3853,7 +3853,7 @@ from the sessions the dashboard already holds, so a new subsession appears at on
 A call still open when its turn or subagent ended is **Stopped** at that end,
 unless it is a background task of a live session. Item times are log times, so a
 call that settled within 50ms is instant. A turn is named by the first line
-of its prompt, by Aether's wake-up wording ("Woken by new agent messages"),
+of its prompt, by Cloudfield's wake-up wording ("Woken by new agent messages"),
 or `Turn N`. The session's bar is its `run.status` history, coloured by state;
 `readTraceLog` (`src/store/trace-log.ts`) reads the session's `run.status` and
 `run.cost` events with `workspace.timeline` (newest first, at most 2,000),
@@ -6838,7 +6838,7 @@ Categories:
   failed mint revokes nothing) and **Revoke** (confirm). A move or
   reconnect stays in progress past its code or watch, so **Get a code** or
   **Watch for the connection** continues it at its URL, until its
-  replacement calls Aether or **Stop** ends it; until then the status region
+  replacement calls Cloudfield or **Stop** ends it; until then the status region
   names it and the other **Move** and **Reconnect** buttons are disabled.
   Errors show verbatim with a fix:
   a server without `connector.list` (`-32601`) gets the update command and
@@ -7253,7 +7253,7 @@ working tree is dirty. The panel then shows both outputs in the order git
 produced them: the comparison's fetch, then the fast-forward. `diverged`
 means both sides moved on: the step names both tips and offers the fetch,
 log, rebase and push commands to resolve it by hand, copyable as one block,
-with no fast-forward button, because Aether never force-pushes.
+with no fast-forward button, because Cloudfield never force-pushes.
 
 Both states keep **Push now**, which re-compares - the thing to do after
 resolving by hand - and both take away the copyable `git push -u aether
@@ -7620,7 +7620,7 @@ that runs a newer release than a client refuses that client
     directory only root can write, such as `/usr/local/bin/aether`): the
     button, and before the click: *macOS will ask for an administrator
     password: {cli_path} is in a directory this account cannot write to.
-    The dialog is labelled osascript, the tool Aether asks through. Aether
+    The dialog is labelled osascript, the tool Cloudfield asks through. Cloudfield
     never sees your password.*
   - *manual*: no button. The row shows `sudo aether update` with a copy
     button.
@@ -8285,7 +8285,7 @@ The installed app is a manual check too, because no browser lets a test
 emulate the `display-mode: standalone` a real install gives. On Android,
 Chrome's ⋮ menu should offer **Install app**; on iPhone, Safari's **Share >
 Add to Home Screen**. The icon that lands on the home screen should be the
-Aether mark on a dark tile, and opening it should give a full-screen dashboard
+Cloudfield mark on a dark tile, and opening it should give a full-screen dashboard
 with the shell's own top bar, safe-area padding intact under
 the notch, and the soft keyboard still shortening the layout rather than
 covering it. Watch what the server saw with:

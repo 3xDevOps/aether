@@ -1,6 +1,6 @@
 # Assistant
 
-The assistant is a chat panel in the dashboard where you ask Aether for things
+The assistant is a chat panel in the dashboard where you ask Cloudfield for things
 in plain language: "what's the status of my sessions?", "launch a session to fix the
 flaky login test", "install Rust in my environment". It acts with your
 permissions and asks before it launches, messages or stops a session, or saves your
@@ -69,7 +69,7 @@ panel shows **Installing** while a short-lived container,
 `aether-assistant-install-<member>`, runs `npm install` of the pinned adapter
 into that directory. It needs network access to the npm registry. The adapter
 carries the agent itself: the Claude Code binary of its Agent SDK, or the Codex
-version Aether pins with the adapter. Neither updates on its own; both move when
+version Cloudfield pins with the adapter. Neither updates on its own; both move when
 a server upgrade pins a newer version.
 
 ## Open it
@@ -79,7 +79,7 @@ a server upgrade pins a newer version.
   means an action waits for your approval.
 - Press `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS), even while a text field or
   a terminal has focus.
-- Run **Ask Aether** from the command palette.
+- Run **Ask Cloudfield** from the command palette.
 
 Viewers do not see the assistant. On a wide screen the panel docks on the right
 and can be resized. On a narrow window it floats over the page and `Esc` closes
@@ -126,7 +126,7 @@ home only. Starting it stops a running assistant; the next prompt starts it
 again, and a prompt sent while the sign-in runs fails until it exits. Select
 **Done** when it exits.
 
-Aether checks only that the sign-in file exists, not that it still works. When
+Cloudfield checks only that the sign-in file exists, not that it still works. When
 the sign-in expires or you want another account, use **Settings > Assistant >
 Sign-in > Sign in again**.
 
@@ -176,7 +176,7 @@ ready agent.
 ## What it can do
 
 The assistant can do what you can do through the dashboard and nothing more. It
-can also read Aether's own guides, so it can explain features of the server you
+can also read Cloudfield's own guides, so it can explain features of the server you
 run.
 
 | What | Examples | Asks first? |
@@ -195,7 +195,7 @@ run.
 Asked "what is left", "continue this" or "did we ship?", the assistant reads
 the session with its [progress evidence](connectors.md#progress-evidence)
 and answers requested, implemented, reviewed, merged, released and deployed
-on separate lines, each with its source and time, or "unknown" when Aether has
+on separate lines, each with its source and time, or "unknown" when Cloudfield has
 no source, as for releases and deployments. An agent's success report alone
 is not proof. "Continue" never repeats a launch, message or merge; the
 assistant proposes the next step and launches only when you ask.
@@ -207,7 +207,7 @@ An approved message reaches the agent at once when you control the session, or
 when it is your own session and no one controls it. Otherwise it waits about 45
 seconds for the member in control to approve or deny it.
 
-Installing a toolchain or editing a file is not an Aether action. The assistant
+Installing a toolchain or editing a file is not a Cloudfield action. The assistant
 does it in its own shell in your environment, then offers to save the
 environment.
 
@@ -272,7 +272,7 @@ The view a message carries is the one the assistant uses for that turn until
 you open another page. Before acting on a session it resolves the target from ids
 you wrote, then the page, then recent pages, and asks when more than one fits
 or you moved away from the session it last discussed. Only this assistant sees your
-page; assistants connected from outside Aether, such as ChatGPT, do not.
+page; assistants connected from outside Cloudfield, such as ChatGPT, do not.
 
 ## Approve an action
 
@@ -331,7 +331,7 @@ push notification carries **Review…**, which opens the card, and **Decline**
 where the device shows them ([watches.md](watches.md#assistant-cards)); only
 the card itself approves.
 
-- A card from a turn you started in Aether keeps the call waiting for 10
+- A card from a turn you started in Cloudfield keeps the call waiting for 10
   minutes; approving it in that time hands the result to the assistant.
   **Stop**, the turn ending or the tool call hanging up stops the wait but
   leaves the card open until it expires.
@@ -417,7 +417,7 @@ These cards never offer a rule, and a rule never passes them:
   launch choices, and answering a session's question.
 
 Only you create rules, by clicking **Always approve** on a card in the
-Aether app. The assistant, its tool socket and connectors cannot create,
+Cloudfield app. The assistant, its tool socket and connectors cannot create,
 list or revoke them.
 
 **Settings → Assistant → Approval rules** lists each rule with its wording,
@@ -521,7 +521,7 @@ agent asks you still appears as a card.
 
 ## Notifications
 
-Aether watches every session the assistant launches, relaunches or messages for
+Cloudfield watches every session the assistant launches, relaunches or messages for
 you: it
 creates a [watch](watches.md#assistant-watches) with source `assistant`,
 listed in **Settings > Watches**, where you pause it to stop the notices. If
@@ -577,7 +577,7 @@ Every message records where it came from. A chip on each of the last 50
 names any door other than the dashboard: **from phone** for the Android app,
 **from desktop** for the desktop app, **from ChatGPT (connector)** for a
 connector. The server stamps the origin from
-the connection that carried the message; the Aether app only names which of
+the connection that carried the message; the Cloudfield app only names which of
 its own clients it is, which labels the message and decides nothing. A
 connector origin is set only by the connector's own route, never by a request
 field.

@@ -55,8 +55,8 @@ A session you stop yourself is abandoned.
 
 A session succeeds when its status is `merged`, a pull request it opened is merged, or its owner chose **Mark complete**.
 
-Only pull requests opened through Aether count. A pull request an agent opens
-with `gh` directly is not counted. A merge is counted only after Aether has
+Only pull requests opened through Cloudfield count. A pull request an agent opens
+with `gh` directly is not counted. A merge is counted only after Cloudfield has
 seen it. On load, the page checks up to 10 open pull requests from your
 finished sessions against GitHub, so a pull request merged after its session finished
 appears within a moment. An older one can stay `open` until its session's pull
@@ -89,7 +89,7 @@ Every other session, Standard sessions included, is listed as not reporting toke
 its cost is unknown, not zero, so cost and token figures are a floor. When some
 sessions are unmetered the page says `at least $X`.
 
-An Enhanced agent reports the running cost of its session. Aether charges what
+An Enhanced agent reports the running cost of its session. Cloudfield charges what
 each report adds, with the tokens of that turn. A restored session, a new
 session or Claude Code's `/clear` neither counts spend twice nor drops it, and
 spend the server had not recorded when it stopped counts with the agent's next
@@ -117,14 +117,14 @@ it. The Activity tab is the 7-day history above; System is live.
 - **Resources by session.** A donut of CPU or memory use. Each of up to five
   sandboxes using at least 2% of the host gets a slice; the rest are one
   **Other sessions** slice. **Everything else** is host use outside the listed
-  sandboxes: the Aether server, Docker, host processes and sandboxes you
+  sandboxes: the Cloudfield server, Docker, host processes and sandboxes you
   cannot see. Click a slice or its legend entry to filter the ranked list to
   it; click again or **Show all** to clear. The list ranks every sandbox
   by use, with its limit, **near limit** from 80% of that limit, **throttled**
   when CPU is capped, and a 15-minute trend. A session's browser is its own row,
   with its own limits. A row opens its session, or your own Environment.
 - **History.** CPU, memory, load average, pressure, network and disk I/O.
-- **Storage.** The data filesystem, Aether data by category, Docker storage,
+- **Storage.** The data filesystem, Cloudfield data by category, Docker storage,
   container writable layers and, for admins, the largest storage owners.
 
 The server reads host figures from `/proc` and `/sys` every 5 seconds and

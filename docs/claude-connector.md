@@ -1,7 +1,7 @@
 # Claude connector listing
 
 For the project's maintainers. Claude's connector directory is Anthropic's
-catalog of MCP servers that Claude users add with one click. Aether's listing
+catalog of MCP servers that Claude users add with one click. Cloudfield's listing
 points at the same URL as the [ChatGPT plugin](chatgpt-plugin.md),
 `https://edge.onaether.dev/mcp`, the project edge's universal connector URL
 ([connectors.md](connectors.md#the-universal-url)). This page covers the
@@ -17,12 +17,12 @@ Anthropic's sources, read 2026-10-26:
 [directory policy](https://support.claude.com/en/articles/13145358-anthropic-software-directory-policy).
 Recheck them before submitting; the quotes below are what they said then.
 
-## Requirements and where Aether stands
+## Requirements and where Cloudfield stands
 
 "Code" is origin/main at cabcf962; "live" is `curl` against
 `edge.onaether.dev` on 2026-10-26.
 
-| Requirement | Anthropic | Aether |
+| Requirement | Anthropic | Cloudfield |
 | --- | --- | --- |
 | Transport | "Use Streamable HTTP, which the MCP specification defines for remote servers." ([building](https://claude.com/docs/connectors/building)) | Streamable HTTP at `/mcp` (live) |
 | IPv4 | "Connectors are IPv4-only, so a hostname that only publishes `AAAA` records can't be reached" ([troubleshooting](https://claude.com/docs/connectors/building/troubleshooting)) | `edge.onaether.dev` has an A record (live) |
@@ -171,7 +171,7 @@ rm -f "$tokens"
 Checklist:
 
 - [ ] Unauthenticated `POST /mcp` answers 401 with `resource_metadata`.
-- [ ] Both metadata documents match the [requirements](#requirements-and-where-aether-stands).
+- [ ] Both metadata documents match the [requirements](#requirements-and-where-cloudfield-stands).
 - [ ] `tools/list` returns every tool with a `title` and `readOnlyHint`,
       `destructiveHint` and `openWorldHint`.
 - [ ] Each read tool returns a result with no generic error.
@@ -207,7 +207,7 @@ At [claude.ai/directory/manage](https://claude.ai/directory/manage), select
 `dist/aether-claude-connector/listing.json`:
 
 1. **Connection**: paste `server_url`. Leave **Users connect to different
-   URLs** unselected: Aether is a **Universal URL** listing.
+   URLs** unselected: Cloudfield is a **Universal URL** listing.
 2. **Tools**: check all tools synced with titles and annotations.
 3. **Listing**: copy the listing fields and upload `icon.png`.
 4. **Use cases**: copy `use_cases`, `prerequisites`, `access` and
@@ -248,7 +248,7 @@ what `edge.onaether.dev` serves.
 | Privacy policy hosted at a public URL | Draft in [legal/](legal/privacy-connectors.md) | No | No | No |
 | Terms hosted at a public URL | Draft in [legal/](legal/terms-connectors.md) | No | No | No |
 | Demo server with sample data | n/a | No | n/a | n/a |
-| Reviewer account that needs no email code | Built in Aether; not enabled on edge.onaether.dev: `aether-edge serve --reviewer-account-file` | No | No | No |
+| Reviewer account that needs no email code | Built in Cloudfield; not enabled on edge.onaether.dev: `aether-edge serve --reviewer-account-file` | No | No | No |
 | Claude Code loopback redirects | No | No | n/a | n/a |
 | Live test from claude.ai through Anthropic's egress `160.79.104.0/21` | n/a | Not run | n/a | n/a |
 | Owner accepts the seven acknowledgments | n/a | n/a | No | No |

@@ -1,8 +1,8 @@
 # Integrating an unsupported agent
 
-This guide connects an agent CLI that Aether does not ship to Aether's durable
-mailbox. A **session** is one agent that Aether launches in a sandbox (a container or virtual machine) for one task.
-Other sessions and people send it messages, which Aether stores until the agent reads
+This guide connects an agent CLI that Cloudfield does not ship to Cloudfield's durable
+mailbox. A **session** is one agent that Cloudfield launches in a sandbox (a container or virtual machine) for one task.
+Other sessions and people send it messages, which Cloudfield stores until the agent reads
 them. Read [Agents](harnesses.md#custom-and-unlisted-agents) first to register
 the CLI as a custom agent. For a shipped agent, you do not need this guide.
 
@@ -32,7 +32,7 @@ commands below work only inside a session.
    ([Agents](harnesses.md#set-up-an-agent)).
 3. Launch it with `aether session "<task>" --agent <name>`.
 
-Aether gives the agent its [instructions](coordination.md#agent-instructions) after
+Cloudfield gives the agent its [instructions](coordination.md#agent-instructions) after
 the task prompt. A launch with no task gets none, so tell the agent's own startup
 mechanism to run `aether-internal skill` and `aether-internal memory brief`.
 
@@ -79,7 +79,7 @@ chmod +x "$adapter_dir/aether-context.sh"
 rm -rf "$adapter_dir"
 ```
 
-It calls `aether-internal hook generic context` and prints only Aether's own
+It calls `aether-internal hook generic context` and prints only Cloudfield's own
 guidance: an instruction to read the inbox, plus any overlap notes. It
 prints nothing when there is no mail. Peer message bodies are never in the output.
 They stay in the inbox as attributed data.
@@ -101,7 +101,7 @@ run it on a timer.
 
 Add wake only if the agent has a supported API to start a turn in a specific live
 session, and lifecycle events that let you cancel on Stop, shutdown and session
-replacement. Do not write to the agent's terminal. Aether has no terminal-input
+replacement. Do not write to the agent's terminal. Cloudfield has no terminal-input
 fallback.
 
 One call performs one bounded, non-consuming check of the mailbox:

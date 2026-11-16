@@ -2,10 +2,10 @@
 
 ## Decision
 
-Aether does not currently split a native agent from its tools. Keep
+Cloudfield does not currently split a native agent from its tools. Keep
 that boundary unchanged until one supported harness can delegate its complete
 enabled tool surface. Do not advertise a partial bridge as isolation, and do
-not replace native agents with an Aether-owned agent loop without a separate
+not replace native agents with a Cloudfield-owned agent loop without a separate
 product decision.
 
 This document records findings checked on 2026-10-08, the tradeoffs, and the
@@ -25,7 +25,7 @@ commands, tests, builds and their child processes. A real split lets an
 execution process or container fail without killing the agent process that
 receives and explains the failure.
 
-A **session** is Aether's durable identity for one agent working on a task, including
+A **session** is Cloudfield's durable identity for one agent working on a task, including
 follow-up tasks. Its compute, checkout and recorded history have separate
 lifetimes. Separating execution does not
 require deleting history: recordings and captured diff history persist until
@@ -51,13 +51,13 @@ An open terminal may need to remain attached. Stopping that environment just
 because no RPC is in flight would kill real work. An idle policy must account
 for owned processes and terminals, not just gaps between model requests.
 
-## Aether's current boundary and adapter findings
+## Cloudfield's current boundary and adapter findings
 
-Aether runs the native CLI and its tools in the same session sandbox. Enhanced
+Cloudfield runs the native CLI and its tools in the same session sandbox. Enhanced
 mode changes the session protocol and presentation, not execution placement.
 The [ACP host](../internal/acphost/conn.go) advertises terminal authentication
 and output display, not client-side filesystem or terminal execution.
-Tool-call updates are observations; they are not instructions for Aether to
+Tool-call updates are observations; they are not instructions for Cloudfield to
 execute again.
 
 Interactive sessions already remain replyable after a success/failure report;
@@ -82,9 +82,9 @@ v1 methods have disappeared.
 | [pi-acp 0.0.34](https://github.com/svkozak/pi-acp/blob/v0.0.34/README.md#limitations) | Explicitly does not delegate `fs/*` or `terminal/*`; pi executes locally. |
 | [OMP 18.8.4](https://github.com/can1357/oh-my-pi/tree/v18.8.4) | Has conditional read/write/edit/Bash delegation, but fallbacks and unbridged paths prevent a complete boundary. |
 
-The first three versions match [Aether's adapter pins](../internal/harness/acp.go).
+The first three versions match [Cloudfield's adapter pins](../internal/harness/acp.go).
 OMP 18.8.4 was checked against its exact upstream tag and the installed
-`omp --version`; it is an inspected version, not an Aether installation pin.
+`omp --version`; it is an inspected version, not a Cloudfield installation pin.
 OpenCode and custom agents receive no execution-delegation guarantee merely
 by supporting ACP. Recheck the exact version before changing these conclusions.
 
@@ -100,7 +100,7 @@ installs a bridge, while the [subagent creation path](https://github.com/can1357
 does not show propagation. That is source evidence, not a live subagent
 isolation result.
 
-## Pros and cons for Aether
+## Pros and cons for Cloudfield
 
 | Potential benefit | Cost or condition |
 | --- | --- |
@@ -119,7 +119,7 @@ own tools exhausting their shared container.
 
 ## Smallest plausible architecture
 
-Keep one Aether server and one session identity. For one fully supported harness,
+Keep one Cloudfield server and one session identity. For one fully supported harness,
 place the agent process and execution environment in separate managed
 containers/cgroups on the same host. Reuse the existing scheduler, authority,
 resource limits, history storage and cleanup ownership. Do not introduce a
@@ -127,7 +127,7 @@ second control-plane service, a distributed queue, or a container per command.
 
 ```mermaid
 flowchart LR
-    B[Native agent] -->|Tool request| S[Aether server]
+    B[Native agent] -->|Tool request| S[Cloudfield server]
     S -->|Authorized operation| E[Execution container]
     E -->|Output and result| S
     S -->|Tool result| B
@@ -174,7 +174,7 @@ with the same workspace. Do not silently restart tools after a lost reply.
    host. Add automatic idle stop only if process ownership is complete and the
    savings justify it. No user should have to manage two runtimes manually.
 
-Only after those checks pass should Aether claim support for that harness and
+Only after those checks pass should Cloudfield claim support for that harness and
 version. None of the adapter inspection above proves that these live
 isolation tests have passed. A complete upstream executor interface is the
 first dependency; more lifecycle machinery is not a substitute for it.

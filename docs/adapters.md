@@ -1,6 +1,6 @@
 # Adding an agent or an adapter
 
-Two independent seams. An **agent profile** teaches Aether how to launch an
+Two independent seams. An **agent profile** teaches Cloudfield how to launch an
 agent CLI - that is all most agents need. An **adapter** additionally turns the
 agent's machine-readable output into typed events. Adapters are optional by
 design: a session without one still has a full PTY transcript and a git-diff
@@ -150,7 +150,7 @@ usage leaves its sessions marked unmetered, which `aether cost` and `aether budg
 both say out loud.
 
 `AgentSession` carries the agent's own conversation ID, which is unrelated
-to any Aether scope. It is a timeline record only: Aether does not assign a
+to any Cloudfield scope. It is a timeline record only: Cloudfield does not assign a
 conversation ID from it or use it to control reopening a session. Emit it anyway - it is
 what an operator needs to find the conversation in the agent's own tooling.
 

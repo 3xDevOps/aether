@@ -1,6 +1,6 @@
 # Member environment home
 
-Your home is a directory on the server that Aether mounts read-write as `$HOME`
+Your home is a directory on the server that Cloudfield mounts read-write as `$HOME`
 in your environment (see [environments.md](environments.md)) and in every session
 you launch, including sessions on another member's shared agent account. Agent
 installs, logins, GitHub credentials and agent configuration live here. This
@@ -17,7 +17,7 @@ recipient's sessions and, when they have no installation of that agent, your
 The home survives every stop, save, reset and server restart:
 
 - Executables in `~/.local/bin`. `npm install -g` and `cargo install` write to
-  `~/.local` because Aether sets `NPM_CONFIG_PREFIX` and `CARGO_INSTALL_ROOT`
+  `~/.local` because Cloudfield sets `NPM_CONFIG_PREFIX` and `CARGO_INSTALL_ROOT`
   to it, unless the image, workspace or profile sets them. nvm refuses to
   switch versions while `NPM_CONFIG_PREFIX` is set, so put `unset
   NPM_CONFIG_PREFIX` before nvm's lines in `~/.bashrc` if you use it.
@@ -44,7 +44,7 @@ environment** never captures it.
 ## Tool caches
 
 Package caches live outside the home, at `/aether-cache`, so they never fill
-it and Aether can clean them. These variables default there unless the image,
+it and Cloudfield can clean them. These variables default there unless the image,
 workspace or profile sets them:
 
 | Variable | Default |
@@ -58,7 +58,7 @@ workspace or profile sets them:
 | `YARN_CACHE_FOLDER` | `/aether-cache/yarn` |
 | `npm_config_store_dir` (pnpm) | `/aether-cache/pnpm` |
 
-You do not need to clean them. Aether keeps each member's caches under
+You do not need to clean them. Cloudfield keeps each member's caches under
 20 GiB: every hour it deletes their least recently used Go build cache
 (`go-build`) files until the member is back under. Files used in the last 2
 hours stay, so running builds keep their files, and a member who builds more
@@ -79,14 +79,14 @@ your computer. The agent, its login and its settings land in your home, so you
 do not save the environment afterwards.
 
 The launch form offers an agent only when its executable is in your
-`~/.local/bin`. Aether follows relative symlinks, and absolute ones under
+`~/.local/bin`. Cloudfield follows relative symlinks, and absolute ones under
 `/root` or `/home/aether`, that stay inside your home. Broken links, links
 outside the home and files without execute permission do not count. On a shared
 account the form uses the owner's installation when you have none, and the
 owner must have logged in. With none installed, the form offers **Set up an
 agent**.
 
-Aether updates a shipped agent in `~/.local/bin` in the background when a session
+Cloudfield updates a shipped agent in `~/.local/bin` in the background when a session
 launches, at most every 6 hours
 ([harnesses.md](harnesses.md#updates-before-launch)). `aether agent remove
 <name>` deletes only its `~/.local/bin` links. Packages, login and settings stay
@@ -101,7 +101,7 @@ agent's vendor login and your server sign-in.
 
 An admin connects in the dashboard: **Settings → GitHub → Connect GitHub**, or
 **Onboarding → Repository → From GitHub → Add GitHub repository**. Choose **Copy
-code and open GitHub**, enter the code on GitHub, approve and return. Aether
+code and open GitHub**, enter the code on GitHub, approve and return. Cloudfield
 sets up Git and signing for you. **Check connection** only reads the state. To
 import a repository, follow the
 [browser walkthrough](quickstart.md#github-repository).
@@ -137,7 +137,7 @@ open the URL in your browser and enter the code; waiting for approval...
 
 Open the URL in your own browser and enter the code. The command waits for the
 approval, then prints the two lines above. The scopes are gh's own defaults
-plus `admin:ssh_signing_key`, which lets Aether register your signing key.
+plus `admin:ssh_signing_key`, which lets Cloudfield register your signing key.
 After 15 minutes the code expires and the command fails with
 `github: authorization expired after 15 minutes; connect again`. Ctrl-C cancels
 the authorization. Running the command again while a code is pending shows the

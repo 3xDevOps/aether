@@ -1,6 +1,6 @@
 # AI contributions policy
 
-Aether is built with plenty of AI assistance. This policy exists because
+Cloudfield is built with plenty of AI assistance. This policy exists because
 low-quality, AI-generated contributions waste maintainer time.
 
 ## The standard
@@ -56,7 +56,7 @@ request and leave its output as a review comment.
 
 ## Why we are not anti-AI
 
-Aether is a tool for running coding agents, and the best contributions to it
+Cloudfield is a tool for running coding agents, and the best contributions to it
 often involve one. A contributor who uses an LLM to understand unfamiliar
 code, draft a first pass, or catch edge cases they would miss is probably
 more productive than one doing everything by hand. The difference is that

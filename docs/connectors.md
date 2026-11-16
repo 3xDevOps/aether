@@ -1,16 +1,16 @@
 # ChatGPT and Claude connectors
 
 A connector is a custom MCP connector in ChatGPT or Claude that points at your
-Aether server. Once you add one, you can launch sessions, see what needs
+Cloudfield server. Once you add one, you can launch sessions, see what needs
 you, answer agents, and check pull requests from a chat in ChatGPT or Claude,
-the phone apps included, with no Aether app on the phone. The connector acts
-as you: the Aether member who authorized it, under the same role checks as
+the phone apps included, with no Cloudfield app on the phone. The connector acts
+as you: the Cloudfield member who authorized it, under the same role checks as
 `aether` and the dashboard.
 
 ```mermaid
 flowchart LR
     A[ChatGPT or Claude] -->|HTTPS tool calls| E[Edge]
-    E -->|forwards| S[Your Aether server]
+    E -->|forwards| S[Your Cloudfield server]
 ```
 
 The edge is a public relay your server connects out to ([edge.md](edge.md)). Your
@@ -126,8 +126,8 @@ The connector then works in Claude on the web, desktop and mobile.
 
 ## The universal URL
 
-`https://<edge>/mcp` is one URL for every Aether server, so one ChatGPT
-plugin can serve every Aether user. Once Aether is listed in ChatGPT's plugin
+`https://<edge>/mcp` is one URL for every Cloudfield server, so one ChatGPT
+plugin can serve every Cloudfield user. Once Cloudfield is listed in ChatGPT's plugin
 directory ([chatgpt-plugin.md](chatgpt-plugin.md)) or Claude's connector
 directory ([claude-connector.md](claude-connector.md)), install it from there
 instead of adding a custom MCP server; connecting then works as described here.
@@ -172,11 +172,11 @@ A connector keeps the URL it was added at. Settings marks each one
 **Universal URL** or **This server's own URL**, and `aether mcp` prints
 `universal URL` or `at <url>`. Once Settings shows the universal URL for you,
 **Move to the universal URL** next to a connector on the server's own URL
-starts a new connection: add Aether again in the app with the universal URL.
+starts a new connection: add Cloudfield again in the app with the universal URL.
 Settings revokes the old connector once a new one from the same client, such as
-ChatGPT or Claude, connects at the universal URL and calls Aether. If none
+ChatGPT or Claude, connects at the universal URL and calls Cloudfield. If none
 calls within 10 minutes, it leaves the old one and says so. Remove the old
-Aether connector in ChatGPT or Claude yourself. From a terminal, connect again at the
+Cloudfield connector in ChatGPT or Claude yourself. From a terminal, connect again at the
 universal URL, then run `aether mcp revoke <old id>`.
 
 ### Self-hosted and custom edges
@@ -248,7 +248,7 @@ member.role: ChatGPT connector con-7k2m9q4xbd cannot call this method; no connec
 To change scopes, revoke the connector and connect
 again, or select **Reconnect** in Settings. It gets a new code where the page
 asks for one, and revokes the old connector once the new connection calls
-Aether. Connectors added before scopes existed have all three.
+Cloudfield. Connectors added before scopes existed have all three.
 
 ## What it can do
 
@@ -282,7 +282,7 @@ The connector has these tools and no others:
 
 Things to ask:
 
-- "What needs me in Aether?"
+- "What needs me in Cloudfield?"
 - "What is the agent working on edge doing?"
 - "Launch a Claude run in api to fix the flaky login test."
 - "Which subscription has the most usage left? Launch the docs fix on it."
@@ -295,7 +295,7 @@ Things to ask:
 - "Tell me when the login fix session needs me or finishes."
 
 The connector tells ChatGPT and Claude to launch and write the task as
-Aether's assistant does: [What a launch's task holds](assistant.md#what-a-launchs-task-holds).
+Cloudfield's assistant does: [What a launch's task holds](assistant.md#what-a-launchs-task-holds).
 
 Results link to the session in the dashboard when the server serves one on
 its tailnet (`web-port`); the edge serves no dashboard. A result's text is a
@@ -484,17 +484,17 @@ unreadable reports. It adds `released` and `deployed` as `{"state":
 repository"}`.
 
 The lookups are the same as `aether_pr_status`'s, for at most 5 sessions per
-call: one may record what GitHub showed in Aether and tell open dashboards
+call: one may record what GitHub showed in Cloudfield and tell open dashboards
 that the session's pull request changed.
 
 `aether_get_session`'s `evidence` has:
 
 - `pull_requests`: the first 20 pull requests the session opened
-  (`pull_requests_total` when there are more), as Aether recorded it
+  (`pull_requests_total` when there are more), as Cloudfield recorded it
   (`source: "aether record"`, with the `checked_at` of that record), or as
   GitHub just showed it (`source: "github"`). Only a lookup that reached
   GitHub without an error relabels one; a finished session's lookup can answer
-  from Aether's record without asking GitHub, and a recorded merge stays as
+  from Cloudfield's record without asking GitHub, and a recorded merge stays as
   recorded. A pull request not merged that no lookup confirmed has
   `not_checked_live`. A session closed as merged adds `closed_as_merged`: a
   person closed it, which is not a GitHub merge.
@@ -662,17 +662,17 @@ scope of the method's own tool: `write` for launches, messages, answers,
 pauses, session lifecycle, memory notes and watches, `control` for stops,
 closes, merges, pull requests, mode switches and handoffs. A method no
 connector tool calls, such as saving the environment or your launch
-defaults, is decided only in Aether. Declining needs no scope. Only a card a turn of this
+defaults, is decided only in Cloudfield. Declining needs no scope. Only a card a turn of this
 connector raised can be decided. A card reads `Waiting for your approval in
 Aether` and is decided only there when its text is over 2,000 characters,
 its summary holds a line break or a character not printed as itself, it forgets a
 preference or shows a saved one, or approving it needs a scope the
 connector lacks now or lacked when the turn ran. The connector offers only
-**Approve** and **Decline**; rules and auto-approval change only in Aether.
+**Approve** and **Decline**; rules and auto-approval change only in Cloudfield.
 
 Your [approval rules and auto-approval](assistant.md#auto-approval) apply to
 connector turns as to dashboard turns, within the connector's scopes: a
-method the connector was not granted always shows a card, decided in Aether.
+method the connector was not granted always shows a card, decided in Cloudfield.
 A call that never shows a card, such as a pause, runs only under a scope
 the connector holds, so a connector turn cannot save a preference.
 The server reads the connector's scopes when each prompt is sent and each
@@ -700,7 +700,7 @@ do not hold:
 
 ChatGPT and Claude ask before each tool that is not read-only. ChatGPT asks by
 default and can remember your answer for a conversation. Claude offers **Allow
-once** and **Always allow** per tool. Aether shows no confirmation card of its
+once** and **Always allow** per tool. Cloudfield shows no confirmation card of its
 own for these tools, and the [assistant's auto-approval](assistant.md#auto-approval)
 applies only inside [`aether_ask_assistant`](#ask-your-assistant) turns. Your role still decides: a viewer's launch is refused, as it is in
 `aether`. A connector's calls are judged by the device its code was minted on:

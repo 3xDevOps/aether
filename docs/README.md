@@ -1,6 +1,6 @@
-# Aether documentation
+# Cloudfield documentation
 
-These guides cover installing, using and extending Aether, a self-hosted server
+These guides cover installing, using and extending Cloudfield, a self-hosted server
 that runs coding agents for you and your team. If you are new, start with the
 [quickstart](quickstart.md).
 
@@ -29,7 +29,7 @@ that runs coding agents for you and your team. If you are new, start with the
 | Environment | Your own sandbox on the server, opened from **Environment** in the dashboard or with `aether terminal`. Your sessions start from its image: agents you install reach them at once, other tools only after **Save environment**. | [environments.md](environments.md) |
 | Home | Your persistent directory on the server, mounted as `$HOME` in your environment and in every session you launch. Installed agents (`~/.local/bin`), their logins and their configuration live there. | [environment-home.md](environment-home.md) |
 | Standard image | The container image an environment starts from until its member saves their own, `ghcr.io/3xdevops/aether-standard`. | [environments.md](environments.md) |
-| Agent | A coding CLI a session starts: Claude Code, Codex, OpenCode, pi, oh-my-pi (`omp`), GitHub Copilot CLI, Gemini CLI, Cursor CLI, Antigravity CLI, or one you add. Aether's code calls these harnesses. | [harnesses.md](harnesses.md) |
+| Agent | A coding CLI a session starts: Claude Code, Codex, OpenCode, pi, oh-my-pi (`omp`), GitHub Copilot CLI, Gemini CLI, Cursor CLI, Antigravity CLI, or one you add. Cloudfield's code calls these harnesses. | [harnesses.md](harnesses.md) |
 | Permission tier | What a session's agent may change outside its checkout. Root access runs sudo without asking, Default asks you before each sudo, and Isolated works on a throwaway copy of your home with only the agents' own hosts reachable. In every tier the agent itself runs unprivileged. | [security.md](security.md#permission-tiers) |
 | Standard, Enhanced and Background mode | How a session shows its agent. Standard is the agent's own terminal, Enhanced shows its messages, tool calls and approvals as dashboard controls, and Background sessions the task once with no interaction. | [enhanced-sessions.md](enhanced-sessions.md) |
 | Subsession | A session an agent starts for part of its task, one level deep. It appears under its parent in the dashboard and reports back to it. | [teams.md](teams.md#subsessions) |
@@ -41,7 +41,7 @@ that runs coding agents for you and your team. If you are new, start with the
 flowchart LR
     client["Your computer or phone:<br>CLI, desktop or Android app"] -->|"SSH: direct,<br>tailnet or edge"| server
     git["GitHub or another<br>Git host"] -->|"source mirror"| ws
-    subgraph server["Aether server"]
+    subgraph server["Cloudfield server"]
         ws["Workspace repository:<br>base and session branches"]
         env["Your environment:<br>image and home"]
         run["Session container:<br>agent and checkout"]
@@ -57,7 +57,7 @@ flowchart LR
 1. [Quickstart](quickstart.md): install, link, add a repository and finish
    your first session.
 2. [Coding agents](agents.md): a prompt that lets Claude Code, Codex or
-   another coding agent set Aether up and drive it from the CLI.
+   another coding agent set Cloudfield up and drive it from the CLI.
 
 Daily use:
 
@@ -74,7 +74,7 @@ Daily use:
    accounts, set budgets or launch subsessions.
 8. [Networking](networking.md) and [edge](edge.md): when you choose how
    people reach the server, or host the dashboard for phones.
-9. [Assistant](assistant.md): when you want to ask Aether for things in plain
+9. [Assistant](assistant.md): when you want to ask Cloudfield for things in plain
    language.
 10. [Team memory](memory.md): when sessions should share what they learn.
 11. [Connectors](connectors.md): when you want to run agents from ChatGPT or
@@ -100,16 +100,16 @@ Reference:
     project's edge store and send.
 20. [Notices](notices.md): the licence and what the release artifacts bundle.
 
-## Extend Aether
+## Extend Cloudfield
 
 - [Agent integration](harness-integration.md): connect an agent CLI that
-  Aether does not ship to the inbox sessions use to message each other.
+  Cloudfield does not ship to the inbox sessions use to message each other.
 - [Adapters](adapters.md): add a built-in agent, or an adapter that turns an
   agent's output into timeline events.
 
 ## Contributor reference
 
-- [CONTRIBUTING.md](../CONTRIBUTING.md): build, test and release Aether.
+- [CONTRIBUTING.md](../CONTRIBUTING.md): build, test and release Cloudfield.
 - [Testing](testing.md): which suite to run for a change, and how.
 - [Dashboard frontend](dashboard-frontend.md): how the web client in `web/` is
   built.
