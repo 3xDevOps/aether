@@ -1,5 +1,6 @@
 'use strict'
 
+const fs = require('node:fs')
 const path = require('node:path')
 
 // Exit statuses `aether gui --json` uses to say what the shell does next
@@ -31,4 +32,24 @@ function relaunchTarget(line) {
   return typeof target === 'string' && path.isAbsolute(target) ? target : ''
 }
 
-module.exports = { relaunchTarget, sidecarExitAction }
+// What app.relaunch gets for target: null to relaunch this shell as it was
+// started, which reuses its whole command line, or the other app's
+// executable with this shell's arguments. Electron drops the original
+// command line once execPath is given (App::Relaunch), and on linux that
+// line carries the launcher's --no-sandbox. A target that does not resolve
+// falls back to this shell rather than relaunching nothing.
+function relaunchOptions(target, execPath, argv, platform = process.platform, realpath = fs.realpathSync) {
+  if (!target) return null
+  let resolved, own
+  try {
+    resolved = realpath(target)
+    own = realpath(execPath)
+  } catch {
+    return null
+  }
+  const foldCase = platform === 'darwin' || platform === 'win32'
+  if (foldCase ? resolved.toLowerCase() === own.toLowerCase() : resolved === own) return null
+  return { execPath: target, args: argv.slice(1) }
+}
+
+module.exports = { relaunchOptions, relaunchTarget, sidecarExitAction }

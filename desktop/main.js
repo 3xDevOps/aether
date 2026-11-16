@@ -18,7 +18,7 @@ const readline = require('node:readline')
 const { boundCli } = require('./cli-binding')
 const { SCHEMES, deepLinkSuffix, findDeepLink } = require('./deep-link')
 const notify = require('./notify')
-const { relaunchTarget, sidecarExitAction } = require('./sidecar-exit')
+const { relaunchOptions, relaunchTarget, sidecarExitAction } = require('./sidecar-exit')
 const { chooseUserData } = require('./user-data')
 const zoom = require('./zoom')
 
@@ -238,14 +238,22 @@ function main() {
       if (action === 'relaunch') {
         quitting = true
         // The line naming the app to relaunch can still be in the pipe
-        // when the exit event fires.
+        // when the exit event fires; a pipe that never closes must not keep
+        // the shell from relaunching.
+        let relaunched = false
         const relaunch = () => {
-          if (relaunchPath) app.relaunch({ execPath: relaunchPath })
+          if (relaunched) return
+          relaunched = true
+          const options = relaunchOptions(relaunchPath, process.execPath, process.argv)
+          if (options) app.relaunch(options)
           else app.relaunch()
           app.exit(0)
         }
         if (stdoutClosed) relaunch()
-        else rl.once('close', relaunch)
+        else {
+          rl.once('close', relaunch)
+          setTimeout(relaunch, 2000)
+        }
         return
       }
       respawns += 1
