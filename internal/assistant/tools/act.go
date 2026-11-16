@@ -327,7 +327,7 @@ func (s *Server) summarizeLaunchDefaults(ctx context.Context, req protocol.Reque
 		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": " + err.Error()}
 	}
 	if p.Defaults == nil {
-		c.Summary = "Clear your saved launch choices, so launches start from Aether's own defaults"
+		c.Summary = "Clear your saved launch choices, so launches start from Cloudfield's own defaults"
 		return nil
 	}
 	var members protocol.MemberListResult

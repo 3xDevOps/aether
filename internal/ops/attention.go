@@ -78,17 +78,17 @@ func attentionRowOf(it protocol.AttentionItem, l links) attentionRow {
 }
 
 func answerWith(it protocol.AttentionItem) string {
-	const dashboard = "the session in the Aether dashboard"
+	const dashboard = "the session in the Cloudfield dashboard"
 	switch it.Kind {
 	case protocol.AttentionKindPermission:
 		if it.Request != nil && len(it.Request.Options) > 0 {
 			return "aether_decide_approval"
 		}
-		return "the session's terminal in the Aether dashboard"
+		return "the session's terminal in the Cloudfield dashboard"
 	case protocol.AttentionKindQuestion:
 		switch {
 		case it.Request == nil || len(it.Request.Options) == 0:
-			return "the session's terminal in the Aether dashboard"
+			return "the session's terminal in the Cloudfield dashboard"
 		case it.Request.URL != "":
 			return "open untrusted.link_url, then aether_answer with an option"
 		}

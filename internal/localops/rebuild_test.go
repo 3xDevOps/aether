@@ -58,27 +58,27 @@ func TestRealUserReportsAnUnknownSudoUser(t *testing.T) {
 // held backslashes and dropped the XDG candidate when this test ran on the
 // Windows runner, which is the whole reason the function stopped joining
 // unix paths with the host's own separator.
-func TestDesktopAppPathsPerOS(t *testing.T) {
-	linux := desktopAppPaths("linux", "/home/u", "/data/xdg", "")
+func TestAppPathsNamedPerOS(t *testing.T) {
+	linux := appPathsNamed("linux", "Aether", "/home/u", "/data/xdg", "")
 	want := []string{"/data/xdg/aether/desktop", "/home/u/.local/share/aether/desktop"}
 	if len(linux) != 2 || linux[0] != want[0] || linux[1] != want[1] {
 		t.Fatalf("linux = %v, want %v", linux, want)
 	}
 	// A relative XDG_DATA_HOME is invalid per the spec; only the default
 	// location is left.
-	if got := desktopAppPaths("linux", "/home/u", "relative", ""); len(got) != 1 {
+	if got := appPathsNamed("linux", "Aether", "/home/u", "relative", ""); len(got) != 1 {
 		t.Fatalf("linux with a relative XDG_DATA_HOME = %v, want one path", got)
 	}
 	// Both Applications folders: which one desktopLayout picked depends on
 	// whether the account could write /Applications at install time.
-	mac := desktopAppPaths("darwin", "/Users/u", "", "")
+	mac := appPathsNamed("darwin", "Aether", "/Users/u", "", "")
 	if len(mac) != 2 || mac[0] != "/Applications/Aether.app" || mac[1] != "/Users/u/Applications/Aether.app" {
 		t.Fatalf("darwin = %v", mac)
 	}
-	if got := desktopAppPaths("windows", "/home/u", "", "AppData"); got != nil {
+	if got := appPathsNamed("windows", "Aether", "/home/u", "", "AppData"); got != nil {
 		t.Fatalf("windows with a relative LOCALAPPDATA = %v", got)
 	}
-	if got := desktopAppPaths("plan9", "/home/u", "", ""); got != nil {
+	if got := appPathsNamed("plan9", "Aether", "/home/u", "", ""); got != nil {
 		t.Fatalf("plan9 = %v, want no desktop app", got)
 	}
 }

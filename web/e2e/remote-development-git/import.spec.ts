@@ -4,7 +4,7 @@ import type { Workspace, WorkspaceMirrorResult } from '../../src/lib/types'
 // A real credential-free HTTPS repository reachable by the server. No route
 // interception, fabricated mirror response, or local repository link is used.
 // Remote fetch uses the scenario deadline, not the short rendering timeout.
-const source = process.env.AETHER_E2E_GIT_SOURCE_URL ?? 'https://github.com/3xDevOps/Aether.git'
+const source = process.env.AETHER_E2E_GIT_SOURCE_URL ?? 'https://github.com/3xDevOps/cloudfield.git'
 const branch = process.env.AETHER_E2E_GIT_SOURCE_BRANCH ?? 'main'
 
 test('remote import retains the initial candidate until an administrator adopts its reviewed commit and generation', async ({ page, aether }) => {

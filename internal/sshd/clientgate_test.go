@@ -28,22 +28,52 @@ import (
 func TestParseClientBanner(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		banner, version string
-		legacy          bool
+		banner string
+		client selfupdate.Release
+		legacy bool
 	}{
-		{"SSH-2.0-Aether v0.8.0", "v0.8.0", false},
-		{"SSH-2.0-Aether v0.8.0-alpha.3-5-gabc1234-dirty", "v0.8.0-alpha.3-5-gabc1234-dirty", false},
-		{"SSH-2.0-Aether dev", "dev", false},
-		{"SSH-2.0-Go", "", true},
-		{"SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13", "", true},
-		{"SSH-2.0-Aether", "", true},
-		{"SSH-2.0-AetherX v0.8.0", "", true},
+		{"SSH-2.0-Aether v0.8.0", selfupdate.Release{Version: "v0.8.0"}, false},
+		{"SSH-2.0-Aether v0.8.0-alpha.3-5-gabc1234-dirty", selfupdate.Release{Version: "v0.8.0-alpha.3-5-gabc1234-dirty"}, false},
+		{"SSH-2.0-Aether dev", selfupdate.Release{Version: "dev"}, false},
+		{"SSH-2.0-Aether v0.9.0-beta.2+b.412", selfupdate.Release{Version: "v0.9.0-beta.2", Build: 412}, false},
+		{"SSH-2.0-Aether v0.9.1+b.412.h.1", selfupdate.Release{Version: "v0.9.1", Build: 412, Hotfix: 1}, false},
+		// Build metadata in any other form leaves the client at build 0,
+		// ordered by its version as before builds.
+		{"SSH-2.0-Aether v0.9.0-beta.2+b.x", selfupdate.Release{Version: "v0.9.0-beta.2"}, false},
+		{"SSH-2.0-Aether v0.9.0-beta.2+b.-1", selfupdate.Release{Version: "v0.9.0-beta.2"}, false},
+		{"SSH-2.0-Aether v0.9.0-beta.2+b.0", selfupdate.Release{Version: "v0.9.0-beta.2"}, false},
+		{"SSH-2.0-Aether v0.9.0-beta.2+b.0412", selfupdate.Release{Version: "v0.9.0-beta.2"}, false},
+		{"SSH-2.0-Aether v0.9.0-beta.2+b.99999999999999999999", selfupdate.Release{Version: "v0.9.0-beta.2"}, false},
+		{"SSH-2.0-Aether v0.9.0-beta.2+b.412.h.0", selfupdate.Release{Version: "v0.9.0-beta.2"}, false},
+		{"SSH-2.0-Aether v0.9.0-beta.2+b.412+b.999", selfupdate.Release{Version: "v0.9.0-beta.2"}, false},
+		{"SSH-2.0-Aether v0.9.0+sha.abc", selfupdate.Release{Version: "v0.9.0"}, false},
+		{"SSH-2.0-Go", selfupdate.Release{}, true},
+		{"SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13", selfupdate.Release{}, true},
+		{"SSH-2.0-Aether", selfupdate.Release{}, true},
+		{"SSH-2.0-AetherX v0.8.0", selfupdate.Release{}, true},
 	}
 	for _, c := range cases {
-		v, legacy := parseClientBanner(c.banner)
-		if v != c.version || legacy != c.legacy {
-			t.Errorf("parseClientBanner(%q) = %q, %v; want %q, %v", c.banner, v, legacy, c.version, c.legacy)
+		got, legacy := parseClientBanner(c.banner)
+		if got != c.client || legacy != c.legacy {
+			t.Errorf("parseClientBanner(%q) = %+v, %v; want %+v, %v", c.banner, got, legacy, c.client, c.legacy)
 		}
+	}
+}
+
+// A server from before builds orders the banner's version with the build
+// metadata dropped, as semver says: main's gate, selfupdate.Behind on the
+// banner's version, sees v0.9.0-beta.2+b.412 as v0.9.0-beta.2.
+func TestBannerBuildIsIgnoredByAServerWithoutBuilds(t *testing.T) {
+	t.Parallel()
+	client := selfupdate.BannerVersion(selfupdate.Release{Version: "v0.9.0-beta.2", Build: 412})
+	if client != "v0.9.0-beta.2+b.412" {
+		t.Fatalf("banner version = %q", client)
+	}
+	if selfupdate.Behind(client, "v0.9.0-beta.2") || selfupdate.Behind("v0.9.0-beta.2", client) {
+		t.Fatalf("%s and v0.9.0-beta.2 do not compare equal by version", client)
+	}
+	if !selfupdate.Behind(client, "v0.9.0-beta.3") || selfupdate.Behind(client, "v0.9.0-beta.1") {
+		t.Fatalf("%s is not ordered by its version alone", client)
 	}
 }
 
@@ -193,6 +223,55 @@ func (b localBackend) Attach(ctx context.Context, req protocol.AttachRequest) (w
 
 func (b localBackend) Terminal(ctx context.Context, req protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
 	return nil, protocol.TerminalResponse{}, errors.New("terminal not served in this test")
+}
+
+// With builds on both sides the gate orders by build, so a beta promoted
+// from a later nightly is served by an earlier nightly's server whatever
+// the tags say; a client or server without a build keeps the version
+// rule, and build metadata in any other form counts as no build.
+func TestClientVersionGateOrdersByBuild(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		release       string
+		build, hotfix int
+		banner        string
+		refused       bool
+	}{
+		{"v0.9.0-nightly.10", 400, 0, "SSH-2.0-Aether v0.9.0-beta.2+b.412", false},
+		{"v0.9.0-nightly.14", 420, 0, "SSH-2.0-Aether v0.9.0-beta.2+b.412", true},
+		{"v0.9.0-nightly.12", 412, 0, "SSH-2.0-Aether v0.9.0-beta.2+b.412", false},
+		{"v0.9.1", 412, 1, "SSH-2.0-Aether v0.9.0+b.412", true},
+		{"v0.9.1", 412, 1, "SSH-2.0-Aether v0.9.1+b.412.h.1", false},
+		// No build on one side: the version decides, as before builds.
+		{"v0.9.0-nightly.10", 400, 0, "SSH-2.0-Aether v0.9.0-beta.2", true},
+		{"v0.9.0-beta.1", 380, 0, "SSH-2.0-Aether v0.9.0-beta.2", false},
+		{"v0.9.0-nightly.10", 0, 0, "SSH-2.0-Aether v0.9.0-beta.2+b.412", true},
+		// A malformed build is no build, so it skips nothing the version
+		// rule refuses.
+		{"v0.9.0-nightly.10", 400, 0, "SSH-2.0-Aether v0.9.0-beta.2+b.x", true},
+		{"v0.9.0-nightly.10", 400, 0, "SSH-2.0-Aether v0.9.0-beta.2+b.-1", true},
+		{"v0.9.0-nightly.10", 400, 0, "SSH-2.0-Aether v0.9.0-beta.2+b.99999999999999999999", true},
+	} {
+		t.Run(c.release+" "+c.banner, func(t *testing.T) {
+			t.Parallel()
+			e := newTestEnv(t, func(cfg *Config) { cfg.release, cfg.build, cfg.hotfix = c.release, c.build, c.hotfix })
+			client := dialBanner(t, e, c.banner)
+			var info protocol.ServerInfoResult
+			if err := controlCall(t, client, protocol.MethodServerInfo, &info); err != nil {
+				t.Fatal(err)
+			}
+			if info.Build != c.build || info.MinClientBuild != c.build || info.MinClientHotfix != c.hotfix || info.MinClientVersion != c.release {
+				t.Fatalf("server.info = build %d min %q build %d, want %q build %d", info.Build, info.MinClientVersion, info.MinClientBuild, c.release, c.build)
+			}
+			err := controlCall(t, client, protocol.MethodWorkspaceList, nil)
+			if refused := protocol.IsUpgradeRequired(err); refused != c.refused {
+				t.Fatalf("workspace.list = %v, want refused %v", err, c.refused)
+			}
+			if !c.refused && err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func TestClientVersionGateDevServer(t *testing.T) {

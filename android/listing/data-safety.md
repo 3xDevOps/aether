@@ -5,9 +5,9 @@ does (see [docs/privacy.md](../../docs/privacy.md) for the same facts in
 prose). Play's form guide is at
 <https://support.google.com/googleplay/android-developer/answer/10787469>.
 
-In Tailscale mode the app itself sends nothing anywhere. In Aether Edge mode
+In Tailscale mode the app itself sends nothing anywhere. In Cloudfield Edge mode
 the bundled CLI also contacts the edge, see [Edge mode](#edge-mode). The
-dashboard it shows is Aether's own code, so under Play's rule that a webview counts when "your app is in control
+dashboard it shows is Cloudfield's own code, so under Play's rule that a webview counts when "your app is in control
 of the code/behavior delivered through that webview", what the dashboard sends
 to the member's server is declared as collected, even though the publisher
 never receives it. Declaring it cannot be held against the app; leaving it out
@@ -31,7 +31,7 @@ lists it in full.
 | --- | --- |
 | Does your app collect or share any of the required user data types? | Yes |
 | Is all of the user data collected by your app encrypted in transit? | Yes |
-| Do you provide a way for users to request that their data is deleted? | Yes. Uninstalling removes everything on the phone; the server's administrator deletes server-side data; the edge account is deleted on the edge's Account page. Link: `https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md#deleting-your-data` |
+| Do you provide a way for users to request that their data is deleted? | Yes. Uninstalling removes everything on the phone; the server's administrator deletes server-side data; the edge account is deleted on the edge's Account page. Link: `https://github.com/3xDevOps/cloudfield/blob/main/docs/privacy.md#deleting-your-data` |
 
 ## Data types
 
@@ -73,7 +73,7 @@ logs or diagnostics leave the phone).
 
 ## Edge mode
 
-Aether Edge mode adds one more recipient, the edge the publisher runs
+Cloudfield Edge mode adds one more recipient, the edge the publisher runs
 ([docs/privacy.md](../../docs/privacy.md#what-an-edge-stores)). The CLI in the
 app signs in there and relays the encrypted SSH stream, which the edge cannot
 read. Declare these in addition, **collected**, **not shared**, **required**
@@ -108,4 +108,4 @@ data, and nothing is downloaded or installed.
 | Government app | No |
 | Financial features | None |
 | Health | None |
-| Account deletion | The app creates no accounts in Tailscale mode. In Edge mode the edge account is deleted on the edge's Account page (`https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md#what-an-edge-stores`) |
+| Account deletion | The app creates no accounts in Tailscale mode. In Edge mode the edge account is deleted on the edge's Account page (`https://github.com/3xDevOps/cloudfield/blob/main/docs/privacy.md#what-an-edge-stores`) |

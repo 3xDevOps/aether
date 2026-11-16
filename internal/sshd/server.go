@@ -24,9 +24,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/secretstore"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/signing"
 	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // memberIDExtension is the ssh.Permissions extension carrying the
@@ -156,9 +156,11 @@ type Config struct {
 	// re-checks its authorization; zero means defaultRevalidateInterval.
 	// Unexported test knob.
 	revalidateInterval time.Duration
-	// release is the version this server reports and gates clients on;
-	// empty means version.Version. Unexported test knob.
-	release string
+	// release, build and hotfix are the release this server reports and
+	// gates clients on; an empty release means this binary's.
+	// Unexported test knobs.
+	release       string
+	build, hotfix int
 }
 
 type Server struct {
@@ -293,7 +295,8 @@ func New(cfg Config) (*Server, error) {
 		cfg.revalidateInterval = defaultRevalidateInterval
 	}
 	if cfg.release == "" {
-		cfg.release = version.Version
+		running := selfupdate.Running()
+		cfg.release, cfg.build, cfg.hotfix = running.Version, running.Build, running.Hotfix
 	}
 	signer, err := LoadOrCreateHostKey(cfg.HostKeyPath)
 	if err != nil {
@@ -379,7 +382,7 @@ func (s *Server) authenticate(cm ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Perm
 		}
 		return nil, &ssh.BannerError{
 			Err:     errors.New("sshd: unknown public key"),
-			Message: "no Aether member for this key\n",
+			Message: "no Cloudfield member for this key\n",
 		}
 	}
 	return &ssh.Permissions{Extensions: map[string]string{memberIDExtension: string(m.ID)}}, nil
@@ -653,7 +656,7 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn, cfg *ssh.ServerConfi
 	if err != nil {
 		return
 	}
-	id.clientVersion, id.legacyClient = parseClientBanner(string(sconn.ClientVersion()))
+	id.client, id.legacyClient = parseClientBanner(string(sconn.ClientVersion()))
 	// A revocation between authentication and this registration closed
 	// nothing, so re-check once the connection is findable.
 	s.bindConn(c, id)

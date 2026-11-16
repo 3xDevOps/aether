@@ -36,7 +36,7 @@ test('a backgrounded tab reopens its event socket the moment it returns', async 
   })
 
   await page.goto(alice.url)
-  const footer = page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /, (Connecting|Live|Reconnecting|Offline)$/ })
+  const footer = page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: /, (Connecting|Live|Reconnecting|Offline)$/ })
   await expect(footer).toHaveAccessibleName(/, Live$/)
 
   pocketed = true
@@ -110,7 +110,7 @@ test('a replay reconnect that goes live clears the edge refusal before it', asyn
   })
 
   await page.goto(alice.url)
-  const footer = page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /, (Connecting|Live|Reconnecting|Offline|Unreachable)$/ })
+  const footer = page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: /, (Connecting|Live|Reconnecting|Offline|Unreachable)$/ })
   await expect(footer).toHaveAccessibleName(/, Live$/)
   // An event gives the client a cursor, so its next subscribe replays.
   await alice.api.rpc('workspace.add', { name: 'second', base_branch: 'main', environment: {} })

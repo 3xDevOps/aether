@@ -29,7 +29,8 @@ func (e *Engine) UploadPack(ctx context.Context, ws domain.WorkspaceID, stdin io
 // ReceivePack serves a client push: it execs git receive-pack on the
 // workspace bare repo with stdio streamed to the arguments. Pushes to any
 // branch are allowed, except that the repo's update hook (see engine.go)
-// refuses non-fast-forward updates to server-owned aether/run-* branches.
+// refuses non-fast-forward updates to server-owned aether/run-* and
+// cloudfield/run-* branches.
 // After a successful push it publishes git.branch for any watched run
 // branch whose tip changed.
 func (e *Engine) ReceivePack(ctx context.Context, ws domain.WorkspaceID, stdin io.Reader, stdout, stderr io.Writer) (exitCode int, err error) {
@@ -63,8 +64,9 @@ func (e *Engine) servePack(ctx context.Context, ws domain.WorkspaceID, service s
 	args := []string{"-c", "safe.directory=*"}
 	if service == "receive-pack" {
 		// The branch is the artifact: no push may delete one. Forced ref
-		// updates stay allowed everywhere except aether/run-*, where the
-		// repo's update hook refuses non-fast-forwards.
+		// updates stay allowed everywhere except aether/run-* and
+		// cloudfield/run-*, where the repo's update hook refuses
+		// non-fast-forwards.
 		args = append(args, "-c", "receive.denyDeletes=true")
 	}
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, append(args, service, repo)...)

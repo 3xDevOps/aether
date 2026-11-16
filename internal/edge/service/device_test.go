@@ -365,12 +365,12 @@ func TestJoinPage(t *testing.T) {
 	resp, page := b.get(t, "/join/"+server+"/inv-7k2m9q4xbd")
 	app := "aether://join?edge=" + url.QueryEscape(testRelay) + "&amp;server=" + server + "&amp;invitation=inv-7k2m9q4xbd"
 	for _, want := range []string{
-		"Join an Aether server",
+		"Join a Cloudfield server",
 		`href="` + app + `"`,
 		`value="` + testRelay + "/join/" + server + `/inv-7k2m9q4xbd"`,
 		`<script src="/join.js">`,
 		"aether link &lt;link&gt;",
-		"https://github.com/3xDevOps/aether/releases/latest",
+		"https://github.com/3xDevOps/cloudfield/releases/latest",
 	} {
 		if resp.StatusCode != http.StatusOK || !strings.Contains(page, want) {
 			t.Errorf("join page: %s, want it to contain %q\n%s", resp.Status, want, page)

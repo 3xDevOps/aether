@@ -21,13 +21,16 @@ import (
 // servers take it no other way. VersionReviewer is the first whose
 // servers can take a ConnectorAssertion for a ProviderReviewer account:
 // an edge offers its reviewer account no server before it.
+// VersionRelayOrigin is the first whose edges set HeaderRelayOrigin on
+// every relayed request, and whose servers bind connector tokens to it.
 const (
-	Version                = 5
+	Version                = 6
 	MinVersion             = 1
 	VersionHTTP            = 2
 	VersionUniversalMCP    = 3
 	VersionConnectorSignIn = 4
 	VersionReviewer        = 5
+	VersionRelayOrigin     = 6
 )
 
 // CheckVersion refuses a peer older than MinVersion with

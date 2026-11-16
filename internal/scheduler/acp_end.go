@@ -52,7 +52,7 @@ func (d *acpDriver) reopenLost(entry *supervised, lost *acpRun, cause error) {
 		d.fail(entry, fmt.Errorf("the agent lost its conversation again within %d minutes: %w", int(acpLostAgain.Minutes()), cause))
 		return
 	}
-	if err := sess.Notice("warning", "Agent conversation lost", "The agent no longer has this conversation. Aether is restarting the agent and restoring the conversation from its history; send again any message that failed."); err != nil {
+	if err := sess.Notice("warning", "Agent conversation lost", "The agent no longer has this conversation. Cloudfield is restarting the agent and restoring the conversation from its history; send again any message that failed."); err != nil {
 		slog.Warn("scheduler: record the lost session notice", "run", entry.runID, "error", err)
 	}
 	// Its keeper's agent lost the session: open must replace it even when
@@ -155,7 +155,7 @@ func (d *acpDriver) restoreHome(ctx context.Context, entry *supervised) error {
 	member, user := entry.memberID, entry.runUser
 	d.s.mu.Unlock()
 	slog.Warn("scheduler: restored a member home a container had taken", "run", entry.runID, "member", member, "was", was, "now", user)
-	d.notice(entry.runID, "warning", "Home restored", fmt.Sprintf("The home this session shares with your other sessions was owned by %s (uid:gid mode), so no agent on it could read its login or run. A root command in one of your sessions changed it; a package that runs systemd-tmpfiles does. Aether gave it back to %s before starting the agent.", was, user))
+	d.notice(entry.runID, "warning", "Home restored", fmt.Sprintf("The home this session shares with your other sessions was owned by %s (uid:gid mode), so no agent on it could read its login or run. A root command in one of your sessions changed it; a package that runs systemd-tmpfiles does. Cloudfield gave it back to %s before starting the agent.", was, user))
 	return nil
 }
 
@@ -238,7 +238,7 @@ func (d *acpDriver) takenOver(entry *supervised, lost *acpRun) {
 		return
 	}
 	slog.Warn("scheduler: another attacher took over the agent's keeper", "run", entry.runID)
-	d.notice(entry.runID, "error", "Agent connection taken over", "Another process attached to the agent's keeper, so Aether restarted the agent and restored its session.")
+	d.notice(entry.runID, "error", "Agent connection taken over", "Another process attached to the agent's keeper, so Cloudfield restarted the agent and restored its session.")
 	// open stops the keeper the run still records as its exec.
 	d.record(entry, func() { entry.agentKeeper = nil })
 	ctx, cancel := context.WithTimeout(context.Background(), acpConnectTimeout)

@@ -27,7 +27,7 @@ export const bannerActions =
 // Technical output is bounded so a failed rebuild cannot push the workbench
 // or its actions out of reach. It remains selectable and scrollable in place.
 export const verbatim =
-  'max-h-28 min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 select-text'
+  'max-h-28 min-w-0 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 select-text'
 
 /** The dismiss control every banner carries. */
 export function Dismiss({ kind, version }: { kind: UpdateKind; version: string }) {
@@ -85,7 +85,7 @@ export function StatusRow({
 }
 
 export function packagedLine(packaged: string, target = ''): string {
-  return `Updates come from the ${packaged}: install its ${target ? `${target} release` : 'new version'} to update Aether.`
+  return `Updates come from the ${packaged}: install its ${target ? `${target} release` : 'new version'} to update Cloudfield.`
 }
 
 /** What to do instead where update.apply cannot replace this binary. */

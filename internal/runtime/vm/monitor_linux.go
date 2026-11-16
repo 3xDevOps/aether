@@ -159,7 +159,7 @@ func composeShare(root string, shares []share) error {
 		return fmt.Errorf("vm monitor: mount share root: %w", err)
 	}
 	for i, s := range shares {
-		if err := bindShare(filepath.Join(root, strconv.Itoa(i)), s); err != nil {
+		if err := bindShare(filepath.Join(root, strconv.Itoa(i)), s, nil); err != nil {
 			return err
 		}
 	}
@@ -169,10 +169,60 @@ func composeShare(root string, shares []share) error {
 	return nil
 }
 
+// IDMap shows a file that OnDiskUID:OnDiskGID owns as ShownUID:ShownGID's
+// through a mount, and stores a file ShownUID:ShownGID creates there as
+// OnDiskUID:OnDiskGID's.
+type IDMap struct {
+	OnDiskUID, OnDiskGID int
+	ShownUID, ShownGID   int
+}
+
+// BindBeneath binds subpath of base at target in place of what target
+// held, resolving subpath without leaving base, through idmap; the omp auth
+// broker's unit gets a member's ~/.omp/agent this way.
+func BindBeneath(target, base, subpath string, idmap IDMap) error {
+	if err := Unbind(target); err != nil {
+		return err
+	}
+	return bindShare(target, share{Source: base, Subpath: subpath}, &idmap)
+}
+
+// idmapUserns opens a user namespace that maps m's on-disk ids to its shown
+// ones, held only by the returned descriptor: the process made to create
+// it is gone when this returns.
+func idmapUserns(m IDMap) (int, error) {
+	cmd := exec.Command("sleep", "infinity")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags:  syscall.CLONE_NEWUSER,
+		UidMappings: []syscall.SysProcIDMap{{ContainerID: m.OnDiskUID, HostID: m.ShownUID, Size: 1}},
+		GidMappings: []syscall.SysProcIDMap{{ContainerID: m.OnDiskGID, HostID: m.ShownGID, Size: 1}},
+	}
+	if err := cmd.Start(); err != nil {
+		return -1, fmt.Errorf("vm: make a user namespace for an idmapped mount: %w", err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	fd, err := unix.Open(fmt.Sprintf("/proc/%d/ns/user", cmd.Process.Pid), unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, fmt.Errorf("vm: open the idmapped mount's user namespace: %w", err)
+	}
+	return fd, nil
+}
+
+// Unbind detaches what BindBeneath bound at target and removes target.
+func Unbind(target string) error {
+	if err := unix.Unmount(target, unix.MNT_DETACH); err != nil && !errors.Is(err, unix.EINVAL) && !errors.Is(err, unix.ENOENT) {
+		return fmt.Errorf("vm: unmount %s: %w", target, err)
+	}
+	if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("vm: %w", err)
+	}
+	return nil
+}
+
 // bindShare resolves a subpath beneath its base without following a symlink
 // out of it, as Docker's volume subpath does, because an agent may control
 // the base's content.
-func bindShare(target string, s share) error {
+func bindShare(target string, s share, idmap *IDMap) error {
 	fd, err := unix.Open(s.Source, unix.O_PATH|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return fmt.Errorf("vm monitor: open %s: %w", s.Source, err)
@@ -209,6 +259,15 @@ func bindShare(target string, s share) error {
 	attr := unix.MountAttr{Attr_set: unix.MOUNT_ATTR_NOSUID | unix.MOUNT_ATTR_NODEV, Propagation: unix.MS_PRIVATE}
 	if s.ReadOnly {
 		attr.Attr_set |= unix.MOUNT_ATTR_RDONLY
+	}
+	if idmap != nil {
+		userns, err := idmapUserns(*idmap)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = unix.Close(userns) }()
+		attr.Attr_set |= unix.MOUNT_ATTR_IDMAP
+		attr.Userns_fd = uint64(userns)
 	}
 	if err := unix.MountSetattr(tree, "", unix.AT_EMPTY_PATH|unix.AT_RECURSIVE, &attr); err != nil {
 		return fmt.Errorf("vm monitor: set mount flags on %s: %w", s.Source, err)

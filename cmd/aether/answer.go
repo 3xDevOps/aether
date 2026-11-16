@@ -105,7 +105,7 @@ func needLines(it protocol.AttentionItem) []string {
 		case it.Request == nil || len(it.Request.Options) == 0:
 			add("answer it in the session's terminal: aether attach %s", run)
 		case len(options) == 0:
-			add("it offers no allow once or reject once option, and aether answer never answers for always; decide it in the Aether dashboard")
+			add("it offers no allow once or reject once option, and aether answer never answers for always; decide it in the Cloudfield dashboard")
 		default:
 			if it.Request.URL != "" {
 				add("open %s, then:", it.Request.URL)
@@ -119,7 +119,7 @@ func needLines(it protocol.AttentionItem) []string {
 		}
 	case protocol.AttentionKindRoomQuestion:
 		if it.Message == nil {
-			add("open the session in the Aether dashboard")
+			add("open the session in the Cloudfield dashboard")
 			break
 		}
 		add("aether answer %s %s \"<answer>\"", run, quoted)
@@ -133,7 +133,7 @@ func needLines(it protocol.AttentionItem) []string {
 		add("aether message %s \"<reply>\"", run)
 		add("aether close %s --outcome abandoned", run)
 	default:
-		add("open the session in the Aether dashboard")
+		add("open the session in the Cloudfield dashboard")
 	}
 	return lines
 }
@@ -233,7 +233,7 @@ func answer(c *protocol.Client, w io.Writer, stdin io.Reader, runID, id, reply s
 			for _, o := range options {
 				ids = append(ids, o.ID)
 			}
-			instead := "decide it in the Aether dashboard"
+			instead := "decide it in the Cloudfield dashboard"
 			if len(ids) > 0 {
 				instead = "pick one of " + strings.Join(ids, ", ") + ", or " + instead
 			}

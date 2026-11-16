@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -335,14 +336,14 @@ func TestRunStopsOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestRunBranchRefspec(t *testing.T) {
-	got := runBranchRefspec("aether")
-	want := "+refs/heads/aether/run-*:refs/remotes/aether/aether/run-*"
-	if got != want {
-		t.Errorf("refspec = %q, want %q", got, want)
+func TestRunBranchRefspecs(t *testing.T) {
+	got := runBranchRefspecs("aether")
+	want := []string{
+		"+refs/heads/aether/run-*:refs/remotes/aether/aether/run-*",
+		"+refs/heads/cloudfield/run-*:refs/remotes/aether/cloudfield/run-*",
 	}
-	if !strings.HasPrefix(got, "+") {
-		t.Error("refspec must be forced: run branches are server-owned")
+	if !slices.Equal(got, want) {
+		t.Errorf("refspecs = %q, want %q", got, want)
 	}
 }
 

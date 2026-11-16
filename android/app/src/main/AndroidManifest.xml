@@ -66,6 +66,15 @@
                 <data
                     android:host="claim"
                     android:scheme="aether" />
+                <data
+                    android:host="run"
+                    android:scheme="cloudfield" />
+                <data
+                    android:host="join"
+                    android:scheme="cloudfield" />
+                <data
+                    android:host="claim"
+                    android:scheme="cloudfield" />
             </intent-filter>
             <!-- Share to Aether: shared text or a link becomes a new
                  session's prompt, which the member still reviews and sends. -->

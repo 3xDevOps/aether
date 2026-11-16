@@ -1,11 +1,14 @@
+import { useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { RunList } from '@/components/run-list'
 import { ViewHeader } from '@/components/view-header'
 import { registerRoute } from '@/routes/registry'
 import { useListedRuns } from '@/store/hooks'
+import { withoutSettled } from '@/store/selectors'
 
 function Overview() {
-  const runs = useListedRuns('')
+  const listed = useListedRuns('')
+  const runs = useMemo(() => withoutSettled(listed), [listed])
   return (
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader

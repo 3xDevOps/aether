@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -21,7 +22,7 @@ func inbox(ctx context.Context, cfg Config, args []string) (int, error) {
 	if fs.NArg() != 0 {
 		return fail(cfg.Out, protocol.CodeInvalidParams, "inbox takes --wait and --ack flags")
 	}
-	path := filepath.Join(os.TempDir(), "aether-inbox-"+os.Getenv(coordtransport.RunIDEnv)+"-ack")
+	path := filepath.Join(os.TempDir(), "aether-inbox-"+envname.Getenv(coordtransport.RunIDEnv)+"-ack")
 	if *ack == "" {
 		last, err := os.ReadFile(path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {

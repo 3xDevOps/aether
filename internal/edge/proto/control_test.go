@@ -6,9 +6,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -284,4 +286,28 @@ func unb64(t *testing.T, s string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// TestReadyKeepsUsableRelayOrigins decodes a ready whose relay_origins a
+// later edge might send: more entries than MaxRelayOrigins and forms this
+// build does not accept. The ready is accepted, with the canonical
+// origins, MaxRelayOrigins at most.
+func TestReadyKeepsUsableRelayOrigins(t *testing.T) {
+	var sent []string
+	for i := range MaxRelayOrigins + 4 {
+		sent = append(sent, fmt.Sprintf("https://edge%d.example.test", i))
+	}
+	sent = append([]string{"https://EDGE.example.test", "edge.example.test", "https://edge.example.test/path"}, sent...)
+	data, err := json.Marshal(map[string]any{"type": "ready", "server_id": "7ozstx3hvprfzhna3cakjwhdnw", "state": StateClaimed,
+		"edge_key": edgeKey(1).Public(), "relay_origins": sent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := DecodeControl(data)
+	if err != nil {
+		t.Fatalf("ready with unusable relay origins refused: %v", err)
+	}
+	if got := m.(Ready).RelayOrigins; !slices.Equal(got, sent[3:3+MaxRelayOrigins]) {
+		t.Fatalf("relay origins kept %v, want the first %d canonical ones", got, MaxRelayOrigins)
+	}
 }

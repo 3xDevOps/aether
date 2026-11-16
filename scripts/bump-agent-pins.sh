@@ -58,3 +58,13 @@ done
 
 pin "$image" 'ARG CLAUDE_CODE_VERSION=' "$(npm view @anthropic-ai/claude-code version)" "Claude Code in the real-agent suite"
 pin "$image" 'ARG CODEX_VERSION=' "$(npm view @openai/codex version)" "Codex in the real-agent suite"
+
+omp=$repo/internal/serversetup/omp.go
+release=$(curl -fsSL --retry 3 https://api.github.com/repos/can1357/oh-my-pi/releases/latest)
+tag=$(printf '%s' "$release" | jq -r .tag_name)
+size=$(printf '%s' "$release" | jq -r '.assets[] | select(.name == "omp-linux-x64") | .size')
+sum=$(curl -fsSL --retry 3 "https://github.com/can1357/oh-my-pi/releases/download/$tag/SHA256SUMS.txt" | awk '$2 == "omp-linux-x64" { print $1 }')
+pin "$omp" 'Name: "oh-my-pi ' "${tag#v}" "oh-my-pi for the omp auth broker"
+pin "$omp" 'oh-my-pi/releases/download/v' "${tag#v}" "its download"
+pin "$omp" 'SHA256: "' "$sum" "its SHA-256"
+pin "$omp" 'Size:   ' "$size" "its size"

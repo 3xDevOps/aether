@@ -13,11 +13,21 @@ MODULE  := github.com/3xDevOps/Aether
 # executing. Anything left empty falls back below.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | tr -cd 'A-Za-z0-9.+_-')
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null | tr -cd 'A-Za-z0-9')
+# The release's signed build and hotfix numbers, taken only from the make
+# command line (make RELEASE_BUILD=412 RELEASE_HOTFIX=0), never from the
+# environment. Unset is 0; anything but one run of digits stops the build
+# before it reaches a shell.
+nodigits = $(subst 0,,$(subst 1,,$(subst 2,,$(subst 3,,$(subst 4,,$(subst 5,,$(subst 6,,$(subst 7,,$(subst 8,,$(subst 9,,$(1)))))))))))
+release_number = $(if $(filter command line,$(origin $(1))),$(if $(and $(filter 1,$(words $($(1)))),$(if $(call nodigits,$($(1))),,1)),$($(1)),$(error $(1) must be a non-negative integer)),0)
+BUILD_NUMBER  := $(call release_number,RELEASE_BUILD)
+HOTFIX_NUMBER := $(call release_number,RELEASE_HOTFIX)
 VERSION := $(or $(VERSION),dev)
 COMMIT  := $(or $(COMMIT),unknown)
 LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.Version=$(VERSION) \
-	-X $(MODULE)/internal/version.Commit=$(COMMIT)
+	-X $(MODULE)/internal/version.Commit=$(COMMIT) \
+	-X $(MODULE)/internal/version.Build=$(BUILD_NUMBER) \
+	-X $(MODULE)/internal/version.Hotfix=$(HOTFIX_NUMBER)
 
 DIST := dist
 BUN  := bun
@@ -70,6 +80,14 @@ TEST_PKGS = $(filter-out $(TEST_SKIP),$(shell go list ./... | sed 's|^$(MODULE)|
 # wait on a timer or a socket overlap instead of queueing behind GOMAXPROCS.
 TEST_RACE ?= -race
 
+# Turns off checkptr, which -race turns on, for the SQLite library's packages
+# only; every other package keeps it, a new modernc.org one included.
+SQLITE_NOCHECKPTR = \
+	-gcflags='modernc.org/sqlite/...=-d=checkptr=0' \
+	-gcflags='modernc.org/libc/...=-d=checkptr=0' \
+	-gcflags='modernc.org/memory=-d=checkptr=0' \
+	-gcflags='modernc.org/mathutil=-d=checkptr=0'
+
 # Release matrix. The server and the edge are Linux-only by design; the CLI
 # additionally ships for macOS and Windows clients.
 SERVER_PLATFORMS := linux/amd64 linux/arm64
@@ -119,12 +137,15 @@ ANDROID_RUN = docker run --rm \
 # Android installs an update only when its versionCode is above the installed
 # one, so the number has to rise with every release. A commit count does not,
 # across branches: a hotfix tagged off a shorter branch scores below the
-# release it fixes. scripts/android-version-code.sh derives it from the tag
-# instead and carries the formula and its ceilings. An unsigned or debug APK
-# can never install over a release, so an untagged tree builds code 1 rather
-# than failing; a signed build refuses a tag the script cannot parse, in the
-# recipe below. Assigned lazily - only `android` reads it.
-ANDROID_VERSION_CODE = $(or $(shell sh scripts/android-version-code.sh '$(VERSION)' 2>/dev/null),1)
+# release it fixes. scripts/android-version-code.sh derives it from the tag,
+# or from RELEASE_BUILD and RELEASE_HOTFIX when either is set, and carries
+# the formulas and their ceilings. An unsigned or debug APK can never install
+# over a release, so an untagged tree builds code 1 rather than failing; a
+# signed build, or one given a build, refuses a tag or build the script
+# cannot use, in the recipe below. Assigned lazily - only `android` reads it.
+ANDROID_BUILD_ARGS = $(if $(filter-out 0,$(BUILD_NUMBER) $(HOTFIX_NUMBER)),'$(BUILD_NUMBER)' '$(HOTFIX_NUMBER)')
+ANDROID_CODE_ARGS = '$(VERSION)' $(ANDROID_BUILD_ARGS)
+ANDROID_VERSION_CODE = $(or $(shell sh scripts/android-version-code.sh $(ANDROID_CODE_ARGS) 2>/dev/null),1)
 
 # versionName is a label Android never compares, but Play prints it in the
 # store listing and Android prints it in the phone's app info, where the tag's
@@ -178,7 +199,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build proto chatgpt-plugin claude-connector agents-image browser-image browser-smoke edge-image test test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
+.PHONY: all build proto chatgpt-plugin claude-connector agents-image browser-image browser-smoke edge-image test test-store test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
 
 all: build
 
@@ -194,7 +215,8 @@ browser-image:
 
 edge-image:
 	docker build --tag '$(EDGE_IMAGE)' --file images/edge/Dockerfile \
-		--build-arg VERSION='$(VERSION)' --build-arg COMMIT='$(COMMIT)' .
+		--build-arg VERSION='$(VERSION)' --build-arg COMMIT='$(COMMIT)' \
+		--build-arg RELEASE_BUILD='$(BUILD_NUMBER)' --build-arg RELEASE_HOTFIX='$(HOTFIX_NUMBER)' .
 
 # A working Ubuntu kernel/user-namespace AppArmor policy is a prerequisite;
 # sandbox failures fail this gate, never trigger an unconfined fallback.
@@ -204,7 +226,11 @@ browser-smoke:
 	$(BROWSER_RUN) --test /opt/aether-browser/companion.test.mjs
 
 test:
-	go test $(TEST_RACE) -parallel 16 -timeout 20m $(TEST_PKGS)
+	go test $(TEST_RACE)$(if $(TEST_RACE), $(SQLITE_NOCHECKPTR)) -parallel 16 -timeout 20m $(TEST_PKGS)
+
+# internal/store under the race detector, as CI's store-tests job runs it.
+test-store:
+	go test -race $(SQLITE_NOCHECKPTR) -parallel 16 -timeout 20m ./internal/store
 
 # The `integration`-tagged tests (real Docker, real git), in the packages that
 # carry them - the unit tests are `make test`'s job. CI shards it with
@@ -239,7 +265,7 @@ test-e2e: build
 # tree (docs/testing.md, "Edge upgrade qualification"). It needs root,
 # Docker with Compose and buildx, jq, curl, and git history with tags.
 test-edge-upgrade:
-	go test -count=1 -timeout=17m -tags edgeupgrade -run '^TestEdgeUpgrade$$' -v ./internal/edge/edgetest/
+	go test -count=1 -timeout=25m -tags edgeupgrade -run '^TestEdgeUpgrade$$' -v ./internal/edge/edgetest/
 
 # The shell scripts in scripts/ have hermetic tests of their own: every
 # external command they call is stubbed, so nothing here touches the network,
@@ -251,7 +277,17 @@ test-scripts:
 	sh scripts/install-sysbox-test.sh
 	sh scripts/deploy-test.sh
 	sh scripts/publish-release-test.sh
+	sh scripts/publish-pointer-test.sh
+	sh scripts/promote-plan-test.sh
+	sh scripts/nightly-plan-test.sh
+	sh scripts/nightly-prune-test.sh
+	sh scripts/create-release-tag-test.sh
+	sh scripts/edge-attestation-test.sh
+	sh scripts/edge-channel-takes-test.sh
+	sh scripts/require-admin-test.sh
 	sh scripts/release-ci-check-test.sh
+	sh scripts/release-hotfix-test.sh
+	sh scripts/release-tag-path-test.sh
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
 	sh scripts/ci-classify-areas-test.sh
@@ -335,7 +371,7 @@ android: android-cli
 		echo 'make android: ANDROID_KEYSTORE_FILE does not name a file: $(ANDROID_KEYSTORE_FILE)' >&2; \
 		exit 1; \
 	fi
-	@[ -z '$(ANDROID_SIGNING)' ] || sh scripts/android-version-code.sh '$(VERSION)' >/dev/null
+	@[ -z '$(ANDROID_SIGNING)$(ANDROID_BUILD_ARGS)' ] || sh scripts/android-version-code.sh $(ANDROID_CODE_ARGS) >/dev/null
 	$(ANDROID_RUN) $(ANDROID_SIGNING) $(ANDROID_IMAGE) \
 		./gradlew --console=plain test assembleRelease bundleRelease \
 			'-PaetherVersionName=$(ANDROID_VERSION_NAME)' -PaetherVersionCode=$(ANDROID_VERSION_CODE)

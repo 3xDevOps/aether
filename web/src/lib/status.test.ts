@@ -424,7 +424,7 @@ describe('checked waits', () => {
     const unverified = shown({ kind: 'unverified' })
     expect(stateWords(unverified, undefined, now)).toEqual({ label: 'Waiting for CI', detail: 'CI on #582' })
     expect(toneOf(unverified)).toBe('waiting')
-    expect(stateTitle(unverified, since, now)).toContain('Not verified: the wait names no condition Aether can check.')
+    expect(stateTitle(unverified, since, now)).toContain('Not verified: the wait names no condition Cloudfield can check.')
   })
 
   it('drops the wait where the dashboard shows another state than the server', () => {

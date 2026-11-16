@@ -246,7 +246,7 @@ func (s *Server) assistantConfirm(ctx context.Context, member domain.MemberID, r
 func memberOnly(ctx context.Context, what string) *protocol.Error {
 	id, _ := ctx.Value(connIdentityKey{}).(connIdentity)
 	if fromAssistant(ctx) || id.connector != "" {
-		return &protocol.Error{Code: protocol.CodeDenied, Message: what + ": only you can change the assistant's approval rules, from the Aether app or the aether CLI"}
+		return &protocol.Error{Code: protocol.CodeDenied, Message: what + ": only you can change the assistant's approval rules, from the Cloudfield app or the aether CLI"}
 	}
 	return nil
 }

@@ -44,6 +44,7 @@ $hadShortcut = $false
 $variables = @('LOCALAPPDATA', 'PATH', 'AETHER_BIN',
     'AETHER_BASE_URL', 'AETHER_REPO', 'AETHER_VERSION', 'AETHER_ROLE', 'AETHER_BIN_DIR',
     'AETHER_CONFIG_DIR', 'AETHER_NO_UPDATE_CHECK', 'npm_config_cache',
+    'CLOUDFIELD_BIN', 'CLOUDFIELD_BASE_URL', 'CLOUDFIELD_REPO', 'CLOUDFIELD_VERSION', 'CLOUDFIELD_ROLE', 'CLOUDFIELD_BIN_DIR', 'CLOUDFIELD_CONFIG_DIR', 'CLOUDFIELD_NO_UPDATE_CHECK',
     'ELECTRON_CACHE', 'ELECTRON_BUILDER_CACHE')
 $saved = @{}
 foreach ($name in $variables) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
@@ -156,7 +157,8 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
         Start-Sleep -Milliseconds 100
     } while ($true)
 
-    foreach ($name in @('AETHER_BIN', 'AETHER_VERSION', 'AETHER_ROLE', 'AETHER_BIN_DIR')) {
+    # The CLOUDFIELD_ names win over the AETHER_ ones this script sets.
+    foreach ($name in @('AETHER_BIN', 'AETHER_VERSION', 'AETHER_ROLE', 'AETHER_BIN_DIR', 'CLOUDFIELD_BIN', 'CLOUDFIELD_BASE_URL', 'CLOUDFIELD_REPO', 'CLOUDFIELD_VERSION', 'CLOUDFIELD_ROLE', 'CLOUDFIELD_BIN_DIR', 'CLOUDFIELD_CONFIG_DIR', 'CLOUDFIELD_NO_UPDATE_CHECK')) {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
     $env:LOCALAPPDATA = Join-Path $root 'Local'
@@ -348,7 +350,7 @@ const { chromium } = require(process.argv[2])
     const page = context.pages()[0] || await context.waitForEvent('page')
     await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 45000 })
     await page.getByRole('heading', { name: 'Onboarding', exact: true }).waitFor({ timeout: 45000 })
-    await page.locator('[aria-label="Starting Aether"]').waitFor({ state: 'detached' })
+    await page.locator('[aria-label="Starting Aether"], [aria-label="Starting Cloudfield"]').waitFor({ state: 'detached' })
     await page.screenshot({ path: process.argv[4] })
     console.log('The installed desktop rendered its first-run onboarding screen.')
     await page.close()

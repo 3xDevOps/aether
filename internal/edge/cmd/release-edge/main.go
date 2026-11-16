@@ -118,6 +118,15 @@ func readUpgrade(root string) (upgrade, error) {
 	if u.ManualSteps == nil {
 		u.ManualSteps = []selfupdate.ManualStep{}
 	}
+	boundaries := []string{u.MinUpgradeFrom}
+	for _, step := range u.ManualSteps {
+		boundaries = append(boundaries, step.Since)
+	}
+	for _, tag := range boundaries {
+		if selfupdate.TagChannel(tag) == selfupdate.ChannelNightly {
+			return upgrade{}, fmt.Errorf("%s names the nightly %s as min_upgrade_from or a step's since; name the first beta or stable release that carries the change: nightlies are pruned, and an edge cannot order itself against one", upgradePath, tag)
+		}
+	}
 	var stale []string
 	record := func(field string, recorded, actual any) {
 		if recorded != actual {

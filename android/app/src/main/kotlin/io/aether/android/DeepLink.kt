@@ -19,6 +19,11 @@ private val LOOPBACK_V4 = Regex("^127\\.\\d+\\.\\d+\\.\\d+$")
 private val LOOPBACK_V6 = Regex("^\\[::1]$|^\\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}]$")
 private val EDGE_ORIGIN = Regex("^(https?)://(\\[[0-9a-f:]+]|[^:/?#\\[\\]@]+)(?::(\\d+))?$")
 
+// Every aether:// link below may also be spelled cloudfield://. A link handed
+// to the dashboard is spelled aether://, the only scheme its join and claim
+// parsers accept.
+private val LINK_SCHEMES = listOf("aether", "cloudfield")
+
 /**
  * The dashboard URL an `aether://run/<id>` link opens in Tailscale mode, or
  * null when the link is not one.
@@ -38,7 +43,7 @@ private fun runLinkId(link: String): String? {
         } catch (_: URISyntaxException) {
             return null
         }
-    if (uri.scheme?.lowercase() != "aether") return null
+    if (uri.scheme?.lowercase() !in LINK_SCHEMES) return null
     // aether://run/<id> parses as host "run", path "/<id>".
     if (uri.host != "run") return null
     val id = uri.path?.removePrefix("/") ?: return null
@@ -81,11 +86,12 @@ fun edgeDeepLinkSuffix(link: String): String? {
     if (parts.fragment == null || !LINK_SECRET.matches(parts.fragment)) return null
     // URLEncoder is form encoding and encodeURIComponent is not: they differ
     // on a space, "*", "~" and "!'()", none of which a validated link holds.
-    val encoded = URLEncoder.encode("aether://${link.substring("aether://".length)}", "UTF-8")
+    val encoded = URLEncoder.encode("aether://${parts.afterScheme}", "UTF-8")
     return "#${parts.host}=${encoded.replace("+", "%20")}"
 }
 
 private class LinkParts(
+    val afterScheme: String,
     val host: String,
     val path: String,
     val query: String,
@@ -95,8 +101,9 @@ private class LinkParts(
 // Split by hand: java.net.URI refuses the "[" and "]" an IPv6 edge origin
 // carries in the query, and the host of a non-special scheme keeps its case.
 private fun linkParts(link: String): LinkParts? {
-    if (!link.startsWith("aether://", ignoreCase = true)) return null
-    var rest = link.substring("aether://".length)
+    val prefix = LINK_SCHEMES.map { "$it://" }.firstOrNull { link.startsWith(it, ignoreCase = true) } ?: return null
+    val afterScheme = link.substring(prefix.length)
+    var rest = afterScheme
     val hash = rest.indexOf('#')
     val fragment = if (hash >= 0) rest.substring(hash + 1) else null
     if (hash >= 0) rest = rest.substring(0, hash)
@@ -105,9 +112,9 @@ private fun linkParts(link: String): LinkParts? {
     if (question >= 0) rest = rest.substring(0, question)
     val slash = rest.indexOf('/')
     return if (slash >= 0) {
-        LinkParts(rest.substring(0, slash), rest.substring(slash), query, fragment)
+        LinkParts(afterScheme, rest.substring(0, slash), rest.substring(slash), query, fragment)
     } else {
-        LinkParts(rest, "", query, fragment)
+        LinkParts(afterScheme, rest, "", query, fragment)
     }
 }
 

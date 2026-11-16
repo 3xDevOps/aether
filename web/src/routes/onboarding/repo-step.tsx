@@ -467,7 +467,7 @@ export function RepoStep({
             <div className="flex flex-col gap-2 rounded-panel bg-state-needs-you-soft px-3 py-2" aria-live="polite">
               <p className="text-ui">
                 Your clone and the workspace have both moved on:{' '}
-                {commits(pushed.ahead)} here, {pushed.behind} there. Aether
+                {commits(pushed.ahead)} here, {pushed.behind} there. Cloudfield
                 never force-pushes.
               </p>
               <p className="text-ui-sm text-muted">

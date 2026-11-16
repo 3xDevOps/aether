@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -95,8 +96,10 @@ type Config struct {
 	// Database is the store's file, snapshotted before a release that
 	// migrates it. Empty skips the snapshot.
 	Database string
-	// Releases is the signed release feed. Nil reads the repository
-	// Checker names, by default the pinned GitHub repository.
+	// Releases, when set, is a fixed signed release feed whose Latest is
+	// the newest release, in place of the channel pointers. Nil follows
+	// the release channel in Store through the signed pointers of the
+	// repository Checker names, by default the pinned GitHub repository.
 	Releases Releases
 	Checker  *selfupdate.Checker
 	// Host carries the process-replacing side effects. A zero Host leaves
@@ -140,6 +143,10 @@ type Service struct {
 
 	mu       sync.Mutex
 	applying bool
+	// committed is set once the update being applied can no longer be
+	// cancelled: from the start of an update applied now, and from the
+	// moment a scheduled one takes its pending row. A cancel then refuses.
+	committed bool
 	// unlock frees the update lock taken with applying.
 	unlock func()
 	// phase and target are the update in progress in this process.
@@ -150,13 +157,38 @@ type Service struct {
 	retries  int
 	retrying store.PendingServerUpdate
 
-	runMu     sync.Mutex
-	checkMu   sync.Mutex
-	check     checkState
-	checkRuns atomic.Uint64
-	kick      chan struct{}
-	stop      context.CancelFunc
-	loop      sync.WaitGroup
+	// run is held by the one check that may write check; a channel
+	// server.update waits on it with its own context.
+	run     chan struct{}
+	checkMu sync.Mutex
+	check   checkState
+	// pointers is each channel's verified pointer at the last check, for
+	// display. declineNote is why the last cancel recorded no declined
+	// build, and scheduleError why the server last failed to schedule the
+	// newest release by itself. Guarded by checkMu.
+	pointers      map[string]publishedPointer
+	declineNote   string
+	scheduleError string
+	// scheduleFailing is the release whose self-schedule failed
+	// scheduleFails times in a row.
+	scheduleFailing string
+	scheduleFails   int
+	// decideMu serializes what the server schedules by itself with the
+	// cancels, rollbacks and channel changes that decline or retire it. It
+	// is held only around store reads and writes, never the network.
+	decideMu sync.Mutex
+	// stateErr is why check.json could not be read on a server following a
+	// channel. Starting afresh would drop the channel marks, so every check
+	// fails with it and the file is not overwritten until it reads again.
+	// Guarded by run.
+	stateErr error
+	// stableMissing counts the checks in a row that found no stable.json
+	// while the server has not chosen a channel. Guarded by run.
+	stableMissing int
+	checkRuns     atomic.Uint64
+	kick          chan struct{}
+	stop          context.CancelFunc
+	loop          sync.WaitGroup
 }
 
 // New builds the service. It never fails on a deployment fact: self-update
@@ -181,9 +213,12 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	s := &Service{cfg: cfg, kick: make(chan struct{}, 1)}
+	s := &Service{cfg: cfg, kick: make(chan struct{}, 1), run: make(chan struct{}, 1)}
 	check, cerr := loadCheck(cfg.StateDir)
-	if cerr != nil {
+	switch {
+	case cerr != nil && cfg.Releases == nil:
+		s.stateErr = unreadableState(cerr)
+	case cerr != nil:
 		slog.Warn("serverupdate: release check state unreadable; checking afresh", "error", cerr)
 	}
 	s.check = check
@@ -240,6 +275,11 @@ func (s *Service) incapableReason() string {
 	if err := selfupdate.CheckWritable(filepath.Dir(s.self)); err != nil {
 		return notWritable
 	}
+	if sibling, ok := selfupdate.Beside(s.self, "aether"); ok {
+		if err := selfupdate.CheckWritable(filepath.Dir(sibling)); err != nil {
+			return notWritable
+		}
+	}
 	return ""
 }
 
@@ -276,8 +316,9 @@ func (s *Service) Status(ctx context.Context, p protocol.ServerUpdateStatusParam
 	s.checkMu.Lock()
 	check := s.check
 	s.checkMu.Unlock()
-	out.LatestVersion, out.Latest, out.NotesURL, out.CheckError = check.LatestVersion, check.LatestVersion, check.NotesURL, check.Error
-	out.UpdateAvailable = selfupdate.Behind(version.Version, check.LatestVersion)
+	if err := s.describeChannel(ctx, &out, check); err != nil {
+		return protocol.ServerUpdateStatusResult{}, err
+	}
 	if !check.CheckedAt.IsZero() {
 		out.CheckedAt = check.CheckedAt.UTC().Format(time.RFC3339)
 	}
@@ -290,6 +331,7 @@ func (s *Service) Status(ctx context.Context, p protocol.ServerUpdateStatusParam
 			Version:     p.Version,
 			RequestedBy: string(p.RequestedBy),
 			RequestedAt: p.RequestedAt.UTC().Format(time.RFC3339),
+			ByServer:    p.RequestedBy == ServerActor,
 		}
 		// Asked live rather than cached from the last poll: a status call
 		// an admin makes after killing the last run should say the update
@@ -302,6 +344,10 @@ func (s *Service) Status(ctx context.Context, p protocol.ServerUpdateStatusParam
 			}
 		}
 	}
+	out.Declined = wireDeclined(state.Declined)
+	s.checkMu.Lock()
+	out.DeclineNote, out.ScheduleError = s.declineNote, s.scheduleError
+	s.checkMu.Unlock()
 	if l := state.Last; l != nil {
 		out.Last = &protocol.ServerUpdateAttempt{
 			Version: l.Version,
@@ -375,17 +421,47 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 	if p.When == protocol.ServerUpdateIdle {
 		// Refused now rather than at the idle moment, when nobody is
 		// watching: the release must already be complete.
-		if _, err = preflight(ctx, s.plan(pending), tag, false); err != nil {
-			return protocol.ServerUpdateResult{}, nil, err
+		m, perr := preflight(ctx, s.plan(pending), tag, false)
+		if perr == nil {
+			perr = s.takenNow(ctx, m)
+		}
+		if perr != nil {
+			return protocol.ServerUpdateResult{}, nil, perr
 		}
 		// One pending update at a time: a second request replaces the
 		// first rather than queueing behind it.
-		if serr := s.cfg.Store.SetPendingServerUpdate(ctx, &pending); serr != nil {
+		s.decideMu.Lock()
+		serr := s.refuseWhileCommitted()
+		if serr == nil {
+			serr = s.cfg.Store.SetPendingServerUpdate(ctx, &pending)
+		}
+		s.decideMu.Unlock()
+		if serr != nil {
 			return protocol.ServerUpdateResult{}, nil, serr
 		}
 		res.Status = protocol.ServerUpdateScheduled
 		s.publish(ctx, actor, events.ServerUpdateScheduled, tag, "")
 		return res, nil, nil
+	}
+	if p.AllowDowngrade {
+		// A rollback holds: the server does not schedule the build it
+		// leaves, or the newest it knows of, by itself again. Recorded
+		// before the swap, so a rollback whose mark cannot be kept does
+		// not happen, and after a preflight, so a rollback the preflight
+		// refuses declines nothing.
+		if _, err = preflight(ctx, s.plan(pending), tag, true); err != nil {
+			return protocol.ServerUpdateResult{}, nil, err
+		}
+		leaving := s.known(version.Version)
+		s.checkMu.Lock()
+		latest := s.check.latest()
+		s.checkMu.Unlock()
+		if selfupdate.Newer(latest, leaving) {
+			leaving.Build, leaving.Hotfix = latest.Build, latest.Hotfix
+		}
+		if err = s.decline(ctx, leaving); err != nil {
+			return protocol.ServerUpdateResult{}, nil, err
+		}
 	}
 	restart, err := s.apply(ctx, pending, p.AllowDowngrade, false)
 	if err != nil {
@@ -397,20 +473,88 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 
 // cancel clears the pending update. Cancelling nothing is not an error:
 // the caller asked for no pending update and there is none.
+//
+// The cancelled release is declined first, with its build read from its
+// manifest when the server does not know it, under the lock the server
+// schedules under, so a cancel whose mark cannot be kept changes nothing
+// and the server cannot schedule the release again in between.
 func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.ServerUpdateResult, error) {
 	state, err := s.cfg.Store.GetServerUpdate(ctx)
 	if err != nil {
 		return protocol.ServerUpdateResult{}, err
 	}
-	if err := s.cfg.Store.SetPendingServerUpdate(ctx, nil); err != nil {
+	var resolved selfupdate.Release
+	if state.Pending != nil {
+		resolved = s.resolve(ctx, state.Pending.Version)
+	}
+	s.decideMu.Lock()
+	defer s.decideMu.Unlock()
+	if err = s.refuseWhileCommitted(); err != nil {
+		return protocol.ServerUpdateResult{}, err
+	}
+	if state, err = s.cfg.Store.GetServerUpdate(ctx); err != nil {
 		return protocol.ServerUpdateResult{}, err
 	}
 	out := protocol.ServerUpdateResult{Status: protocol.ServerUpdateCancelled}
 	if state.Pending != nil {
+		if resolved.Version != state.Pending.Version {
+			resolved = s.known(state.Pending.Version)
+		}
+		recorded, err := raiseDeclined(ctx, s.cfg.Store, resolved)
+		if err != nil {
+			return protocol.ServerUpdateResult{}, err
+		}
+		note := ""
+		if !recorded {
+			// The cancel stands: an admin must always be able to stop an
+			// update. Only the mark that keeps the server from scheduling
+			// it again by itself is missing, and that is said.
+			note = fmt.Sprintf("%s was not recorded as declined: its build could not be read from its signed manifest; the server may schedule it again by itself", state.Pending.Version)
+		}
+		s.checkMu.Lock()
+		s.declineNote = note
+		s.checkMu.Unlock()
+		out.NotDeclined = note
+	}
+	if err := s.cfg.Store.SetPendingServerUpdate(ctx, nil); err != nil {
+		return protocol.ServerUpdateResult{}, err
+	}
+	if state.Pending != nil {
 		out.Version = state.Pending.Version
-		s.publish(ctx, actor, events.ServerUpdateCancelled, state.Pending.Version, "")
+		s.publish(ctx, actor, events.ServerUpdateCancelled, state.Pending.Version, out.NotDeclined)
 	}
 	return out, nil
+}
+
+// latestRecorded is latest for server.update. On a channel it waits for
+// any running check, bounded by ctx, and records a raised mark before it
+// answers. It returns the channel it followed, "" on a fixed feed.
+func (s *Service) latestRecorded(ctx context.Context) (selfupdate.Manifest, string, error) {
+	if s.cfg.Releases != nil {
+		m, err := s.cfg.Releases.Latest(ctx)
+		return m, "", err
+	}
+	select {
+	case s.run <- struct{}{}:
+	case <-ctx.Done():
+		return selfupdate.Manifest{}, "", ctx.Err()
+	}
+	defer func() { <-s.run }()
+	s.reloadState()
+	cur := s.current()
+	m, marks, channel, _, err := s.latest(ctx, cur.Pointers)
+	if err != nil || maps.Equal(marks, cur.Pointers) {
+		return m, channel, err
+	}
+	st := s.current()
+	st.Pointers = marks
+	if err := s.persistCheck(st); err != nil {
+		return selfupdate.Manifest{}, channel, err
+	}
+	s.checkMu.Lock()
+	s.check = st
+	s.checkMu.Unlock()
+	return m, channel, nil
 }
 
 // resolveTag validates a client-supplied tag or asks the release feed for
@@ -425,14 +569,14 @@ func (s *Service) resolveTag(ctx context.Context, tag string) (string, error) {
 		}
 		return tag, nil
 	}
-	m, err := s.releases().Latest(ctx)
+	m, channel, err := s.latestRecorded(ctx)
 	if errors.Is(err, selfupdate.ErrNoRelease) {
 		return "", fmt.Errorf("%w: %w", ErrUpToDate, err)
 	}
 	if err != nil {
 		return "", err
 	}
-	if !selfupdate.Behind(version.Version, m.Version) {
+	if !Offers(channel, selfupdate.Running(), m.Release()) {
 		return "", fmt.Errorf("%w: aether-server %s is not older than the latest release %s", ErrUpToDate, version.Version, m.Version)
 	}
 	return m.Version, nil

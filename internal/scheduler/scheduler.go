@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/mirror"
+	"github.com/3xDevOps/Aether/internal/ompbroker"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/secretstore"
@@ -88,6 +90,8 @@ type Config struct {
 	// callers may omit it to use StateDir.
 	DataDir string
 	Homes   *memberhome.Manager
+	// OMPBrokers run omp's auth broker for session VMs; nil in Docker.
+	OMPBrokers *ompbroker.Manager
 	// Signing holds members' commit signing keys and serves each member's
 	// agent into their containers; nil leaves commits unsigned.
 	Signing *signing.Service
@@ -199,6 +203,8 @@ func defaultHarnesses() map[string]HarnessSpec {
 type Scheduler struct {
 	cfg       Config
 	harnesses map[string]HarnessSpec
+	// ompFront serves session VMs' omp logins; nil without session VMs.
+	ompFront *ompbroker.Front
 
 	// oom is touched only by the sweep loop in Start.
 	oom oomWatcher
@@ -746,6 +752,12 @@ func New(cfg Config) (*Scheduler, error) {
 	}
 	s.acp = newACPDriver(s)
 	s.appServer = newAppServerDriver(s)
+	// vm-single held launch records that servers before omp's broker and
+	// seeded VM state wrote; nothing reads them now.
+	if err := os.RemoveAll(filepath.Join(cfg.StateDir, "vm-single")); err != nil {
+		slog.Warn("scheduler: remove the old one-VM-session records", "error", err)
+	}
+	s.useOMPBroker(cfg.OMPBrokers)
 	return s, nil
 }
 
@@ -1058,7 +1070,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env[coordtransport.RunIDEnv] = string(run.ID)
 	env["AETHER_WORKSPACE_ID"] = string(run.WorkspaceID)
 	env["AETHER_ACCOUNT_MEMBER_ID"] = string(run.AccountMember())
-	env["AETHER_HARNESS"] = run.Harness
+	env[coordtransport.HarnessEnv] = run.Harness
 	identity := member.GitIdentity()
 	env["GIT_AUTHOR_NAME"] = identity.Name
 	env["GIT_COMMITTER_NAME"] = identity.Name

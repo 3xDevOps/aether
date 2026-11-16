@@ -409,7 +409,7 @@ func (s *Session) autonomousOverLocked() bool {
 	}
 	if limit == autonomousStale {
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "warning", Title: "Background turn ended",
-			Description: fmt.Sprintf("The agent sent nothing for %s while a tool call stayed open, so Aether stopped waiting for the turn's end.", limit)}})
+			Description: fmt.Sprintf("The agent sent nothing for %s while a tool call stayed open, so Cloudfield stopped waiting for the turn's end.", limit)}})
 	}
 	return true
 }

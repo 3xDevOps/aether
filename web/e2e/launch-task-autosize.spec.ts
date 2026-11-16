@@ -13,7 +13,7 @@ test('pasted tasks grow to the limit and scroll past it', async ({ page, aether 
   await page.goto(alice.url)
 
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(alice.url).origin })
-  const nav = page.getByRole('navigation', { name: 'Aether' })
+  const nav = page.getByRole('navigation', { name: 'Cloudfield' })
   await nav.getByRole('button', { name: 'New session' }).click()
   const dialog = page.getByRole('dialog', { name: 'New session' })
   const task = dialog.getByLabel('Task')

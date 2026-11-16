@@ -111,7 +111,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
           <AlertDialogHeader>
             <AlertDialogTitle>Start a Standard session instead?</AlertDialogTitle>
             <AlertDialogDescription>
-              This agent cannot move a running conversation between modes. Aether starts a new Standard session with the same task and closes this one without merging. The conversation so far stays in this session’s history.
+              This agent cannot move a running conversation between modes. Cloudfield starts a new Standard session with the same task and closes this one without merging. The conversation so far stays in this session’s history.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {check ? <CloseWarnings check={check} run={run} onLeave={() => setConfirm(false)} className={warningScroll} /> : <p className="text-ui-sm text-muted">Checking what closing affects…</p>}

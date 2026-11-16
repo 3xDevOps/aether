@@ -27,11 +27,13 @@ type units interface {
 
 func unitName(key string) string { return "aether-vm-" + key + ".service" }
 
-type systemdUnits struct{}
+// SystemdUnits starts transient units in the sessions' slice with
+// systemd-run; the omp auth broker runs in them too.
+type SystemdUnits struct{}
 
 // Start uses --collect so a unit that failed does not keep its name from
 // the next Start.
-func (systemdUnits) Start(ctx context.Context, name string, argv, properties []string) error {
+func (SystemdUnits) Start(ctx context.Context, name string, argv, properties []string) error {
 	args := []string{"--unit=" + name, "--slice=" + runtime.SessionSlice, "--collect", "--quiet"}
 	for _, p := range properties {
 		args = append(args, "--property="+p)
@@ -41,7 +43,7 @@ func (systemdUnits) Start(ctx context.Context, name string, argv, properties []s
 }
 
 // Stop treats a unit systemd no longer knows as stopped.
-func (systemdUnits) Stop(ctx context.Context, name string) error {
+func (SystemdUnits) Stop(ctx context.Context, name string) error {
 	err := systemctl(ctx, "systemctl", "stop", name)
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.ExitCode() == 5 {
@@ -52,7 +54,7 @@ func (systemdUnits) Stop(ctx context.Context, name string) error {
 
 // State counts a unit as active while it starts, runs or reloads, so a VM
 // whose monitor is still composing its share is not mistaken for gone.
-func (systemdUnits) State(ctx context.Context, name string) (unitState, error) {
+func (SystemdUnits) State(ctx context.Context, name string) (unitState, error) {
 	out, err := exec.CommandContext(ctx, "systemctl", "show", "--property=ActiveState,MainPID", name).Output()
 	if err != nil {
 		return unitState{}, fmt.Errorf("vm runtime: systemctl show %s: %w", name, err)

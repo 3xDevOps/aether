@@ -38,7 +38,7 @@ func ValidReviewerLogin(login string) bool {
 // earlier version stored, with the reason.
 func CheckProvider(p string) error {
 	if p != ProviderGitHub {
-		return fmt.Errorf("edgeproto: sign-in provider %q is not supported: Aether signs in with GitHub only", p)
+		return fmt.Errorf("edgeproto: sign-in provider %q is not supported: Cloudfield signs in with GitHub only", p)
 	}
 	return nil
 }

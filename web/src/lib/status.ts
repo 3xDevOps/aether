@@ -262,7 +262,7 @@ export function stateTitle(shown: Pick<RunPresentation, 'state' | 'reason' | 'ne
   const read = wait?.verified_at && wait.kind !== 'unverified' ? `Last read ${new Date(wait.verified_at).toLocaleString()}.` : undefined
   const summary = waitLine(wait, shown.state, now) && shown.state !== 'needs-you' ? stateDetail(shown) : undefined
   const reported = summary ? `The agent reported: ${summary.replace(/\.$/, '')}.` : undefined
-  const unverified = wait?.kind === 'unverified' ? 'Not verified: the wait names no condition Aether can check.' : undefined
+  const unverified = wait?.kind === 'unverified' ? 'Not verified: the wait names no condition Cloudfield can check.' : undefined
   const why = shown.cause ? `Why: ${causeWords[shown.cause] ?? shown.cause}.` : undefined
   return [`${head}${said}`, read, reported, unverified, shown.next, why].filter(Boolean).join(' ')
 }

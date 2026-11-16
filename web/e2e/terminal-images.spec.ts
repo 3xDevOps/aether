@@ -78,7 +78,7 @@ test('targets image bytes at a live run shell', async ({ page, aether }) => {
   })
 
   await page.goto(alice.url)
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: new RegExp(task) }).click()
+  await page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: new RegExp(task) }).click()
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
   const newShell = page.getByRole('main').getByRole('button', { name: 'New shell' })

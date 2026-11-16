@@ -493,7 +493,7 @@ func TestGoogleAccountFromAnEarlierVersion(t *testing.T) {
 	if _, err := db.Exec(`UPDATE accounts SET provider = 'google', login = '' WHERE subject = '1'`); err != nil {
 		t.Fatal(err)
 	}
-	const reason = `sign-in provider "google" is not supported: Aether signs in with GitHub only; ` +
+	const reason = `sign-in provider "google" is not supported: Cloudfield signs in with GitHub only; ` +
 		`this edge's operator removes the account with: aether-edge accounts delete google:1`
 
 	if status, msg := h.apiCall(t, http.MethodGet, edgeproto.PathServers, tok.Token, nil, nil); status != http.StatusForbidden || !strings.Contains(msg, reason) {

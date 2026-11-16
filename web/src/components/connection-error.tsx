@@ -209,7 +209,7 @@ function copyFor({ kind, dead, edge, serverID, approvalCode }: ConnectionErrorPr
     return {
       icon: ServerOff,
       eyebrow: 'Server offline',
-      title: 'Cannot reach your Aether server',
+      title: 'Cannot reach your Cloudfield server',
       description:
         'The network is up and the server did not answer over SSH. Check that the server is running and that its host is reachable, then try again.',
       action: 'Retry connection',

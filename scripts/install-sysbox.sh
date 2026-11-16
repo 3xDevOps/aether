@@ -3,7 +3,7 @@
 # already runs Docker, so Aether runs can start their own Docker daemon.
 # Run as root:
 #
-#   curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install-sysbox.sh | sudo sh
+#   curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install-sysbox.sh | sudo sh
 #
 # The package registers the sysbox-runc runtime with Docker. Its installer
 # refuses to run while any container exists, stopped ones included, if it must

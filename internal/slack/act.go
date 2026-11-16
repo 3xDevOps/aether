@@ -67,7 +67,7 @@ func (s *Service) link(ctx context.Context, cb eventCallback) string {
 		_, err := s.cfg.Store.SlackLinkByUser(ctx, cb.TeamID, ev.User)
 		switch {
 		case errors.Is(err, store.ErrNotFound):
-			return "To link your Aether account, run `aether slack link` and send me the code it prints."
+			return "To link your Cloudfield account, run `aether slack link` and send me the code it prints."
 		case err != nil:
 			return err.Error()
 		}
@@ -135,7 +135,7 @@ func (s *Service) press(ctx context.Context, in interaction) string {
 	}
 	last, err := s.cfg.Store.SlackMessageAt(ctx, in.Container.ChannelID, in.Container.MessageTS)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && string(last.RunID) != a.Run) {
-		return "This message no longer follows the session; answer it in the Aether dashboard."
+		return "This message no longer follows the session; answer it in the Cloudfield dashboard."
 	}
 	if err != nil {
 		return err.Error()
@@ -158,7 +158,7 @@ func (s *Service) press(ctx context.Context, in interaction) string {
 		}
 	}
 	if picked == nil {
-		return "The request changed; answer it in the Aether dashboard."
+		return "The request changed; answer it in the Cloudfield dashboard."
 	}
 	var res protocol.RunInputRespondResult
 	if err := call(ctx, c, protocol.MethodRunInputRespond, protocol.RunInputRespondParams{RunID: a.Run, RequestID: a.Answer,
@@ -184,7 +184,7 @@ func (s *Service) press(ctx context.Context, in interaction) string {
 func (s *Service) acting(ctx context.Context, team, user string) (Caller, error) {
 	link, err := s.cfg.Store.SlackLinkByUser(ctx, team, user)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, errors.New("your Slack account is not linked to Aether; run `aether slack link` and send me the code")
+		return nil, errors.New("your Slack account is not linked to Cloudfield; run `aether slack link` and send me the code")
 	}
 	if err != nil {
 		return nil, err

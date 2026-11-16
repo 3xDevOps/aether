@@ -18,6 +18,9 @@ func TestPrintConnectors(t *testing.T) {
 		{ID: "con-2", ClientName: "Claude", RedirectHost: "claude.ai", Resource: universal, Scopes: []string{"read", "write", "control"},
 			CreatedAt: now.UTC().Format(time.RFC3339)},
 	}
+	const otherUniversal = "https://edge.example.test/mcp"
+	other := protocol.Connector{ID: "con-3", ClientName: "ChatGPT", RedirectHost: "chatgpt.com", Resource: otherUniversal, Scopes: []string{"read"},
+		CreatedAt: now.UTC().Format(time.RFC3339)}
 	for _, tt := range []struct {
 		name string
 		list protocol.ConnectorListResult
@@ -37,7 +40,7 @@ Remove one: aether mcp revoke <id>
 To use the one URL https://edge.onaether.dev/mcp instead, link a GitHub account: aether member link --github <login>
 `},
 		{"signing in replaces the code", protocol.ConnectorListResult{Connectors: connectors, URL: universal, UniversalURL: universal, SignIn: true}, nil,
-			`Install Aether from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
+			`Install Cloudfield from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
   URL   https://edge.onaether.dev/mcp
   No code: on the page that opens, sign in to the edge with GitHub, pick this server and select Allow
 Connected:
@@ -45,6 +48,16 @@ Connected:
   con-2  Claude (claude.ai)  scopes read,write,control  added 2026-10-18  never used  universal URL
 Move con-1 to the universal URL: connect again at https://edge.onaether.dev/mcp, then aether mcp revoke <id>
 Reconnecting one at the server's own URL asks for a code: aether mcp code
+Remove one: aether mcp revoke <id>
+`},
+		{"at the edge's other relay address", protocol.ConnectorListResult{Connectors: []protocol.Connector{connectors[1], other}, URL: universal,
+			UniversalURL: universal, UniversalURLs: []string{universal, otherUniversal}, SignIn: true}, nil,
+			`Install Cloudfield from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
+  URL   https://edge.onaether.dev/mcp
+  No code: on the page that opens, sign in to the edge with GitHub, pick this server and select Allow
+Connected:
+  con-2  Claude (claude.ai)  scopes read,write,control  added 2026-10-18  never used  universal URL
+  con-3  ChatGPT (chatgpt.com)  scopes read  added 2026-10-18  never used  universal URL
 Remove one: aether mcp revoke <id>
 `},
 	} {

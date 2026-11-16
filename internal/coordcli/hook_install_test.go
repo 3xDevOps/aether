@@ -190,7 +190,7 @@ func TestHookSummaryReportsOnlyTheRunHarness(t *testing.T) {
 // and are never reported missing.
 func TestHookInstallManagedLaunchLoadsHooks(t *testing.T) {
 	const managed = "Inbox hooks (opencode): loaded by this session's launch; do not install a manual copy.\n"
-	const enhanced = "Inbox hooks: not used in Enhanced sessions; Aether hands this session its mail as a prompt. Do not install them.\n"
+	const enhanced = "Inbox hooks: not used in Enhanced sessions; Cloudfield hands this session its mail as a prompt. Do not install them.\n"
 	for _, tt := range []struct {
 		name    string
 		env     map[string]string

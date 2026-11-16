@@ -23,6 +23,11 @@ const (
 	BinaryPath = "/opt/aether/aether-server"
 	// CLIPath is the staged coordination CLI path.
 	CLIPath = "/usr/local/bin/aether-internal"
+	// CloudfieldCLIPath is the same CLI under the new product name. A
+	// container made by an older server has only CLIPath, and member homes
+	// are shared across server versions, so the server's own execs and
+	// files written into homes call CLIPath.
+	CloudfieldCLIPath = "/usr/local/bin/cloudfield-internal"
 	// SudoPath mounts the same binary as the sudo shim of Default and
 	// Isolated runs, ahead of the image's /usr/bin/sudo on PATH.
 	SudoPath = "/usr/local/bin/sudo"
@@ -47,4 +52,11 @@ const (
 	// context it keeps through compaction, so hooks and the MCP bridge do
 	// not repeat it.
 	RoleCardEnv = "AETHER_ROLE_CARD"
+	// HarnessEnv names the run's harness in its container.
+	HarnessEnv = "AETHER_HARNESS"
 )
+
+// SessionEnv are the variables the server sets for its own programs in a
+// session. Their readers take the CLOUDFIELD_ name first, so the server
+// empties that name wherever it builds a session's environment.
+var SessionEnv = [...]string{RunIDEnv, EnhancedEnv, ManagedHooksEnv, BackgroundEnv, WakeEnv, RoleCardEnv, HarnessEnv}

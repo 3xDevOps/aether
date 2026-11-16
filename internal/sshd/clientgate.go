@@ -35,38 +35,47 @@ var ungatedMethods = map[string]bool{
 // server is about to refuse.
 const upgradeRefusalTimeout = 10 * time.Second
 
-// parseClientBanner reads the client version from an SSH banner, reporting
-// legacy for a banner that is not an Aether client's.
-func parseClientBanner(banner string) (clientVersion string, legacy bool) {
+// parseClientBanner reads the client release from an SSH banner, its
+// build from the version's build metadata, reporting legacy for a banner
+// that is not an Aether client's.
+func parseClientBanner(banner string) (client selfupdate.Release, legacy bool) {
 	v, ok := strings.CutPrefix(banner, aetherBannerPrefix)
 	if !ok {
-		return "", true
+		return selfupdate.Release{}, true
 	}
-	return strings.TrimSpace(v), false
+	return selfupdate.ParseBannerVersion(strings.TrimSpace(v)), false
 }
 
-// minClientVersion is the oldest client release this server serves: its
-// release core, so a server built past a tag asks for that tag and never
-// for a client release that does not exist.
-func (s *Server) minClientVersion() string { return version.ReleaseCore(s.cfg.release) }
+// minClient is the oldest client release this server serves: its release
+// core, so a server built past a tag asks for that tag and never for a
+// client release that does not exist, at its own build.
+func (s *Server) minClient() selfupdate.Release {
+	return selfupdate.Release{Version: version.ReleaseCore(s.cfg.release), Build: s.cfg.build, Hotfix: s.cfg.hotfix}
+}
 
 // upgradeRequired is the refusal for the connection behind ctx when its
-// client is older than this server's release. The in-process client
-// (Local) carries no client version and is never gated.
+// client is older than this server's release, by build when both carry
+// one, else by version. The in-process client (Local) carries no client
+// version and is never gated.
+//
+// The gate keeps a client from calling a server newer than it, for the
+// client's sake; it is not access control. A client that claims a higher
+// build in its banner gains what claiming a higher version always gave:
+// calls the server answers by role like any other.
 func (s *Server) upgradeRequired(ctx context.Context) *protocol.Error {
 	id, ok := ctx.Value(connIdentityKey{}).(connIdentity)
 	if !ok {
 		return nil
 	}
-	client := id.clientVersion
+	client := id.client
 	if id.legacyClient {
-		client = legacyClientVersion
+		client = selfupdate.Release{Version: legacyClientVersion}
 	}
-	floor := s.minClientVersion()
-	if !selfupdate.Behind(client, floor) {
+	floor := s.minClient()
+	if !selfupdate.Ahead(floor, client) {
 		return nil
 	}
-	return protocol.UpgradeRequired(id.clientVersion, s.cfg.release, floor)
+	return protocol.UpgradeRequired(id.client.Version, s.cfg.release, floor.Version)
 }
 
 // refuseUpgrade answers a stream from a gated client in the shape every

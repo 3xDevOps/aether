@@ -56,10 +56,6 @@ func feed(releases Releases, baseURL string) Releases {
 	return repository(baseURL)
 }
 
-func (s *Service) releases() Releases {
-	return feed(s.cfg.Releases, s.cfg.Checker.BaseURL())
-}
-
 // Plan is what moving an installation to a release needs: where it lives
 // and where releases come from. The server fills it from its own state;
 // `aether-server update` fills it from the config file.
@@ -108,10 +104,8 @@ func preflight(ctx context.Context, p Plan, tag string, allowDowngrade bool) (se
 	if err != nil {
 		return m, fmt.Errorf("%w: %w", ErrPreflight, retryable{err})
 	}
-	core := version.ReleaseCore(version.Version)
-	if selfupdate.Behind(tag, core) && !allowDowngrade {
-		return m, fmt.Errorf("%w: %s is older than the running %s; pass --allow-downgrade (allow_downgrade) to install it anyway",
-			ErrDowngrade, tag, core)
+	if older := selfupdate.Downgrade(selfupdate.Running(), m.Release()); older != nil && !allowDowngrade {
+		return m, fmt.Errorf("%w: %w; pass --allow-downgrade (allow_downgrade) to install it anyway", ErrDowngrade, older)
 	}
 	schema, err := p.Schema(ctx)
 	if err != nil {

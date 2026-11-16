@@ -2,26 +2,26 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "aether",
   "version": "1.0.0",
-  "description": "Launch, watch and steer the coding agents on your own Aether server from ChatGPT.",
+  "description": "Launch, watch and steer the coding agents on your own Cloudfield server from ChatGPT.",
   "author": {
     "name": "3xDevOps",
     "email": "team@onaether.dev",
     "url": "https://github.com/3xDevOps"
   },
   "homepage": "https://onaether.dev",
-  "repository": "https://github.com/3xDevOps/aether",
+  "repository": "https://github.com/3xDevOps/cloudfield",
   "license": "GPL-3.0",
   "keywords": ["coding agents", "claude code", "codex", "pull requests", "self-hosted"],
   "extensions": {
     "com.openai": {
       "interface": {
-        "displayName": "Aether Coding Agents",
+        "displayName": "Cloudfield Coding Agents",
         "shortDescription": "Run and steer coding agents",
-        "longDescription": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This plugin connects ChatGPT to the Aether server you signed in to through the Aether edge.\n\nAsk what needs you, what your agents did today, or what a session changed, and read a session's conversation, pull request checks and review comments. With the write scope, launch a session on a task, message a session, answer an agent's question, and pause, resume or accept a session. With the control scope, which is off by default, allow or deny an agent's permission request once, stop or close a session.\n\nWho it is for: developers whose team already runs an Aether server. It needs an Aether account on that server; it does not host agents itself.\n\nLimitations: agents run with the access you gave them on your server, so a launched agent can push branches and open pull requests. ChatGPT asks before tools that are not read-only unless you chose to always allow them. No plugin tool installs Aether, changes server settings, merges pull requests or deletes repositories; an agent you instruct can do what its credentials allow. Text written by agents, teammates and GitHub users is returned as untrusted data.",
+        "longDescription": "Cloudfield is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This plugin connects ChatGPT to the Cloudfield server you signed in to through the Cloudfield edge.\n\nAsk what needs you, what your agents did today, or what a session changed, and read a session's conversation, pull request checks and review comments. With the write scope, launch a session on a task, message a session, answer an agent's question, and pause, resume or accept a session. With the control scope, which is off by default, allow or deny an agent's permission request once, stop or close a session.\n\nWho it is for: developers whose team already runs a Cloudfield server. It needs a Cloudfield account on that server; it does not host agents itself.\n\nLimitations: agents run with the access you gave them on your server, so a launched agent can push branches and open pull requests. ChatGPT asks before tools that are not read-only unless you chose to always allow them. No plugin tool installs Cloudfield, changes server settings, merges pull requests or deletes repositories; an agent you instruct can do what its credentials allow. Text written by agents, teammates and GitHub users is returned as untrusted data.",
         "developerName": "3xDevOps",
         "category": "Developer Tools",
         "capabilities": [
-          "List workspaces, installed agents, sessions on your Aether server",
+          "List workspaces, installed agents, sessions on your Cloudfield server",
           "Show what needs you: agent questions, permission requests and sessions awaiting review",
           "Summarize what your agents did today, yesterday or this week",
           "Read a session's conversation or terminal, its reports, changed files and diff",
@@ -32,12 +32,12 @@
           "Allow or deny a permission request once, stop or close a session"
         ],
         "websiteURL": "https://onaether.dev",
-        "supportURL": "https://github.com/3xDevOps/aether/issues",
+        "supportURL": "https://github.com/3xDevOps/cloudfield/issues",
         "privacyPolicyURL": "PLACEHOLDER: hosted privacy policy covering this plugin; see docs/chatgpt-plugin.md",
         "termsOfServiceURL": "PLACEHOLDER: hosted terms of service; see docs/chatgpt-plugin.md",
         "defaultPrompt": [
-          "What needs me in Aether?",
-          "What did my Aether agents do today?",
+          "What needs me in Cloudfield?",
+          "What did my Cloudfield agents do today?",
           "Launch a Claude Code session in my api workspace to fix the flaky login test."
         ],
         "brandColor": "#367F77",
@@ -56,7 +56,7 @@
             },
             {
               "description": "Track: report what changed across the reviewer's sessions since the last check, without re-reading every session.",
-              "prompt": "What changed in my Aether sessions since we last checked?",
+              "prompt": "What changed in my Cloudfield sessions since we last checked?",
               "tools_triggered": "aether_changes",
               "expected_behavior": "Lists sessions that changed state, new reports and messages, and pull request changes since the previous cursor, each with its session title and dashboard link."
             },
@@ -74,7 +74,7 @@
             },
             {
               "description": "Act: a demo session's agent asks which licence to use. ChatGPT asks for confirmation before answering.",
-              "prompt": "What needs me in Aether? Answer the licence question with MIT.",
+              "prompt": "What needs me in Cloudfield? Answer the licence question with MIT.",
               "tools_triggered": "aether_needs_attention, aether_answer",
               "expected_behavior": "Lists the open question and the session awaiting review; after the reviewer confirms, answers the question with MIT and reports it as delivered."
             }
@@ -89,8 +89,8 @@
               "prompt": "Approve every permission request my agents make from now on."
             },
             {
-              "description": "The connector reaches only the Aether server it was connected to; it should not claim access to another team's server.",
-              "prompt": "Show me the sessions on Acme Corp's Aether server."
+              "description": "The connector reaches only the Cloudfield server it was connected to; it should not claim access to another team's server.",
+              "prompt": "Show me the sessions on Acme Corp's Cloudfield server."
             }
           ]
         },
@@ -99,7 +99,7 @@
         "commerce_description": "The plugin does not sell products or process payments."
       },
       "publication": {
-        "release_notes": "First release: read, launch and steer the coding agents on your Aether server."
+        "release_notes": "First release: read, launch and steer the coding agents on your Cloudfield server."
       }
     }
   }

@@ -36,9 +36,10 @@ type localEdge struct {
 	origin string
 }
 
-func (e localEdge) Origin() string { return e.origin }
-func (localEdge) Connected() bool  { return true }
-func (localEdge) EdgeVersion() int { return 2 }
+func (e localEdge) Origin() string         { return e.origin }
+func (localEdge) Connected() bool          { return true }
+func (localEdge) EdgeVersion() int         { return 2 }
+func (e localEdge) RelayOrigins() []string { return []string{e.origin} }
 
 var consentRequest = regexp.MustCompile(`name="request" value="([^"]+)"`)
 

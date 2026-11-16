@@ -27,7 +27,7 @@ async function openDock(page: Page, url: string): Promise<Locator> {
     await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Sessions' }).click()
     await page.getByRole('main').getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   } else {
-    await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+    await page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   }
   await showShell(page, /agent-tui/)
   const dock = page.locator('[data-slot=shell-terminal]')
@@ -193,7 +193,7 @@ test('agent-created TUI shares authority, geometry, protocol responses, limits a
   await expect.poll(async () => (await list()).terminals.find((item) => item.terminal_id === terminal.terminal_id)?.process.state).not.toBe('running')
   // A stopped shell does not come back as a tab.
   await page.reload()
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
+  await page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' }).getByRole('button', { name: /development terminal acceptance/ }).click()
   const tabs = page.getByRole('main').getByRole('tablist', { name: 'Terminals' })
   await expect(tabs.getByRole('tab', { name: 'after-stop' })).toBeVisible()
   await expect(tabs.getByRole('tab', { name: /agent-tui/ })).toHaveCount(0)

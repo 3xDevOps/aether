@@ -11,11 +11,11 @@ import { themeScript } from './theme-script'
  * bar tag has no effect without the prefixed one.
  */
 export const metadata: Metadata = {
-  title: 'Aether',
-  description: 'Aether developer workbench',
-  applicationName: 'Aether',
+  title: 'Cloudfield',
+  description: 'Cloudfield developer workbench',
+  applicationName: 'Cloudfield',
   icons: { apple: '/icons/apple-touch-icon.png' },
-  appleWebApp: { capable: true, title: 'Aether', statusBarStyle: 'black-translucent' },
+  appleWebApp: { capable: true, title: 'Cloudfield', statusBarStyle: 'black-translucent' },
   other: { 'apple-mobile-web-app-capable': 'yes' },
 }
 

@@ -1093,7 +1093,7 @@ func TestBorrowedClaudeLoginMarksSetupComplete(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-		}, "over the 64 MiB Aether copies"},
+		}, "over the 64 MiB Cloudfield copies"},
 		"a hard link to another file": {func(t *testing.T, e *shareEnv, outside string) {
 			if err := os.Link(outside, filepath.Join(e.adaHome, ".claude.json")); err != nil {
 				t.Fatal(err)

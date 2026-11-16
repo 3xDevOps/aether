@@ -80,6 +80,9 @@ func TestTerminalGetsVerifiedCLIWithoutRunSocketWhenCoordinationDisabled(t *test
 	if !ok || !cli.ReadOnly {
 		t.Fatalf("terminal CLI mount = %+v, want read-only %s", container.spec.Mounts, coordtransport.CLIPath)
 	}
+	if cloudfield, found := mountFor(container.spec, coordtransport.CloudfieldCLIPath); !found || cloudfield.HostPath != cli.HostPath || cloudfield.ReadOnly != cli.ReadOnly || cloudfield.Kind != cli.Kind {
+		t.Fatalf("terminal cloudfield CLI mount = %+v, want %+v", container.spec.Mounts, cli)
+	}
 	if _, ok := mountFor(container.spec, coordtransport.MountDir); ok {
 		t.Fatalf("disabled terminal received fabricated run socket mount: %+v", container.spec.Mounts)
 	}

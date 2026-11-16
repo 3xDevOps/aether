@@ -76,7 +76,7 @@ test('the sign-in terminal in Settings keeps its size through open, input, resiz
   const signIns = await playSignIn(page, 'idle')
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.goto(alice.url)
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'Assistant', exact: true }).click()
   const section = page.locator('#assistant-sign-in')
 

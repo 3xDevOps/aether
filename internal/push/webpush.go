@@ -51,7 +51,7 @@ const (
 	tokenTTL = 12 * time.Hour
 	// vapidSubject is the contact a push service is given for this sender.
 	// It names the project and no installation.
-	vapidSubject = "https://github.com/3xDevOps/Aether"
+	vapidSubject = "https://github.com/3xDevOps/cloudfield"
 
 	sendTimeout = 15 * time.Second
 )

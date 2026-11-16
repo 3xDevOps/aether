@@ -30,7 +30,7 @@ test('shows the CLI banner to a collaborator when the CLI is behind', async () =
   seed({ self: bob })
   render(<UpdateHost client={client} />)
 
-  expect(await screen.findByText('Aether v1.3.0 is available.')).toBeTruthy()
+  expect(await screen.findByText('Cloudfield v1.3.0 is available.')).toBeTruthy()
   expect(screen.getByText(/You are running v1\.2\.3/)).toBeTruthy()
   // The copy names what the restart costs: the gateway holds the attach
   fireEvent.click(
@@ -41,7 +41,7 @@ test('shows the CLI banner to a collaborator when the CLI is behind', async () =
   ).toBeTruthy()
   const notes = screen.getByRole('link', { name: 'Release notes' })
   expect(notes.getAttribute('href')).toBe(
-    'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+    'https://github.com/3xDevOps/cloudfield/releases/tag/v1.3.0',
   )
   expect(notes.getAttribute('target')).toBe('_blank')
   expect(client.localUpdateCheck).toHaveBeenCalledTimes(1)
@@ -66,7 +66,7 @@ test('offers no button or command where the CLI cannot update itself', async () 
     await screen.findByText(/This aether cannot update itself\. Install v1\.3\.0 from its release page\./),
   ).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Release v1.3.0' }).getAttribute('href')).toBe(
-    'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+    'https://github.com/3xDevOps/cloudfield/releases/tag/v1.3.0',
   )
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.queryByText(/aether update/)).toBeNull()
@@ -128,7 +128,7 @@ test('a packaged CLI offers nothing and names the app that updates it', async ()
   render(<UpdateHost client={client} />)
 
   expect(
-    await screen.findByText('Updates come from the Android app: install its new version to update Aether.'),
+    await screen.findByText('Updates come from the Android app: install its new version to update Cloudfield.'),
   ).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.queryByText(/sudo/)).toBeNull()
@@ -146,12 +146,12 @@ test('a packaged CLI behind a release names it without offering an update', asyn
 
   expect(
     await screen.findByText(
-      'Updates come from the Android app: install its new version to update Aether. Aether v1.3.0 is released; the app\'s banner says when and where to update.',
+      'Updates come from the Android app: install its new version to update Cloudfield. Cloudfield v1.3.0 is released; the app\'s banner says when and where to update.',
     ),
   ).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.queryByRole('link', { name: 'Release notes' })).toBeNull()
-  expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
+  expect(screen.queryByText('Cloudfield v1.3.0 is available.')).toBeNull()
 })
 
 test('the Update button applies and the banner says it is restarting', async () => {
@@ -254,7 +254,7 @@ describe('a binary macOS installs through the administrator dialog', () => {
     )
     expect(
       await screen.findByText(
-        'macOS will ask for an administrator password: /usr/local/bin/aether is in a directory this account cannot write to. The dialog is labelled osascript, the tool Aether asks through. Aether never sees your password.',
+        'macOS will ask for an administrator password: /usr/local/bin/aether is in a directory this account cannot write to. The dialog is labelled osascript, the tool Cloudfield asks through. Cloudfield never sees your password.',
       ),
     ).toBeTruthy()
 
@@ -366,14 +366,14 @@ test('a dismissal hides that version and a newer release comes back', async () =
 
   fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
   expect(useStore.getState().dismissedUpdates.cli).toBe('v1.3.0')
-  expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
+  expect(screen.queryByText('Cloudfield v1.3.0 is available.')).toBeNull()
   first.unmount()
 
   // The same dismissal, the same release: still silent.
   useStore.setState({ update: null })
   const again = render(<UpdateHost client={client} />)
   await waitFor(() => expect(useStore.getState().update).not.toBeNull())
-  expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
+  expect(screen.queryByText('Cloudfield v1.3.0 is available.')).toBeNull()
   again.unmount()
 
   const newer = fakeApi({
@@ -384,7 +384,7 @@ test('a dismissal hides that version and a newer release comes back', async () =
   })
   useStore.setState({ update: null })
   render(<UpdateHost client={newer} />)
-  expect(await screen.findByText('Aether v1.3.1 is available.')).toBeTruthy()
+  expect(await screen.findByText('Cloudfield v1.3.1 is available.')).toBeTruthy()
 })
 
 // The gateway's note is the one thing that says what is left to do. A
@@ -456,7 +456,7 @@ describe('what the banner keeps after the install', () => {
     expect(screen.getByText(/Updated to v1\.3\.0/)).toBeTruthy()
     expect(screen.getByText('sudo systemctl restart aether-server')).toBeTruthy()
     // The offer it replaced is gone: this machine is no longer behind.
-    expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
+    expect(screen.queryByText('Cloudfield v1.3.0 is available.')).toBeNull()
   })
 
   test('keeps a running rebuild on screen', async () => {
@@ -486,7 +486,7 @@ describe('what the banner keeps after the install', () => {
     expect(screen.getByText(/Rebuilding the app/)).toBeTruthy()
     // The rebuild states have no Applied block, so the lead is what names
     // the release the app is being rebuilt for.
-    expect(screen.getByText('Aether v1.3.0 is installed.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.3.0 is installed.')).toBeTruthy()
   })
 })
 
@@ -688,14 +688,14 @@ describe('the release the Update button installs', () => {
     seed()
     render(<UpdateHost client={client} />)
     await settle()
-    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.3.0 is available.')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
     await settle()
 
     // update.apply has not answered yet and the banner already names the
     // release the gateway is installing.
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
 
     finish()
     await settle()
@@ -732,12 +732,12 @@ describe('the release the Update button installs', () => {
     await settle()
 
     expect(client.localUpdateApply).not.toHaveBeenCalled()
-    expect(screen.getByText('Aether v1.3.0 is the newest release.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.3.0 is the newest release.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
 
     released = true
     await refocus()
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy()
   })
 
@@ -767,7 +767,7 @@ describe('the release the Update button installs', () => {
       await vi.advanceTimersByTimeAsync(1000)
     })
 
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   // Nothing may rename the banner while the install behind it runs: the
@@ -795,7 +795,7 @@ describe('the release the Update button installs', () => {
     await refocus()
     await refocus()
 
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   // A plain read already out when Update is clicked lands while the click's
@@ -834,7 +834,7 @@ describe('the release the Update button installs', () => {
       await vi.advanceTimersByTimeAsync(1000)
     })
 
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   // A plain re-check that was already out when Update was clicked answers
@@ -866,7 +866,7 @@ describe('the release the Update button installs', () => {
       await vi.advanceTimersByTimeAsync(200)
     })
 
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   // The click added a second way to fail. A check that cannot reach GitHub

@@ -390,6 +390,7 @@ func (s *Server) afterMerge(ctx context.Context, caller domain.MemberID, merge *
 	if err := s.removeAssistant(ctx, merge.AbsorbedID); err != nil {
 		slog.Warn("sshd: absorbed member's assistant cleanup failed", "merge", merge.ID, "error", err)
 	}
+	s.cfg.Runs.ForgetOMPAccount(ctx, merge.AbsorbedID)
 	var agentErr error
 	if s.cfg.Signing != nil {
 		agentErr = s.cfg.Signing.StopAgent(merge.AbsorbedID)

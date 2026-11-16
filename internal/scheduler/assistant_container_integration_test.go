@@ -196,7 +196,7 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 		switch {
 		case m.Type == mount.TypeVolume:
 			t.Errorf("the assistant container mounts the volume %s at %s", m.Name, m.Destination)
-		case m.Type == mount.TypeBind && !strings.HasPrefix(m.Source, resolvedDir) && m.Destination != coordtransport.BinaryPath && m.Destination != coordtransport.CLIPath:
+		case m.Type == mount.TypeBind && !strings.HasPrefix(m.Source, resolvedDir) && m.Destination != coordtransport.BinaryPath && m.Destination != coordtransport.CLIPath && m.Destination != coordtransport.CloudfieldCLIPath:
 			t.Errorf("assistant bind mount from outside its directory: %s at %s", m.Source, m.Destination)
 		}
 	}

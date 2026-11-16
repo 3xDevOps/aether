@@ -140,9 +140,11 @@ Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark;
 fill, and `text-on-done` on a `bg-state-done` fill. Diffs use `text-diff-add`/`text-diff-del` (the done and failed colours)
 and `bg-diff-add-bg`/`bg-diff-del-bg` at 8% light, 10% dark.
 
-Agent vendor colours (`text-agent-claude`, `-codex`, `-pi`, `-omp`,
-`-opencode`) appear only on the Agents page, the launch picker and the head
-of a Board card, through `AgentGlyph colored`.
+Agent vendor colours (`text-agent-claude`, `-pi`, `-omp`, `-cursor`,
+`-gemini`, `-antigravity`) appear only on the Agents page, the launch picker
+and the head of a Board card, through `AgentGlyph colored`. Codex, OpenCode
+and Copilot glyphs take `text-text` there instead: OpenAI, OpenCode and GitHub
+forbid recolouring their marks.
 
 Member colours are the only arbitrary server data applied inline: avatar
 rings, the owner rail in session lists, the owner mark on sidebar session rows and
@@ -423,8 +425,11 @@ and `bg-*` class in `components/ui/` names a token defined in `index.css`.
 
 Icons come from `web/src/components/icons.ts`, which re-exports the lucide
 icons the dashboard uses at stroke width 1.75. Add a name there rather than
-importing `lucide-react`. The same module holds `Claude`, the Claude mark that
-`AgentGlyph` draws for the `claude` agent; it is filled, not stroked.
+importing `lucide-react`. The same module holds the agent marks `AgentGlyph`
+draws, filled in the text colour rather than stroked, each in a viewBox that
+fits the mark as its source draws it, never stretched. Gemini CLI and Antigravity CLI show their
+initial, because Google allows its product icons only on request.
+[notices.md](notices.md) lists where each mark comes from.
 
 ## Geometry and responsive behavior
 

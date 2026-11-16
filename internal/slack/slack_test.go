@@ -102,7 +102,7 @@ func TestNeedShowsButtonsThenEditsAndClears(t *testing.T) {
 	if posts[0].Channel != "D1" || len(l.sections) != 2 || !strings.Contains(l.sections[0], "Fix auth") || l.sections[1] != "Run rm -rf build?" {
 		t.Fatalf("message = %+v %+v, want the title and the request", posts[0], l)
 	}
-	if want := fmt.Sprintf("<https://box.tail.ts.net/?run=%s|Open in Aether>", url.QueryEscape(string(run.ID))); !strings.Contains(l.context, want) {
+	if want := fmt.Sprintf("<https://box.tail.ts.net/?run=%s|Open in Cloudfield>", url.QueryEscape(string(run.ID))); !strings.Contains(l.context, want) {
 		t.Fatalf("context = %q, want it to contain %q", l.context, want)
 	}
 	if len(l.buttons) != 2 || l.buttons[0].label != "Allow" || l.buttons[1].label != "Reject" {
@@ -183,7 +183,7 @@ func TestNeedWithoutButtons(t *testing.T) {
 		t.Fatalf("shown request has %d characters, want at most %d", got, maxRequest+1)
 	}
 	l = layoutOf(t, posts[1])
-	if l.actions != 0 || !strings.Contains(l.context, "Answer it in the Aether dashboard") {
+	if l.actions != 0 || !strings.Contains(l.context, "Answer it in the Cloudfield dashboard") {
 		t.Fatalf("question with a schema = %+v, want no buttons and a pointer to the dashboard", l)
 	}
 }
@@ -455,7 +455,7 @@ func TestNoticeIsANewMessageInTheLinkedDM(t *testing.T) {
 	if l.sections[0] != "*&lt;!channel&gt; aether*\nBudget warning: $8.50 of $10.00 spent" {
 		t.Fatalf("section = %q, want the escaped workspace and the line", l.sections[0])
 	}
-	if want := "<https://box.tail.ts.net/?page=workspace&id=" + string(h.ws.ID) + "|Open in Aether>"; l.context != want {
+	if want := "<https://box.tail.ts.net/?page=workspace&id=" + string(h.ws.ID) + "|Open in Cloudfield>"; l.context != want {
 		t.Fatalf("context = %q, want %q", l.context, want)
 	}
 }
