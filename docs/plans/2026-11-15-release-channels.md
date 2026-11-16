@@ -42,7 +42,7 @@ stands unless the owner changes it.
 - The first stable is `v0.8.7`, promoted from a beta. Existing installs
   land on beta. New installs default to stable once it exists. Nightlies
   then start at `v0.9.0-nightly.1`.
-- A server on nightly applies updates by itself when idle
+- A server on any channel applies updates by itself when idle
   ([Applying updates](#applying-updates)). The project's own server runs
   nightly.
 - Nightly assets are pruned after 14 days, except a nightly a waiting
@@ -136,11 +136,13 @@ both get it wrong.
 
 Every manifest carries a signed `build`, a positive integer:
 
-- Each nightly takes the next build number: one above the highest of
-  the `build:` lines in the messages of the annotated `-nightly.N` tags
-  and the builds the three pointers name. Those tags are never deleted,
-  so pruning or yanking a release never frees a number. Builds only
-  increase along `main`.
+- Each nightly takes one above the highest signed build: the builds the
+  three pointers name and the verified manifests of published nightlies
+  whose tag claims a higher one. A tag a failed run left one above that
+  is resumed; any other unpublished tag above it is refused. Pointers
+  never move down and nightly tags are never deleted, so pruning or
+  yanking a release never frees a number. Builds only increase along
+  `main`.
 - A beta or stable built from a nightly's commit carries that nightly's
   build. It is the same code, so it gets the same number.
 - A hotfix on `release/X.Y` carries the build of the stable it fixes and
@@ -213,7 +215,7 @@ Every place that compares versions today moves to build order:
 `scripts/android-version-code.sh` accepts only `alpha.N`, `beta.N` and
 `rc.N` up to 199 (`:76-88`), and `release.yml` runs it on every tag
 (`:97`), so today a nightly tag fails before anything builds. From
-`v0.9.0`, the code comes from the build number, which
+`v0.8.7`, build 1, the code comes from the build number, which
 `release-build.yml` passes to the script because the tag does not carry
 it:
 
@@ -312,7 +314,9 @@ pointer waits on a nightly. `nightly.json` never names a beta or stable:
 each was promoted from a nightly with the same build, and a hotfix's fix
 is on `main` first, so a later nightly carries it. Writers share one
 concurrency group, `channels`, with `cancel-in-progress: false`, and each
-reads the pointer it replaces first.
+reads the pointer it replaces first. GitHub keeps one pending run per
+group, so a pending nightly build and a pending Promote cancel each
+other; the cancelled one is dispatched again.
 
 ### Trusted signer
 
@@ -415,9 +419,7 @@ Decided 2026-11-16: on every channel a server applies updates by itself
 when idle. When the check finds a release on the server's channel above
 the running build, the server schedules it itself, exactly as
 `server.update` `idle` would, and it applies once no session is working.
-Before channels the background check only recorded the newest release,
-and each update started with a super admin's `server.update`. One
-function decides which channels do this, `selfApplies` in
+One function decides which channels do this, `selfApplies` in
 `internal/serverupdate/autoupdate.go`.
 
 - `AETHER_NO_UPDATE_CHECK=1`, which already turns the check off, turns
@@ -426,9 +428,12 @@ function decides which channels do this, `selfApplies` in
   `cancel`, an `allow_downgrade` update, and an update recorded failed
   after its 3 retries (`internal/serverupdate/apply.go:21`) each store
   that build as declined in the database, as does a self-scheduled
-  update whose new binary failed its trial and rolled back. The mark is
-  written before the cancel or rollback takes effect, and a write that
-  fails refuses it. The server schedules by itself only a build above the
+  update whose new binary failed its trial and rolled back, and a
+  release the server failed to schedule 3 times. A cancel or an
+  `allow_downgrade` update writes the mark first and is refused if the
+  write fails; a failed or rolled-back update writes it afterwards. A
+  cancel whose build cannot be read still cancels and says the release
+  was not declined. The server schedules by itself only a build above the
   declined one, so a rollback holds until a newer build ships. A super
   admin's own `server.update` ignores the mark.
 - Only a published release stamped with a build schedules by itself, and
@@ -487,8 +492,9 @@ deployment config for it). Its `edge-update.sh` timer pulls
 `promote-edge.yml` for a published stable release, and the host installs
 it only with that run's attestation and a passing `release-check`.
 
-- The image tags `:nightly`, `:beta` and `:stable` move with the matching
-  pointer. `:latest` keeps following GitHub's Latest
+- `:nightly` and `:beta` move when `nightly.yml` and Promote move their
+  pointer; `:stable` moves by its own dispatch. `:latest` keeps following
+  GitHub's Latest
   (`release.yml:983-987`), which becomes stable.
 - `promote-edge.yml` gains `workflow_call` and a channel input. Promote
   calls it for `:beta` and `nightly.yml` for `:nightly`. The attestation's
@@ -541,8 +547,6 @@ it only with that run's attestation and a passing `release-check`.
   cycle therefore names a beta that does not exist yet, and nightly hosts
   hold until it is published. Signing a build per boundary would remove
   that; it is a manifest format change this plan does not make.
-  (`cmd/aether-edge/releasecheck.go:71`, `:76` under
-  [Build number](#build-number) are these two comparisons.)
 - `release-check` reads the manifest's `channel` and `build` and refuses a
   channel the host's does not accept, or a lower build.
 
@@ -641,6 +645,7 @@ Nightly builds add the previous nightly as a second starting point.
 | `from` | a nightly tag, a beta tag, or a full commit SHA of one |
 | `to` | `beta` or `stable` |
 | `version` | optional `X.Y.Z` override, at least the current nightly base |
+| `first-pointer` | only for the migration's first stable |
 
 It resolves the new tag, `vX.Y.Z-beta.N` (next `N` for that version) or
 `vX.Y.Z`, and refuses:
@@ -725,9 +730,10 @@ it.
 1. Ship the channel-aware updater as `v0.8.7-beta.N`, released the old
    way, by a tag on `main`. It becomes Latest and reaches every install
    through `/releases/latest`. Existing servers get `release_channel`
-   `beta` from its migration. This is the last release cut by a tag on
-   `main`: such a release has no build, and from step 3 no channel-aware
-   install takes one.
+   `beta` from its migration. It should be the last release cut by a
+   tag on `main`. Nothing refuses a later one, but such a release has no
+   build: from step 3 no install with a build takes it, and it never
+   becomes Latest.
 2. Create the `channels` prerelease that holds the pointers. No pointer
    is published for the pre-channel beta: until a channel's first
    pointer verifies, installs on it read `/releases/latest`.
@@ -745,8 +751,8 @@ it.
 5. Switch the project's own server to nightly.
 
 From step 3, betas and nightlies are published as prereleases.
-`reconcile_latest` keeps ordering by `versionCode`, which uses the new
-formula from `v0.9.0`.
+`reconcile_latest` orders by the manifests' `(build, hotfix)`, and by the
+tag's `versionCode` only among releases from before channels.
 
 ## Implementation pull requests
 
