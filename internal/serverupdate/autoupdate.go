@@ -19,10 +19,9 @@ import (
 const ServerActor domain.MemberID = "server"
 
 // selfApplies reports whether a server following channel schedules the
-// newer builds its release check finds by itself. Every channel does, an
-// assumption pending the owner; for nightly only it would return
-// channel == selfupdate.ChannelNightly. A server on a fixed feed
-// (Config.Releases, channel "") never does.
+// newer builds its release check finds by itself. Every channel does;
+// for nightly only it would return channel == selfupdate.ChannelNightly.
+// A server on a fixed feed (Config.Releases, channel "") never does.
 func selfApplies(channel string) bool { return channel != "" }
 
 // errNotTaken refuses an update at its idle moment that the server's
