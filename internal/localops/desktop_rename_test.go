@@ -179,15 +179,18 @@ func TestBuiltDesktopAppFindsTheRenamedBundle(t *testing.T) {
 	}
 }
 
-// startAppExe runs a copy of sleep as the app's executable at exe, the way
-// the desktop starts it, until the test ends.
+// startAppExe runs a copy of this test binary as the app's executable at
+// exe, the way the desktop starts it, until the test ends. A copy of the
+// system's sleep is no stand-in: uutils coreutils, Ubuntu's since 25.10, is
+// one binary that picks the utility from argv[0] and exits at once under any
+// other name.
 func startAppExe(t *testing.T, exe string) {
 	t.Helper()
-	sleep, err := exec.LookPath("sleep")
+	self, err := os.Executable()
 	if err != nil {
-		t.Skip("no sleep binary")
+		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(sleep)
+	raw, err := os.ReadFile(self)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,11 +200,21 @@ func startAppExe(t *testing.T, exe string) {
 	if err := os.WriteFile(exe, raw, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, "60")
+	cmd := exec.Command(exe, "-test.run=^TestHelperAppProcess$")
+	cmd.Env = append(os.Environ(), "LOCALOPS_HELPER_APP=1")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+}
+
+// TestHelperAppProcess is the app process startAppExe runs; it does nothing
+// in a normal test run.
+func TestHelperAppProcess(t *testing.T) {
+	if os.Getenv("LOCALOPS_HELPER_APP") == "" {
+		t.Skip("runs only as startAppExe's app process")
+	}
+	time.Sleep(time.Minute)
 }
 
 // `aether update` tells the user to restart an app that is running, whichever
