@@ -134,7 +134,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ steps.plan.outputs.commit }}
-        run: echo "url=$(sh scripts/release-ci-check.sh "$GITHUB_REPOSITORY" "$COMMIT")" >> "$GITHUB_OUTPUT"
+        # On its own line: a failed check inside echo's arguments would not
+        # fail the step.
+        run: |
+          url=$(sh scripts/release-ci-check.sh "$GITHUB_REPOSITORY" "$COMMIT")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
       - name: Summarize
         env:
           TO: ${{ inputs.to }}
