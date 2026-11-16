@@ -150,9 +150,10 @@ usage leaves its sessions marked unmetered, which `aether cost` and `aether budg
 both say out loud.
 
 `AgentSession` carries the agent's own conversation ID, which is unrelated
-to any Cloudfield scope. It is a timeline record only: Cloudfield does not assign a
-conversation ID from it or use it to control reopening a session. Emit it anyway - it is
-what an operator needs to find the conversation in the agent's own tooling.
+to any Cloudfield scope. It is a timeline record only: Cloudfield does not
+assign a conversation ID from it or use it to control reopening a session. Emit
+it anyway - it is what an operator needs to find the conversation in the agent's
+own tooling.
 
 ### Testing
 

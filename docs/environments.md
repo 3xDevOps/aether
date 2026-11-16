@@ -44,7 +44,8 @@ The server uses the image tagged for its own release, from
 
 ### Git in session environments
 
-Cloudfield commits for a session with the Git in the session's sandbox. Stock Ubuntu
+Cloudfield commits for a session with the Git in the session's sandbox. Stock
+Ubuntu
 24.04 Git is enough. These commits do not run commit hooks, so if your
 repository needs hooks, run `git commit` in the session's terminal. A custom image
 whose Git lacks prepared reference transactions (`git update-ref --stdin`
@@ -310,8 +311,8 @@ Cloudfield checks that the host has free disk and memory, and that the server is
 not stalling on memory (its cgroup's `memory.pressure`, `some avg60` below
 10%). Otherwise the launch fails with `scheduler: insufficient disk headroom`,
 `scheduler: insufficient host memory headroom` or `scheduler: host capacity
-unavailable`. Cloudfield never stops a running agent to make room, and reopening a
-retained session needs no check. [Recover from disk
+unavailable`. Cloudfield never stops a running agent to make room, and reopening
+a retained session needs no check. [Recover from disk
 pressure](failure-handling.md#recover-from-disk-pressure) and [Recover from
 memory pressure](failure-handling.md#recover-from-memory-pressure) have the
 thresholds and what to do.

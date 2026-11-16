@@ -489,7 +489,7 @@ contribute to that group's count. Relationships come from the session snapshot's
 ### App header
 
 `top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
-Its first row shows the Cloudfield mark and lowercase `aether` wordmark on the left, then **Board**,
+Its first row shows the Aether mark and lowercase `aether` wordmark on the left, then **Board**,
 **Activity**, **Insights**, **Memory**, **Files**, **Environment**, **Agents** and
 **Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
 styling and current-page selection. A `ResizeObserver` measures the row and
@@ -763,8 +763,8 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   `other_member` says that member (`other_owner`) owns the session, so it asks
   even with auto-approval on; for a launch it says their account pays.
 - **Action cards** (`components/assistant/action-card.tsx`,
-  `lib/assistant-actions.ts`): `assistantView` takes each Cloudfield tool call out
-  of its step block as a card: one whose `tool_name` ends in an `aether_*`
+  `lib/assistant-actions.ts`): `assistantView` takes each Cloudfield tool call
+  out of its step block as a card: one whose `tool_name` ends in an `aether_*`
   tool (Claude Code's `mcp__aether__aether_launch_session`, or the bare name), or
   a Codex call titled `mcp.aether.aether_*`, whose `{server, tool, arguments}`
   input and `{result, error}` output are unwrapped from the call's latest
@@ -1535,8 +1535,8 @@ team reads write it onto the stored info, which is the gauge's only reader. The 
 stays optional and the gauge stays hidden if the read fails. What `statfs`
 answers is the whole filesystem holding the data directory, not the directory
 itself, and the gauge is labelled as that: it is the number that says whether
-the box is running out of room, and claiming it as Cloudfield's own usage would be
-an invention.
+the box is running out of room, and claiming it as Cloudfield's own usage would
+be an invention.
 
 `account.usage` is the quota RPC used by Settings > **Usage**. Its params
 are `{account_member_id?: string, refresh?: boolean}` and its result is
@@ -2098,8 +2098,8 @@ message. *Cause* is the session's `cause` in words; it is shown only while the
 session is live and shows the state the server chose, so not for a paused session
 or a request shown as "Waiting for *name*".
 
-A session that shows a reported wait carries `wait`, what Cloudfield verified about
-the conditions the agent named ([Waits Cloudfield can
+A session that shows a reported wait carries `wait`, what Cloudfield verified
+about the conditions the agent named ([Waits Cloudfield can
 check](failure-handling.md#waits-cloudfield-can-check)). `waitLine` words it,
 and `stateWords` puts that in place of the agent's summary, even one that
 reads "Waiting for ...", which moves to the tooltip as "The agent reported:
@@ -3288,7 +3288,7 @@ failed read shows the server's error with **Retry**. Conversation rows carry no 
 For a session with `acp: true` (Enhanced, or Background over ACP) the rows come
 from its [session item log](enhanced-sessions.md#instructions-and-the-session-log) instead.
 With no conversation rows or older-history control, the pane shows a
-decorative, low-contrast Cloudfield mark above the session's title, workspace, agent
+decorative, low-contrast Aether mark above the session's title, workspace, agent
 and mode, branch, owner and creation time. The title and each metadata row
 are centered in the conversation pane, including when long metadata needs
 scrolling. The overview gives way to the conversation as rows arrive. History
@@ -7620,7 +7620,7 @@ that runs a newer release than a client refuses that client
     directory only root can write, such as `/usr/local/bin/aether`): the
     button, and before the click: *macOS will ask for an administrator
     password: {cli_path} is in a directory this account cannot write to.
-    The dialog is labelled osascript, the tool Cloudfield asks through. Cloudfield
+    The dialog is labelled osascript, the tool Aether asks through. Aether
     never sees your password.*
   - *manual*: no button. The row shows `sudo aether update` with a copy
     button.
@@ -8285,7 +8285,7 @@ The installed app is a manual check too, because no browser lets a test
 emulate the `display-mode: standalone` a real install gives. On Android,
 Chrome's ⋮ menu should offer **Install app**; on iPhone, Safari's **Share >
 Add to Home Screen**. The icon that lands on the home screen should be the
-Cloudfield mark on a dark tile, and opening it should give a full-screen dashboard
+Aether mark on a dark tile, and opening it should give a full-screen dashboard
 with the shell's own top bar, safe-area padding intact under
 the notch, and the soft keyboard still shortening the layout rather than
 covering it. Watch what the server saw with:

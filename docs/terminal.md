@@ -1,7 +1,7 @@
 # Terminals
 
-Cloudfield shows three kinds of terminal in the dashboard. A session is one agent
-working on one task in its own sandbox; other terms are in the
+Cloudfield shows three kinds of terminal in the dashboard. A session is one
+agent working on one task in its own sandbox; other terms are in the
 [glossary](README.md#concepts).
 
 | Terminal | What it is |
@@ -376,8 +376,9 @@ On a phone:
 
 Paste an image straight into a terminal that accepts input, or choose **Tools →
 Upload image…**. The **Upload image to terminal** dialog previews it. Select
-**Upload and insert**. Cloudfield stores the file in your home and types its path,
-quoted, without pressing Enter. Review the path, then press Enter yourself.
+**Upload and insert**. Cloudfield stores the file in your home and types its
+path, quoted, without pressing Enter. Review the path, then press Enter
+yourself.
 
 Only real image bytes work: PNG, JPEG, GIF or WebP up to 8 MiB. The server
 checks the decoded bytes, not the filename. Some clipboard managers copy only a
@@ -463,9 +464,9 @@ A shell started by a server without terminal keepers, or in a container whose
 staged binary predates them, keeps running through a restart, but its screen,
 output and input are gone. It reads `PTY unavailable after recovery;
 execution was not reattached or restarted`; stop it and start another.
-Cloudfield starts a terminal without a keeper only when the staged binary answers
-`unknown command: acp-keeper`. Any other keeper failure fails `terminal start`
-with `start the terminal keeper: <error>`, because the keeper may already
+Cloudfield starts a terminal without a keeper only when the staged binary
+answers `unknown command: acp-keeper`. Any other keeper failure fails `terminal
+start` with `start the terminal keeper: <error>`, because the keeper may already
 have started the command.
 
 Docker restarted with `live-restore` forgets every exec but not its

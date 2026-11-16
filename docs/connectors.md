@@ -127,8 +127,8 @@ The connector then works in Claude on the web, desktop and mobile.
 ## The universal URL
 
 `https://<edge>/mcp` is one URL for every Cloudfield server, so one ChatGPT
-plugin can serve every Cloudfield user. Once Cloudfield is listed in ChatGPT's plugin
-directory ([chatgpt-plugin.md](chatgpt-plugin.md)) or Claude's connector
+plugin can serve every Cloudfield user. Once Cloudfield is listed in ChatGPT's
+plugin directory ([chatgpt-plugin.md](chatgpt-plugin.md)) or Claude's connector
 directory ([claude-connector.md](claude-connector.md)), install it from there
 instead of adding a custom MCP server; connecting then works as described here.
 
@@ -176,7 +176,7 @@ starts a new connection: add Cloudfield again in the app with the universal URL.
 Settings revokes the old connector once a new one from the same client, such as
 ChatGPT or Claude, connects at the universal URL and calls Cloudfield. If none
 calls within 10 minutes, it leaves the old one and says so. Remove the old
-Cloudfield connector in ChatGPT or Claude yourself. From a terminal, connect again at the
+Aether connector in ChatGPT or Claude yourself. From a terminal, connect again at the
 universal URL, then run `aether mcp revoke <old id>`.
 
 ### Self-hosted and custom edges
@@ -700,12 +700,13 @@ do not hold:
 
 ChatGPT and Claude ask before each tool that is not read-only. ChatGPT asks by
 default and can remember your answer for a conversation. Claude offers **Allow
-once** and **Always allow** per tool. Cloudfield shows no confirmation card of its
-own for these tools, and the [assistant's auto-approval](assistant.md#auto-approval)
-applies only inside [`aether_ask_assistant`](#ask-your-assistant) turns. Your role still decides: a viewer's launch is refused, as it is in
-`aether`. A connector's calls are judged by the device its code was minted on:
-a method that needs an approved device refuses a connector minted on a
-registered one.
+once** and **Always allow** per tool. Cloudfield shows no confirmation card of
+its own for these tools, and the [assistant's
+auto-approval](assistant.md#auto-approval) applies only inside
+[`aether_ask_assistant`](#ask-your-assistant) turns. Your role still decides: a
+viewer's launch is refused, as it is in `aether`. A connector's calls are judged
+by the device its code was minted on: a method that needs an approved device
+refuses a connector minted on a registered one.
 
 Each connector can make 30 write calls at once, enough for many parallel
 launches, then regains one every 2 seconds, up to 30 again. Past that, the

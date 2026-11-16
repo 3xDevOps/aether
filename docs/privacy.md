@@ -19,7 +19,7 @@ request ([What an edge stores](#what-an-edge-stores)).
 
 - **Which mode you chose and, in Tailscale mode, the server name you type on
   the first screen**, in the app's private storage.
-- **In Cloudfield Edge mode, the CLI's state**, under the app's private files
+- **In Aether Edge mode, the CLI's state**, under the app's private files
   directory in `.config/aether/`: `config.json` (the servers you linked),
   `edge-device-key` (this phone's SSH private key, mode `0600`),
   `edge-tokens.json` (the edge's sign-in token for this device, mode `0600`)
@@ -82,7 +82,7 @@ request ([What an edge stores](#what-an-edge-stores)).
   sees a different member or server, or any refusal of access (a rejected
   token, a refused or removed member, a revoked or pending device); after a
   refusal nothing is saved again until a load succeeds. It is skipped above
-  1 MB. In Cloudfield Edge mode the dashboard never saves it and deletes any
+  1 MB. In Aether Edge mode the dashboard never saves it and deletes any
   copy, because another app could serve script from the gateway's loopback
   port. `localStorage` itself stays on in the app's WebView there; the app
   turns off only its HTTP cache and service workers' network loads. It is
@@ -274,9 +274,9 @@ Off until an admin runs `sudo aether-server slack setup`
 member the server sends Slack the titles of the sessions that need them, the
 need lines (which can quote an agent's reason), the text and options of
 pending requests, session IDs and the dashboard's address, and, in the
-link confirmation, the member's Cloudfield display name and the server's host name.
-Replies and button presses pass through Slack to the server. Nothing is sent
-to Slack for members who never linked.
+link confirmation, the member's Cloudfield display name and the server's host
+name. Replies and button presses pass through Slack to the server. Nothing is
+sent to Slack for members who never linked.
 
 Slack keeps the messages under the workspace's retention settings. Unlinking
 or removing the bot does not delete messages already sent. The tokens stay in
@@ -535,8 +535,8 @@ or Settings) with the id of the message it was quoted from, and when it was
 created, changed and last read.
 
 Only you can read, change or delete your preferences. Teammates and admins
-cannot through Cloudfield, nor can your sessions or connected apps. Server operators
-with access to the database file can read it.
+cannot through Cloudfield, nor can your sessions or connected apps. Server
+operators with access to the database file can read it.
 
 Forgetting a preference deletes its row. SQLite overwrites the deleted text
 (`secure_delete`) and the server checkpoints and truncates the write-ahead

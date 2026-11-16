@@ -1,15 +1,15 @@
 # Security model
 
-What Cloudfield isolates, what it leaves exposed, and who can see or act on what.
-Read it before you run Cloudfield for other people or let someone join your
-server.
+What Cloudfield isolates, what it leaves exposed, and who can see or act on
+what. Read it before you run Cloudfield for other people or let someone join
+your server.
 
-The Cloudfield server runs on your Linux host and starts every agent in a sandbox:
-a Docker container, or with `session-runtime vm` a virtual machine. A member is
-a person admitted to the server. Each member has a home directory on the server
-and an environment, a long-lived sandbox where they install and sign in to
-agent CLIs. A session is one agent task in its own sandbox, with the launching
-member's home mounted into it. A workspace is a
+The Cloudfield server runs on your Linux host and starts every agent in a
+sandbox: a Docker container, or with `session-runtime vm` a virtual machine. A
+member is a person admitted to the server. Each member has a home directory on
+the server and an environment, a long-lived sandbox where they install and sign
+in to agent CLIs. A session is one agent task in its own sandbox, with the
+launching member's home mounted into it. A workspace is a
 repository and its sessions. [Concepts](README.md#concepts) has the full glossary.
 
 ## Report a vulnerability
@@ -247,8 +247,8 @@ Two things in an Isolated session still reach outside it:
 
 ### Sudo in a Default session
 
-A Default session's `sudo` is Cloudfield's shim at `/usr/local/bin/sudo`, ahead of
-the image's on `PATH`. Docker's `no-new-privileges` stops the image's own:
+A Default session's `sudo` is Cloudfield's shim at `/usr/local/bin/sudo`, ahead
+of the image's on `PATH`. Docker's `no-new-privileges` stops the image's own:
 `/usr/bin/sudo` fails with `sudo: The "no new privileges" flag is set, which
 prevents sudo from running as root.`
 
@@ -552,8 +552,8 @@ someone who can run code in the workspace.
 ## The assistant
 
 The [assistant](assistant.md) is an agent that runs in a sandbox of its own
-per member, driven from the dashboard. Its Cloudfield tools act as you, with your
-permissions, and it uses the account you signed it in to.
+per member, driven from the dashboard. Its Cloudfield tools act as you, with
+your permissions, and it uses the account you signed it in to.
 
 - Its home is `<data>/assistant/<member>/home` and its instructions are
   read-only. No session, environment or other member's container mounts either,

@@ -1,12 +1,12 @@
 # The VM helper
 
 A session that runs in a Cloud Hypervisor VM, rather than a Docker container
-(see the [plan](plans/2026-11-13-microvm-sessions.md)), has one Cloudfield process
-inside it from the first instruction on: `aether-internal guest`, the helper.
-It is PID 1 of the VM, does what Docker and its init do for a container, and
-serves the API the server uses in place of `docker exec` and `docker attach`.
-The code is in `internal/guest/helper`; the server's client of the API is
-`internal/guest`.
+(see the [plan](plans/2026-11-13-microvm-sessions.md)), has one Cloudfield
+process inside it from the first instruction on: `aether-internal guest`, the
+helper. It is PID 1 of the VM, does what Docker and its init do for a container,
+and serves the API the server uses in place of `docker exec` and `docker
+attach`. The code is in `internal/guest/helper`; the server's client of the API
+is `internal/guest`.
 
 The helper is the `aether-server` binary itself. The kernel boots the
 read-only helper disk, which holds that binary as `/init`, and passes it the

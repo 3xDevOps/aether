@@ -1,7 +1,7 @@
 # Agents
 
-Cloudfield does not install or bundle coding agents. You install the agent CLI in
-your [environment](environments.md) (your own persistent container shell) and
+Cloudfield does not install or bundle coding agents. You install the agent CLI
+in your [environment](environments.md) (your own persistent container shell) and
 sign in with the vendor's own login. Sessions then launch that CLI inside a
 container. This guide lists which agents work, how to sign in to each, and what
 does not work. Terms such as run, subsession and workspace are in the
@@ -321,8 +321,8 @@ Claude Code refuses `--dangerously-skip-permissions` as root, so every `claude`
 session gets `IS_SANDBOX=1`.
 
 Claude Code reruns a model call that ends without text, adding the hidden
-prompt `[Your previous response had no visible output...]`. A Cloudfield turn ends
-with a report and no text after it, so every `claude` session gets
+prompt `[Your previous response had no visible output...]`. A Cloudfield turn
+ends with a report and no text after it, so every `claude` session gets
 `CLAUDE_CODE_TERMINAL_MCP_TOOLS=mcp__aether__aether_report`, which exempts a
 turn in which `aether_report` succeeded since the last user message. A report
 through `aether-internal report` runs as the shell tool and still gets the
@@ -344,13 +344,14 @@ key** comes filled in with it. Codex reads no base-URL variable; for a gateway,
 set `openai_base_url` in `~/.codex/config.toml`.
 
 A Standard Codex run starts `codex app-server` in the session's sandbox and
-attaches the Codex terminal to it with `codex --remote`. Cloudfield follows the same
-session through that app-server: Codex reports the start and end of each turn,
-and mail and your messages from the dashboard or `aether message` arrive as a
-new turn when Codex is idle, or as a steer added to the running turn. They show
-in the terminal as prompts, under Cloudfield's attribution banner. Press Esc in the
-terminal to stop a turn. Cloudfield loads no hooks into Standard Codex, so remove
-any copy of its hooks from `~/.codex/hooks.json`: it would announce mail twice.
+attaches the Codex terminal to it with `codex --remote`. Cloudfield follows the
+same session through that app-server: Codex reports the start and end of each
+turn, and mail and your messages from the dashboard or `aether message` arrive
+as a new turn when Codex is idle, or as a steer added to the running turn. They
+show in the terminal as prompts, under Cloudfield's attribution banner. Press
+Esc in the terminal to stop a turn. Cloudfield loads no hooks into Standard
+Codex, so remove any copy of its hooks from `~/.codex/hooks.json`: it would
+announce mail twice.
 
 Standard sessions need Codex 0.131.0 or newer. With an older one, the session's terminal
 prints:
@@ -401,8 +402,9 @@ or `OPENAI_BASE_URL` for a gateway. OpenCode settings and plugins live in
 `~/.config/opencode`, the root `aether config` and **Files** use. That root does
 not follow `XDG_CONFIG_HOME`, `OPENCODE_CONFIG_DIR` or `OPENCODE_CONFIG`.
 
-Cloudfield never updates OpenCode, because an upgrade can cross a major version that
-Cloudfield's launch wrapper refuses. Update it yourself in `aether terminal`.
+Cloudfield never updates OpenCode, because an upgrade can cross a major version
+that Cloudfield's launch wrapper refuses. Update it yourself in `aether
+terminal`.
 
 #### GitHub Copilot CLI
 
@@ -478,9 +480,9 @@ Google sign-in inside a session sandbox.
 
 ### Install hooks by hand
 
-Claude Code, Copilot, pi, oh-my-pi and OpenCode load Cloudfield's inbox hooks for
-you on a Standard session that has a task. Codex needs none: its app-server hands it
-mail. Gemini CLI and Cursor CLI do not load hooks.
+Claude Code, Copilot, pi, oh-my-pi and OpenCode load Cloudfield's inbox hooks
+for you on a Standard session that has a task. Codex needs none: its app-server
+hands it mail. Gemini CLI and Cursor CLI do not load hooks.
 Without hooks, mail reaches those agents only when they run
 `aether-internal inbox`.
 
@@ -541,8 +543,8 @@ that a recipient's session borrows. A `codex`, `pi`, `copilot` or `gemini` in
 example, `codex in ~/.local/bin was not installed with npm, so Aether cannot
 update it`.
 
-Cloudfield does not roll an update back. To turn updates off for the whole server,
-run `sudo aether-server config set agent-update false`, then restart it.
+Cloudfield does not roll an update back. To turn updates off for the whole
+server, run `sudo aether-server config set agent-update false`, then restart it.
 
 ## Usage limits
 
@@ -593,10 +595,10 @@ installed on the launch's account, and Standard otherwise.
   shell, and the session stays open until you Close, Kill or Delete it.
 - Enhanced sessions the agent over ACP next to a login shell. Close and reopen work
   like Standard.
-- Background sessions the agent once. On exit Cloudfield commits and publishes the
-  branch, records `completed` or `failed`, and destroys the container. It cannot
-  be reopened. `codex`, `omp`, `opencode`, `copilot`, `gemini` and `cursor` run
-  the task over ACP when their server is installed
+- Background sessions the agent once. On exit Cloudfield commits and publishes
+  the branch, records `completed` or `failed`, and destroys the container. It
+  cannot be reopened. `codex`, `omp`, `opencode`, `copilot`, `gemini` and
+  `cursor` run the task over ACP when their server is installed
   ([Background sessions](enhanced-sessions.md#background-sessions)). Claude Code keeps
   `claude -p`.
 
@@ -881,18 +883,18 @@ in.
 | `--login <path>` | A login file, such as `--login ~/.cursor/auth.json`. With it the Agents page shows **Login found**. Without it setup never shows the agent as logged in |
 
 The name is what you choose at launch, and it need not match the executable.
-`aether agent add mycursor --standard "agent {task}"` runs `agent`. Cloudfield ships
-inbox hooks for a fixed set of names, so a differently named agent gets none and
-`aether-internal skill` says `no packaged integration`.
+`aether agent add mycursor --standard "agent {task}"` runs `agent`. Cloudfield
+ships inbox hooks for a fixed set of names, so a differently named agent gets
+none and `aether-internal skill` says `no packaged integration`.
 
 Your definition shapes launches only in your own containers, and runs only on
 your own account. Shipped names and the reserved names `custom` and `fake` cannot
 be registered. An administrator can pin a definition for every member with
 `--agent-definitions` (or `AETHER_AGENT_DEFINITIONS`), which wins over member
 registrations and is the only way to change a shipped agent. An override
-replaces the shipped definition, so Cloudfield stops passing its status reporter,
-inbox hooks and instructions flags to it, because nothing checks that the
-override is still that CLI.
+replaces the shipped definition, so Cloudfield stops passing its status
+reporter, inbox hooks and instructions flags to it, because nothing checks that
+the override is still that CLI.
 
 For inbox support, status reporting and the contract the CLI has to follow, see
 [Integrating an unsupported agent](harness-integration.md).
@@ -936,16 +938,17 @@ wake pauses until a turn completes. Copilot has no idle wake, so mail waits for
 the next hook boundary. pi, oh-my-pi and OpenCode wake only their main
 session, and only while idle.
 
-Hooks that you installed yourself and Cloudfield's managed ones do not double up for
-Claude Code. If an OpenCode, pi or oh-my-pi setting disables extensions, Cloudfield
-leaves it alone and skips the managed hooks. For OpenCode, `OPENCODE_PURE=1` or
-`true` in the workspace environment disables Cloudfield's plugins too. The session still
-launches but reports nothing, and is judged on silence.
+Hooks that you installed yourself and Cloudfield's managed ones do not double up
+for Claude Code. If an OpenCode, pi or oh-my-pi setting disables extensions,
+Cloudfield leaves it alone and skips the managed hooks. For OpenCode,
+`OPENCODE_PURE=1` or `true` in the workspace environment disables Cloudfield's
+plugins too. The session still launches but reports nothing, and is judged on
+silence.
 
 ## Status reporting
 
-An agent with status reporting tells Cloudfield when it is working and when it is
-waiting. The dashboard shows a waiting session as **Needs you**
+An agent with status reporting tells Cloudfield when it is working and when it
+is waiting. The dashboard shows a waiting session as **Needs you**
 ([failure-handling.md](failure-handling.md#needs-you)). Standard sessions of
 `claude`, `codex`, `pi`, `omp` and `opencode` report both ends of a turn.
 While Codex asks you a question in its terminal, the session waits with the reason
@@ -983,8 +986,8 @@ mounts.
   hooks at all. A [subsession](teams.md#subsessions) refuses them Standard, so they run
   Enhanced there.
 - Standard Codex needs Codex 0.131.0 or newer. Its app-server ends with its
-  terminal, so a `codex resume` in the shell runs without Cloudfield's status and
-  message delivery.
+  terminal, so a `codex resume` in the shell runs without Cloudfield's status
+  and message delivery.
 - Only Claude Code and Codex show subscription usage and can move to another
   account on a usage limit.
 - In Docker sessions, sharing an `omp` account shares the whole `~/.omp/agent`

@@ -1,11 +1,11 @@
 # Member environment home
 
-Your home is a directory on the server that Cloudfield mounts read-write as `$HOME`
-in your environment (see [environments.md](environments.md)) and in every session
-you launch, including sessions on another member's shared agent account. Agent
-installs, logins, GitHub credentials and agent configuration live here. This
-guide covers what survives, how to set up an agent and GitHub, and how to edit
-files in the home.
+Your home is a directory on the server that Cloudfield mounts read-write as
+`$HOME` in your environment (see [environments.md](environments.md)) and in
+every session you launch, including sessions on another member's shared agent
+account. Agent installs, logins, GitHub credentials and agent configuration live
+here. This guide covers what survives, how to set up an agent and GitHub, and
+how to edit files in the home.
 
 A share of your agent account exposes only that agent's login to the
 recipient's sessions and, when they have no installation of that agent, your
@@ -17,9 +17,9 @@ recipient's sessions and, when they have no installation of that agent, your
 The home survives every stop, save, reset and server restart:
 
 - Executables in `~/.local/bin`. `npm install -g` and `cargo install` write to
-  `~/.local` because Cloudfield sets `NPM_CONFIG_PREFIX` and `CARGO_INSTALL_ROOT`
-  to it, unless the image, workspace or profile sets them. nvm refuses to
-  switch versions while `NPM_CONFIG_PREFIX` is set, so put `unset
+  `~/.local` because Cloudfield sets `NPM_CONFIG_PREFIX` and
+  `CARGO_INSTALL_ROOT` to it, unless the image, workspace or profile sets them.
+  nvm refuses to switch versions while `NPM_CONFIG_PREFIX` is set, so put `unset
   NPM_CONFIG_PREFIX` before nvm's lines in `~/.bashrc` if you use it.
 - Agent logins and other files the agent writes.
 - Agent configuration, uploaded with `aether config push` or edited in
@@ -44,8 +44,8 @@ environment** never captures it.
 ## Tool caches
 
 Package caches live outside the home, at `/aether-cache`, so they never fill
-it and Cloudfield can clean them. These variables default there unless the image,
-workspace or profile sets them:
+it and Cloudfield can clean them. These variables default there unless the
+image, workspace or profile sets them:
 
 | Variable | Default |
 | --- | --- |

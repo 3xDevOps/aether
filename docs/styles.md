@@ -534,7 +534,7 @@ control** or **Release** ([terminal.md](terminal.md)). A session shell adds
 ## Shell, palette and focus
 
 The shell has a branded navigation header above one sidebar and the content
-view, with no icon rail or status bar. The Cloudfield mark and title sit at its
+view, with no icon rail or status bar. The Aether mark and title sit at its
 left; Board through Templates follow as horizontal `ListRow`s. Measure
 available width rather than assuming every label fits a breakpoint, and
 keep Board outside the overflow menu. The header and sidebar use
@@ -617,7 +617,7 @@ starts after the step rail's 24px gutter, where state dots and step marks
 sit. Turns are 24px apart and a turn's header and answer 12px. Its composer
 fills the available pane with balanced 16px side gutters, including when
 Details is open. An empty ACP
-conversation shows a subdued Cloudfield mark above the centered session title and
+conversation shows a subdued Aether mark above the centered session title and
 metadata rows: workspace, agent, branch, owner and creation time. Symmetric
 scrollbar gutters keep the overview centered when its content needs scrolling.
 

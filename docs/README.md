@@ -1,8 +1,8 @@
 # Cloudfield documentation
 
-These guides cover installing, using and extending Cloudfield, a self-hosted server
-that runs coding agents for you and your team. If you are new, start with the
-[quickstart](quickstart.md).
+These guides cover installing, using and extending Cloudfield, a self-hosted
+server that runs coding agents for you and your team. If you are new, start with
+the [quickstart](quickstart.md).
 
 ## Concepts
 
@@ -74,8 +74,8 @@ Daily use:
    accounts, set budgets or launch subsessions.
 8. [Networking](networking.md) and [edge](edge.md): when you choose how
    people reach the server, or host the dashboard for phones.
-9. [Assistant](assistant.md): when you want to ask Cloudfield for things in plain
-   language.
+9. [Assistant](assistant.md): when you want to ask Cloudfield for things in
+   plain language.
 10. [Team memory](memory.md): when sessions should share what they learn.
 11. [Connectors](connectors.md): when you want to run agents from ChatGPT or
     Claude, including their phone apps.

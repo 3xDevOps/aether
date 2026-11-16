@@ -1,8 +1,8 @@
 # Quickstart
 
 This guide takes you from nothing to an agent's change published as a pull
-request, in eight steps. Each step ends with how you know it worked. Cloudfield's
-terms are defined in the [glossary](README.md#concepts).
+request, in eight steps. Each step ends with how you know it worked.
+Cloudfield's terms are defined in the [glossary](README.md#concepts).
 A coding agent can do these steps from the CLI: paste the prompt in
 [agents.md](agents.md) into it.
 
@@ -60,8 +60,8 @@ Setup decides how your computer reaches the server. **Tailscale** is the
 simplest: on a host where Tailscale runs, Enter at the tailnet question picks
 it, and people link by this host's tailnet name with their tailnet login
 ([networking.md](networking.md#tailscale)). Otherwise setup turns on the
-**edge**, a relay the Cloudfield project runs at `https://edge.onaether.dev`. The
-server and your computer both dial out to it, so neither needs an open port.
+**edge**, a relay the Cloudfield project runs at `https://edge.onaether.dev`.
+The server and your computer both dial out to it, so neither needs an open port.
 SSH runs end to end through it: the edge cannot read your traffic, but sees
 host names, IP addresses and who signs in ([edge.md](edge.md));
 `aether-server config set edge-url ""` turns it off.
@@ -157,7 +157,7 @@ is linked, answer **How does this computer reach your server?**:
 | Choice | When | Then |
 | --- | --- | --- |
 | **Tailscale** (recommended) | This computer is on the server's tailnet. | Enter the name setup printed in **Server's tailnet name**, and click **Link**. |
-| **Cloudfield relay** | Setup printed a claim link, or someone sent you an invitation. | Click **Sign in with GitHub**, open the address shown and confirm the code. Paste the claim link into **Claim or invite link** and click **Claim and link**. Or paste either link into **Have an invitation or claim link?** first. |
+| **Aether relay** | Setup printed a claim link, or someone sent you an invitation. | Click **Sign in with GitHub**, open the address shown and confirm the code. Paste the claim link into **Claim or invite link** and click **Claim and link**. Or paste either link into **Have an invitation or claim link?** first. |
 | **SSH address** | This computer reaches the server's SSH port directly. | Enter `<server-host>:2222`, and an **Invite code** if an admin gave you one, then click **Link**. |
 
 Opening the `aether://claim` link on your computer opens the relay choice with
@@ -287,8 +287,8 @@ the vendor's own login. Your **home** there persists, so this is done once.
 5. Click **Check**.
 
 It worked if the dialog shows **Installed** and **Login found**, and after
-**Done** the agent's button reads **Run**. Cloudfield only looks for the login file;
-the agent proves the login when a session starts.
+**Done** the agent's button reads **Run**. Cloudfield only looks for the login
+file; the agent proves the login when a session starts.
 
 From the CLI, on your computer. The environment has no `aether` command, so do
 not run these in its terminal:
@@ -489,7 +489,8 @@ agent), 4 when it is parked with nothing pending, because its turn ended with
 an `answered` report or no report or it went silent, and a message continues it (`aether message
 <session-id> "<reply>"`), 5 when its wait broke (a condition it waited on resolved
 and the wake never reached the agent, or its source went unread for an hour; see [Waits Cloudfield can
-check](failure-handling.md#waits-cloudfield-can-check)), and 124 on timeout. Before exiting it prints `run
+check](failure-handling.md#waits-cloudfield-can-check)), and 124 on timeout.
+Before exiting it prints `run
 <session-id> <state>: <reason>`, with the state as `aether sessions` labels it. It keeps waiting
 while the session waits on agents, CI or a process. When Cloudfield cannot vouch for that wait
 it says so once on stderr: `session <session-id> still waits, but <condition>: status

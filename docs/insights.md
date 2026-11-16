@@ -55,13 +55,13 @@ A session you stop yourself is abandoned.
 
 A session succeeds when its status is `merged`, a pull request it opened is merged, or its owner chose **Mark complete**.
 
-Only pull requests opened through Cloudfield count. A pull request an agent opens
-with `gh` directly is not counted. A merge is counted only after Cloudfield has
-seen it. On load, the page checks up to 10 open pull requests from your
-finished sessions against GitHub, so a pull request merged after its session finished
-appears within a moment. An older one can stay `open` until its session's pull
-request status is read again. If GitHub cannot be read, the row shows
-`Could not refresh this pull request: <error>`.
+Only pull requests opened through Cloudfield count. A pull request an agent
+opens with `gh` directly is not counted. A merge is counted only after
+Cloudfield has seen it. On load, the page checks up to 10 open pull requests
+from your finished sessions against GitHub, so a pull request merged after its
+session finished appears within a moment. An older one can stay `open` until its
+session's pull request status is read again. If GitHub cannot be read, the row
+shows `Could not refresh this pull request: <error>`.
 
 ## Time
 
@@ -89,8 +89,8 @@ Every other session, Standard sessions included, is listed as not reporting toke
 its cost is unknown, not zero, so cost and token figures are a floor. When some
 sessions are unmetered the page says `at least $X`.
 
-An Enhanced agent reports the running cost of its session. Cloudfield charges what
-each report adds, with the tokens of that turn. A restored session, a new
+An Enhanced agent reports the running cost of its session. Cloudfield charges
+what each report adds, with the tokens of that turn. A restored session, a new
 session or Claude Code's `/clear` neither counts spend twice nor drops it, and
 spend the server had not recorded when it stopped counts with the agent's next
 report.

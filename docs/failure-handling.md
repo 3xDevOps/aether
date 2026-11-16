@@ -72,8 +72,8 @@ still holds background tasks or, as a parent, has a live subsession
 or unread subsession mail. Its reason becomes `no update for <duration>: <summary>`.
 A CI or process wait keeps its state; an agents wait shows `waiting`, or
 `waiting-agents` while a subsession is live again. A wait goes stale once; the
-next turn starts it over. A wait Cloudfield infers from subsessions or background
-tasks lasts exactly as long as they do.
+next turn starts it over. A wait Cloudfield infers from subsessions or
+background tasks lasts exactly as long as they do.
 
 ### Waits Cloudfield can check
 
@@ -230,8 +230,8 @@ which browsers showed a need, so one announced before it is not replaced.
 
 ## Recover from disk pressure
 
-Every launch checks that the Cloudfield data filesystem and Docker's storage keep
-a reserve free: by default the larger of 5 GiB and 5% of the filesystem,
+Every launch checks that the Cloudfield data filesystem and Docker's storage
+keep a reserve free: by default the larger of 5 GiB and 5% of the filesystem,
 capped at 20 GiB, plus 1 GiB for this launch and each one already starting.
 When free space
 drops below the reserve plus 4 GiB, Cloudfield frees space on its own, on every
@@ -526,8 +526,8 @@ agent to continue.
 
 ## Usage limit mid-session
 
-When an agent reports that its account's usage limit stopped it, Cloudfield moves
-the session to another account that has usage left
+When an agent reports that its account's usage limit stopped it, Cloudfield
+moves the session to another account that has usage left
 ([usage fallback](teams.md#usage-fallback)): the same session, checkout and branch
 continue on the new account's login, and a room note says so. When it cannot
 move, interactive sessions park as **Needs you**, a Background session fails, and the reason says why:
@@ -548,8 +548,8 @@ server restart: the next start finishes it.
 
 ## Raise file-watch limits
 
-Cloudfield watches each session's checkout for changes with inotify. The kernel caps
-watches and instances per user, and a server running as root shares that
+Cloudfield watches each session's checkout for changes with inotify. The kernel
+caps watches and instances per user, and a server running as root shares that
 budget with every root process in its session containers. When the kernel refuses,
 the session still launches and its file changes arrive up to 60 seconds late,
 which also delays stall detection.
@@ -851,8 +851,8 @@ minutes without streaming a thought parks at the short limit and returns to
 `running` with its next update. A resume or a server restart starts the quiet
 time over.
 
-Cloudfield restarts nothing on its own. The session's Chat view shows the agent's
-last progress, the phase and the connection, and offers:
+Cloudfield restarts nothing on its own. The session's Chat view shows the
+agent's last progress, the phase and the connection, and offers:
 
 - **Stop turn** cancels the turn. It costs nothing.
 - **Open trace** opens the turn's model calls and tool calls.

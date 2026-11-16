@@ -390,7 +390,7 @@ you have given notification access can still press **Decline** for you.
 **Decline** refuses a card from a server other than the one chosen under
 **Connection** now, with the error `This card is from <old>, and the app now
 connects to <new>.`
-Older Android cannot require that, so there, and in **Cloudfield Edge** mode,
+Older Android cannot require that, so there, and in **Aether Edge** mode,
 where the identity is the CLI the app runs only while it is open, a card's
 notification only opens it. While it runs the notification reads
 `Declining…` with no buttons; then `Declined` with the card's text, or
@@ -423,10 +423,10 @@ Limits:
   only on the tailnet or LAN fails with `refusing to connect to <ip>: not a
   public address` in the server's `push: notification not delivered` log
   line. Use ntfy.sh or an ntfy server with a public address.
-- In **Cloudfield Edge** mode, switching to another server through the gateway
+- In **Aether Edge** mode, switching to another server through the gateway
   keeps the registration on the first one, which goes on notifying the
   phone. Turn notifications off before you switch, and on again after.
-- In **Cloudfield Edge** mode the server learns a new address from the
+- In **Aether Edge** mode the server learns a new address from the
   distributor only while the app is open; until then notifications go to the
   old one, which the server drops once the push service reports it gone.
 - ntfy keeps a connection open, which its authors measure at about 0-1% of

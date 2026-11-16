@@ -367,14 +367,14 @@ Gatekeeper warn, and auto-update refuses them. Treat them as test builds.
 
 </details>
 
-Every icon Cloudfield ships is generated from `web/public/aether-mark.png`. After
-changing it, run `python3 scripts/make-icons.py` (needs `pillow` and
+Every icon Cloudfield ships is generated from `web/public/aether-mark.png`.
+After changing it, run `python3 scripts/make-icons.py` (needs `pillow` and
 `fonttools[woff]`) and commit what it writes.
 
 ## Android shell
 
 `android/` is a Kotlin WebView app that loads a server's dashboard or, in
-Cloudfield Edge mode, the local gateway of the `aether` CLI it carries
+Aether Edge mode, the local gateway of the `aether` CLI it carries
 ([docs/install.md](docs/install.md#android-app)). It builds in containers
 pinned by digest, so it needs Docker and no Android SDK:
 

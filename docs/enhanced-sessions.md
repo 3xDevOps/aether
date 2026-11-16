@@ -1,11 +1,11 @@
 # Enhanced sessions
 
 A session normally shows the agent's own terminal UI. This is **Standard** mode. In
-**Enhanced** mode, Cloudfield drives the agent over the Agent Client Protocol (ACP),
-a JSON protocol on the agent's stdin and stdout. The dashboard then shows the
-agent's messages, tool calls, diffs and permission prompts as native controls
-in a **Chat** view, instead of a terminal. Read [Agents](harnesses.md) first
-to install and sign in to an agent. Other terms are in the
+**Enhanced** mode, Cloudfield drives the agent over the Agent Client Protocol
+(ACP), a JSON protocol on the agent's stdin and stdout. The dashboard then shows
+the agent's messages, tool calls, diffs and permission prompts as native
+controls in a **Chat** view, instead of a terminal. Read [Agents](harnesses.md)
+first to install and sign in to an agent. Other terms are in the
 [glossary](README.md#concepts).
 
 ## Which agents
@@ -403,11 +403,11 @@ session whose agent refuses to open its conversation. See
 [harnesses.md](harnesses.md#when-a-login-is-signed-out) for where else a
 signed-out login shows.
 
-Each time it starts or restarts an adapter, Cloudfield checks that your home still
-belongs to the session's user with owner `rwx`. A root command in any of your
-sessions can change that and lock every agent on the home out of its login
-and its `~/.local/bin`. Cloudfield gives the home back and shows **Home restored**
-with the owner and mode it found
+Each time it starts or restarts an adapter, Cloudfield checks that your home
+still belongs to the session's user with owner `rwx`. A root command in any of
+your sessions can change that and lock every agent on the home out of its login
+and its `~/.local/bin`. Cloudfield gives the home back and shows **Home
+restored** with the owner and mode it found
 ([security.md](security.md#permission-tiers)). An agent that stays
 connected and is never refused gets no restore, so its tools keep failing:
 run `sudo chown "$(id -u):$(id -g)" "$HOME" && sudo chmod u+rwx "$HOME"` in

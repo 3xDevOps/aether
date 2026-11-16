@@ -194,8 +194,8 @@ MCP session-level JSON-RPC failures. Cloudfield's numeric code is in the result
 metadata key `aether/error_code`; the text includes the method-qualified
 message. Local socket failures such as a missing listener, EOF, broken pipe,
 or a connection-cap refusal map to `CodeUnavailable` (`-32004`). Server
-responses preserve their own Cloudfield codes, including `CodeDenied` (`-32001`),
-`CodeConflict` (`-32003`), `CodeNotFound` (`-32000`), and
+responses preserve their own Cloudfield codes, including `CodeDenied`
+(`-32001`), `CodeConflict` (`-32003`), `CodeNotFound` (`-32000`), and
 `CodeInvalidParams` (`-32602`). This keeps an operation failure actionable
 without tearing down the MCP session.
 
@@ -239,8 +239,8 @@ sidecars.
 
 Active sessions and retained terminal TUI sessions keep their socket, unread mailbox,
 and MCP assets through a server restart. When the container is destroyed,
-Cloudfield releases the coordination directory and mailbox after required evidence
-capture.
+Cloudfield releases the coordination directory and mailbox after required
+evidence capture.
 The coordination disable setting remains effective. When it is off, no session
 socket or usable MCP bridge is provided: bridge calls and run-bound CLI
 operations return unavailable. Every newly created managed container still

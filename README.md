@@ -113,7 +113,8 @@ flowchart LR
 
 ## Documentation
 
-[docs/README.md](docs/README.md) lists every guide and defines Cloudfield's terms.  
+[docs/README.md](docs/README.md) lists every guide and defines Cloudfield's
+terms.  
 
 Common documentation:
 - [Quickstart](docs/quickstart.md): from install to your first reviewed run.

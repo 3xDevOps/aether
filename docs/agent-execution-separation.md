@@ -53,12 +53,12 @@ for owned processes and terminals, not just gaps between model requests.
 
 ## Cloudfield's current boundary and adapter findings
 
-Cloudfield runs the native CLI and its tools in the same session sandbox. Enhanced
-mode changes the session protocol and presentation, not execution placement.
-The [ACP host](../internal/acphost/conn.go) advertises terminal authentication
-and output display, not client-side filesystem or terminal execution.
-Tool-call updates are observations; they are not instructions for Cloudfield to
-execute again.
+Cloudfield runs the native CLI and its tools in the same session sandbox.
+Enhanced mode changes the session protocol and presentation, not execution
+placement. The [ACP host](../internal/acphost/conn.go) advertises terminal
+authentication and output display, not client-side filesystem or terminal
+execution. Tool-call updates are observations; they are not instructions for
+Cloudfield to execute again.
 
 Interactive sessions already remain replyable after a success/failure report;
 explicit Close ends that live use and starts the configured compute grace.
@@ -174,7 +174,7 @@ with the same workspace. Do not silently restart tools after a lost reply.
    host. Add automatic idle stop only if process ownership is complete and the
    savings justify it. No user should have to manage two runtimes manually.
 
-Only after those checks pass should Cloudfield claim support for that harness and
-version. None of the adapter inspection above proves that these live
+Only after those checks pass should Cloudfield claim support for that harness
+and version. None of the adapter inspection above proves that these live
 isolation tests have passed. A complete upstream executor interface is the
 first dependency; more lifecycle machinery is not a substitute for it.

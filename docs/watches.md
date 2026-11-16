@@ -27,7 +27,7 @@ takes the target's defaults, marked *.
 | `run` | `pr_merged`, `ci` | Every pull request the session recorded: `PR #N merged on GitHub`, or its checks finished. See [Pull requests and CI](#pull-requests-and-ci). |
 | `pr` | `ci`*, `review`*, `merged`*, `closed` | See [Pull requests and CI](#pull-requests-and-ci). |
 
-Cloudfield has no deploy signal. `deployed` is refused with that reason; watch
+Aether has no deploy signal. `deployed` is refused with that reason; watch
 `finished` or `pr_merged` instead.
 
 A notice's title is the session's title. Its body is the

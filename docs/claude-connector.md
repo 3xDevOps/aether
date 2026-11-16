@@ -1,8 +1,8 @@
 # Claude connector listing
 
 For the project's maintainers. Claude's connector directory is Anthropic's
-catalog of MCP servers that Claude users add with one click. Cloudfield's listing
-points at the same URL as the [ChatGPT plugin](chatgpt-plugin.md),
+catalog of MCP servers that Claude users add with one click. Cloudfield's
+listing points at the same URL as the [ChatGPT plugin](chatgpt-plugin.md),
 `https://edge.onaether.dev/mcp`, the project edge's universal connector URL
 ([connectors.md](connectors.md#the-universal-url)). This page covers the
 listing, Anthropic's requirements, testing and review.
@@ -171,7 +171,8 @@ rm -f "$tokens"
 Checklist:
 
 - [ ] Unauthenticated `POST /mcp` answers 401 with `resource_metadata`.
-- [ ] Both metadata documents match the [requirements](#requirements-and-where-cloudfield-stands).
+- [ ] Both metadata documents match the
+  [requirements](#requirements-and-where-cloudfield-stands).
 - [ ] `tools/list` returns every tool with a `title` and `readOnlyHint`,
       `destructiveHint` and `openWorldHint`.
 - [ ] Each read tool returns a result with no generic error.

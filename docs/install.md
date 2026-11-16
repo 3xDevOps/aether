@@ -1,17 +1,19 @@
 # Install, upgrade and remove Cloudfield
 
-The product is named Cloudfield; its commands, variables, paths and addresses still use the name `aether`.
+The product is named Cloudfield. Its commands, variables, paths and hostnames,
+and what the apps and the CLI print, still say `aether` or Aether until later
+releases.
 
 This guide installs, upgrades and removes Cloudfield on every platform. For the
 shortest path to a first session, follow [quickstart.md](quickstart.md), then come
-back here for other platforms, options and errors. Cloudfield's terms are defined
-in the [glossary](README.md#concepts).
+back here for other platforms, options and errors. Cloudfield's terms are
+defined in the [glossary](README.md#concepts).
 
 ## What gets installed where
 
-Cloudfield has two parts. The server, `aether-server`, runs on one Linux machine:
-it keeps your repositories and runs each agent in its own Docker container or
-[virtual machine](#hosts-for-vm-sessions). A
+Cloudfield has two parts. The server, `aether-server`, runs on one Linux
+machine: it keeps your repositories and runs each agent in its own Docker
+container or [virtual machine](#hosts-for-vm-sessions). A
 client is any machine you work from: the `aether` CLI, the desktop app and the
 Android app all connect to that server.
 
@@ -46,7 +48,8 @@ flowchart LR
   between members ([teams.md](teams.md#agent-accounts)) needs Docker Engine
   26.0 or newer; `docker version --format '{{.Server.Version}}'` prints yours.
 - git, and `ssh-keygen` (package `openssh-client` on Debian and Ubuntu), which
-  git uses to sign the commits Cloudfield makes for members who connected GitHub.
+  git uses to sign the commits Cloudfield makes for members who connected
+  GitHub.
 - At least 2.5 GiB of available memory and 6 GiB of free disk, plus disk for
   the images the server pulls on first use. A session starts only while 2 GiB of
   memory (a tenth of RAM above 20 GiB) plus 512 MiB per session starting stays
@@ -256,8 +259,9 @@ stopped by default (as admin: `Start-Service ssh-agent` and
 
 ### Windows Defender and SmartScreen
 
-Cloudfield's Windows binaries and locally built desktop apps are not code-signed,
-so SmartScreen, Smart App Control or an antivirus may warn about or block them.
+Cloudfield's Windows binaries and locally built desktop apps are not
+code-signed, so SmartScreen, Smart App Control or an antivirus may warn about or
+block them.
 
 | What you see | What it is | What to do |
 | --- | --- | --- |
@@ -356,14 +360,14 @@ sends is in [privacy.md](privacy.md), its licences in [notices.md](notices.md).
 1. On the phone, download `aether-android.apk` from the
    [latest release](https://github.com/3xDevOps/Aether/releases/latest).
 2. When Android asks, allow your browser to install apps, then open the file.
-3. Choose how the app reaches your server: **Cloudfield Edge** or **Tailscale**.
+3. Choose how the app reaches your server: **Aether Edge** or **Tailscale**.
 
 | Mode | You need | How it works |
 | --- | --- | --- |
-| **Cloudfield Edge** | A GitHub account the server lets in | The app runs its own copy of the `aether` CLI. Sign in with GitHub in the browser, pick your server, check its host key and tap **Link and pin**. A server that admits only approved devices makes the phone wait for approval ([teams.md](teams.md#through-an-edge)). |
+| **Aether Edge** | A GitHub account the server lets in | The app runs its own copy of the `aether` CLI. Sign in with GitHub in the browser, pick your server, check its host key and tap **Link and pin**. A server that admits only approved devices makes the phone wait for approval ([teams.md](teams.md#through-an-edge)). |
 | **Tailscale** | The phone on the server's tailnet, and the server's dashboard on (`web-port`, see [networking.md](networking.md#the-dashboard)) | Type the server's MagicDNS name, such as `my-server.tailnet-name.ts.net`. The app opens the server's HTTPS dashboard; your tailnet login identifies you. |
 
-In **Cloudfield Edge** mode SSH runs end to end; the edge relays encrypted bytes.
+In **Aether Edge** mode SSH runs end to end; the edge relays encrypted bytes.
 The app keeps a device key and edge tokens in private storage, excluded from
 backups. Uninstalling the app or clearing its storage deletes the key, so the
 phone signs in as a new device and may need approval again. To switch mode or
@@ -380,14 +384,14 @@ ntfy, then turn on **Notify this device when a session needs me** in the
 dashboard's Settings ([networking.md](networking.md#in-the-android-app)).
 
 About once an hour, when you bring it to the front, the app checks for a
-release and shows a banner. In **Cloudfield Edge** mode it offers the release the
+release and shows a banner. In **Aether Edge** mode it offers the release the
 server runs, from the gateway's `update.check`, and nothing newer until the
 server updates. In **Tailscale** mode it runs the bundled CLI's check, which
 follows the `config.json` that CLI has, and `stable` (`beta` until the first
 stable exists) when it has none. **Download update** fetches the new APK; open
 it and Android installs it over the app, keeping your data. A Google Play
 install gets **Open Google Play** once a stable release is 7 days old; Play
-carries no beta or nightly. In **Cloudfield Edge** mode the server refuses an older
+carries no beta or nightly. In **Aether Edge** mode the server refuses an older
 app: a screen such as `This app (v0.7.0) is too old for the server (v0.8.0
 needs v0.8.0 or newer).` stays until you install the update it links.
 
@@ -428,7 +432,7 @@ valid for 30 minutes (`sudo aether-server edge claim-code` prints a new one).
 Setup starts nothing; it ends on `next:`: start the service, then on your
 machine link it. On a tailnet that is `aether link <MagicDNS name>`, or
 **Tailscale** in the app's Connect step; through the edge, `aether login` and
-`aether link --claim <code>`, or **Cloudfield relay** with the claim link; with
+`aether link --claim <code>`, or **Aether relay** with the claim link; with
 neither, `aether link <this-host>:2222`. When the edge is not
 `https://edge.onaether.dev`, both client commands carry `--edge <url>`, because
 a claim code names no edge.
@@ -832,7 +836,7 @@ Clients follow their server. `aether update` and the desktop app take the
 release of the channel their default linked server follows, and by default
 never one above that server; a member who cannot update the server, or
 `--force`, can ([Update a client](#update-a-client)). The Android app in
-Cloudfield Edge mode offers the server's release; in Tailscale mode its bundled
+Aether Edge mode offers the server's release; in Tailscale mode its bundled
 CLI follows its own `config.json`, and `stable` when it has none
 ([Android app](#android-app)).
 
@@ -1208,7 +1212,7 @@ to your originals, holding local edits from when it paused.
   not check the release signature.
 - The Android app is not on Google Play, needs a UnifiedPush distributor for
   notifications ([networking.md](networking.md#in-the-android-app)) and has
-  no port forwarding. Join and claim links open only in **Cloudfield Edge** mode.
+  no port forwarding. Join and claim links open only in **Aether Edge** mode.
 - On Linux the desktop app runs Electron with `--no-sandbox`; the dashboard
   page still has no Node.js access.
 
@@ -1220,7 +1224,7 @@ to your originals, holding local edits from when it paused.
 | `aether link` fails with `knownhosts: key mismatch` after the server was reinstalled | The server has a new host key. Run `ssh-keygen -R '[<server-host>]:2222'` for every address you linked through, then link again. |
 | The sync daemon fails with exit status 2 after an upgrade | Its service passes a flag that no longer exists, such as `--sync-origin`. Rerun both commands in [The client-side sync daemon](#the-client-side-sync-daemon). |
 
-### Cloudfield is missing from the Windows Start Menu
+### Aether is missing from the Windows Start Menu
 
 `-Role none` and a manual install add no shortcut. Check what Windows has:
 

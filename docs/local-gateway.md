@@ -1456,8 +1456,8 @@ immediately before atomic rename; an absent destination must still be absent,
 and editor saves also recheck the content revision. A detected change returns
 `config: conflict` without replacing that destination. Staged bytes remain
 private until the destination permissions have been validated.
-These checks are optimistic, not a filesystem compare-and-swap: Cloudfield's root
-lock coordinates its own operations, not arbitrary processes in the shared
+These checks are optimistic, not a filesystem compare-and-swap: Cloudfield's
+root lock coordinates its own operations, not arbitrary processes in the shared
 HOME, which can still write between the final check and rename.
 
 `home.tree`, `home.read`, `home.write`, `home.mkdir`, `home.rename`,
@@ -1759,8 +1759,8 @@ data produces `warnings`; affected measurements are partial, not evidence
 of an empty directory. Measurement lives in `internal/disk`, shared with
 the scheduler's filesystem floor.
 
-Optional `docker` accounting describes the whole daemon, including non-Aether
-workloads: `images_bytes`, `containers_bytes`, `volumes_bytes`,
+Optional `docker` accounting describes the whole daemon, including
+non-Cloudfield workloads: `images_bytes`, `containers_bytes`, `volumes_bytes`,
 `build_cache_bytes` and `reclaimable_bytes`. Shared image layers count once;
 build-cache bytes exclude image-shared records, and bind-backed homes are not
 counted again as Docker volumes. Docker's unused classification does not mean

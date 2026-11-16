@@ -1007,8 +1007,8 @@ To rerun only the failed jobs of a session: `gh run rerun <session-id> --failed`
 
 ## Running the Docker suites inside a session
 
-You can work on Cloudfield from inside a Cloudfield run (an agent's container on an
-Cloudfield server). Two things differ there.
+You can work on Cloudfield from inside a Cloudfield run (an agent's container on
+an Cloudfield server). Two things differ there.
 
 A session sets `AETHER_*` variables (`AETHER_RUN_ID`, `AETHER_HARNESS`,
 `AETHER_WORKSPACE_ID` and others) that some tests read. `internal/coordcli`

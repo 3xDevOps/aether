@@ -1,8 +1,8 @@
 # Cloudfield
 
-Cloudfield is a self-hosted development environment for coding agents. The public
-repository contains one Go server, one Go CLI, an embedded dashboard, and the
-operational guides needed to run them on your own hardware.
+Cloudfield is a self-hosted development environment for coding agents. The
+public repository contains one Go server, one Go CLI, an embedded dashboard, and
+the operational guides needed to run them on your own hardware.
 
 ## Public documentation
 

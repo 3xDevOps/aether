@@ -1,10 +1,10 @@
 # Assistant
 
-The assistant is a chat panel in the dashboard where you ask Cloudfield for things
-in plain language: "what's the status of my sessions?", "launch a session to fix the
-flaky login test", "install Rust in my environment". It acts with your
-permissions and asks before it launches, messages or stops a session, or saves your
-environment, unless you turn on [auto-approval](#auto-approval).
+The assistant is a chat panel in the dashboard where you ask Cloudfield for
+things in plain language: "what's the status of my sessions?", "launch a session
+to fix the flaky login test", "install Rust in my environment". It acts with
+your permissions and asks before it launches, messages or stops a session, or
+saves your environment, unless you turn on [auto-approval](#auto-approval).
 
 The assistant is not a session. It is an [Enhanced](enhanced-sessions.md) session of
 Claude Code or Codex with a sign-in of its own, which you make once for it. Its
@@ -69,8 +69,8 @@ panel shows **Installing** while a short-lived container,
 `aether-assistant-install-<member>`, runs `npm install` of the pinned adapter
 into that directory. It needs network access to the npm registry. The adapter
 carries the agent itself: the Claude Code binary of its Agent SDK, or the Codex
-version Cloudfield pins with the adapter. Neither updates on its own; both move when
-a server upgrade pins a newer version.
+version Cloudfield pins with the adapter. Neither updates on its own; both move
+when a server upgrade pins a newer version.
 
 ## Open it
 
@@ -79,7 +79,7 @@ a server upgrade pins a newer version.
   means an action waits for your approval.
 - Press `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS), even while a text field or
   a terminal has focus.
-- Run **Ask Cloudfield** from the command palette.
+- Run **Ask Aether** from the command palette.
 
 Viewers do not see the assistant. On a wide screen the panel docks on the right
 and can be resized. On a narrow window it floats over the page and `Esc` closes
@@ -126,9 +126,9 @@ home only. Starting it stops a running assistant; the next prompt starts it
 again, and a prompt sent while the sign-in runs fails until it exits. Select
 **Done** when it exits.
 
-Cloudfield checks only that the sign-in file exists, not that it still works. When
-the sign-in expires or you want another account, use **Settings > Assistant >
-Sign-in > Sign in again**.
+Cloudfield checks only that the sign-in file exists, not that it still works.
+When the sign-in expires or you want another account, use **Settings > Assistant
+> Sign-in > Sign in again**.
 
 After sign-in the panel asks once **How should your assistant act?**:
 **Ask before acting** (recommended) keeps [approval cards](#approve-an-action),
@@ -176,8 +176,8 @@ ready agent.
 ## What it can do
 
 The assistant can do what you can do through the dashboard and nothing more. It
-can also read Cloudfield's own guides, so it can explain features of the server you
-run.
+can also read Cloudfield's own guides, so it can explain features of the server
+you run.
 
 | What | Examples | Asks first? |
 | --- | --- | --- |
@@ -195,8 +195,8 @@ run.
 Asked "what is left", "continue this" or "did we ship?", the assistant reads
 the session with its [progress evidence](connectors.md#progress-evidence)
 and answers requested, implemented, reviewed, merged, released and deployed
-on separate lines, each with its source and time, or "unknown" when Cloudfield has
-no source, as for releases and deployments. An agent's success report alone
+on separate lines, each with its source and time, or "unknown" when Cloudfield
+has no source, as for releases and deployments. An agent's success report alone
 is not proof. "Continue" never repeats a launch, message or merge; the
 assistant proposes the next step and launches only when you ask.
 
@@ -207,8 +207,8 @@ An approved message reaches the agent at once when you control the session, or
 when it is your own session and no one controls it. Otherwise it waits about 45
 seconds for the member in control to approve or deny it.
 
-Installing a toolchain or editing a file is not a Cloudfield action. The assistant
-does it in its own shell in your environment, then offers to save the
+Installing a toolchain or editing a file is not a Cloudfield action. The
+assistant does it in its own shell in your environment, then offers to save the
 environment.
 
 ## What a launch's task holds
@@ -521,8 +521,8 @@ agent asks you still appears as a card.
 
 ## Notifications
 
-Cloudfield watches every session the assistant launches, relaunches or messages for
-you: it
+Cloudfield watches every session the assistant launches, relaunches or messages
+for you: it
 creates a [watch](watches.md#assistant-watches) with source `assistant`,
 listed in **Settings > Watches**, where you pause it to stop the notices. If
 the watch cannot be created, the conversation says so with the error. You do

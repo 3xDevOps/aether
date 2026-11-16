@@ -44,7 +44,8 @@ behaves the same at either path. Containers created before this release lack
 file written into a member's home call `/usr/local/bin/aether-internal`. A
 Default or Isolated session also gets the binary at `/usr/local/bin/sudo`, the
 [sudo shim](security.md#sudo-in-a-default-session). The coordination directory
-and the executable mounts are constructed by Cloudfield, not requested by a session.
+and the executable mounts are constructed by Cloudfield, not requested by a
+session.
 
 The container has no coordination token or identity flag. The mounted socket
 is the identity: a connection accepted by a session's socket is treated as that
@@ -157,16 +158,16 @@ live sessions in the sender's workspace with `state: "workspace"`, most recently
 active first. Sending never requires a session to be listed. Every peer
 carries its task summary, its `activity` (what it is doing) with its
 `reason` (`reason_truncated` when cut at 512 bytes), `wait` while it shows a
-reported wait (what Cloudfield last verified about it, or why it cannot vouch for
-it; see [Waits Cloudfield can check](failure-handling.md#waits-cloudfield-can-check)),
-and `run_status`. A `run_status` of `needs-attention` only means the
-agent is parked: read `activity` to tell waiting on agents, CI or a process
-from a request for a person. Each session appears once, under its first route,
-and status never lists a session the sender cannot message: finished sessions and
-every peer of a viewer's session are left out, and `peer_total` counts what
-remains. A question reply needs no check beyond the question: `coord.reply`
-identifies its destination from the question. It cannot be used to send an
-unrelated message.
+reported wait (what Cloudfield last verified about it, or why it cannot vouch
+for it; see [Waits Cloudfield can
+check](failure-handling.md#waits-cloudfield-can-check)), and `run_status`. A
+`run_status` of `needs-attention` only means the agent is parked: read
+`activity` to tell waiting on agents, CI or a process from a request for a
+person. Each session appears once, under its first route, and status never lists
+a session the sender cannot message: finished sessions and every peer of a
+viewer's session are left out, and `peer_total` counts what remains. A question
+reply needs no check beyond the question: `coord.reply` identifies its
+destination from the question. It cannot be used to send an unrelated message.
 
 A peer the caller has written to also carries `last_sent`: the newest
 message, question, reply or forwarded report it sent that peer, with
@@ -1407,9 +1408,9 @@ What a report does depends on the session:
 - **Background session** (`headless`). Success or failure still finishes the session
   after its turn ends, or on process exit. For an agent without a status
   reporter, the first `--poll-interval` check two minutes after the report
-  finishes it; outstanding input requests prevent that finish. Cloudfield commits
-  the work (`aether:` for success, `wip:` for failure), publishes the session
-  branch, records `completed` or `failed`, and cleans up its container.
+  finishes it; outstanding input requests prevent that finish. Cloudfield
+  commits the work (`aether:` for success, `wip:` for failure), publishes the
+  session branch, records `completed` or `failed`, and cleans up its container.
   A Close or Kill that lands first wins. A session completed by its success
   report shows **Finished: review** until the owner marks it complete or
   later.
@@ -1519,8 +1520,8 @@ named resolved but its wake never reached the agent, or its source went
 unread for an hour
 ([exit codes](quickstart.md#from-a-script-or-agent)).
 
-Before accepting `coord.report`, Cloudfield captures evidence for the session. The
-capture retains a private Git evidence commit and the PTY transcript up to
+Before accepting `coord.report`, Cloudfield captures evidence for the session.
+The capture retains a private Git evidence commit and the PTY transcript up to
 16 MiB, then stores factual context, provenance, unresolved facts, and a next
 action with the report. Evidence is retained for 30 days. Unavailable or
 truncated sources are recorded explicitly. The capture is not an atomic
@@ -1604,8 +1605,8 @@ retention does not grant live input or wake authority. Explicit Kill, Delete,
 and subsession cancellation still destroy the
 container; a negative TTL requests immediate cleanup. Recovery rebinds
 `coord3.sock` for retained sessions. When a session's sandbox is destroyed,
-Cloudfield releases the coordination directory and retires the session's unread mail
-after any required evidence capture has completed; the messages stay listed
+Cloudfield releases the coordination directory and retires the session's unread
+mail after any required evidence capture has completed; the messages stay listed
 until the session is deleted. With `--conflict-coordination=false`, sessions
 still receive their identity socket and agent instructions without report
 lines.

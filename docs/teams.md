@@ -1,6 +1,7 @@
 # Running Cloudfield with a team
 
-One Cloudfield server can serve several people. Each person is a **member** with a
+One Cloudfield server can serve several people. Each person is a **member** with
+a
 **role**, and everyone's agents run side by side in the same **workspaces** (a
 workspace is one repository plus its settings). A solo setup is a team of one,
 so there is nothing to switch on: you add members.
@@ -502,8 +503,8 @@ When a session is handed off or finishes, Cloudfield saves an **evidence packet*
 objective, base and final git revisions, changed files and a transcript copy. It
 records what Cloudfield observed and does not prove a command succeeded or that
 anyone reviewed the result. Packets expire after 30 days, and a session whose
-checkout exceeds 64 MiB gets no finish packet. If saving fails, Cloudfield keeps the
-checkout and transcript instead of deleting them.
+checkout exceeds 64 MiB gets no finish packet. If saving fails, Cloudfield keeps
+the checkout and transcript instead of deleting them.
 
 ```sh
 aether close <session> --outcome merged|abandoned   # close a finished session after reviewing it
@@ -546,12 +547,12 @@ Change yours with `aether member color <#rrggbb>` and your display name under
 off, change settings) is recorded in the timeline with who did it.
 
 Set your git identity under **Profile → Git identity**, or `aether member git
---name "Dana Lee" --email dana@example.com`. The agent in a session commits as the
-member who launched it, fixed when the container starts. Cloudfield's own commits
-(when a session finishes, is stopped or is recovered) use the session's current owner.
-With no identity set, commits use your display name and `<member-id>@aether.local`,
-which matches no GitHub account. Signed commits show **Verified** on GitHub only
-if the commit email is verified there
+--name "Dana Lee" --email dana@example.com`. The agent in a session commits as
+the member who launched it, fixed when the container starts. Cloudfield's own
+commits (when a session finishes, is stopped or is recovered) use the session's
+current owner. With no identity set, commits use your display name and
+`<member-id>@aether.local`, which matches no GitHub account. Signed commits show
+**Verified** on GitHub only if the commit email is verified there
 ([security.md](security.md#github-credentials-and-signing-keys)).
 
 Anyone who messages a session is added to its co-authors. Cloudfield's commits end with a
@@ -700,11 +701,11 @@ the session launches on the requested one. A session that fell back stays owned 
 launcher. Its header reads **On `<name>`'s account (fallback)**, and `aether
 sessions` appends ` (fallback)` to the `ACCOUNT` column.
 
-A session also moves to another account mid-session when its agent reports the usage
-limit. Cloudfield starts a new container on the next account and resumes the agent's
-session there. The session keeps its ID, checkout and branch, but processes in the
-old container, terminals included, end. This works for Enhanced and Background
-sessions of `claude` and `codex` and Standard `claude` sessions
+A session also moves to another account mid-session when its agent reports the
+usage limit. Cloudfield starts a new container on the next account and resumes
+the agent's session there. The session keeps its ID, checkout and branch, but
+processes in the old container, terminals included, end. This works for Enhanced
+and Background sessions of `claude` and `codex` and Standard `claude` sessions
 ([harnesses.md](harnesses.md#usage-limit-signals)). Cost stays with the account
 that spent it. The account that ran out is not read again: the agent's report
 counts as exhausted. The move picks an account with usage left as a launch

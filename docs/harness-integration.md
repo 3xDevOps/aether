@@ -1,10 +1,11 @@
 # Integrating an unsupported agent
 
-This guide connects an agent CLI that Cloudfield does not ship to Cloudfield's durable
-mailbox. A **session** is one agent that Cloudfield launches in a sandbox (a container or virtual machine) for one task.
-Other sessions and people send it messages, which Cloudfield stores until the agent reads
-them. Read [Agents](harnesses.md#custom-and-unlisted-agents) first to register
-the CLI as a custom agent. For a shipped agent, you do not need this guide.
+This guide connects an agent CLI that Cloudfield does not ship to Cloudfield's
+durable mailbox. A **session** is one agent that Cloudfield launches in a
+sandbox (a container or virtual machine) for one task. Other sessions and people
+send it messages, which Cloudfield stores until the agent reads them. Read
+[Agents](harnesses.md#custom-and-unlisted-agents) first to register the CLI as a
+custom agent. For a shipped agent, you do not need this guide.
 
 The levels build on each other. Stop at the first one that is enough.
 
@@ -101,8 +102,8 @@ run it on a timer.
 
 Add wake only if the agent has a supported API to start a turn in a specific live
 session, and lifecycle events that let you cancel on Stop, shutdown and session
-replacement. Do not write to the agent's terminal. Cloudfield has no terminal-input
-fallback.
+replacement. Do not write to the agent's terminal. Cloudfield has no
+terminal-input fallback.
 
 One call performs one bounded, non-consuming check of the mailbox:
 
