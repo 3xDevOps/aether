@@ -509,6 +509,22 @@ A failure before publishing leaves at most a draft: fix the cause and run
 `gh run rerun <session-id> --failed`. Published assets are never replaced, so a
 bad published release needs a new tag.
 
+An admin promotes a published nightly to beta, or a published beta to
+stable, with `.github/workflows/promote.yml` on `main`:
+
+```sh
+gh workflow run promote.yml -f from=v0.9.0-nightly.12 -f to=beta
+```
+
+It takes the commit and build from the source's signed manifest, requires
+green push CI for that commit, refuses a build below the channel's
+pointer, and calls `release-build.yml`, whose `release` job creates the
+annotated tag (`vX.Y.Z-beta.N` or `vX.Y.Z`, with a `build:` line) once
+every asset is built. `-f version=X.Y.Z` names another version, at least
+the current nightly base. A failed run is re-run with `gh run rerun
+<session-id> --failed`; a new dispatch of the same commit reuses a tag it
+left without a release.
+
 A workflow that moves a channel pointer (`<channel>.json` on the
 `channels` prerelease) keeps the pair it signed as the `pointer-<channel>`
 artifact for 90 days. If an upload leaves half a pair, restore that
@@ -531,8 +547,9 @@ name a beta or stable release, never a `-nightly.N` tag: an edge orders itself
 against them by their signed build, and nightlies are pruned.
 
 A release that becomes Latest moves `ghcr.io/3xdevops/aether-edge:latest`.
-Production edges follow `:stable`, which only `promote-edge.yml` moves, run
-by an admin at least 24 hours after the release
+Promote moves `:beta` when it publishes a beta. Production edges follow
+`:stable`, which only `promote-edge.yml` moves, run by an admin at least 24
+hours after the release
 (`-f soak_override_reason='<why>'` promotes sooner):
 
 ```sh
@@ -540,11 +557,12 @@ docker buildx imagetools inspect ghcr.io/3xdevops/aether-edge:<tag>   # Digest:
 gh workflow run promote-edge.yml -f tag=<tag> -f digest=sha256:<digest>
 ```
 
-It refuses a release older than `stable`, and one whose `min_upgrade_from`
-is above the release `stable` carries.
+It refuses a release older, by signed build and hotfix, than the one
+`stable` carries, and one whose `min_upgrade_from` is above it.
 
 Keep `AETHER_RELEASE_SIGNING_KEY` in the `release` environment
-(**Settings → Environments**) limited to `v*` tags, delete any repository
+(**Settings → Environments**) limited to `v*` tags and `main` (Promote
+runs on `main`), delete any repository
 secret of that name, and limit `edge-promotion` to `main`. The Android job
 reads `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
 and `ANDROID_KEY_PASSWORD`. Losing that keystore means no release can update

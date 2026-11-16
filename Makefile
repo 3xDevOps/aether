@@ -266,6 +266,10 @@ test-scripts:
 	sh scripts/deploy-test.sh
 	sh scripts/publish-release-test.sh
 	sh scripts/publish-pointer-test.sh
+	sh scripts/promote-plan-test.sh
+	sh scripts/create-release-tag-test.sh
+	sh scripts/edge-attestation-test.sh
+	sh scripts/require-admin-test.sh
 	sh scripts/release-ci-check-test.sh
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
