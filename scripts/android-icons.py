@@ -8,12 +8,17 @@ Converts cloudfield-android-foreground.svg and cloudfield-android-monochrome.svg
 to VectorDrawables in android/app/src/main/res/drawable/. Path data is copied
 verbatim, a nested <svg> becomes a <group> with the same translate and scale,
 and a circle becomes the two-arc path through the same points. The
-notification icon is the monochrome file's inner 32 x 32 drawing at 24 dp.
+notification icon is the monochrome file's inner 32 x 32 drawing at 24 dp,
+moved by a translate only so that the bounding box of its stroked shapes is
+centred in the box. The drawing's rings are open on the right, so that box is
+not centred on the rings.
 Anything else in an SVG stops the script, because VectorDrawable may not draw
 it the same way. The adaptive background is a colour resource,
 ic_launcher_background in res/values/colors.xml.
 """
 
+import math
+import re
 import sys
 import xml.etree.ElementTree as ET
 from fractions import Fraction
@@ -84,6 +89,38 @@ def nested(root: ET.Element) -> ET.Element:
     return children[0]
 
 
+def extent(element: ET.Element) -> tuple:
+    """Return (xmin, xmax, ymin, ymax) of one shape, stroke width included.
+
+    A stroked arc is an annular sector with butt caps, so its extremes are its
+    four corners and the axis points of its outer edge that the arc crosses.
+    """
+    tag = element.tag.removeprefix(SVG)
+    if tag == "circle":
+        cx, cy, r = (float(element.get(k)) for k in ("cx", "cy", "r"))
+        return cx - r, cx + r, cy - r, cy + r
+    m = re.fullmatch(r"M([\d.]+) ([\d.]+)A(\d+) \3 0 ([01]) ([01]) ([\d.]+) ([\d.]+)", element.get("d"))
+    if not m:
+        sys.exit(f"cannot measure path {element.get('d')}: only M x y A r r 0 large sweep x y")
+    x0, y0, r, large, sweep, x1, y1 = float(m[1]), float(m[2]), float(m[3]), m[4], m[5], float(m[6]), float(m[7])
+    half = float(element.get("stroke-width", "1")) / 2
+    mx, my, chord = (x0 + x1) / 2, (y0 + y1) / 2, math.hypot(x1 - x0, y1 - y0)
+    offset = math.sqrt(r * r - chord * chord / 4)
+    sign = -1 if large != sweep else 1
+    cx = mx + sign * offset * (y1 - y0) / chord
+    cy = my - sign * offset * (x1 - x0) / chord
+    a0, a1 = math.atan2(y0 - cy, x0 - cx), math.atan2(y1 - cy, x1 - cx)
+    start, end = (a0, a1) if sweep == "1" else (a1, a0)
+    if end < start:
+        end += math.tau
+    angles = [start, end] + [k * math.pi / 2 for k in range(-8, 9) if start <= k * math.pi / 2 <= end]
+    points = [(cx + (r + side * half) * math.cos(a), cy + (r + side * half) * math.sin(a))
+              for a in angles[:2] for side in (-1, 1)]
+    points += [(cx + (r + half) * math.cos(a), cy + (r + half) * math.sin(a)) for a in angles[2:]]
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
 def vector(source: Path, size_dp: int, viewport: Fraction, body: list) -> str:
     return "\n".join([
         '<?xml version="1.0" encoding="utf-8"?>',
@@ -118,10 +155,19 @@ def adaptive_layer(source: Path) -> str:
 
 def notification(source: Path) -> str:
     inner = nested(ET.parse(source).getroot())
-    body = []
+    viewport = viewbox(inner)
+    xmin, xmax, ymin, ymax = (f(v) for f, v in zip((min, max, min, max), zip(*map(extent, inner))))
+    shift = [Fraction(round(float(viewport - low - high) / 2, 4)).limit_denominator(10000)
+             for low, high in ((xmin, xmax), (ymin, ymax))]
+    body = [
+        "    <group",
+        f'        android:translateX="{number(shift[0])}"',
+        f'        android:translateY="{number(shift[1])}">',
+    ]
     for element in inner:
-        body += shape(element, "    ")
-    return vector(source, 24, viewbox(inner), body)
+        body += shape(element, "        ")
+    body.append("    </group>")
+    return vector(source, 24, viewport, body)
 
 
 def main() -> None:
