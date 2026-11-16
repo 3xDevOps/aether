@@ -131,6 +131,17 @@ func Scoped(ev Event, scope Scope) Event {
 	return ev
 }
 
+// VisibleTo reports whether a private payload may be shown to member. A
+// non-private payload is always visible here (reachability is checked
+// separately). Stored-log readers use this so a page honors the same
+// recipient-only rule the live and replayed streams enforce via deliverable.
+func VisibleTo(ev Event, member domain.MemberID) bool {
+	if p, ok := ev.Payload.(private); ok {
+		return p.Recipient() == member
+	}
+	return true
+}
+
 func deliverable(ev Event, member domain.MemberID, scope Scope) bool {
 	if p, ok := ev.Payload.(private); ok {
 		return p.Recipient() == member

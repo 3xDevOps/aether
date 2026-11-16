@@ -2592,8 +2592,8 @@ anything dropped.
 When a member's [assistant](assistant.md#notifications) launches or messages a
 session, the server publishes `assistant.notice` as the session finishes or needs the
 member. The envelope carries the session's `workspace_id` and `run_id`, and the
-member as `actor_id`. It is a workspace event, so every subscriber of the
-workspace receives it; a client shows it only to the member in `member_id`.
+member as `actor_id`. It is private: the server sends it, on the stream and in
+`workspace.timeline`, only to the member in `member_id`.
 
 ```json
 {"type":"assistant.notice","payload":{"member_id":"mem_...","run_id":"run_...",
