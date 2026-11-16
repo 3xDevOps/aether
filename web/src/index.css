@@ -242,14 +242,11 @@
   --diff-bg: 8%;
 
   --agent-claude: #b4532a;
-  --agent-codex: #4757c9;
   --agent-pi: #8a3fb8;
   --agent-omp: #1f7a8c;
-  --agent-opencode: #b23a68;
-  --agent-copilot: #2f7d4a;
   --agent-gemini: #1f6fd1;
   --agent-cursor: #9a6a00;
-  --agent-antigravity: #c2410c;
+  --agent-antigravity: #2f7d4a;
   --tone-soft: 8%;
   --lane-tint: 16%;
 
@@ -309,14 +306,11 @@
   --diff-bg: 10%;
 
   --agent-claude: #e0835e;
-  --agent-codex: #8fa3ff;
   --agent-pi: #c792ea;
   --agent-omp: #5ec4d6;
-  --agent-opencode: #f07fa8;
-  --agent-copilot: #6ccf8e;
   --agent-gemini: #7ab4ff;
   --agent-cursor: #e8b84a;
-  --agent-antigravity: #ff9466;
+  --agent-antigravity: #6ccf8e;
   --tone-soft: 12%;
   --lane-tint: 26%;
 
@@ -406,11 +400,8 @@
   --color-diff-add-bg: color-mix(in srgb, var(--diff-add) var(--diff-bg), transparent);
   --color-diff-del-bg: color-mix(in srgb, var(--diff-del) var(--diff-bg), transparent);
   --color-agent-claude: var(--agent-claude);
-  --color-agent-codex: var(--agent-codex);
   --color-agent-pi: var(--agent-pi);
   --color-agent-omp: var(--agent-omp);
-  --color-agent-opencode: var(--agent-opencode);
-  --color-agent-copilot: var(--agent-copilot);
   --color-agent-gemini: var(--agent-gemini);
   --color-agent-cursor: var(--agent-cursor);
   --color-agent-antigravity: var(--agent-antigravity);

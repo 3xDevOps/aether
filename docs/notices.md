@@ -101,10 +101,31 @@ The dashboard bundles these fonts under the SIL Open Font License 1.1:
 listing's feature graphic, `android/listing/feature-graphic.png`, whose
 tagline is JetBrainsMono NFM.
 
-The glyph for Claude Code sessions is the Claude mark, a trademark of Anthropic,
-used only to identify that agent. Its path in `web/src/components/icons.ts`
-comes from [Simple Icons](https://github.com/simple-icons/simple-icons) 16.34.0,
-which publishes it under CC0-1.0.
+Agent glyphs are their vendors' marks, used only to identify each agent; each
+mark is its owner's trademark. The paths in `web/src/components/icons.ts` come
+from:
+
+| Agent | Mark | Source | Licence of the file |
+| --- | --- | --- | --- |
+| Claude Code | Claude, Anthropic | [Simple Icons 16.34.0 `claude`](https://cdn.jsdelivr.net/npm/simple-icons@16.34.0/icons/claude.svg) | none stated |
+| Codex | OpenAI Blossom, OpenAI | `OAI_OpenAI-Blossom_Black.svg` in [openai-logos.zip](https://cdn.openai.com/brand/openai-logos.zip), from [openai.com/brand](https://openai.com/brand/) | OpenAI brand terms |
+| pi | pi | [Simple Icons 16.38.0 `pi`](https://cdn.jsdelivr.net/npm/simple-icons@16.38.0/icons/pi.svg), from pi.dev's favicon | none stated |
+| oh-my-pi | oh-my-pi | [`packages/collab-web/public/favicon.svg` at v18.20.3](https://github.com/can1357/oh-my-pi/blob/v18.20.3/packages/collab-web/public/favicon.svg), drawn in one colour instead of its gradient | [MIT](https://github.com/can1357/oh-my-pi/blob/v18.20.3/LICENSE), with the repository |
+| OpenCode | OpenCode | the frame of [`opencode-logo-transparent-dark.svg`](https://opencode.ai/brand/files/opencode-logo-transparent-dark.svg) from [opencode.ai/brand](https://opencode.ai/brand) | none stated |
+| GitHub Copilot CLI | Invertocat, GitHub | [Primer Octicons 19.42.0 `mark-github-24`](https://cdn.jsdelivr.net/npm/@primer/octicons@19.42.0/build/svg/mark-github-24.svg) | [MIT](https://cdn.jsdelivr.net/npm/@primer/octicons@19.42.0/LICENSE) |
+| Cursor CLI | Cursor cube | `General Logos/Cube/SVG/CUBE_2D_LIGHT.svg` in the kit on [cursor.com/brand](https://cursor.com/brand) | none stated |
+
+Simple Icons is CC0, but its
+[disclaimer](https://github.com/simple-icons/simple-icons/blob/16.38.0/DISCLAIMER.md)
+says that does not make every icon in it CC0. OpenAI, OpenCode and GitHub
+forbid changing their marks' colours, so Codex, OpenCode and Copilot glyphs
+only ever take the text colour; OpenCode's mark also keeps its 4:5
+proportions. GitHub retired the Copilot head in early 2026 and shows Copilot
+with its Invertocat
+([GitHub brand: Copilot](https://brand.github.com/brand-identity/copilot)).
+Google makes its product icons "ask first"
+([Google brand guidance](https://about.google/brand-resource-center/guidance/)),
+so Gemini CLI and Antigravity CLI show their initial instead.
 
 The terminal uses [xterm.js](https://github.com/xtermjs/xterm.js), including its
 fit, search and web-links addons, under the
