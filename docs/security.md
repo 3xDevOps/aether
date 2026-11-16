@@ -331,6 +331,11 @@ they have no installation of the agent in their own `~/.local/bin`, they also
 get yours, read-only, with your whole `~/.local/bin` on their `PATH` after
 their own entries.
 
+In session VMs, a `copilot` or `antigravity` session gets a copy of your
+login, made at each cold start of its VM; a copy of either login is not
+invalidated when another is used, and after a revoke the session moves off
+your account or stops, so the copy is replaced.
+
 Claude Code caches the account it is signed in to as `oauthAccount` in
 `~/.claude.json`, and `claude auth status` reports that cache, not the owner of
 the login. A `claude` session on your account therefore gets its own copy of

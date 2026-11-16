@@ -67,6 +67,11 @@ func planMounts(checkouts, mounts []runtime.Mount, nestedDocker bool, dir string
 		case runtime.MountState:
 			p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeState, Source: m.Subpath, Target: m.ContainerPath})
 			continue
+		case runtime.MountSeed:
+			if err := p.seed(m.ContainerPath); err != nil {
+				return plan{}, err
+			}
+			continue
 		case runtime.MountServerBinary:
 			p.mounts = append(p.mounts, guest.Mount{Volume: guest.VolumeHelper, Source: ".", Target: m.ContainerPath, ReadOnly: true})
 			continue
@@ -146,4 +151,20 @@ func linkSockets(dir string, links map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// seed has the state mount nearest above file, planned before it, copy
+// file in at every boot.
+func (p *plan) seed(file string) error {
+	for i := len(p.mounts) - 1; i >= 0; i-- {
+		m := &p.mounts[i]
+		if m.Volume != guest.VolumeState {
+			continue
+		}
+		if rel, ok := strings.CutPrefix(file, m.Target+"/"); ok {
+			m.Seed = append(m.Seed, rel)
+			return nil
+		}
+	}
+	return fmt.Errorf("vm runtime: no state mount covers the seed %s", file)
 }

@@ -69,6 +69,9 @@ func (s *Scheduler) vmStateMounts(run domain.RunID, member domain.MemberID, prof
 		mounts = append(mounts, runtime.Mount{
 			HostPath: dir, Subpath: strconv.Itoa(i), ContainerPath: target, Kind: runtime.MountState,
 		})
+		for _, f := range state.Seed {
+			mounts = append(mounts, runtime.Mount{HostPath: dir, ContainerPath: path.Join(target, f), Kind: runtime.MountSeed})
+		}
 		if _, set := env[state.Env]; state.Env != "" && !set {
 			env[state.Env] = path.Join(target, state.File)
 		}

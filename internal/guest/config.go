@@ -98,6 +98,10 @@ type Mount struct {
 	Target   string
 	ReadOnly bool
 	Overlay  bool
+	// Seed, for a state mount, names files under Target that the helper
+	// copies into Source at every boot, from what Target shows before this
+	// mount covers it; a file missing there is removed from Source.
+	Seed []string
 }
 
 // CheckoutMount mounts a session checkout's disk, the block device whose
@@ -148,6 +152,9 @@ func (c Config) KernelArgs(base string) (string, error) {
 			arg += ",overlay"
 		}
 		args = append(args, arg)
+		for _, f := range m.Seed {
+			args = append(args, "aether.seed="+escapePath(m.Target)+","+escapePath(f))
+		}
 	}
 	for _, m := range c.Checkouts {
 		args = append(args, "aether.checkout="+m.Serial+","+m.Key+","+escapePath(m.Target))
@@ -235,6 +242,23 @@ func (c *Config) parseArg(key, value string) error {
 			option = fields[3]
 		}
 		c.Mounts = append(c.Mounts, Mount{Volume: Volume(fields[0]), Source: source, Target: target, ReadOnly: option == "ro", Overlay: option == "overlay"})
+	case "aether.seed":
+		if len(fields) != 2 {
+			return errors.New("want <target>,<file>")
+		}
+		target, err := url.PathUnescape(fields[0])
+		if err != nil {
+			return err
+		}
+		file, err := url.PathUnescape(fields[1])
+		if err != nil {
+			return err
+		}
+		i := len(c.Mounts) - 1
+		if i < 0 || c.Mounts[i].Target != target {
+			return errors.New("must follow the mount it seeds")
+		}
+		c.Mounts[i].Seed = append(c.Mounts[i].Seed, file)
 	case "aether.checkout":
 		if len(fields) != 3 {
 			return errors.New("want <serial>,<key>,<target>")
@@ -303,6 +327,14 @@ func (c Config) Validate() error {
 			}
 		default:
 			errs = append(errs, fmt.Errorf("mount %d: unknown volume %q", i, m.Volume))
+		}
+		if len(m.Seed) > 0 && m.Volume != VolumeState {
+			errs = append(errs, fmt.Errorf("mount %d: only a state mount can be seeded", i))
+		}
+		for _, f := range m.Seed {
+			if !filepath.IsLocal(f) || path.Clean(f) != f {
+				errs = append(errs, fmt.Errorf("mount %d: seed %q must be a clean relative path", i, f))
+			}
 		}
 		if m.Overlay && (m.Volume != VolumeHome || m.ReadOnly) {
 			errs = append(errs, fmt.Errorf("mount %d: only a writable home mount can be an overlay", i))

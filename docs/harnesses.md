@@ -652,6 +652,8 @@ Their logins and other files stay shared:
 | `codex` | `~/.codex/vm-sqlite`, every `*.sqlite` | `CODEX_SQLITE_HOME` |
 | `opencode` | `~/.local/share/opencode/vm-db/opencode.db` | `OPENCODE_DB` |
 | `cursor` | `~/.cursor/ai-tracking` and `~/.local/state/cursor/agent-stores` | `CURSOR_AGENT_STORE_DIR` for the second |
+| `copilot` | `~/.copilot` | mounted over the home's, seeded |
+| `antigravity` | `~/.gemini/antigravity-cli` | mounted over the home's, seeded |
 
 The agent's history and indexes in those databases belong to that session
 only. A variable the workspace already sets is kept, and then the agent
@@ -661,11 +663,29 @@ shares that database again; so does Codex when `~/.codex/config.toml` sets
 starts signed out of OpenCode Console; provider logins in `auth.json` stay
 shared.
 
-`omp`, `copilot` and `antigravity` keep such databases where no setting moves
-them (oh-my-pi's logins, Copilot's session index beside its login,
-Antigravity's conversations). Only one VM session at a time runs each of them
-on a home: the launcher's, and for oh-my-pi on a shared account also the
-owner's, whose `~/.omp/agent` it mounts. Every session that still has its VM
+Copilot keeps its session index, `~/.copilot/session-store.db`, beside its
+login, and Antigravity keeps `conversation_summaries.db` beside its login and
+`settings.json`; no setting moves the databases without the login. Each
+session therefore gets its own `~/.copilot` or `~/.gemini/antigravity-cli`,
+and every time its VM starts cold (not when it wakes from sleep) the VM copies
+these files into it from the home, or from the account owner's login on a
+shared account:
+
+| Agent | Copied at each cold start |
+| --- | --- |
+| `copilot` | `config.json` (the login), `settings.json`, `mcp-config.json` |
+| `antigravity` | `antigravity-oauth-token` (the login), `settings.json`, `cache/onboarding.json` |
+
+A copy is safe because neither login rotates: Copilot stores a GitHub OAuth
+app token, and Antigravity a Google refresh token, which Google does not
+replace when it is used. Signing in or out takes effect at the next cold
+start of a session, not in a running one. Everything else in those
+directories, such as Copilot's plugins, agents and skills, is the session's
+own and starts empty.
+
+`omp` keeps its logins in a SQLite database where no setting moves them. Only
+one VM session at a time runs it on a home: the launcher's, and on a shared
+account also the owner's, whose `~/.omp/agent` it mounts. Every session that still has its VM
 counts, sleeping ones and ones shutting down too. A launch, or a move to a
 fallback account, that would make a second one is refused:
 
@@ -673,7 +693,7 @@ fallback account, that would make a second one is refused:
 scheduler: oh-my-pi keeps its logins in a SQLite database that two session VMs cannot share, and Ada's session run-k3v9q2m7xd already runs it on the same home; close or kill it first
 ```
 
-A closed session of one of them does not reopen while another runs it on the
+A closed oh-my-pi session does not reopen while another runs it on the
 same home, nor after one did since it closed, because its VM kept the
 databases open: launch a new session instead. The member's environment
 terminal and the agent started by hand in a session's shell open the same

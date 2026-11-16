@@ -19,6 +19,7 @@ func TestKernelArgsRoundTrip(t *testing.T) {
 			{Volume: VolumeShare, Source: "home", Target: "/root"},
 			{Volume: VolumeShare, Source: "repos/my repo,v2", Target: "/repos/my repo,v2", ReadOnly: true},
 			{Volume: VolumeData, Source: "tmp", Target: "/tmp"},
+			{Volume: VolumeState, Source: "0", Target: "/root/.copilot", Seed: []string{"config.json", "cache/on boarding.json"}},
 		},
 		Checkouts: []CheckoutMount{{Serial: "repo0", Key: "run-abc", Target: "/workspace"}, {Serial: "repo1", Key: "run-abc-r1", Target: "/repos/my repo"}},
 		Sockets:   []Socket{{Port: 1025, Path: "/run/aether/coord3.sock"}},

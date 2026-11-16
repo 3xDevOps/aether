@@ -128,6 +128,10 @@ const (
 	// that outlives each VM the session runs in. HostPath is the session's
 	// directory the VM runtime keeps that disk in.
 	MountState MountKind = "state"
+	// MountSeed is no mount but a file of the home, ContainerPath, that a
+	// session VM copies into the MountState mount covering it at every boot;
+	// HostPath is that mount's.
+	MountSeed MountKind = "seed"
 )
 
 // ContainerInfo is immutable metadata captured from a live or stopped

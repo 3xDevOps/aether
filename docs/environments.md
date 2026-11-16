@@ -373,9 +373,10 @@ What changes:
   empty. An Isolated session's caches never go back.
 - No ownership pass runs over the home: every file in it shows as the
   session user's.
-- Agents' SQLite databases cannot be shared between VMs. Codex, OpenCode and
-  Cursor get their own per session; oh-my-pi, Copilot and Antigravity run in
-  one VM session at a time per home
+- Agents' SQLite databases cannot be shared between VMs. Codex, OpenCode,
+  Cursor, Copilot and Antigravity get their own per session, Copilot's and
+  Antigravity's logins copied in at each cold start; oh-my-pi runs in one VM
+  session at a time per home
   ([harnesses.md](harnesses.md#agents-in-session-vms)).
 - Starting a stopped session builds a fresh root disk from its image and runs
   the setup script again: packages installed outside the mounts are gone.
