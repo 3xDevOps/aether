@@ -129,7 +129,7 @@ func (r *Relay) ForwardUniversal(w http.ResponseWriter, req *http.Request, serve
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		if reg := r.servers[serverID]; reg != nil && reg.version < edgeproto.VersionUniversalMCP {
-			return noUniversalEndpoint{name: reg.name, id: reg.id, agentVersion: reg.agentVersion, origin: r.origin}
+			return noUniversalEndpoint{name: reg.name, id: reg.id, agentVersion: reg.agentVersion, origin: reg.origin}
 		}
 		return nil
 	})
@@ -162,6 +162,7 @@ func (r *Relay) Version(serverID string) int {
 // was written to the server. A request written to a server is never sent
 // again.
 func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID string, body []byte, browser string, check func() error) {
+	r.countConnector(req, serverID)
 	var until time.Time
 	if _, err := r.awaitReturn(req.Context(), serverID, &until); err != nil {
 		r.refuseHTTP(w, req, serverID, err)
@@ -184,6 +185,20 @@ func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID strin
 			return
 		}
 	}
+}
+
+// countConnector counts a connector request to serverID by the relay
+// origin it came in on and the server's protocol version.
+func (r *Relay) countConnector(req *http.Request, serverID string) {
+	k := ConnectorKey{Origin: r.originOf(req)}
+	r.mu.Lock()
+	if reg := r.servers[serverID]; reg != nil {
+		k.Protocol = reg.version
+	}
+	r.mu.Unlock()
+	r.refusalsMu.Lock()
+	r.connectorMap[k]++
+	r.refusalsMu.Unlock()
 }
 
 // forwardOnce sends req to serverID and writes the answer, or the

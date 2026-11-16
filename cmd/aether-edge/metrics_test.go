@@ -91,3 +91,24 @@ func TestReadiness(t *testing.T) {
 		t.Fatalf("closed database: %+v, healthcheck --ready: %v", rep, err)
 	}
 }
+
+func TestMetricsPerOrigin(t *testing.T) {
+	var out bytes.Buffer
+	writeMetrics(&out, relay.Metrics{
+		ServersByOrigin: map[string]int{"https://edge.example.test": 2, "https://edge.example.net": 0},
+		ConnectorRequests: map[relay.ConnectorKey]uint64{
+			{Origin: "https://edge.example.test", Protocol: 5}: 3, {Origin: "https://edge.example.net", Protocol: 0}: 1,
+		},
+	}, 0, map[string]uint64{"https://auth.example.test": 4})
+	for _, line := range []string{
+		`aether_edge_servers_by_origin{origin="https://edge.example.net"} 0`,
+		`aether_edge_servers_by_origin{origin="https://edge.example.test"} 2`,
+		`aether_edge_device_logins_total{origin="https://auth.example.test"} 4`,
+		`aether_edge_connector_requests_total{origin="https://edge.example.net",protocol="0"} 1`,
+		`aether_edge_connector_requests_total{origin="https://edge.example.test",protocol="5"} 3`,
+	} {
+		if !strings.Contains(out.String(), line+"\n") {
+			t.Errorf("metrics lack %s:\n%s", line, out.String())
+		}
+	}
+}

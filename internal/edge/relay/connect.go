@@ -229,24 +229,6 @@ func (r *Relay) register(kind, serverID string, account edgeproto.Account, devic
 	c.ticketHash = edgeproto.HashToken(ticket)
 	now := time.Now()
 	msg := edgeproto.Open{ConnID: c.id, Ticket: ticket, Kind: kind}
-	if kind != edgeproto.KindHTTP {
-		grant, err := edgeproto.SignGrant(r.key, edgeproto.Grant{
-			Issuer:      r.origin,
-			ServerID:    serverID,
-			ConnID:      c.id,
-			Kind:        kind,
-			Account:     account,
-			DeviceID:    device.ID,
-			DeviceKey:   device.Key,
-			DeviceLabel: device.Label,
-			IssuedAt:    now,
-			ExpiresAt:   now.Add(edgeproto.GrantTTL),
-		})
-		if err != nil {
-			return nil, edgeproto.Open{}, err
-		}
-		msg.Grant = grant
-	}
 	if addr.IsValid() {
 		msg.ClientAddr = addr.String()
 	}
@@ -267,6 +249,25 @@ func (r *Relay) register(kind, serverID string, account edgeproto.Account, devic
 		}
 	}
 	r.mu.Unlock()
+	if err == nil && kind != edgeproto.KindHTTP {
+		// The issuer is the origin the server enrolled at, which it checks
+		// every grant against, not the one the client came in on.
+		msg.Grant, err = edgeproto.SignGrant(r.key, edgeproto.Grant{
+			Issuer:      reg.origin,
+			ServerID:    serverID,
+			ConnID:      c.id,
+			Kind:        kind,
+			Account:     account,
+			DeviceID:    device.ID,
+			DeviceKey:   device.Key,
+			DeviceLabel: device.Label,
+			IssuedAt:    now,
+			ExpiresAt:   now.Add(edgeproto.GrantTTL),
+		})
+		if err != nil {
+			r.drop(c)
+		}
+	}
 	if err != nil {
 		c.cancel(err)
 		return nil, edgeproto.Open{}, err

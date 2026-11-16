@@ -244,3 +244,42 @@ func TestEnvExampleListsEveryVariable(t *testing.T) {
 		}
 	}
 }
+
+func TestOriginPairs(t *testing.T) {
+	dir := t.TempDir()
+	secret, blank := filepath.Join(dir, "github-client-secret-2"), filepath.Join(dir, "blank")
+	if err := os.WriteFile(secret, []byte("fake-secret-2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blank, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pair := "https://auth.example.net https://edge.example.net fake-id-2 " + secret
+	o, err := parseOptions(origins, envOf(map[string]string{"AETHER_EDGE_ORIGIN_PAIRS": pair + " , https://auth3.example.net https://edge3.example.net fake-id-3 " + secret}))
+	if err != nil || len(o.morePairs) != 2 || o.signinOrigin != "https://auth.example.test" || o.relayOrigin != "https://edge.example.test" {
+		t.Fatalf("two more pairs: %+v %v", o, err)
+	}
+	if p := o.morePairs[0]; p.SigninOrigin != "https://auth.example.net" || p.RelayOrigin != "https://edge.example.net" ||
+		p.GitHub.ClientID != "fake-id-2" || p.GitHub.ClientSecret != "fake-secret-2" {
+		t.Fatalf("first more pair: %+v %+v", p, p.GitHub)
+	}
+	if o, err = parseOptions(origins, envOf(nil)); err != nil || o.morePairs != nil {
+		t.Fatalf("no more pairs: %+v %v", o.morePairs, err)
+	}
+	for _, tt := range []struct{ pairs, want string }{
+		{"https://auth.example.net https://edge.example.net fake-id-2", "is not <signin origin> <relay origin> <GitHub client id> <client secret file>"},
+		{"https://auth.example.net https://edge.example.test fake-id-2 " + secret, "has the host name edge.example.test of --relay-origin"},
+		{"https://auth.example.net https://AUTH.example.net:8443 fake-id-2 " + secret, "has the host name auth.example.net of https://auth.example.net"},
+		{"http://auth.example.net https://edge.example.net fake-id-2 " + secret, "--origin-pairs must be https://host[:port]"},
+		{"https://auth.example.net https://edge.example.net fake-id-2 " + filepath.Join(dir, "missing"), "the client secret file of https://auth.example.net"},
+		{"https://auth.example.net https://edge.example.net fake-id-2 " + blank, "holds no secret"},
+	} {
+		if _, err := parseOptions(append(slices.Clone(origins), "--origin-pairs", tt.pairs), envOf(nil)); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("--origin-pairs %q: %v, want %q", tt.pairs, err, tt.want)
+		}
+	}
+	if _, err := parseOptions(append(slices.Clone(devOrigins), "--dev-listen", "127.0.0.1:8080", "--origin-pairs",
+		"http://127.0.0.2:8080 http://127.0.0.3:8080 fake-id-2 "+secret), envOf(nil)); err != nil {
+		t.Errorf("a second loopback pair in development mode: %v", err)
+	}
+}

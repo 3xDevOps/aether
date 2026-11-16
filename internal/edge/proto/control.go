@@ -71,12 +71,19 @@ func (h Hello) PublicKey() (ssh.PublicKey, error) {
 }
 
 // Ready (edge to server) confirms enrollment. EdgeKey is the key grants are
-// signed with; the server pins it.
+// signed with; the server pins it. RelayOrigins, sent only by an edge that
+// serves more than one relay origin, lists every one of them, the origin
+// the server enrolled at among them. A server that does not know the
+// member ignores it.
 type Ready struct {
-	ServerID string            `json:"server_id"`
-	State    string            `json:"state"`
-	EdgeKey  ed25519.PublicKey `json:"edge_key"`
+	ServerID     string            `json:"server_id"`
+	State        string            `json:"state"`
+	EdgeKey      ed25519.PublicKey `json:"edge_key"`
+	RelayOrigins []string          `json:"relay_origins,omitempty"`
 }
+
+// MaxRelayOrigins bounds Ready.RelayOrigins.
+const MaxRelayOrigins = 16
 
 // Open (edge to server) asks the server to attach a data socket for one
 // client connection, with Ticket as the bearer token of the data socket
@@ -236,6 +243,13 @@ func (m Ready) validate() error {
 		return fmt.Errorf("unknown server state %q", m.State)
 	case len(m.EdgeKey) != ed25519.PublicKeySize:
 		return fmt.Errorf("edge key is %d bytes, want %d", len(m.EdgeKey), ed25519.PublicKeySize)
+	case len(m.RelayOrigins) > MaxRelayOrigins:
+		return fmt.Errorf("%d relay origins, limit %d", len(m.RelayOrigins), MaxRelayOrigins)
+	}
+	for _, o := range m.RelayOrigins {
+		if c, err := Origin(o); err != nil || c != o {
+			return fmt.Errorf("relay origin %q is not a canonical edge origin", o)
+		}
 	}
 	return nil
 }

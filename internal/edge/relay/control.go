@@ -28,8 +28,10 @@ var (
 
 // registration is one authenticated control channel.
 type registration struct {
-	id     string
-	name   string
+	id   string
+	name string
+	// origin is the relay origin the server enrolled at.
+	origin string
 	policy edgeproto.AccessPolicy
 	addr   netip.Prefix
 	ws     *websocket.Conn
@@ -136,7 +138,7 @@ func (r *Relay) serveControl(w http.ResponseWriter, req *http.Request) {
 	}
 	defer func() { _ = ws.CloseNow() }()
 	ws.SetReadLimit(edgeproto.MaxControlMessageSize)
-	reg, err := r.enroll(ws, edgeproto.RateLimitKey(remote.Addr()))
+	reg, err := r.enroll(ws, edgeproto.RateLimitKey(remote.Addr()), r.originOf(req))
 	if err != nil {
 		r.countRefusal("enrollment refused")
 		slog.Info("relay: enrollment refused", "client", remote, "error", err)
@@ -146,8 +148,9 @@ func (r *Relay) serveControl(w http.ResponseWriter, req *http.Request) {
 	r.serveRegistration(reg)
 }
 
-// enroll runs the challenge and hello exchange and registers the server.
-func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, error) {
+// enroll runs the challenge and hello exchange and registers the server,
+// which dialed origin.
+func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix, origin string) (*registration, error) {
 	ctx, cancel := context.WithTimeoutCause(r.ctx, handshakeTimeout, errHandshakeTimeout)
 	defer cancel()
 	// The handshake's I/O is not bound to ctx, which would drop the socket
@@ -158,7 +161,7 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	defer stop()
 	nonce := make([]byte, edgeproto.NonceSize)
 	_, _ = rand.Read(nonce) // crypto/rand.Read never returns an error.
-	if err := writeControl(context.Background(), ws, edgeproto.Challenge{Version: edgeproto.Version, Nonce: nonce, Origin: r.origin}); err != nil {
+	if err := writeControl(context.Background(), ws, edgeproto.Challenge{Version: edgeproto.Version, Nonce: nonce, Origin: origin}); err != nil {
 		return nil, fmt.Errorf("relay: send challenge: %w", cmp.Or(context.Cause(ctx), err))
 	}
 	m, err := readControl(context.Background(), ws)
@@ -179,7 +182,7 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	if err != nil {
 		return nil, err
 	}
-	id, err := edgeproto.VerifyEnrollment(hostKey, r.origin, nonce, hello.Signature)
+	id, err := edgeproto.VerifyEnrollment(hostKey, origin, nonce, hello.Signature)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +199,7 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 		return nil, fmt.Errorf("relay: claim state of %s: %w", id, err)
 	}
 
-	reg := &registration{id: id, name: hello.Name, policy: policy, version: version, agentVersion: hello.AgentVersion, addr: addr, ws: ws,
+	reg := &registration{id: id, name: hello.Name, origin: origin, policy: policy, version: version, agentVersion: hello.AgentVersion, addr: addr, ws: ws,
 		claimed: claimed, turn: make(chan struct{}, 1), ready: make(chan struct{})}
 	reg.ctx, reg.cancel = context.WithCancelCause(r.ctx)
 	r.mu.Lock()
@@ -225,12 +228,12 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	if claimed {
 		state = edgeproto.StateClaimed
 	}
-	if err := reg.write(edgeproto.Ready{ServerID: id, State: state, EdgeKey: r.pub}); err != nil {
+	if err := reg.write(edgeproto.Ready{ServerID: id, State: state, EdgeKey: r.pub, RelayOrigins: r.announced}); err != nil {
 		r.unregister(reg, err)
 		return nil, err
 	}
 	close(reg.ready)
-	slog.Info("relay: server enrolled", "server", id, "state", state, "protocol", version, "agent_version", hello.AgentVersion)
+	slog.Info("relay: server enrolled", "server", id, "state", state, "protocol", version, "agent_version", hello.AgentVersion, "origin", origin)
 	return reg, nil
 }
 
