@@ -100,7 +100,7 @@ func memoryCommand(ctx context.Context, cfg Config, args []string) (int, error) 
 		case "add":
 			text, err = memoryAdd(ctx, cfg.Socket, args[1:])
 		case "search":
-			text, err = memorySearch(ctx, cfg.Socket, args[1:], cfg.CLI)
+			text, err = memorySearch(ctx, cfg.Socket, args[1:], cfg.cli)
 		case "show":
 			text, err = memoryShow(ctx, cfg.Socket, args[1:])
 		case "brief":

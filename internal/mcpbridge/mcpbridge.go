@@ -41,9 +41,6 @@ type Config struct {
 	// In and Out are the MCP stdio streams; nil means os.Stdin/os.Stdout.
 	In  io.ReadCloser
 	Out io.WriteCloser
-	// CLI is the name the text gives the in-container command; empty means
-	// the one this container has.
-	CLI string
 }
 
 // newCLIPath is where a container created since the command got its new
@@ -61,22 +58,19 @@ func Run(ctx context.Context, cfg Config) error {
 	if cfg.In == nil {
 		cfg.In = os.Stdin
 	}
-	if cfg.CLI == "" {
-		cfg.CLI = coordhooks.LocalCLI(newCLIPath)
-	}
 	if cfg.Out == nil {
 		cfg.Out = nopCloser{os.Stdout}
 	}
 
-	g := newGate()
+	g, cli := newGate(), coordhooks.LocalCLI(newCLIPath)
 	var opts *mcp.ServerOptions
 	if !cfg.Assistant {
-		opts = &mcp.ServerOptions{Instructions: instructions(ctx, cfg.Socket, cfg.CLI)}
+		opts = &mcp.ServerOptions{Instructions: instructions(ctx, cfg.Socket, cli)}
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: version.String()}, opts)
 	if cfg.Assistant {
 		registerAssistantTools(srv, cfg.Socket)
-	} else if err := registerTools(srv, cfg.Socket, g, cfg.CLI); err != nil {
+	} else if err := registerTools(srv, cfg.Socket, g, cli); err != nil {
 		return err
 	} else {
 		registerChildTools(ctx, srv, cfg.Socket)

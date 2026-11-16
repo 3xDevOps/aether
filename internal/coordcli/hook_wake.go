@@ -39,7 +39,7 @@ func hookWake(ctx context.Context, cfg Config) (int, error) {
 	}
 	result := hookWakeResult{WaitSupported: true, UnreadMessageIDs: ids, WakeAdmitted: status.WakeAdmitted}
 	if status.WakeAdmitted && len(ids) > 0 {
-		result.Context = coordhooks.Named(protocol.CoordInboxContext(len(ids))+protocol.CoordReportReminder, cfg.CLI)
+		result.Context = coordhooks.Named(protocol.CoordInboxContext(len(ids))+protocol.CoordReportReminder, cfg.cli)
 	}
 	if err := json.NewEncoder(cfg.Out).Encode(result); err != nil {
 		return ExitFailure, fmt.Errorf("hook wake: write response: %w", err)

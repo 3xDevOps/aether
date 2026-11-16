@@ -54,9 +54,9 @@ type Config struct {
 	// Name is the name the command was run by, which usage text shows;
 	// empty means coordhooks.OldCLI.
 	Name string
-	// CLI is the name guidance gives the command; empty means the one this
-	// container has.
-	CLI string
+	// cli is the name guidance gives the command: the one this container
+	// has.
+	cli string
 }
 
 // Envelope is the stable output wrapper for state commands. Skill and help
@@ -108,9 +108,7 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 	if cfg.Name == "" {
 		cfg.Name = coordhooks.OldCLI
 	}
-	if cfg.CLI == "" {
-		cfg.CLI = coordhooks.LocalCLI(newCLIPath)
-	}
+	cfg.cli = coordhooks.LocalCLI(newCLIPath)
 	if len(args) == 0 {
 		return fail(cfg.Out, protocol.CodeInvalidRequest, "a command is required; use --help for command usage")
 	}
@@ -330,7 +328,7 @@ func status(ctx context.Context, socket string, args []string) (protocol.CoordSt
 }
 
 func skill(ctx context.Context, cfg Config, args []string) (int, error) {
-	socket, out, named := cfg.Socket, cfg.Out, namedWriter{cfg.Out, cfg.CLI}
+	socket, out, named := cfg.Socket, cfg.Out, namedWriter{cfg.Out, cfg.cli}
 	fs := newFlags("skill")
 	hooks := fs.Bool("hooks", false, "print hook installation checks and steps for every harness")
 	if err := parseFlags(fs, args); err != nil {
@@ -340,7 +338,7 @@ func skill(ctx context.Context, cfg Config, args []string) (int, error) {
 		if fs.NArg() != 0 {
 			return fail(out, protocol.CodeInvalidParams, "skill --hooks takes no topic")
 		}
-		if err := writeHookInstallation(out, cfg.CLI); err != nil {
+		if err := writeHookInstallation(out, cfg.cli); err != nil {
 			return ExitFailure, fmt.Errorf("write hook installation guidance: %w", err)
 		}
 		return ExitOK, nil
@@ -362,7 +360,7 @@ func skill(ctx context.Context, cfg Config, args []string) (int, error) {
 		if topic != "" {
 			return writeDevelopmentSkill(named, status, topic)
 		}
-		return writeSkill(out, status, cfg.CLI)
+		return writeSkill(out, status, cfg.cli)
 	}
 	if socket == "" {
 		return write(nil)

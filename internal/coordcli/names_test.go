@@ -88,16 +88,17 @@ func TestUsageShowsTheNameItWasRunBy(t *testing.T) {
 // under the old path from its file either way.
 func TestHookContextNamesTheContainersCommand(t *testing.T) {
 	_, _, socket, _ := hookRun(t, []string{"shared.go"}, true)
-	hook := func(cli, event, input string) string {
+	hook := func(event, input string) string {
 		t.Helper()
 		var out bytes.Buffer
-		code, err := Run(t.Context(), []string{"hook", "claude", event}, Config{Socket: socket, In: strings.NewReader(input), Out: &out, CLI: cli})
+		code, err := Run(t.Context(), []string{"hook", "claude", event}, Config{Socket: socket, In: strings.NewReader(input), Out: &out})
 		if err != nil || code != ExitOK {
 			t.Fatalf("hook %s = %d, %v", event, code, err)
 		}
 		return out.String()
 	}
-	start := hook(coordhooks.NewCLI, "SessionStart", `{"hook_event_name":"SessionStart","source":"startup"}`)
+	newNameContainer(t)
+	start := hook("SessionStart", `{"hook_event_name":"SessionStart","source":"startup"}`)
 	for _, want := range []string{"`cloudfield-internal skill`", "/usr/local/bin/cloudfield-internal inbox", "/usr/local/bin/cloudfield-internal status"} {
 		if !strings.Contains(start, want) {
 			t.Fatalf("SessionStart lacks %q: %s", want, start)
@@ -106,11 +107,12 @@ func TestHookContextNamesTheContainersCommand(t *testing.T) {
 	if strings.Contains(start, coordhooks.OldCLI) {
 		t.Fatalf("SessionStart names the old command: %s", start)
 	}
-	subagent := hook(coordhooks.NewCLI, "SubagentStart", `{"hook_event_name":"SubagentStart","agent_id":"a1"}`)
+	subagent := hook("SubagentStart", `{"hook_event_name":"SubagentStart","agent_id":"a1"}`)
 	if !strings.Contains(subagent, "`cloudfield-internal status`") || strings.Contains(subagent, coordhooks.OldCLI) {
 		t.Fatalf("SubagentStart: %s", subagent)
 	}
-	if old := hook(coordhooks.OldCLI, "SessionStart", `{"hook_event_name":"SessionStart","source":"clear"}`); strings.Contains(old, coordhooks.NewCLI) || !strings.Contains(old, "`aether-internal skill`") {
+	newCLIPath = ""
+	if old := hook("SessionStart", `{"hook_event_name":"SessionStart","source":"clear"}`); strings.Contains(old, coordhooks.NewCLI) || !strings.Contains(old, "`aether-internal skill`") {
 		t.Fatalf("SessionStart in a container without the new path: %s", old)
 	}
 }

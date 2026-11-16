@@ -88,7 +88,7 @@ func writeHookInstallation(out io.Writer, cli string) error {
 	home, homeErr := os.UserHomeDir()
 	cwd, cwdErr := os.Getwd()
 	if homeErr != nil || cwdErr != nil {
-		_, err := fmt.Fprintf(out, "\nHook installation: unverified: %v. Run %s hook file to list copyable assets.\n", errors.Join(homeErr, cwdErr), coordhooks.Named(coordhooks.OldCLI, cli))
+		_, err := fmt.Fprintf(out, "\nHook installation: unverified: %v. Run %s hook file to list copyable assets.\n", errors.Join(homeErr, cwdErr), cli)
 		return err
 	}
 	return writeHookInstallationWithInputs(out, hookInstallInputs{home: home, cwd: cwd, env: os.Getenv, lookupEnv: os.LookupEnv, cli: cli})
@@ -141,7 +141,7 @@ func writeHookSummaryWithInputs(out io.Writer, harness string, in hookInstallInp
 		text.WriteString(".\n")
 	}
 	if text.Len() == 0 {
-		fmt.Fprintf(&text, "Inbox hooks: no packaged integration for harness %s; see %s skill --hooks.\n", shellquote.Quote(harness), coordhooks.Named(coordhooks.OldCLI, in.cli))
+		fmt.Fprintf(&text, "Inbox hooks: no packaged integration for harness %s; see %s skill --hooks.\n", shellquote.Quote(harness), in.cli)
 	} else {
 		text.WriteString(coordhooks.Named("Install or inspect: aether-internal skill --hooks\n", in.cli))
 	}
@@ -230,7 +230,7 @@ func writeHookInstallationWithInputs(out io.Writer, in hookInstallInputs) error 
 		fmt.Fprintf(&text, ". %s\n", plan.note)
 		fmt.Fprintf(&text, "  Inspect/install destination: %s; project alternative: %s\n", shellquote.Quote(plan.paths[0]), shellquote.Quote(plan.paths[1]))
 		for _, asset := range plan.assets {
-			fmt.Fprintf(&text, "  %s hook file %s\n", coordhooks.Named(coordhooks.OldCLI, in.cli), asset)
+			fmt.Fprintf(&text, "  %s hook file %s\n", in.cli, asset)
 		}
 		fmt.Fprintf(&text, "  %s\n", plan.activate)
 	}
