@@ -14,7 +14,10 @@ export const metadata: Metadata = {
   title: 'Cloudfield',
   description: 'Cloudfield developer workbench',
   applicationName: 'Cloudfield',
-  icons: { apple: '/icons/apple-touch-icon.png' },
+  icons: {
+    icon: [16, 32, 48].map((size) => ({ url: `/icons/favicon-${size}.png`, sizes: `${size}x${size}`, type: 'image/png' })),
+    apple: '/icons/apple-touch-icon.png',
+  },
   appleWebApp: { capable: true, title: 'Cloudfield', statusBarStyle: 'black-translucent' },
   other: { 'apple-mobile-web-app-capable': 'yes' },
 }

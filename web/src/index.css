@@ -438,13 +438,6 @@
   font-weight: 600;
 }
 
-@utility text-wordmark {
-  font-family: var(--font-pixel);
-  font-size: 24px;
-  line-height: 1;
-  font-weight: 400;
-}
-
 :root {
   --title-size: 16px;
 }

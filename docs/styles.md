@@ -31,7 +31,7 @@ Fonts ship in the bundle; nothing is fetched from Google.
 | --- | --- | --- |
 | DM Sans (variable, Latin subset) | All UI text | `@fontsource-variable/dm-sans`, one WOFF2 |
 | Saira (variable, Latin subset) | `text-title` only | `web/public/fonts/saira-latin.woff2` |
-| VT323 (Latin subset, 400) | Header and launch-splash wordmarks | `web/public/fonts/vt323-latin.woff2` |
+| VT323 (Latin subset, 400) | Launch-splash wordmark | `web/public/fonts/vt323-latin.woff2` |
 | JetBrainsMono NFM | xterm primary font; UI private-use symbols through `Aether Nerd Symbols` | `web/public/fonts/jetbrains-mono-nfm-*.woff2` |
 | Noto Sans Symbols 2 | Braille and geometric symbols through `Aether Symbols` | `web/public/fonts/noto-sans-symbols-2-spinners.woff2` |
 | `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-code`), after symbol fallbacks | system |
@@ -47,11 +47,13 @@ Other scripts and symbols outside those ranges still use platform fallbacks.
 The aliases use `font-display: swap` and load only when a matching character
 appears; xterm keeps its own full-font family and cell metrics.
 
-The header wordmark is lowercase `aether` and uses `text-wordmark`: VT323 at
-24px, 400 weight and line height 1. The header logo and wordmark sit 1px above
-the row's center to align visually with navigation buttons. The splash keeps
-its original `clamp(32px, 4vw, 48px)` size and `0.12em` letter spacing. Both use
-`--font-pixel`; other headings stay Saira.
+The header shows the Cloudfield logo at 32px tall:
+`web/public/cloudfield-logo-small.svg`, the c and single-line letters, in the
+dark theme, and `cloudfield-logo-for-light-backgrounds.svg`, the c and
+three-line letters, in the light one, the only light-surface logo file. The splash
+wordmark is lowercase `cloudfield` in `--font-pixel` at its original
+`clamp(32px, 4vw, 48px)` size and `0.12em` letter spacing; other headings stay
+Saira.
 
 The type scale, in `web/src/index.css`:
 
@@ -534,7 +536,7 @@ control** or **Release** ([terminal.md](terminal.md)). A session shell adds
 ## Shell, palette and focus
 
 The shell has a branded navigation header above one sidebar and the content
-view, with no icon rail or status bar. The Aether mark and title sit at its
+view, with no icon rail or status bar. The Cloudfield logo sits at its
 left; Board through Templates follow as horizontal `ListRow`s. Measure
 available width rather than assuming every label fits a breakpoint, and
 keep Board outside the overflow menu. The header and sidebar use
@@ -617,7 +619,7 @@ starts after the step rail's 24px gutter, where state dots and step marks
 sit. Turns are 24px apart and a turn's header and answer 12px. Its composer
 fills the available pane with balanced 16px side gutters, including when
 Details is open. An empty ACP
-conversation shows a subdued Aether mark above the centered session title and
+conversation shows a subdued Cloudfield mark above the centered session title and
 metadata rows: workspace, agent, branch, owner and creation time. Symmetric
 scrollbar gutters keep the overview centered when its content needs scrolling.
 

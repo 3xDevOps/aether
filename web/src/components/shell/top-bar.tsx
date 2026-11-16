@@ -55,9 +55,9 @@ export function TopBar({ navigation = true }: { navigation?: boolean }) {
             desktop?.platform === 'darwin' && 'pl-20',
           )}
         >
-          <div className="flex shrink-0 -translate-y-px items-center gap-1.5">
-            <img src="/aether-mark.png" alt="" width={24} height={24} />
-            <span className="text-wordmark">aether</span>
+          <div className="flex shrink-0 items-center">
+            <img src="/cloudfield-logo-small.svg" alt="Cloudfield" width={162} height={32} className="hidden dark:block" />
+            <img src="/cloudfield-logo-for-light-backgrounds.svg" alt="Cloudfield" width={162} height={32} className="dark:hidden" />
           </div>
           {navigation && <HeaderNavigation />}
           {navigation && collapsed && <AssistantButton />}

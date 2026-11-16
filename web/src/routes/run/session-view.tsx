@@ -192,7 +192,7 @@ function SessionWelcome({ run, agentName }: { run: RunRecord; agentName: string 
         <div
           aria-hidden="true"
           className="h-36 max-h-[24vh] w-52 shrink-0 bg-icon-faint/15"
-          style={{ mask: 'url(/aether-mark.png) center / contain no-repeat' }}
+          style={{ mask: 'url(/cloudfield-mark.svg) center / contain no-repeat' }}
         />
         <h2 className="line-clamp-3 max-w-full text-center text-title break-words text-muted">{runLabel(run)}</h2>
         <dl className="flex w-full min-w-0 flex-col gap-2 text-center text-ui-sm text-muted">
