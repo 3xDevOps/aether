@@ -2,13 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main, 'release/*']
+    branches: [main, 'release/[0-9]*.[0-9]*']
   # A pull request runs changes, audit, lint, build-and-test and dashboard
   # only. The merge queue and the nightly run on main run every job, except
   # that the merge queue boots VMs only for a change that can affect them. A
   # push to main runs only changes and CI gate when its commit passed the
   # merge queue and changed nothing a cache key hashes. A push to a
-  # release/X.Y hotfix branch runs every job: release.yml reads its verdict.
+  # release/X.Y hotfix branch runs every job and boots the VMs:
+  # release.yml reads its verdict.
   pull_request:
   merge_group:
   # Refreshes the per-commit caches, which only a run on main can write, and
@@ -113,7 +114,8 @@ jobs:
             # group also carries to main, so a queue run compares with main.
             case $GITHUB_EVENT_NAME in
             merge_group) range="${QUEUE_BASE#refs/heads/}...$GITHUB_SHA" ;;
-            push) range="$BEFORE...$GITHUB_SHA" ;;
+            # A push to a release/X.Y hotfix branch always boots the VMs.
+            push) range=; if [ "$GITHUB_REF" = refs/heads/main ]; then range="$BEFORE...$GITHUB_SHA"; fi ;;
             *) range= ;;
             esac
             # A failed or truncated file list, or a failed classifier, runs
