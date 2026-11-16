@@ -114,8 +114,8 @@ test('an agent starts a child run that its owner sees, follows and stops', async
   expect((await runStatus(alice, second.run_id)).reason).toContain(`stopped by parent session ${parent.id}`)
 })
 
-test('the sidebar folds a parent session’s subsessions', async ({ page, aether }) => {
-  test.setTimeout(launchTimeout + 60_000)
+test('the sidebar folds a parent session’s subsessions and leaves out the finished ones', async ({ page, aether }) => {
+  test.setTimeout(8 * 60 * 1000)
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('sidebar-subsessions-project')
   await seedWorkspace(alice, aether.server.addr, repo, 'sidebar-subsessions-project')
@@ -150,6 +150,39 @@ test('the sidebar folds a parent session’s subsessions', async ({ page, aether
   if (shots) await page.screenshot({ path: `${shots}/sidebar-subsessions-folded.png` })
   await fold().click()
   await expect(childRow).toBeVisible()
+
+  const start = (purpose: string, key: string) => runCoordCLI<{ run_id: string }>(parent.id, [
+    'subsession', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', purpose,
+    '--task', 'Wait for the parent to stop this check.', '--idempotency-key', key,
+  ])
+  const failing = start('Sidebar failing check', 'sidebar-failing-check')
+  const asking = start('Sidebar asking check', 'sidebar-asking-check')
+  for (const started of [failing, asking]) {
+    await expect.poll(async () => (await runStatus(alice, started.run_id)).status, { timeout: launchTimeout }).toBe('running')
+    await waitForCoordCLI(started.run_id, aether.server.dataDir)
+  }
+  await waitForCoordCLI(child.run_id, aether.server.dataDir)
+  runCoordCLI(child.run_id, ['report', '--outcome', 'success', '--summary', 'The fold works.', '--idempotency-key', 'fold-verdict'])
+  runCoordCLI(failing.run_id, ['report', '--outcome', 'failure', '--summary', 'The check could not run.', '--idempotency-key', 'failing-verdict'])
+  runCoordCLI(asking.run_id, ['report', '--outcome', 'needs-input', '--summary', 'Which width next?', '--idempotency-key', 'asking-question'])
+
+  // A finished subsession leaves the list; one that failed or asks stays, and the parent still lists all three.
+  const finished = sidebar.getByRole('button', { name: '1 finished', exact: true })
+  await expect(finished).toBeVisible({ timeout: 60_000 })
+  await expect(childRow).toBeHidden()
+  await expect(sidebar.getByRole('button', { name: /Sidebar failing check/ })).toBeVisible()
+  await expect(sidebar.getByRole('button', { name: /Sidebar asking check/ })).toBeVisible()
+  const section = page.getByRole('region', { name: 'Subsessions' })
+  for (const purpose of ['Sidebar fold check', 'Sidebar failing check', 'Sidebar asking check']) {
+    await expect(section.getByText(purpose)).toBeVisible({ timeout: 60_000 })
+  }
+  await expect(section.getByText('The fold works.')).toBeVisible()
+  if (shots) await page.screenshot({ path: `${shots}/sidebar-subsessions-finished.png` })
+  await finished.click()
+  await expect(childRow).toBeVisible()
+  await sidebar.getByRole('button', { name: 'Hide finished', exact: true }).click()
+  await expect(childRow).toBeHidden()
+
   await page.setViewportSize({ width: 768, height: 900 })
   if (shots) await page.screenshot({ path: `${shots}/sidebar-subsessions-narrow.png` })
   await alice.api.rpc('run.kill', { run_id: parent.id })

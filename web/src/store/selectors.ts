@@ -58,6 +58,8 @@ export function childRunsText({ members }: TreeSummary): string {
 /** `children` are the members that need the viewer, which a folded tree still shows. */
 export interface RunTree extends RunRow {
   children: RunRow[]
+  /** The sidebar's finished subsessions, which it lists only on request. */
+  settled?: RunRow[]
   /** Child runs of a run. */
   childRuns?: TreeSummary
 }
@@ -152,6 +154,15 @@ export function runTrees(rows: RunRow[]): RunTree[] {
   return trees
 }
 
+/** A subsession that finished with nothing left for a person: its result went to its parent, which still lists it. */
+const settled = (row: RunRow) => row.group === 'finished' && !endedBadly(row.state)
+
+/** `rows` without the settled subsessions whose parent is among them. */
+export function withoutSettled<T extends RunRow>(rows: T[]): T[] {
+  const parents = runParents(rows)
+  return rows.filter((row) => !(parents.has(runKey(row)) && settled(row)))
+}
+
 /** Every child run below `rootIDs`, nearest first. */
 export function descendantRuns(runs: Record<string, RunRecord>, rootIDs: string[]): RunRecord[] {
   const below = new Map<string, RunRecord[]>()
@@ -225,13 +236,14 @@ export function sidebarGroups(s: RunsInput, devices = 0): SidebarGroup[] {
     .map((key) => ({
       key,
       label: groupLabel[key],
-      runs: groups[key].map((tree) => tree.childRuns ? {
-        ...tree,
-        children: tree.childRuns.members
+      runs: groups[key].map((tree) => {
+        if (!tree.childRuns) return tree
+        const members = tree.childRuns.members
           .filter((row) => key === 'needs-you' || !s.mineOnly || row.run.member_id === s.ctx.viewerID)
           .sort((a, b) => a.run.created_at.localeCompare(b.run.created_at) || a.run.id.localeCompare(b.run.id))
-          .map((row) => located(row, s)),
-      } : tree),
+          .map((row) => located(row, s))
+        return { ...tree, children: members.filter((row) => !settled(row)), settled: members.filter(settled) }
+      }),
       count:
         key === 'needs-you'
           ? groups[key].reduce(

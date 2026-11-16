@@ -224,26 +224,28 @@ function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; ex
 }
 
 function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) {
-  const canFold = group === 'needs-you'
-    ? tree.children.some((child) => !child.needsYou)
-    : tree.children.length > 0
-  const [expanded, setExpanded] = useState(tree.children.length > 0)
+  const settled = tree.settled ?? []
+  const below = tree.children.length + settled.length
+  const foldable = tree.children.filter((child) => group !== 'needs-you' || !child.needsYou).length + settled.length
+  const [expanded, setExpanded] = useState(below > 0)
+  const [settledShown, setSettledShown] = useState(false)
   const touched = useRef(false)
-  const hadChildren = useRef(tree.children.length > 0)
+  const hadChildren = useRef(below > 0)
 
   useEffect(() => {
-    const hasChildren = tree.children.length > 0
+    const hasChildren = below > 0
     if (!hadChildren.current && hasChildren && !touched.current) setExpanded(true)
     hadChildren.current = hasChildren
-  }, [tree.children.length])
+  }, [below])
 
   const shown = expanded ? tree.children : tree.children.filter((child) => child.needsYou)
+  const finished = expanded ? settled : []
   return (
     <>
       <RunRowItem
         tree={tree}
-        subsessions={canFold ? {
-          count: tree.children.filter((child) => group !== 'needs-you' || !child.needsYou).length,
+        subsessions={foldable > 0 ? {
+          count: foldable,
           expanded,
           onToggle: () => {
             touched.current = true
@@ -251,9 +253,21 @@ function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) 
           },
         } : undefined}
       />
-      {shown.length > 0 && (
+      {shown.length + finished.length > 0 && (
         <ul aria-label={`Sessions in ${runLabel(tree.run)}`}>
           {shown.map((child) => (
+            <li key={child.run.id} className={connectors}>
+              <RunRowItem tree={{ ...child, children: [] }} />
+            </li>
+          ))}
+          {finished.length > 0 && (
+            <li className={cn(connectors, 'flex h-7 items-center coarse:h-11')}>
+              <Button variant="quiet" size="sm" className="ml-2 text-ui-sm" aria-expanded={settledShown} onClick={() => setSettledShown(!settledShown)}>
+                {settledShown ? 'Hide finished' : `${finished.length} finished`}
+              </Button>
+            </li>
+          )}
+          {settledShown && finished.map((child) => (
             <li key={child.run.id} className={connectors}>
               <RunRowItem tree={{ ...child, children: [] }} />
             </li>

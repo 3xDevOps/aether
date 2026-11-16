@@ -415,7 +415,7 @@ attached to it, the viewer included: the `watching` lists of
 right edge and the age and the glyph move left to make
 room; a session nobody is on reserves none. A root with subsessions shows a
 `Network` glyph and their count before the agent glyph, and its name adds
-"2 subsessions · 1 working"; every subsession lists under it. Its chevron
+"2 subsessions · 1 working"; its subsessions list under it. Its chevron
 folds the subsessions for this browser session only; they start open, and the
 first child to arrive opens with the chevron's turn animation. Folding keeps
 subsessions that need you visible. The first avatar sits whole at the edge and
@@ -470,7 +470,15 @@ any member opens the session, the row recedes in every member's dashboard.
 Every unarchived subsession is indented beneath its parent and joined to it
 by tree connectors: a vertical trunk under the parent's status dot and a
 horizontal wire into each subsession row
-([Styles](styles.md#shell-palette-and-focus)). **Mine** also filters
+([Styles](styles.md#shell-palette-and-focus)). A subsession that finished
+with nothing left for a person leaves the list: one that reported success
+(**Finished: reported to its parent**) or ended `completed`, `merged` or
+`abandoned`, such as one its parent stopped. Its parent's last nested line
+counts them (**3 finished**) and lists them in place until **Hide finished**,
+for this browser session only; the parent's count and its Details
+(**Subsessions**) still include them. One that failed, was interrupted or
+needs you stays listed, and a finished one returns while it works again. The
+session stays open either way (`settled` in `src/store/selectors.ts`). **Mine** also filters
 these subsessions under Working and Finished; Needs you keeps the whole tree
 visible. Selecting a session row opens that session, from anywhere on the row
 outside its buttons. The whole tree sits in
@@ -1628,7 +1636,8 @@ shows (`card-list.tsx`, virtua).
 In a flat session list (`run-list.tsx`) a root lists its subsessions
 under it with a toggle naming the count (**Show 2 subsessions
 **). Subsessions start shown, and a folded one that needs you still shows. Nested rows add the model to the
-agent.
+agent. **All workspaces** leaves out the finished subsessions the sidebar
+does (`withoutSettled`), from its rows and its count.
 
 A card (`run-card.tsx`, on the `Card` primitive) has three parts:
 
@@ -1781,7 +1790,8 @@ Needs you count changes.
 
 ### Map
 
-**Map** exposes every individual session, subsessions included. `mapRuns()` reads
+**Map** exposes every individual session, subsessions included, finished ones
+too. `mapRuns()` reads
 the unaggregated `runRows()` presentation rather than Board's folded cards, and `useMapRuns` reuses unchanged card objects
 (`dequal`), so a `run.agent` event re-renders one card. A map card opens that
 individual session; its primary action still targets the condition that needs
