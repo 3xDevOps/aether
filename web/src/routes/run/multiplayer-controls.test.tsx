@@ -122,8 +122,7 @@ it('moves the red takeover hold copy with the other dots', async () => {
   expect(positions(group.querySelector('[data-takeover-hold] .control-matrix-grid'))).toEqual(positions(neutral))
 })
 
-it('supports touch drag, cancellation, and keyboard points', async () => {
-  const user = userEvent.setup()
+it('supports touch drag and cancellation', () => {
   useStore.setState({
     roomStatus: {
       [run.id]: { workspace_id: run.workspace_id, run_id: run.id, protected: false, watchers: ['mem_2'], queued_steers: 0 },
@@ -131,19 +130,7 @@ it('supports touch drag, cancellation, and keyboard points', async () => {
   })
   const view = render(<MultiplayerControls run={run} agent={agent(vi.fn())} onPeople={vi.fn()} />)
   const group = strip()
-  group.focus()
-  fireEvent.keyDown(group, { key: 'ArrowRight' })
-  tick()
-  expect(Number(group.querySelector('.control-matrix-ring')!.getAttribute('opacity'))).toBeGreaterThan(0)
-
-  const watchers = screen.getByRole('group', { name: 'Session watchers' })
-  const keydowns: KeyboardEvent[] = []
-  watchers.addEventListener('keydown', (event) => keydowns.push(event))
-  watchers.focus()
-  await user.keyboard('{ArrowRight}')
-  expect(keydowns).toHaveLength(1)
-  expect(keydowns[0]?.defaultPrevented).toBe(false)
-
+  expect(group.hasAttribute('tabindex')).toBe(false)
   fireEvent.pointerDown(group, { pointerType: 'touch', pointerId: 7, clientX: 20, clientY: 12 })
   fireEvent.pointerMove(group, { pointerType: 'touch', pointerId: 7, clientX: 70, clientY: 12 })
   expect(frames.size).toBeGreaterThan(0)
@@ -153,12 +140,11 @@ it('supports touch drag, cancellation, and keyboard points', async () => {
   view.unmount()
 })
 
-it('keeps the static dots and no keyboard stop with reduced motion', () => {
+it('keeps the static dots with reduced motion', () => {
   const matchMedia = window.matchMedia
   vi.stubGlobal('matchMedia', (query: string) => ({ ...matchMedia(query), matches: query.includes('prefers-reduced-motion') }))
   render(<MultiplayerControls run={run} agent={agent(vi.fn())} onPeople={vi.fn()} />)
   const group = strip()
-  expect(group.hasAttribute('tabindex')).toBe(false)
   fireEvent.pointerDown(group, { pointerType: 'touch', pointerId: 1, clientX: 30, clientY: 12 })
   expect(frames.size).toBe(0)
   expect(group.querySelector('.control-matrix-grid')).toBeNull()

@@ -3140,16 +3140,14 @@ With a mouse or touch pointer on the multiplayer strip, `useDotFade`
 (`routes/run/dot-fade.ts`) swaps the strip's dot texture for SVG copies of
 it and springs each dot away from the pointer. Pointer speed adds a
 two-branch V wake, and a click or tap swells the nearby dots under a spreading
-ring. The clear bars behind text damp motion to 25%. A focused strip accepts
-Enter or Space for a ring and arrow keys to move the point; its accessible
-instructions describe these keys. The hook listens on the strip alone:
-`ControlButton`'s pointer capture and a touch's implicit capture keep a drag's
+ring. The clear bars behind text damp motion to 25%. The effect is decoration,
+so the strip is not a tab stop and takes no keys. The hook listens on the strip
+alone: `ControlButton`'s pointer capture and a touch's implicit capture keep a drag's
 moves there, and `touch-pan-y` keeps a horizontal touch drag from turning into
 a pan. Events only record the pointer; each animation frame measures the strip
 and its clear bars once, moves the dots, and rewrites only those not at rest.
 When every dot is back at rest the SVG is removed and the static texture
-returns. With reduced motion the strip keeps the static texture and is not a
-tab stop.
+returns. With reduced motion the strip keeps the static texture.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
 cancellation and server acknowledgement as Standard sessions. Streaming updates

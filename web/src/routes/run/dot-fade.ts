@@ -13,9 +13,6 @@ const RING_RADIUS = 46
 const CALM_FEATHER = 12
 const SPRING = 0.065
 const DAMPING = 0.86
-const KEY_STEPS: Partial<Record<string, [number, number]>> = {
-  ArrowLeft: [-12, 0], ArrowRight: [12, 0], ArrowUp: [0, -12], ArrowDown: [0, 12], Enter: [0, 0], ' ': [0, 0],
-}
 
 type Point = { x: number; y: number }
 type Layers = [SVGSVGElement, SVGSVGElement, SVGSVGElement]
@@ -35,9 +32,9 @@ function clamp(value: number, low: number, high: number): number {
 
 /**
  * Springs SVG copies of the strip's `.control-matrix` dots away from the pointer; the static
- * CSS texture is the rest state. Returns whether the strip responds, which reduced motion turns off.
+ * CSS texture is the rest state. Reduced motion leaves the texture still.
  */
-export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
+export function useDotFade(ref: RefObject<HTMLElement | null>) {
   const reducedMotion = useReducedMotion()
 
   useEffect(() => {
@@ -234,24 +231,6 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
       pointer = undefined
       schedule()
     }
-    const key = (event: KeyboardEvent) => {
-      const step = KEY_STEPS[event.key]
-      if (event.target !== strip || !step) return
-      event.preventDefault()
-      const rect = matrix.getBoundingClientRect()
-      const from = pointer ?? { x: rect.width / 2, y: rect.height / 2 }
-      tap = {
-        x: rect.left + clamp(from.x + step[0], 0, rect.width),
-        y: rect.top + clamp(from.y + step[1], 0, rect.height),
-      }
-      if (step[0] || step[1]) client = tap
-      schedule()
-    }
-    const blur = () => {
-      client = undefined
-      pointer = undefined
-      schedule()
-    }
 
     // Moves are read on the strip itself: ControlButton captures the pointer during a hold, and a
     // touch is captured by the element it started on, so a drag's moves still arrive here.
@@ -262,8 +241,6 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
     strip.addEventListener('pointerup', end, { signal })
     strip.addEventListener('pointercancel', end, { signal })
     strip.addEventListener('pointerleave', leave, { signal })
-    strip.addEventListener('keydown', key, { signal })
-    strip.addEventListener('blur', blur, { signal })
     const holdObserver = new MutationObserver(attachHold)
     holdObserver.observe(light, { childList: true })
     const resize = new ResizeObserver(() => {
@@ -279,6 +256,4 @@ export function useDotFade(ref: RefObject<HTMLElement | null>): boolean {
       destroy()
     }
   }, [reducedMotion, ref])
-
-  return !reducedMotion
 }
