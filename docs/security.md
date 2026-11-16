@@ -1092,11 +1092,13 @@ signature over it. `aether update`, the dashboard's **Update now** and
 require the manifest's version to match the tag, and check every download
 against it. [install.md](install.md#verified-releases) shows the check by hand.
 
-Nightly releases publish unattended, so a separate list of nightly keys
-verifies only a manifest whose signed `channel` is `nightly`; a leaked
-nightly key cannot produce a beta or stable release. That list is empty
-until the first nightly key ships. A manifest's `channel` must also match its
-tag's form, so a nightly cannot be relabelled beta.
+The key is an ed25519 key pair generated offline. The base64 of its 32-byte
+seed is the secret `AETHER_RELEASE_SIGNING_KEY`, set in the `release`
+environment and nowhere in the repository; the base64 of its 32-byte public
+key is an entry of `releaseKeys` in `internal/selfupdate/keys.go`. The
+nightly key is the same kind of pair: the secret `AETHER_NIGHTLY_SIGNING_KEY`
+in the `nightly` environment, and `nightlyKeys` in the same file. Keep a
+seed out of logs, shells that record history and agent sessions.
 
 `aether gui build` on Windows checks the desktop app zip the same way, but
 `aether gui build --zip <path>` checks only a local zip's layout: compare it
@@ -1107,6 +1109,125 @@ older than the bridge rejects every later release: install the bridge first
 with `aether update --version <bridge-tag>` (or `aether server update
 --version <bridge-tag>`), or reinstall with the install script. A client that
 has not installed a release past a leaked key still trusts that key.
+
+### Release channels
+
+A server and its clients follow a [release channel](install.md#release-channel)
+(`nightly`, `beta` or `stable`). Which release is newest on a channel comes
+from three signed documents, none from GitHub's own ordering or labels:
+
+- **The manifest** (above) signs the release's `channel`, which must match its
+  tag's form (`-nightly.N`, `-beta.N`, none), so a nightly cannot be
+  relabelled beta, and a `build` number and `hotfix` count. Releases order by
+  `(build, hotfix)`, never by the tag: version strings sort `beta` below
+  `nightly`, and a tag is only a label. A release from before channels has no
+  build and counts as 0; among those, the version decides.
+- **A pointer per channel**, `nightly.json`, `beta.json` and `stable.json`
+  with a `.sig`, are assets of the `channels` prerelease. Each names the
+  channel's newest release (its tag, commit, build, hotfix and store schema)
+  and when it was published. A client verifies the pointer, fetches the
+  manifest of the tag it names, and refuses the release unless the manifest
+  agrees with the pointer on version, commit, build, hotfix and store schema.
+- **Both sign their channel.** A client refuses a pointer for another channel
+  (`channel pointer beta.json is signed for channel "stable"; do not follow
+  it`) and a manifest its channel does not take (`v0.9.0-nightly.13 is a
+  nightly release, which an install on beta does not take`). A channel takes
+  its own releases and those above it: `stable` takes stable, `beta` beta and
+  stable, `nightly` all.
+
+**The high-water mark.** Every install keeps the highest `(build, hotfix)` it
+has accepted from each channel's pointer: on a server in
+`server-update/check.json` in its data directory, on a client in `update.json`
+beside `config.json`. A pointer below the mark is refused, and the check
+counts as failed:
+
+```
+channel pointer beta.json names build 380, below build 412 seen before
+```
+
+So replaying an old pointer, or serving one from a stale mirror, can fail
+checks but cannot move an install back. A manifest below the running build is
+refused the same way, because an install refuses a lower build whatever the
+pointer says. Only a named release installs one: `aether server update
+--version <tag> --allow-downgrade`, which never crosses the database's
+schema, or `aether update --version <tag>`. A state file that exists but
+cannot be read fails the check and is never overwritten, because starting
+again would forget the marks.
+
+What the mark cannot do:
+
+- **Withheld updates.** Serving an old pointer forever, or a 404, stalls
+  updates without moving anything backward. Aether cannot tell a stalled
+  channel from a quiet one except by the signed `published_at`, which the
+  dashboard's Release channel section shows as the pointer's age. A frozen
+  channel stalls security fixes too. Until an install has verified a pointer
+  once, a missing pointer falls back to GitHub's Latest, which only releases
+  the channel takes can satisfy; after that a missing pointer is a failed
+  check, never a fall back.
+- **A bad pointer that is validly signed.** The mark moves only on a pointer
+  whose signature, manifest and fields all verify. A validly signed pointer
+  with a very high build raises every install's mark for good: no later
+  pointer with a lower build is accepted, and only a release with a higher
+  build recovers. The pointer writer refuses to sign a lower build for that
+  reason, so withdrawing a bad release means shipping a higher build, not
+  moving the pointer back.
+
+**Two kinds of key.** Release keys sign any manifest and pointer. Nightly keys,
+a separate list in the binary, verify only a document whose signed `channel` is
+`nightly`; a nightly-signed pointer must also name a nightly release. The nightly
+list is empty until the first nightly key ships in a release, so no
+nightly verifies yet, and a client older than that release cannot verify any.
+Nightlies publish unattended, so their key lives in the `nightly` environment,
+limited to `main`, and never signs a beta or stable. Whoever holds a leaked
+nightly key and can put files in the repository's releases can:
+
+- publish a nightly release and move `nightly.json` to it, which every server
+  and client on `nightly` then installs, with code that runs as root on a
+  server; and set a very high nightly build, so that nightly installs refuse
+  any real nightly below it.
+
+It cannot move `beta.json` or `stable.json`, publish a beta or stable release,
+or relabel a nightly: those fail verification (`channel pointer nightly.json is
+signed by a nightly key but names <tag>, a beta release; do not install it`).
+Servers and clients on `beta` or `stable` are not reached. Rotate a nightly key
+as the release key is rotated ([above](#release-signing)): ship the next public
+key in a release before anything is signed with it.
+
+**The trusted signer.** Releases are built in one job and signed in another.
+The jobs that build run the released commit's code and hold no signing key. The
+job that signs checks out `main`, takes only the built artifacts and values,
+and runs `main`'s `release-manifest`, `publish-release.sh` and pointer writer
+with the key. Code from the commit being released, including a commit that
+Promote rebuilds under a new tag, therefore never runs next to the key, and a
+promoted old commit is signed in today's manifest format. Which key a run can
+reach is decided by its GitHub environment: `release` for beta and stable,
+`nightly` for nightlies. A run for one refuses a document of the other's kind
+before it signs.
+
+Limits of that arrangement:
+
+- GitHub environments limit which refs a workflow may use a secret from, but
+  not which workflow file. A tag runs the tagged commit's own workflow files,
+  so a hotfix tag on a `release/X.Y` branch runs that branch's copies with the
+  release key. The guards are the branch's ruleset (reviewed pull requests,
+  admin-only creation), a tag ruleset that only admins and GitHub Actions can
+  create `v*` tags under, required reviewers on the `release` environment, and
+  an admin's own reading of the branch before tagging
+  ([CONTRIBUTING.md](../CONTRIBUTING.md#hotfixes)).
+- The workflow files on `main` reach the key like any code on `main`, and pass
+  the same merge gate.
+- A release tag, a hotfix and a Promote run check that the pusher or dispatcher
+  is a repository admin. A workflow file that skips that check is not stopped
+  by it; a scheduled nightly has no admin behind it, and builds only a `main`
+  commit whose CI is green.
+
+**What an admin can do by hand.** On the server host, `sudo aether-server update
+--version <tag>` and `aether update --version <tag>` install a release you name,
+signature checked, whatever the pointer says. Removing `server-update/check.json`
+(or a client's `update.json`) forgets the marks; the error for an unreadable
+state file names this. `sudo aether-server update --channel
+<channel> --yes` moves a server to another channel. Restoring a pointer is a
+maintainer step ([CONTRIBUTING.md](../CONTRIBUTING.md#releases)).
 
 ### Server and client updates
 
