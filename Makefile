@@ -267,6 +267,8 @@ test-scripts:
 	sh scripts/publish-release-test.sh
 	sh scripts/publish-pointer-test.sh
 	sh scripts/promote-plan-test.sh
+	sh scripts/nightly-plan-test.sh
+	sh scripts/nightly-prune-test.sh
 	sh scripts/create-release-tag-test.sh
 	sh scripts/edge-attestation-test.sh
 	sh scripts/require-admin-test.sh

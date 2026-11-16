@@ -528,6 +528,30 @@ the current nightly base. A failed run is re-run with `gh run rerun
 <session-id> --failed`; a new dispatch of the same commit reuses a tag it
 left without a release.
 
+`.github/workflows/nightly.yml` builds nightlies, and does nothing until
+an admin sets the repository variable `NIGHTLY_ENABLED` to `true`. Every 30
+minutes it takes the newest `main` commit with green push CI, waits until 4
+hours after the last nightly unless an admin ran
+`gh workflow run nightly.yml`, and has `release-build.yml` tag it
+`vX.Y.Z-nightly.N` with the next build number, sign it with
+`AETHER_NIGHTLY_SIGNING_KEY` in the `nightly` environment, and move
+`nightly.json`; `promote-edge.yml` then moves `aether-edge:nightly`. A run
+that finds a nightly tag its failed predecessor left without a release
+builds that tag again. With `NIGHTLY_PRUNE_ENABLED` also `true`, it deletes
+once a day the release and images, never the git tag, of each nightly older
+than 14 days, except the newest and every nightly above `stable.json`'s
+build. This lists what it would delete, and deletes nothing (`gh` needs
+the `read:packages` scope):
+
+```sh
+go build -o /tmp/nightly-plan ./scripts/nightly-plan
+GITHUB_REPOSITORY=3xDevOps/aether NIGHTLY_PLAN=/tmp/nightly-plan sh scripts/nightly-prune.sh --dry-run
+```
+
+Before `NIGHTLY_ENABLED` is set, a release must carry the nightly public key in
+`nightlyKeys` (`internal/selfupdate/keys.go`), and the `nightly` environment
+must exist, limited to `main`, holding the private key.
+
 A workflow that moves a channel pointer (`<channel>.json` on the
 `channels` prerelease) keeps the pair it signed as the `pointer-<channel>`
 artifact for 90 days. If an upload leaves half a pair, restore that
@@ -638,7 +662,7 @@ against them by their signed build, and nightlies are pruned.
 
 A release that becomes Latest moves `ghcr.io/3xdevops/aether-edge:latest`.
 Promote moves `:beta` whenever it moves `beta.json`, on a stable
-promotion too. Production edges follow
+promotion too, and `nightly.yml` moves `:nightly`. Production edges follow
 `:stable`, which only `promote-edge.yml` moves, run by an admin at least 24
 hours after the release
 (`-f soak_override_reason='<why>'` promotes sooner):
