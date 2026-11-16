@@ -37,7 +37,8 @@ type vmWatch struct {
 	finished chan struct{}
 	// lastChange is the server's time of the VM's last file change report.
 	lastChange atomic.Int64
-	// flushing lifts the rate limit for the last snapshot stop asks for.
+	// flushing lifts the rate limit for the last snapshot stop asks for, and
+	// holds the loop's retry delay at vmWatchRetryMin.
 	flushing atomic.Bool
 	// wake ends the loop's retry backoff, as the VM's flush waits for this
 	// watch to deliver the last snapshot.
@@ -155,7 +156,7 @@ func (w *vmWatch) loop() {
 		if w.ctx.Err() != nil {
 			return
 		}
-		if heard {
+		if heard || w.flushing.Load() {
 			delay = vmWatchRetryMin
 		}
 		if now := time.Now(); now.Sub(w.lastWarn) >= diffWarnInterval {
