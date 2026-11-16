@@ -2,12 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/*']
   # A pull request runs changes, audit, lint, build-and-test and dashboard
   # only. The merge queue and the nightly run on main run every job, except
   # that the merge queue boots VMs only for a change that can affect them. A
   # push to main runs only changes and CI gate when its commit passed the
-  # merge queue and changed nothing a cache key hashes.
+  # merge queue and changed nothing a cache key hashes. A push to a
+  # release/X.Y hotfix branch runs every job: release.yml reads its verdict.
   pull_request:
   merge_group:
   # Refreshes the per-commit caches, which only a run on main can write, and
@@ -98,7 +99,7 @@ jobs:
           BEFORE: ${{ github.event.before }}
           QUEUE_BASE: ${{ github.event.merge_group.base_ref }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
             verdict=$(sh scripts/ci-queue-verdict.sh "$GITHUB_REPOSITORY" "$BEFORE" "$GITHUB_SHA") || verdict=
             if [ -n "$verdict" ]; then
               echo "The merge queue passed this commit in $verdict; this push runs no other job." >> "$GITHUB_STEP_SUMMARY"

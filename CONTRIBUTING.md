@@ -461,11 +461,13 @@ never put live credentials in a report.
 
 ## Releases
 
-Maintainers release by pushing a tag: `vMAJOR.MINOR.PATCH` with an optional
-`-alpha.N`, `-beta.N` or `-rc.N`. The tag's exact commit needs a successful
-`CI` run from a push to `main`; a pull request run, a merge queue run or
-another commit's session does not count on its own. That push session runs
-the full suite, except that it may run only `changes` and `CI gate`, linking
+Maintainers release by pushing a tag: `vMAJOR.MINOR.0`, or a version with
+`-alpha.N`, `-beta.N` or `-rc.N`, on a `main` commit, or a hotfix
+`vMAJOR.MINOR.PATCH` (patch 1 or more) on a `release/MAJOR.MINOR` commit
+([Hotfixes](#hotfixes)). A `-nightly.N` tag is refused. A `main` tag's
+exact commit needs a successful `CI` run from a push to `main`; a pull
+request run, a merge queue run or another commit's session does not count on
+its own. That push session runs the full suite, except that it may run only `changes` and `CI gate`, linking
 the queue session, when the newest merge queue session of the same commit
 succeeded ([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)).
 If you re-run that queue session after the push, re-run the whole push
@@ -534,6 +536,46 @@ artifact with the `gh run download ... && gh release upload channels
 what is left of the pointer and re-sign it with `first-pointer` for the
 release it named or one above it, never below: installs refuse a pointer
 lower than one they have seen.
+
+### Hotfixes
+
+A hotfix fixes one line of stable releases without the rest of `main`.
+The line's base is its stable release with hotfix 0, usually `vX.Y.0`; for
+0.8 it is `v0.8.7`, the first stable with a build. Merge the fix to `main`
+first. Cut `release/X.Y` from the base commit if it does not exist
+(`git push origin 'v0.9.0^{commit}:refs/heads/release/0.9'`), and
+cherry-pick the fix into it in a pull request. Each push to `release/X.Y`
+runs the full `CI` suite. When it is green, tag the branch head `vX.Y.Z`,
+one above the line's newest release, and check it from a `main` checkout
+before pushing:
+
+```sh
+git tag -a v0.9.1 -m v0.9.1 origin/release/0.9
+sh scripts/release-ci-check.sh --branch release/0.9 3xDevOps/aether "$(git rev-parse 'v0.9.1^{commit}')" &&
+git push origin v0.9.1
+```
+
+`release.yml` then runs `scripts/release-hotfix.sh` from `main`. It reads
+the signed manifest of the published `vX.Y.(Z-1)`, which must be a stable
+release with a build; its hotfix count leads back to the base, whose
+manifest must be stable on the same build with hotfix 0. It refuses the tag
+unless its commit is on `release/X.Y`, contains `vX.Y.(Z-1)` and differs
+from it, and the branch's only merge base with `main` is the base commit,
+so the branch carries nothing newer from `main`. The release is stable,
+with the base's build and the next hotfix count. A line whose base is from
+before channels has no build and cannot take a hotfix. The hotfix moves
+`stable.json`, and `beta.json` when it is above it, unless `stable.json`
+already names a newer line: then it moves no pointer, and only installs
+that ask for that tag get it. Once a nightly carries the fix, promote it to
+beta too, because beta can sit at a build above the hotfix that lacks the
+fix.
+
+A push to the branch runs the branch's `ci.yml`, and the tag runs its
+`release.yml` and `release-build.yml`. A line whose base commit predates
+hotfix support needs those workflow files from `main` cherry-picked onto
+its branch first. Review the branch against the base
+(`git log -p v0.9.0..origin/release/0.9`) before tagging: the tag runs the
+branch's workflow files with the signing key.
 
 <details>
 <summary>Edge releases and the signing key</summary>
