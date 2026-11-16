@@ -82,9 +82,12 @@ if [ -n "$resume" ]; then
 	commit=$(value resume-commit)
 	green "$commit" || fail "$resume was tagged without a published release, but its commit $commit is not a main commit with green push CI: $(cat "$tmp/ci-err" 2>/dev/null)"
 	# A failure after tagging that persists is retried every 4 hours, not
-	# every 30 minutes; build now retries at once.
-	tagged=$(git for-each-ref --format='%(taggerdate:iso-strict)' "refs/tags/$resume")
-	waited "$tagged" || skip "$resume was tagged at $tagged by a run that failed; a scheduled run retries it 4 hours after that"
+	# every 30 minutes, counted from the tag or the newest failed run,
+	# whichever is later; build now retries at once.
+	tried=$(git for-each-ref --format='%(taggerdate:iso-strict)' "refs/tags/$resume")
+	failed=$(gh api "repos/$repo/actions/workflows/nightly.yml/runs?status=failure&per_page=1" --jq '.workflow_runs[0].created_at // empty')
+	if [ -n "$failed" ] && [ -n "$tried" ] && [ "$(date -d "$failed" +%s)" -gt "$(date -d "$tried" +%s)" ]; then tried=$failed; fi
+	waited "$tried" || skip "$resume was last tried at $tried by a run that failed; a scheduled run retries it 4 hours after that"
 	echo "run=true"
 	echo "reason=resuming $resume, which a failed run tagged without publishing"
 	echo "tag=$resume"

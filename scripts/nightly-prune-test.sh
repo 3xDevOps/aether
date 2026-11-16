@@ -54,12 +54,13 @@ reset() {
 	echo "v0.9.0-nightly.1 $c1" >"$STATE/prune"
 	# The gh --jq output: id and comma-joined tags.
 	cat >"$STATE/versions" <<EOF
-10 v0.9.0-nightly.1,$c1,sha-1111111
+10 v0.9.0-nightly.1,$c1,sha-11111111
 11 v0.9.0-nightly.1-amd64
 12 v0.9.0-nightly.1-arm64,v0.9.0-beta.1-arm64
 13
 14 v0.9.0-nightly.2
 15 $c1
+16 v0.9.0-nightly.1-amd64,sha-1111112
 EOF
 }
 
@@ -90,7 +91,7 @@ for package in aether-browser aether-edge aether-standard; do
 	for id in 10 11; do
 		grep -qx "gh api -X DELETE orgs/3xDevOps/packages/container/$package/versions/$id" "$STATE/log" || fail "$package version $id was not deleted"
 	done
-	for id in 12 13 14 15; do
+	for id in 12 13 14 15 16; do
 		if grep -q "container/$package/versions/$id\$" "$STATE/log"; then fail "$package version $id was deleted"; fi
 	done
 done

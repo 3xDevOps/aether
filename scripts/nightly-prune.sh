@@ -10,7 +10,7 @@
 #
 # An image version is deleted only when every tag it carries is one of the
 # nightly's own: <tag>, <tag>-amd64, <tag>-arm64, its commit and
-# sha-<short>. A version that also carries another tag, such as a beta
+# sha-<abbreviated commit>. A version that also carries another tag, such as a beta
 # rebuilt to the same digest or a channel tag, is kept.
 set -eu
 
@@ -67,7 +67,6 @@ for package in $packages; do
 done
 
 while read -r tag commit; do
-	short=$(printf '%s' "$commit" | cut -c1-7)
 	for package in $packages; do
 		while read -r id tags; do
 			[ -n "$tags" ] || continue
@@ -76,7 +75,9 @@ while read -r tag commit; do
 			for t in $(printf '%s' "$tags" | tr ',' ' '); do
 				case $t in
 				"$tag" | "$tag-amd64" | "$tag-arm64") ours=true ;;
-				"$commit" | "sha-$short") ;;
+				"$commit") ;;
+				# git rev-parse --short: 7 characters or more.
+				sha-???????*) [ "${commit#"${t#sha-}"}" != "$commit" ] || theirs="$theirs $t" ;;
 				*) theirs="$theirs $t" ;;
 				esac
 			done

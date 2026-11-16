@@ -34,6 +34,9 @@ case "$*" in
 "api --paginate repos/3xDevOps/Aether/actions/workflows/nightly.yml/runs?"*)
 	for actor in $(cat "$STATE/dispatchers"); do echo "$actor"; done
 	;;
+"api repos/3xDevOps/Aether/actions/workflows/nightly.yml/runs?status=failure&per_page=1 "*)
+	cat "$STATE/failed" 2>/dev/null || true
+	;;
 "api repos/3xDevOps/Aether/collaborators/"*)
 	user=${2#repos/3xDevOps/Aether/collaborators/}
 	user=${user%/permission}
@@ -194,6 +197,12 @@ git -C "$repo" tag -d v0.9.0-nightly.2 >/dev/null
 GIT_COMMITTER_DATE=$old git -C "$repo" -c user.name=t -c user.email=t@example.com tag -a v0.9.0-nightly.2 -m "$(printf 'v0.9.0-nightly.2\n\nbuild: 3')" "$(c 2)"
 plan schedule || fail "old resume: $(cat "$tmp/err")"
 want tag=v0.9.0-nightly.2 "old resume"
+# An old tag whose last run failed recently still waits 4 hours from that run.
+date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ >"$STATE/failed"
+plan schedule || fail "recently failed resume: $(cat "$tmp/err")"
+want run=false "recently failed resume"
+grep -q 'was last tried at' "$tmp/out" || fail "recently failed reason: $(cat "$tmp/out")"
+rm "$STATE/failed"
 git -C "$repo" tag -d v0.9.0-nightly.2 >/dev/null
 
 # No green commit in the walk.
