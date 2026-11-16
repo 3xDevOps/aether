@@ -45,6 +45,9 @@ type session struct {
 	c        *websocket.Conn
 	edgeKey  ed25519.PublicKey
 	protocol int
+	// origins are the relay origins requests relayed on the session may
+	// come in on: the one the server dialed, then those Ready announced.
+	origins []string
 	// since is when the session enrolled.
 	since time.Time
 	// beats holds the latest answered ping recordBeats has not written.
@@ -214,7 +217,13 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	defer cancel()
 	defer c.CloseNow() //nolint:errcheck // the close error of a dead session is not actionable
 	start := time.Now()
-	s := &session{c: c, edgeKey: ready.EdgeKey, protocol: protocol, since: start, beats: make(chan time.Time, 1),
+	origins := []string{a.origin}
+	for _, o := range ready.RelayOrigins {
+		if !slices.Contains(origins, o) {
+			origins = append(origins, o)
+		}
+	}
+	s := &session{c: c, edgeKey: ready.EdgeKey, protocol: protocol, origins: origins, since: start, beats: make(chan time.Time, 1),
 		transfers: map[string]chan edgeproto.OwnerTransferResult{}}
 	if err = a.setEdgeState(ready.State); err != nil {
 		return time.Since(start), err
@@ -355,6 +364,18 @@ func (a *Agent) EdgeVersion() int {
 		return 0
 	}
 	return a.live.protocol
+}
+
+// RelayOrigins are the relay origins connector requests may come in on:
+// those the enrolled control connection announced, from
+// edgeproto.VersionRelayOrigin, else only the one the server dialed.
+func (a *Agent) RelayOrigins() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.live == nil || a.live.protocol < edgeproto.VersionRelayOrigin {
+		return []string{a.origin}
+	}
+	return slices.Clone(a.live.origins)
 }
 
 // EdgeKey is the key of the edge the control connection is enrolled

@@ -259,7 +259,7 @@ export function EdgeSignIn({
             </>
           ) : (
             <>
-              This computer and the server both connect out to Aether&apos;s relay, the edge, so neither needs an open
+              This computer and the server both connect out to Cloudfield&apos;s relay, the edge, so neither needs an open
               port. Sign in with GitHub to see the servers your account reaches.
             </>
           )}
@@ -312,7 +312,7 @@ export function JoinLink({
 export function LinkByCommand({ link, command }: { link: string; command: string }) {
   return (
     <section aria-label="Link from a terminal" className="flex min-w-0 flex-col gap-2 text-ui">
-      <p>This dashboard cannot link a server itself. Open this link in the Aether desktop app:</p>
+      <p>This dashboard cannot link a server itself. Open this link in the Cloudfield desktop app:</p>
       <p className="break-all font-code select-all">{link}</p>
       <p>or run on the computer to link:</p>
       <CopyableCommand command={command} />

@@ -15,9 +15,9 @@ export const dynamic = 'force-static'
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Aether',
-    short_name: 'Aether',
-    description: 'Aether developer workbench',
+    name: 'Cloudfield',
+    short_name: 'Cloudfield',
+    description: 'Cloudfield developer workbench',
     start_url: '/',
     scope: '/',
     display: 'standalone',

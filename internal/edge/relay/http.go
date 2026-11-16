@@ -32,12 +32,13 @@ var responseHeaders = map[string]bool{
 }
 
 // forwardHeaders trims h, the request headers ReverseProxy passes on: it
-// drops Cookie, any X-Forwarded-* the client sent, HeaderBrowser, and
-// HeaderClientAddr, which it sets to addr. ReverseProxy drops hop-by-hop headers but puts
+// drops Cookie, any X-Forwarded-* the client sent, HeaderBrowser,
+// HeaderClientAddr, which it sets to addr, and HeaderRelayOrigin, which it
+// sets to origin. ReverseProxy drops hop-by-hop headers but puts
 // back Connection, Upgrade and Te; those go too, so no upgrade tunnels
 // past responseFilter. Accept-Encoding goes because Content-Encoding does
 // not come back.
-func forwardHeaders(h http.Header, addr netip.AddrPort) {
+func forwardHeaders(h http.Header, addr netip.AddrPort, origin string) {
 	for k := range h {
 		if strings.HasPrefix(k, "X-Forwarded-") {
 			delete(h, k)
@@ -49,6 +50,7 @@ func forwardHeaders(h http.Header, addr netip.AddrPort) {
 	if addr.IsValid() {
 		h.Set(edgeproto.HeaderClientAddr, addr.String())
 	}
+	h.Set(edgeproto.HeaderRelayOrigin, origin)
 }
 
 // errHTTPLimit refuses an http connection past MaxHTTPConnsPerServer.
@@ -129,7 +131,7 @@ func (r *Relay) ForwardUniversal(w http.ResponseWriter, req *http.Request, serve
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		if reg := r.servers[serverID]; reg != nil && reg.version < edgeproto.VersionUniversalMCP {
-			return noUniversalEndpoint{name: reg.name, id: reg.id, agentVersion: reg.agentVersion, origin: r.origin}
+			return noUniversalEndpoint{name: reg.name, id: reg.id, agentVersion: reg.agentVersion, origin: reg.origin}
 		}
 		return nil
 	})
@@ -162,6 +164,7 @@ func (r *Relay) Version(serverID string) int {
 // was written to the server. A request written to a server is never sent
 // again.
 func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID string, body []byte, browser string, check func() error) {
+	r.countConnector(req, serverID)
 	var until time.Time
 	if _, err := r.awaitReturn(req.Context(), serverID, &until); err != nil {
 		r.refuseHTTP(w, req, serverID, err)
@@ -186,6 +189,20 @@ func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID strin
 	}
 }
 
+// countConnector counts a connector request to serverID by the relay
+// origin it came in on and the server's protocol version.
+func (r *Relay) countConnector(req *http.Request, serverID string) {
+	k := ConnectorKey{Origin: r.originOf(req)}
+	r.mu.Lock()
+	if reg := r.servers[serverID]; reg != nil {
+		k.Protocol = reg.version
+	}
+	r.mu.Unlock()
+	r.refusalsMu.Lock()
+	r.connectorMap[k]++
+	r.refusalsMu.Unlock()
+}
+
 // forwardOnce sends req to serverID and writes the answer, or the
 // refusal, to w. It writes nothing and returns the refusal when the edge
 // refused the request as not connected before it was written to the
@@ -204,7 +221,7 @@ func (r *Relay) forwardOnce(w http.ResponseWriter, req *http.Request, serverID s
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
-	addr := clientAddr(req.RemoteAddr)
+	addr, origin := clientAddr(req.RemoteAddr), r.originOf(client)
 	var unsent error
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -213,7 +230,7 @@ func (r *Relay) forwardOnce(w http.ResponseWriter, req *http.Request, serverID s
 			// Sent with its length, the body carries none of the client's
 			// trailers: net/http writes them only on a chunked body.
 			pr.Out.TransferEncoding = nil
-			forwardHeaders(pr.Out.Header, addr)
+			forwardHeaders(pr.Out.Header, addr, origin)
 			if browser != "" {
 				pr.Out.Header.Set(edgeproto.HeaderBrowser, browser)
 			}

@@ -63,7 +63,7 @@ func newCheckoutHost(t *testing.T) *checkoutHost {
 		CheckoutDisks: func(ctx context.Context, path, target string, uid, gid int) (string, guest.Checkout, bool, error) {
 			return h.git.VMCheckoutDisk(ctx, path, target, uid, gid)
 		},
-	}, systemdUnits{}, dialHelper)
+	}, SystemdUnits{}, dialHelper)
 	vms := &Runtime{vms: h.e}
 	h.git, err = gitengine.New(gitengine.Config{
 		ReposDir: h.repos, CheckoutsDir: filepath.Join(dir, "checkouts"), Bus: bus,

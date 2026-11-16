@@ -250,7 +250,7 @@ func (s *Scheduler) wake(ctx context.Context, entry *supervised) error {
 // noteWake tells the session's terminal and conversation how it woke.
 func (s *Scheduler) noteWake(ctx context.Context, run domain.RunID, how woke) {
 	text := how.notice()
-	if err := s.cfg.PTY.Annotate(context.WithoutCancel(ctx), ptyhost.RunSession(run), "Aether", "", text); err != nil {
+	if err := s.cfg.PTY.Annotate(context.WithoutCancel(ctx), ptyhost.RunSession(run), "Cloudfield", "", text); err != nil {
 		slog.Warn("scheduler: note the wake in the terminal", "run", run, "error", err)
 	}
 	if sess := s.acp.session(run); sess != nil {

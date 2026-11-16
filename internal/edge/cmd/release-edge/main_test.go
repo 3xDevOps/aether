@@ -39,7 +39,10 @@ func TestUpgradeRecordMatchesTheCode(t *testing.T) {
 	}
 }
 
-func TestReadUpgradeNamesWhatIsStale(t *testing.T) {
+// copyRecord copies the upgrade record and the files it records into a
+// new root.
+func copyRecord(t *testing.T) string {
+	t.Helper()
 	root := t.TempDir()
 	for _, name := range append([]string{upgradePath}, recordedFiles...) {
 		data, err := os.ReadFile(filepath.Join(repoRoot, name))
@@ -53,6 +56,11 @@ func TestReadUpgradeNamesWhatIsStale(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	return root
+}
+
+func TestReadUpgradeNamesWhatIsStale(t *testing.T) {
+	root := copyRecord(t)
 	unit := filepath.Join(root, "packaging/systemd/aether-edge.service")
 	if err := os.WriteFile(unit, []byte("[Service]\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -84,5 +92,37 @@ func TestRunWritesWhatReleaseManifestSigns(t *testing.T) {
 	err = run([]string{"-tag", "v99.0.0", "-image", "aether-edge=" + digest("e")}, &out)
 	if err == nil || !strings.Contains(err.Error(), "want exactly") {
 		t.Fatalf("err = %v, want the missing images refused", err)
+	}
+}
+
+// An edge orders itself against min_upgrade_from and each step's since by
+// their signed builds, which a pruned nightly no longer has.
+func TestReadUpgradeRefusesANightlyBoundary(t *testing.T) {
+	for _, edit := range []func(map[string]any){
+		func(u map[string]any) { u["min_upgrade_from"] = "v0.9.0-nightly.4" },
+		func(u map[string]any) {
+			u["manual_steps"] = []any{map[string]any{"id": "s", "since": "v0.9.0-nightly.4", "summary": "s", "doc_url": "https://example.com/s", "blocking": true}}
+		},
+	} {
+		root := copyRecord(t)
+		path := filepath.Join(root, upgradePath)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u := map[string]any{}
+		if err = json.Unmarshal(data, &u); err != nil {
+			t.Fatal(err)
+		}
+		edit(u)
+		if data, err = json.Marshal(u); err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = readUpgrade(root); err == nil || !strings.Contains(err.Error(), "names the nightly v0.9.0-nightly.4") {
+			t.Errorf("err = %v, want the nightly refused", err)
+		}
 	}
 }

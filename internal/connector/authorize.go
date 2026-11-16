@@ -139,7 +139,7 @@ type wrongCodes struct {
 // the client. On the universal URL the edge posts the request with its
 // assertion; anything else arrives as a GET.
 func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res resource, q url.Values) {
-	if res == h.universal && q.Get(edgeproto.ParamServer) != h.serverID {
+	if res.universal() && q.Get(edgeproto.ParamServer) != h.serverID {
 		h.renderError(w, fmt.Sprintf("This request names server %q, not this server, %s. Start the connection again from ChatGPT or Claude.",
 			q.Get(edgeproto.ParamServer), h.serverID))
 		return
@@ -151,7 +151,7 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res reso
 		if err == nil && u.Host != "" {
 			host = u.Host
 		}
-		h.renderError(w, fmt.Sprintf("Aether connectors work with ChatGPT and Claude; %s is not one of them.", host))
+		h.renderError(w, fmt.Sprintf("Cloudfield connectors work with ChatGPT and Claude; %s is not one of them.", host))
 		return
 	}
 	doc, err := h.fetchClient(r.Context(), clientID)
@@ -187,14 +187,14 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res reso
 		h.redirectError(w, r, req, "invalid_target", "resource must be "+res.base)
 		return
 	}
-	page := consentPage{Client: clientLabel(req), Write: true, Universal: res == h.universal}
+	page := consentPage{Client: clientLabel(req), Write: true, Universal: res.universal()}
 	bound := h.ssh.EdgeBindsSignIn()
 	if bound && r.Method == http.MethodGet && q.Has(edgeproto.ParamAssertion) {
 		h.renderError(w, "The edge put its sign-in in the URL, where logs and browser history keep it, so it is refused. "+
 			"The edge's operator updates it; until then, connect with a code from aether mcp.")
 		return
 	}
-	if signed := q.Get(edgeproto.ParamAssertion); signed != "" && res == h.universal && h.ssh.EdgeAccess() == edgeproto.PolicyAccount {
+	if signed := q.Get(edgeproto.ParamAssertion); signed != "" && res.universal() && h.ssh.EdgeAccess() == edgeproto.PolicyAccount {
 		a, name, aerr := h.assertion(r.Context(), signed, req, h.edgeBrowser(r), bound)
 		if aerr != nil {
 			h.renderError(w, "Cannot connect with your edge sign-in: "+aerr.Error()+". Start the connection again from ChatGPT or Claude.")
@@ -324,7 +324,7 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 		return
 	}
 	scopes := grantedScopes(r.PostForm["scope"])
-	page := consentPage{Request: signed, Client: clientLabel(req), Universal: res == h.universal,
+	page := consentPage{Request: signed, Client: clientLabel(req), Universal: res.universal(),
 		Write: slices.Contains(scopes, string(ops.ScopeWrite)), Control: slices.Contains(scopes, string(ops.ScopeControl))}
 	now := h.now()
 	if req.Asserted != nil {
@@ -333,7 +333,7 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 			h.renderError(w, "Cannot connect with your edge sign-in: "+err.Error()+". Start the connection again from ChatGPT or Claude.")
 			return
 		}
-		h.issueCode(w, r, req, grant, scopes, now)
+		h.issueCode(w, r, res, req, grant, scopes, now)
 		return
 	}
 	from := clientPrefix(r)
@@ -345,7 +345,7 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 	grant, err := h.ssh.RedeemConnectorCode(r.PostFormValue("code"), now)
 	if errors.Is(err, sshd.ErrConnectorCode) {
 		h.recordWrong(from, now)
-		page.Error = "That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Aether app, or aether mcp, and paste it here."
+		page.Error = "That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Cloudfield app, or aether mcp, and paste it here."
 		h.renderConsent(w, http.StatusForbidden, page)
 		return
 	}
@@ -353,7 +353,7 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.issueCode(w, r, req, grant, scopes, now)
+	h.issueCode(w, r, res, req, grant, scopes, now)
 }
 
 // assertedGrant spends the assertion a consent form carries, posted from
@@ -373,10 +373,10 @@ func (h *handler) assertedGrant(ctx context.Context, a *asserted, browser string
 	return grant, err
 }
 
-// issueCode sends the client an authorization code for req, bound to
-// grant and scopes.
-func (h *handler) issueCode(w http.ResponseWriter, r *http.Request, req authRequest, grant sshd.ConnectorGrant, scopes []string, now time.Time) {
-	code, hash, err := newToken(h.prefixOf(req.Resource))
+// issueCode sends the client an authorization code for req, a request
+// for res, bound to grant and scopes.
+func (h *handler) issueCode(w http.ResponseWriter, r *http.Request, res resource, req authRequest, grant sshd.ConnectorGrant, scopes []string, now time.Time) {
+	code, hash, err := newToken(res.prefix)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -576,10 +576,10 @@ input[type=checkbox]{width:1.25rem;height:1.25rem;font-size:inherit;vertical-ali
 <p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Stop and approve</strong>: decide approvals and permission requests, stop and close runs. Text an agent wrote that the assistant reads could then talk it into approving or ending work without asking you.</label></p>
 </fieldset>
 <p>To change these later, revoke the connector and connect again.</p>
-<p>Allow only if you started connecting {{.Client}} to Aether yourself just now.</p>
+<p>Allow only if you started connecting {{.Client}} to Cloudfield yourself just now.</p>
 {{if .Member}}<p>You signed in at the edge as {{.Account}}, which this server admits as {{.Member}}.</p>
 <p><button type="submit" autofocus><strong>Allow</strong></button></p>
-{{else}}<p><label for="code">Paste the code from Settings → ChatGPT and Claude in the Aether app, or <code>aether mcp</code>:</label></p>
+{{else}}<p><label for="code">Paste the code from Settings → ChatGPT and Claude in the Cloudfield app, or <code>aether mcp</code>:</label></p>
 <p class="row"><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit"><strong>Allow</strong></button></p>{{end}}
 </form>
 {{end}}
@@ -599,14 +599,6 @@ func (h *handler) renderConsent(w http.ResponseWriter, status int, page consentP
 
 func (h *handler) renderError(w http.ResponseWriter, message string) {
 	h.renderConsent(w, http.StatusBadRequest, consentPage{Failed: true, Error: message})
-}
-
-// prefixOf is the prefix of codes minted for the connector URL base.
-func (h *handler) prefixOf(base string) string {
-	if base == h.universal.base {
-		return h.universal.prefix
-	}
-	return ""
 }
 
 // sameResource reports whether resource names base, ignoring a trailing

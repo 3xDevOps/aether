@@ -97,7 +97,7 @@ func TestHTTPHeaders(t *testing.T) {
 		req.Header = passed.Clone()
 		for k, v := range map[string]string{"Cookie": "edge=1", "X-Forwarded-For": "198.51.100.1", "X-Forwarded-Port": "443",
 			"Forwarded": "for=198.51.100.1", "Accept-Encoding": "gzip", "Te": "trailers", "Connection": "Upgrade", "Upgrade": "websocket",
-			edgeproto.HeaderClientAddr: "203.0.113.9:1", edgeproto.HeaderBrowser: "forged"} {
+			edgeproto.HeaderClientAddr: "203.0.113.9:1", edgeproto.HeaderBrowser: "forged", edgeproto.HeaderRelayOrigin: "https://forged.example"} {
 			req.Header.Set(k, v)
 		}
 		req.Trailer = http.Header{"X-Client-Trailer": {"1"}}
@@ -138,7 +138,7 @@ func TestHTTPHeaders(t *testing.T) {
 			t.Errorf("server got %s on %s, want %s on %s", sreq.RequestURI, sreq.Host, path, a.id)
 		}
 		for k, v := range sreq.Header {
-			if _, ok := passed[k]; !ok && k != edgeproto.HeaderClientAddr && k != "Content-Length" {
+			if _, ok := passed[k]; !ok && k != edgeproto.HeaderClientAddr && k != edgeproto.HeaderRelayOrigin && k != "Content-Length" {
 				t.Errorf("request header %s = %q reached the server", k, v)
 			}
 		}
@@ -149,6 +149,9 @@ func TestHTTPHeaders(t *testing.T) {
 		}
 		if ap, err := netip.ParseAddrPort(sreq.Header.Get(edgeproto.HeaderClientAddr)); err != nil || !ap.Addr().IsLoopback() {
 			t.Errorf("%s = %q, want the client's address", edgeproto.HeaderClientAddr, sreq.Header.Get(edgeproto.HeaderClientAddr))
+		}
+		if got := sreq.Header.Values(edgeproto.HeaderRelayOrigin); len(got) != 1 || got[0] != e.r.origin {
+			t.Errorf("%s = %q, want the edge's relay origin %s", edgeproto.HeaderRelayOrigin, got, e.r.origin)
 		}
 		sent, _ := io.ReadAll(sreq.Body)
 		if string(sent) != body || sreq.ContentLength != int64(len(body)) || len(sreq.TransferEncoding) != 0 || len(sreq.Trailer) != 0 {

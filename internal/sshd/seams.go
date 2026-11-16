@@ -185,6 +185,9 @@ type RunController interface {
 	// WithStoppedTerminal excludes terminal recreation through afterStop.
 	// The callback may lock member caches but must not reenter terminal lifecycle.
 	WithStoppedTerminal(ctx context.Context, member domain.MemberID, afterStop func() error) error
+	// ForgetOMPAccount stops the omp auth broker of a member who was removed
+	// or merged into another.
+	ForgetOMPAccount(ctx context.Context, member domain.MemberID)
 	TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error)
 	ExecTerminal(ctx context.Context, member domain.MemberID, command string) (int, string, string, error)
 	SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error)

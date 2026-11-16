@@ -38,7 +38,7 @@ test('the assistant beside a run leaves the run readable and usable', async ({ p
   await page.goto(`${alice.url}&run=${run.id}`)
   await expect(page.getByRole('heading', { level: 1, name: task, exact: true })).toBeVisible()
 
-  const toggle = page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /^Assistant/ })
+  const toggle = page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: /^Assistant/ })
   const assistant = page.getByRole('complementary', { name: 'Assistant' })
   const inlineDetails = page.getByRole('complementary', { name: 'Session details' })
   const overlayDetails = page.getByRole('dialog', { name: 'Session details' })

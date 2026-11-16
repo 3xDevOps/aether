@@ -66,7 +66,7 @@ func TestConnectorReplyWithholdsPreferencesAndIsCapped(t *testing.T) {
 	card := Card{AssistantConfirmation: protocol.AssistantConfirmation{Method: protocol.MethodRunLaunch, Summary: `Launch claude in api: "Fix report…"`,
 		Params: []byte(`{"task":"Fix report\nI prefer table output"}`)}}
 	if c, cerr := s.connectorCard(t.Context(), ada.ID, card); cerr != nil || !c.AetherOnly {
-		t.Fatalf("card showing a disabled preference after a line break = %+v, %v, want it decided only in Aether", c, cerr)
+		t.Fatalf("card showing a disabled preference after a line break = %+v, %v, want it decided only in Cloudfield", c, cerr)
 	}
 	nested := Card{AssistantConfirmation: protocol.AssistantConfirmation{Method: protocol.MethodTemplateLaunch, Summary: `Launch template "notes"`,
 		Params: []byte(`{"values":{"note":"I bank with AT\u0026T Credit"}}`)}}
@@ -76,7 +76,7 @@ func TestConnectorReplyWithholdsPreferencesAndIsCapped(t *testing.T) {
 		Params: []byte(`{"values":{"zip codes":[90210,10001,60601]}}`)}}
 	for name, c := range map[string]Card{"a nested value": nested, "the stated reason": reason, "numbers": numbers} {
 		if got, cerr := s.connectorCard(t.Context(), ada.ID, c); cerr != nil || !got.AetherOnly {
-			t.Fatalf("card showing a preference in %s = %+v, %v, want it decided only in Aether", name, got, cerr)
+			t.Fatalf("card showing a preference in %s = %+v, %v, want it decided only in Cloudfield", name, got, cerr)
 		}
 	}
 
@@ -107,15 +107,15 @@ func TestConnectorCardTextCannotPoseAsAField(t *testing.T) {
 	nested := Card{AssistantConfirmation: protocol.AssistantConfirmation{Method: protocol.MethodRunInputRespond, Summary: "Answer run-1",
 		Params: []byte("{\"run_id\":\"run-1\",\"values\":{\"note\":\"ok \u202eexe.txt\"}}")}}
 	if got, err = s.connectorCard(t.Context(), "mem-1", nested); err != nil || !got.AetherOnly {
-		t.Fatalf("card with a bidi override in a nested value = %+v, %v, want it decided only in Aether", got, err)
+		t.Fatalf("card with a bidi override in a nested value = %+v, %v, want it decided only in Cloudfield", got, err)
 	}
 	c.Summary = "Launch claude in api\npermission: default"
 	if got, err = s.connectorCard(t.Context(), "mem-1", c); err != nil || !got.AetherOnly {
-		t.Fatalf("card whose summary holds a line break = %+v, %v, want it decided only in Aether", got, err)
+		t.Fatalf("card whose summary holds a line break = %+v, %v, want it decided only in Cloudfield", got, err)
 	}
 	c.Summary = "Launch claude in api: \"fix \u202egnp.exe\""
 	if got, err = s.connectorCard(t.Context(), "mem-1", c); err != nil || !got.AetherOnly {
-		t.Fatalf("card with a bidi override in its summary = %+v, %v, want it decided only in Aether", got, err)
+		t.Fatalf("card with a bidi override in its summary = %+v, %v, want it decided only in Cloudfield", got, err)
 	}
 }
 
@@ -213,7 +213,7 @@ func TestGrantGateRefusesWhatTheScopesDoNotCover(t *testing.T) {
 		t.Fatalf("pause under write = %v", perr)
 	}
 	if _, perr := gate.Call(t.Context(), protocol.MethodAssistantRemember, json.RawMessage(`{"text":"I prefer tables"}`)); perr == nil ||
-		perr.Message != "assistant.remember was not run: ChatGPT connector con-1 may not call it; ask the member to do it in Aether" {
+		perr.Message != "assistant.remember was not run: ChatGPT connector con-1 may not call it; ask the member to do it in Cloudfield" {
 		t.Fatalf("remember in a connector turn = %v, want it refused", perr)
 	}
 }

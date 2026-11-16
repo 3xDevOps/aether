@@ -21,7 +21,7 @@ import { useCapability } from '@/store/hooks'
 export const CONNECTORS_SECTION_ID = 'connectors'
 
 const pollMs = 3000
-const docs = 'https://github.com/3xDevOps/Aether/blob/main/docs'
+const docs = 'https://github.com/3xDevOps/cloudfield/blob/main/docs'
 
 type App = 'chatgpt' | 'claude'
 
@@ -131,7 +131,7 @@ const guides: Record<App, { open: ReactNode; paste: ReactNode; note: string }> =
 function SignInStep({ watching, busy, expired, onWatch }: { watching: boolean; busy: boolean; expired: boolean; onWatch: () => void }) {
   return (
     <>
-      <p>On the Aether pages that open, sign in to the edge with GitHub, select <strong>Continue</strong> next to this server, choose its scopes and select <strong>Allow</strong>. No code is needed.</p>
+      <p>On the Cloudfield pages that open, sign in to the edge with GitHub, select <strong>Continue</strong> next to this server, choose its scopes and select <strong>Allow</strong>. No code is needed.</p>
       {!watching && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <Button size="sm" variant="secondary" disabled={busy} onClick={onWatch}>Watch for the connection</Button>
@@ -141,6 +141,17 @@ function SignInStep({ watching, busy, expired, onWatch }: { watching: boolean; b
     </>
   )
 }
+
+type ListInfo = Omit<ConnectorList, 'connectors'>
+
+const atUniversal = (info: ListInfo, url?: string | null) =>
+  !!url && (url === info.universal_url || (info.universal_urls ?? []).includes(url))
+
+// The universal URL at any address of the edge is one place: the same
+// page, the same sign-in, and a connector added at one counts at another.
+const sameURL = (info: ListInfo, a?: string, b?: string) => a === b || (atUniversal(info, a) && atUniversal(info, b))
+
+const signsInAt = (info: ListInfo, url?: string) => !!info.sign_in && (!url || sameURL(info, url, info.url))
 
 function Setup({
   app,
@@ -154,7 +165,7 @@ function Setup({
   onMint,
 }: {
   app: App
-  info: Omit<ConnectorList, 'connectors'>
+  info: ListInfo
   edgeNote: ReactNode
   code: ConnectorCode | null
   at?: string
@@ -165,7 +176,7 @@ function Setup({
 }) {
   const guide = guides[app]
   const url = at ?? code?.url ?? info.url ?? null
-  const universal = url !== null && url === info.universal_url
+  const universal = atUniversal(info, url)
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {universal && <p>Install Aether from the {app === 'chatgpt' ? 'ChatGPT' : 'Claude'} directory where it is listed, or add it as a custom connector:</p>}
@@ -174,7 +185,7 @@ function Setup({
         <Step n={2}>
           <p>{guide.paste}</p>
           {url ? <CopyableCommand command={url} /> : edgeNote ?? <p className="text-muted">The URL appears with the code.</p>}
-          {at && <p className="text-muted">This is this server’s own URL, where the connector you are reconnecting was added. Its page asks for a code.</p>}
+          {at && !atUniversal(info, at) && <p className="text-muted">This is this server’s own URL, where the connector you are reconnecting was added. Its page asks for a code.</p>}
           {url && info.universal_url && !universal && !at && (
             <p className="text-muted">
               This is this server’s own URL. To use the one URL <Code>{info.universal_url}</Code> instead, link a GitHub account in <strong>Profile › Sign-ins › Link a GitHub account</strong>, or run <Code>aether member link --github &lt;login&gt;</Code>.
@@ -182,11 +193,11 @@ function Setup({
           )}
         </Step>
         <Step n={3}>
-          {info.sign_in && !at
+          {signsInAt(info, at)
             ? <SignInStep watching={watching} busy={busy} expired={expired} onWatch={onMint} />
             : (
                 <>
-                  <p>On the Aether page that opens, choose its scopes, paste this code if the page asks for one, and select <strong>Allow</strong>.</p>
+                  <p>On the Cloudfield page that opens, choose its scopes, paste this code if the page asks for one, and select <strong>Allow</strong>.</p>
                   <CodeStep code={code} busy={busy} expired={expired} onMint={onMint} />
                 </>
               )}
@@ -211,7 +222,7 @@ function Connectors({ client }: { client: Api }) {
   const servesEdge = useCapability().hasMethod('server.edge')
   const route = useStore((s) => s.route)
   const [connectors, setConnectors] = useState<Connector[] | null>(null)
-  const [info, setInfo] = useState<Omit<ConnectorList, 'connectors'>>({})
+  const [info, setInfo] = useState<ListInfo>({})
   const [listError, setListError] = useState<Failure | null>(null)
   const [edge, setEdge] = useState<ServerEdge | null>(null)
   const [edgeError, setEdgeError] = useState<string | null>(null)
@@ -228,9 +239,10 @@ function Connectors({ client }: { client: Api }) {
     known: Set<string>
     replaces?: Connector
     into?: string
+    info: ListInfo
   } | null>(null)
   // The move or reconnect in progress, kept past an attempt's expiry until
-  // its replacement calls Aether or the member stops it, so a new code
+  // its replacement calls Cloudfield or the member stops it, so a new code
   // or watch continues it. `at` is its URL when not the one shown; `id`
   // and `known` are its claim and baseline, kept so a retry still takes a
   // replacement that appeared before it.
@@ -296,7 +308,7 @@ function Connectors({ client }: { client: Api }) {
         setAttempt(null)
       }
       if (!old) {
-        const added = next.find((c) => !attempt.known.has(c.id) && appOf(c) === attempt.app && (!c.resource || c.resource === attempt.into))
+        const added = next.find((c) => !attempt.known.has(c.id) && appOf(c) === attempt.app && (!c.resource || sameURL(attempt.info, c.resource, attempt.into)))
         if (added || final) finish()
         if (added) setConnected(added)
         else if (final) setExpired(true)
@@ -304,7 +316,7 @@ function Connectors({ client }: { client: Api }) {
       }
       // A replacement that called Aether wins over one whose tokens may
       // never have arrived.
-      const candidates = next.filter((c) => !attempt.known.has(c.id) && c.resource === attempt.into &&
+      const candidates = next.filter((c) => !attempt.known.has(c.id) && sameURL(attempt.info, c.resource, attempt.into) &&
         (old.client_id ? c.client_id === old.client_id : c.redirect_host === old.redirect_host))
       let added: Connector | undefined
       try {
@@ -341,7 +353,7 @@ function Connectors({ client }: { client: Api }) {
       } else if (final) {
         finish()
         setPollError({
-          text: `${label(added)} has not called Aether yet, so ${label(old)} was not revoked. Revoke it once the new connection works.`,
+          text: `${label(added)} has not called Cloudfield yet, so ${label(old)} was not revoked. Revoke it once the new connection works.`,
           fix: <Link href={`${docs}/connectors.md#move-a-connector-to-the-universal-url`}>Moving a connector</Link>,
         })
       }
@@ -389,7 +401,7 @@ function Connectors({ client }: { client: Api }) {
     // code even when the universal URL takes the sign-in.
     const into = next?.kind === 'move' ? rest.universal_url : next?.replaces.resource ?? rest.url
     const at = into && into !== rest.url ? into : undefined
-    const signIn = rest.sign_in && !at
+    const signIn = signsInAt(rest, at)
     const code = signIn ? null : await client.connectorCode()
     if (run !== starts.current) return
     // Signing in needs nothing from here, so it may be done already: what
@@ -406,6 +418,7 @@ function Connectors({ client }: { client: Api }) {
       known,
       replaces: next?.replaces,
       into,
+      info: rest,
     })
   }
 
@@ -427,8 +440,8 @@ function Connectors({ client }: { client: Api }) {
     setExpired(false)
   }
 
-  // A connector added at a URL other than the one shown reconnects there, with a code.
-  const signsIn = (c: Connector) => !!info.sign_in && (!c.resource || c.resource === info.url)
+  // A connector on the server's own URL reconnects there, with a code.
+  const signsIn = (c: Connector) => signsInAt(info, c.resource)
   const tooOld = listError?.old === true
   const edgeNote = edge && !edge.edge_url
     ? <p className="text-muted">This server has no edge, so ChatGPT and Claude cannot reach it. An admin turns one on: <Link href={`${docs}/edge.md#turning-it-on`}>Edge guide</Link>.</p>
@@ -463,7 +476,7 @@ function Connectors({ client }: { client: Api }) {
             <p className="flex items-center gap-1.5 text-muted">
               <Spinner />
               {attempt.replaces && connected
-                ? `Waiting for ${label(connected)} to call Aether, then revoking ${label(attempt.replaces)}…`
+                ? `Waiting for ${label(connected)} to call Cloudfield, then revoking ${label(attempt.replaces)}…`
                 : `Waiting for ${attempt.app === 'chatgpt' ? 'ChatGPT' : 'Claude'} to connect…`}
             </p>
           )}
@@ -471,7 +484,7 @@ function Connectors({ client }: { client: Api }) {
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-muted">
               <span>
                 {target.kind === 'move' ? 'Moving' : 'Reconnecting'} {label(target.replaces)}
-                {attempt ? '' : `: ${target.at || !info.sign_in ? 'get a new code' : 'watch for the connection'} to continue`}. It is revoked only once its replacement calls Aether; another move or reconnect waits until this one ends.
+                {attempt ? '' : `: ${signsInAt(info, target.at) ? 'watch for the connection' : 'get a new code'} to continue`}. It is revoked only once its replacement calls Cloudfield; another move or reconnect waits until this one ends.
               </span>
               <Button size="sm" variant="ghost" onClick={stop}>Stop</Button>
             </div>
@@ -482,7 +495,7 @@ function Connectors({ client }: { client: Api }) {
               title={`${label(connected)} connected`}
               actions={<Button ref={done} size="sm" variant="secondary" onClick={() => setConnected(null)}>Done</Button>}
             >
-              With {scopeList(connected)}. Ask it “What needs me in Aether?”
+              With {scopeList(connected)}. Ask it “What needs me in Cloudfield?”
             </Callout>
           )}
         </div>
@@ -491,7 +504,7 @@ function Connectors({ client }: { client: Api }) {
       </SettingRow>
       <SettingRow
         label="What a connector may do"
-        help="You choose its scopes on the Aether page that opens when you connect; ChatGPT and Claude do not. To change them, reconnect."
+        help="You choose its scopes on the Cloudfield page that opens when you connect; ChatGPT and Claude do not. To change them, reconnect."
       >
         <dl className="flex min-w-0 flex-col gap-2 text-ui-sm">
           {scopes.map(([name, text]) => (
@@ -503,10 +516,11 @@ function Connectors({ client }: { client: Api }) {
         </dl>
       </SettingRow>
       {connectors?.length === 0 && (
-        <SettingRow label="No connectors yet" help="One appears here once you select Allow on the Aether page." />
+        <SettingRow label="No connectors yet" help="One appears here once you select Allow on the Cloudfield page." />
       )}
       {connectors?.map((c) => {
-        const movable = !!c.resource && !!info.universal_url && c.resource !== info.universal_url && info.url === info.universal_url
+        const universal = atUniversal(info, c.resource)
+        const movable = !!c.resource && !!info.universal_url && !universal && info.url === info.universal_url
         return (
           <SettingRow
             key={c.id}
@@ -514,7 +528,7 @@ function Connectors({ client }: { client: Api }) {
             help={(
               <>
                 <span className="block">{scopeList(c)}</span>
-                {c.resource && <span className="block">{c.resource === info.universal_url ? 'Universal URL' : <>This server’s own URL, <Code>{c.resource}</Code></>}</span>}
+                {c.resource && <span className="block">{universal ? 'Universal URL' : <>This server’s own URL, <Code>{c.resource}</Code></>}</span>}
                 Added <RelativeTime at={c.created_at} />
                 {' · '}{c.last_used_at ? <>last used <RelativeTime at={c.last_used_at} /></> : 'never used'}
               </>
@@ -533,7 +547,7 @@ function Connectors({ client }: { client: Api }) {
       {confirming?.action === 'move' && (
         <Confirm
           title={`Move ${label(confirming.connector)} to the universal URL?`}
-          description={`Add Aether again in ${confirming.connector.client_name} with ${info.universal_url}${info.sign_in ? ' and sign in' : ' and paste the code'}. Once the new connection calls Aether, this connector is revoked; remove the old Aether connector in ${confirming.connector.client_name} too.`}
+          description={`Add Aether again in ${confirming.connector.client_name} with ${info.universal_url}${info.sign_in ? ' and sign in' : ' and paste the code'}. Once the new connection calls Cloudfield, this connector is revoked; remove the old Aether connector in ${confirming.connector.client_name} too.`}
           action="Move"
           pending="Starting…"
           onConfirm={async () => {
@@ -551,7 +565,7 @@ function Connectors({ client }: { client: Api }) {
       {confirming && confirming.action !== 'move' && (confirming.action === 'reconnect' ? (
         <Confirm
           title={`Reconnect ${label(confirming.connector)}?`}
-          description={`${signsIn(confirming.connector) ? 'Connect Aether again' : 'This gets a new code. Connect Aether again'} in ${confirming.connector.client_name}${signsIn(confirming.connector) ? ' and sign in' : ' and paste the code'}; you can choose other scopes. Once the new connection calls Aether, this connector is revoked.`}
+          description={`${signsIn(confirming.connector) ? 'Connect Aether again' : 'This gets a new code. Connect Aether again'} in ${confirming.connector.client_name}${signsIn(confirming.connector) ? ' and sign in' : ' and paste the code'}; you can choose other scopes. Once the new connection calls Cloudfield, this connector is revoked.`}
           action="Reconnect"
           pending="Reconnecting…"
           onConfirm={async () => {

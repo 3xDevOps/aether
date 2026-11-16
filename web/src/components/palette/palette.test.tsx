@@ -597,7 +597,7 @@ describe('command palette', () => {
       ['terminal', 'Environment', 'Environment'],
       ['logs', 'Activity', 'Activity'],
       ['dark mode', 'Use dark theme', 'Use dark theme'],
-      ['chat', 'Ask Aether', 'Send a message to the agent…'],
+      ['chat', 'Ask Cloudfield', 'Send a message to the agent…'],
       ['messages', 'Send a message to the agent…', 'Send a message to the agent…'],
       ['tunnel', 'Forward a port…', 'Forward a port…'],
     ])('"%s" ranks %s first and finds %s without running anything', async (query, first, found) => {

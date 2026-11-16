@@ -72,5 +72,11 @@ const releaseTag = /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/
 /** The GitHub release page of a tag; empty for anything that is not a
  * release tag, so a gateway's answer cannot steer the link elsewhere. */
 export function releasePage(tag: string): string {
-  return releaseTag.test(tag) ? `https://github.com/3xDevOps/Aether/releases/tag/${tag}` : ''
+  return releaseTag.test(tag) ? `https://github.com/3xDevOps/cloudfield/releases/tag/${tag}` : ''
+}
+
+/** "build 412", or "build 412 hotfix 1"; empty for a release from before builds. */
+export function buildLabel(build?: number, hotfix?: number): string {
+  if (!build) return ''
+  return hotfix ? `build ${build} hotfix ${hotfix}` : `build ${build}`
 }

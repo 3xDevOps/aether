@@ -1,8 +1,8 @@
 # Quickstart
 
 This guide takes you from nothing to an agent's change published as a pull
-request, in eight steps. Each step ends with how you know it worked. Aether's
-terms are defined in the [glossary](README.md#concepts).
+request, in eight steps. Each step ends with how you know it worked.
+Cloudfield's terms are defined in the [glossary](README.md#concepts).
 A coding agent can do these steps from the CLI: paste the prompt in
 [agents.md](agents.md) into it.
 
@@ -28,7 +28,7 @@ at step 5.
 Run the install script on the server, then on your computer (Linux or macOS):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh
 ```
 
 At the `role` prompt, answer `server` on the server. It installs
@@ -42,7 +42,7 @@ On Windows, download and review the PowerShell installer, then run it. It
 installs the CLI and the desktop app without administrator rights:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 
@@ -60,8 +60,8 @@ Setup decides how your computer reaches the server. **Tailscale** is the
 simplest: on a host where Tailscale runs, Enter at the tailnet question picks
 it, and people link by this host's tailnet name with their tailnet login
 ([networking.md](networking.md#tailscale)). Otherwise setup turns on the
-**edge**, a relay the Aether project runs at `https://edge.onaether.dev`. The
-server and your computer both dial out to it, so neither needs an open port.
+**edge**, a relay the Cloudfield project runs at `https://edge.onaether.dev`.
+The server and your computer both dial out to it, so neither needs an open port.
 SSH runs end to end through it: the edge cannot read your traffic, but sees
 host names, IP addresses and who signs in ([edge.md](edge.md));
 `aether-server config set edge-url ""` turns it off.
@@ -71,7 +71,7 @@ Setup asks these questions. Enter accepts the default shown in brackets:
 | Prompt | Answer |
 | --- | --- |
 | `Continue without Docker` | Asked only when Docker does not answer. Enter stops with nothing written. Install or start Docker, then run setup again. |
-| `SSH listen address for Aether, not the system sshd` | Enter keeps `:2222`. |
+| `SSH listen address for Cloudfield, not the system sshd` | Enter keeps `:2222`. |
 | `Data directory` | Enter keeps `/var/lib/aether`. |
 | `Use Tailscale to reach this server` | Asked only when Tailscale runs on this host. A **tailnet** is a private network made with Tailscale. Enter (yes) signs people in by their tailnet login; answer no when your computer is not on this tailnet, and setup uses the edge. |
 | `Let anyone on the tailnet join ...`, `Also require a registered SSH key ...`, `Dashboard HTTPS port` | Asked after a yes. Enter keeps admin approval for new members, no key requirement, and the dashboard on port 443 for phones ([networking.md](networking.md#who-is-let-in)). |
@@ -89,9 +89,9 @@ claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server i
 next:
   1. start the server on this machine:
        sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
-  2. on your computer, install Aether if it is not there yet (Windows: docs/install.md):
-       curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client
-  3. on your computer: in the Aether app's Connect step choose Aether relay, sign in
+  2. on your computer, install Cloudfield if it is not there yet (Windows: docs/install.md):
+       curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client
+  3. on your computer: in the Cloudfield app's Connect step choose Cloudfield relay, sign in
      with GitHub and paste the claim link above; in a terminal:
        aether login
        aether link --claim <server id>-<secret>
@@ -105,7 +105,7 @@ alternative for a computer off the tailnet; do one or the other, because the
 first link makes its account the super admin:
 
 ```
-  3. on your computer, on the same tailnet: in the Aether app's Connect step choose
+  3. on your computer, on the same tailnet: in the Cloudfield app's Connect step choose
      Tailscale and enter my-server.tail1234.ts.net; in a terminal:
        aether link my-server.tail1234.ts.net
      or, with nothing installed, open https://my-server.tail1234.ts.net/ in a browser there
@@ -134,7 +134,7 @@ To drive setup from an agent over ssh, with no terminal on the server (`sudo`
 there must not ask for a password), run the steps non-interactively:
 
 ```sh
-ssh <user>@<server> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --role none'
+ssh <user>@<server> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --role none'
 ssh <user>@<server> 'sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>'
 ssh <user>@<server> 'sudo systemctl daemon-reload && sudo systemctl enable --now aether-server'
 ssh <user>@<server> "timeout 300 sh -c 'until sudo aether-server edge status >/dev/null; do sleep 5; done'"
@@ -157,7 +157,7 @@ is linked, answer **How does this computer reach your server?**:
 | Choice | When | Then |
 | --- | --- | --- |
 | **Tailscale** (recommended) | This computer is on the server's tailnet. | Enter the name setup printed in **Server's tailnet name**, and click **Link**. |
-| **Aether relay** | Setup printed a claim link, or someone sent you an invitation. | Click **Sign in with GitHub**, open the address shown and confirm the code. Paste the claim link into **Claim or invite link** and click **Claim and link**. Or paste either link into **Have an invitation or claim link?** first. |
+| **Cloudfield relay** | Setup printed a claim link, or someone sent you an invitation. | Click **Sign in with GitHub**, open the address shown and confirm the code. Paste the claim link into **Claim or invite link** and click **Claim and link**. Or paste either link into **Have an invitation or claim link?** first. |
 | **SSH address** | This computer reaches the server's SSH port directly. | Enter `<server-host>:2222`, and an **Invite code** if an admin gave you one, then click **Link**. |
 
 Opening the `aether://claim` link on your computer opens the relay choice with
@@ -204,7 +204,7 @@ aether member git --name "Ada Lovelace" --email ada@example.com
 A **workspace** is one repository, its **base branch** (the branch new sessions
 start from), and the sessions started from it. Only an admin or super admin can create one, and the creator owns it ([workspace access](teams.md#workspace-access)).
 
-Open the **dashboard**, the web app where you work with Aether. The desktop
+Open the **dashboard**, the web app where you work with Cloudfield. The desktop
 app shows it, and so does `aether gui`, which serves it in a browser tab from
 your computer. It shows **Onboarding** (**Connect**, **Repository**, **Agent**,
 **First session**, which match steps 3 to 6 here) until you finish. If you linked
@@ -216,7 +216,7 @@ there. **Settings → General → Setup guide → Open guide** reopens onboardin
 1. In **Onboarding → Repository**, under **From GitHub**, click **Add GitHub
    repository**.
 2. Click **Connect GitHub**, then **Copy code and open GitHub**. Enter the code
-   on GitHub and authorize **GitHub CLI**, which Aether uses to connect. The
+   on GitHub and authorize **GitHub CLI**, which Cloudfield uses to connect. The
    dialog shows **Connected as `<login>`** by itself.
 3. Choose a repository. Private and organization repositories need no deploy
    key.
@@ -287,8 +287,8 @@ the vendor's own login. Your **home** there persists, so this is done once.
 5. Click **Check**.
 
 It worked if the dialog shows **Installed** and **Login found**, and after
-**Done** the agent's button reads **Run**. Aether only looks for the login file;
-the agent proves the login when a session starts.
+**Done** the agent's button reads **Run**. Cloudfield only looks for the login
+file; the agent proves the login when a session starts.
 
 From the CLI, on your computer. The environment has no `aether` command, so do
 not run these in its terminal:
@@ -488,10 +488,11 @@ permission request, a `needs-input` or `blocked` report, or a disconnected
 agent), 4 when it is parked with nothing pending, because its turn ended with
 an `answered` report or no report or it went silent, and a message continues it (`aether message
 <session-id> "<reply>"`), 5 when its wait broke (a condition it waited on resolved
-and the wake never reached the agent, or its source went unread for an hour; see [Waits Aether can
-check](failure-handling.md#waits-aether-can-check)), and 124 on timeout. Before exiting it prints `run
+and the wake never reached the agent, or its source went unread for an hour; see [Waits Cloudfield can
+check](failure-handling.md#waits-cloudfield-can-check)), and 124 on timeout.
+Before exiting it prints `run
 <session-id> <state>: <reason>`, with the state as `aether sessions` labels it. It keeps waiting
-while the session waits on agents, CI or a process. When Aether cannot vouch for that wait
+while the session waits on agents, CI or a process. When Cloudfield cannot vouch for that wait
 it says so once on stderr: `session <session-id> still waits, but <condition>: status
 unknown (last read 12m ago): <error>`. It also exits 1 on its
 own error, such as an unknown session id, with the error on stderr and nothing on
@@ -543,7 +544,7 @@ foreground server with Ctrl-C, then `sudo systemctl start aether-server`.
 | `claim code is wrong`, `claim code expired` or `claim code has no attempts left` | On the server, `sudo aether-server edge claim-code` prints a new link. |
 | `... refused: server is not connected to the edge (HTTP 503)` | On the server, `sudo aether-server edge status` says why: the service is stopped, still starting, or cannot reach the edge. |
 | `device "<label>", signed in as <account>, is waiting for approval` | The server admits approved devices only. An admin approves it from its **Needs you** card, or runs the command the message prints. |
-| `no Aether member for this key` | No member has this SSH key: someone else linked first, or you joined through the edge. Ask an admin to invite you ([teams.md](teams.md)), or link through the edge. |
+| `no Cloudfield member for this key` | No member has this SSH key: someone else linked first, or you joined through the edge. Ask an admin to invite you ([teams.md](teams.md)), or link through the edge. |
 | `gitengine: mirror no-candidate for branch "<branch>": revision <sha> is waiting for an admin to adopt it; ...`, or **The server's copy is pending** in the dashboard | The mirror's current revision was never adopted. Check that `<sha>` is the upstream commit you expect, then an admin runs the `aether workspace mirror adopt` command the error ends with, or, on the workspace's **Repository** page, opens **Advanced → Review source mirror** and clicks **Adopt candidate**. |
 | `gitengine: workspace branch "main" has no commit` | A local-only workspace has no base yet. Push one: `git push aether main`. |
 | `workspace "myproject" not found` or `--workspace is required when more than one workspace exists` | Pass a name that `aether workspace list` prints. |

@@ -266,16 +266,17 @@ func (e *Engine) RemoveWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID)
 
 // updateHook is installed as hooks/update in every workspace bare repo. Run
 // branches are server-owned artifacts: a client push may create or
-// fast-forward refs/heads/aether/run-* but never rewrite one. Deletions are
+// fast-forward refs/heads/aether/run-* or refs/heads/cloudfield/run-* but
+// never rewrite one. Deletions are
 // refused wholesale by receive.denyDeletes (transport.go). Update hooks only
 // fire under receive-pack, so PublishRunBranch's direct fetch into the bare
 // repo rewrites run branches unimpeded.
 const updateHook = `#!/bin/sh
-# Installed by Aether; do not edit - rewritten when the workspace is touched.
+# Installed by Cloudfield; do not edit - rewritten when the workspace is touched.
 refname="$1" oldrev="$2" newrev="$3"
 case "$refname" in
 refs/aether/*)
-	echo "aether: rejected write to protected ref $refname: mirror refs are owned by the Aether server" >&2
+	echo "aether: rejected write to protected ref $refname: mirror refs are owned by the Cloudfield server" >&2
 	exit 1
 	;;
 esac
@@ -284,12 +285,12 @@ if [ -n "$mirrorbase" ] && [ "$refname" = "$mirrorbase" ]; then
 	echo "aether: rejected write to protected ref $refname: this mirrored base is owned by the upstream; use the configured upstream to update it" >&2
 	exit 1
 fi
-case "$refname" in refs/heads/aether/run-*) ;; *) exit 0 ;; esac
+case "$refname" in refs/heads/aether/run-* | refs/heads/cloudfield/run-*) ;; *) exit 0 ;; esac
 zero="0000000000000000000000000000000000000000"
 [ "$oldrev" = "$zero" ] && exit 0 # branch creation is allowed
 [ "$newrev" = "$zero" ] && exit 0 # deletion: receive.denyDeletes decides
 git merge-base --is-ancestor "$oldrev" "$newrev" && exit 0
-echo "aether: rejected non-fast-forward push to $refname: session branches are owned by the Aether server" >&2
+echo "aether: rejected non-fast-forward push to $refname: session branches are owned by the Cloudfield server" >&2
 exit 1
 `
 

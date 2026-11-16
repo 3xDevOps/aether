@@ -1,5 +1,5 @@
 {{define "reviewer"}}{{template "top" .}}
-<p>Sign in with the reviewer account this edge's operator gave the app directory. It reaches one Aether server and nothing else on this edge.</p>
+<p>Sign in with the reviewer account this edge's operator gave the app directory. It reaches one Cloudfield server and nothing else on this edge.</p>
 <form method="post" action="/connectors/reviewer">
 {{range .Data.Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">
 {{end}}<label>Login <input name="login" autocomplete="username" required></label>

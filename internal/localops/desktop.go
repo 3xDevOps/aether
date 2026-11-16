@@ -15,6 +15,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/3xDevOps/Aether/desktop"
+	"github.com/3xDevOps/Aether/internal/envname"
 )
 
 // DesktopApp is an installed desktop shell.
@@ -32,6 +37,74 @@ type DesktopApp struct {
 	// removes it once the new app is in place so the desktop lists one
 	// Aether.
 	Superseded string
+}
+
+// legacyProductName is the name of every desktop app installed before the
+// product was renamed. An app under another name installs beside it and
+// finds and rebuilds an app of either name.
+const legacyProductName = "Aether"
+
+// builderConfig is what desktop/electron-builder.yml decides about the
+// installed app. productName names the darwin bundle, and the linux and
+// windows install locations follow it. The linux launcher file and the
+// executable it runs keep one name across a rename, so a renamed app's
+// launcher replaces the old one's and Electron registers that launcher as
+// the link handler.
+type builderConfig struct {
+	AppID         string `yaml:"appId"`
+	ProductName   string `yaml:"productName"`
+	ExtraMetadata struct {
+		DesktopName string `yaml:"desktopName"`
+	} `yaml:"extraMetadata"`
+	Linux struct {
+		ExecutableName string `yaml:"executableName"`
+	} `yaml:"linux"`
+}
+
+var builder = embeddedBuilderConfig()
+
+// productName is builder.ProductName, a variable so tests can install under
+// another name.
+var productName = builder.ProductName
+
+func embeddedBuilderConfig() builderConfig {
+	raw, err := desktop.Source.ReadFile("electron-builder.yml")
+	if err != nil {
+		panic(fmt.Sprintf("localops: read the embedded electron-builder.yml: %v", err))
+	}
+	var cfg builderConfig
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		panic(fmt.Sprintf("localops: parse the embedded electron-builder.yml: %v", err))
+	}
+	if cfg.AppID == "" || cfg.ProductName == "" || cfg.ExtraMetadata.DesktopName == "" || cfg.Linux.ExecutableName == "" {
+		panic(fmt.Sprintf("localops: the embedded electron-builder.yml lacks appId, productName, extraMetadata.desktopName or linux.executableName: %+v", cfg))
+	}
+	return cfg
+}
+
+func productNames() []string {
+	if productName == legacyProductName {
+		return []string{productName}
+	}
+	return []string{productName, legacyProductName}
+}
+
+func linuxAppDir(name string) string   { return strings.ToLower(name) }
+func darwinBundle(name string) string  { return name + ".app" }
+func windowsAppDir(name string) string { return name + " Desktop" }
+
+// DesktopAppExe is the executable of the app installed at app, the one the
+// desktop starts.
+func DesktopAppExe(goos, app string) string {
+	switch goos {
+	case "darwin":
+		// electron-builder names it after the bundle.
+		return filepath.Join(app, "Contents", "MacOS", strings.TrimSuffix(filepath.Base(app), ".app"))
+	case "windows":
+		return filepath.Join(app, desktopExe)
+	default:
+		return filepath.Join(app, builder.Linux.ExecutableName)
+	}
 }
 
 // macSystemApplications is the machine-wide Applications folder, the one
@@ -208,7 +281,7 @@ func builtDesktopApp(goos, dist string) (string, error) {
 	case "windows":
 		pattern = "win*-unpacked"
 	case "darwin":
-		pattern = filepath.Join("mac*", "Aether.app")
+		pattern = filepath.Join("mac*", darwinBundle(productName))
 	default:
 		return "", fmt.Errorf("localops: no desktop app target for %s", goos)
 	}
@@ -516,7 +589,7 @@ func sweepInstallLeftovers(parent string) {
 func removeHint(goos, path string, err error) string {
 	switch {
 	case goos == "windows":
-		return " (is the Aether window still open?)"
+		return " (is the Cloudfield window still open?)"
 	case errors.Is(err, fs.ErrPermission):
 		return fmt.Sprintf(" (it belongs to another user; delete it with: sudo rm -rf %q)", path)
 	default:
@@ -531,7 +604,7 @@ func removeHint(goos, path string, err error) string {
 // found only through a PATH entry outside the defaults is reported in
 // shellOnly: it works from here but may not from the application menu.
 func DesktopFindsCLI(home string) (found bool, shellOnly string) {
-	if explicit := os.Getenv("AETHER_BIN"); explicit != "" {
+	if explicit := envname.Getenv("AETHER_BIN"); explicit != "" {
 		_, err := exec.LookPath(explicit)
 		return err == nil, ""
 	}
@@ -585,12 +658,12 @@ func desktopLayout(goos, home string) (DesktopApp, error) {
 			data = filepath.Join(home, ".local", "share")
 		}
 		return DesktopApp{
-			App:      filepath.Join(data, "aether", "desktop"),
-			Launcher: filepath.Join(data, "applications", "aether-desktop.desktop"),
+			App:      filepath.Join(data, linuxAppDir(productName), "desktop"),
+			Launcher: filepath.Join(data, "applications", builder.ExtraMetadata.DesktopName),
 		}, nil
 	case "darwin":
-		system := filepath.Join(macSystemApplications, "Aether.app")
-		user := filepath.Join(home, "Applications", "Aether.app")
+		system := filepath.Join(macSystemApplications, darwinBundle(productName))
+		user := filepath.Join(home, "Applications", darwinBundle(productName))
 		app, other := system, user
 		if !writableDir(macSystemApplications) {
 			app, other = user, system
@@ -609,8 +682,8 @@ func desktopLayout(goos, home string) (DesktopApp, error) {
 			return DesktopApp{}, fmt.Errorf("localops: resolve Start Menu Programs folder: %w", err)
 		}
 		return DesktopApp{
-			App:      filepath.Join(local, "Programs", "Aether Desktop"),
-			Launcher: filepath.Join(programs, "Aether.lnk"),
+			App:      filepath.Join(local, "Programs", windowsAppDir(productName)),
+			Launcher: filepath.Join(programs, productName+".lnk"),
 		}, nil
 	default:
 		return DesktopApp{}, fmt.Errorf("localops: no desktop app target for %s", goos)
@@ -632,22 +705,22 @@ func writableDir(dir string) bool {
 }
 
 // desktopEntry renders the freedesktop launcher for the unpacked app in
-// dir. %U hands aether:// links to the app. --no-sandbox matches
-// electron-builder's own AppImage default: an unpacked Electron cannot use
-// its SUID helper without root, and Ubuntu 24.04+ denies the namespace
-// sandbox to unconfined binaries, so without the flag the app refuses to
-// start on the most common desktop. The renderer still runs with context
-// isolation and no Node access, locked to the loopback gateway.
+// dir. %U hands aether:// and cloudfield:// links to the app. --no-sandbox
+// matches electron-builder's own AppImage default: an unpacked Electron
+// cannot use its SUID helper without root, and Ubuntu 24.04+ denies the
+// namespace sandbox to unconfined binaries, so without the flag the app
+// refuses to start on the most common desktop. The renderer still runs with
+// context isolation and no Node access, locked to the loopback gateway.
 func desktopEntry(dir string) string {
 	return "[Desktop Entry]\n" +
 		"Type=Application\n" +
-		"Name=Aether\n" +
-		"Comment=Aether dashboard in its own window\n" +
-		"Exec=" + desktopExecQuote(filepath.Join(dir, "aether-desktop")) + " --no-sandbox %U\n" +
+		"Name=" + productName + "\n" +
+		"Comment=" + productName + " dashboard in its own window\n" +
+		"Exec=" + desktopExecQuote(DesktopAppExe("linux", dir)) + " --no-sandbox %U\n" +
 		"Icon=" + filepath.Join(dir, desktopIcon) + "\n" +
 		"Terminal=false\n" +
 		"Categories=Development;\n" +
-		"MimeType=x-scheme-handler/aether;\n" +
+		"MimeType=x-scheme-handler/aether;x-scheme-handler/cloudfield;\n" +
 		"StartupWMClass=Aether\n"
 }
 

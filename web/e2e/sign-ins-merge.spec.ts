@@ -12,7 +12,7 @@ import { memberID, seedWorkspace } from './harness/setup'
 
 async function openMerge(page: Page, phone = false) {
   if (phone) await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'More pages' }).click()
-  await (phone ? page.getByRole('dialog', { name: 'More' }) : page.getByRole('navigation', { name: 'Aether' }))
+  await (phone ? page.getByRole('dialog', { name: 'More' }) : page.getByRole('navigation', { name: 'Cloudfield' }))
     .getByRole('button', { name: /, (Live|Reconnecting|Offline)$/ }).click()
   await page.getByRole('menuitem', { name: 'Profile' }).click()
   const signIns = page.getByRole('dialog', { name: 'Profile' }).getByRole('region', { name: 'Sign-ins' })

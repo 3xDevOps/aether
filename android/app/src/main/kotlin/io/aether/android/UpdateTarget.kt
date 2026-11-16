@@ -25,8 +25,8 @@ private val PLAY_INSTALLERS = setOf(PLAY_PACKAGE, "com.google.android.feedback")
 // (android/listing/README.md), which never matches.
 private const val RELEASE_CERT_SHA256 = "2d7e0777aa8a24ac0090dcdd4c620910c9ef13c7775b1576ed69230f1dd37c3a"
 
-private const val RELEASES = "https://github.com/3xDevOps/Aether/releases/tag/"
-private const val DOWNLOADS = "https://github.com/3xDevOps/Aether/releases/download/"
+private const val RELEASES = "https://github.com/3xDevOps/cloudfield/releases/tag/"
+private const val DOWNLOADS = "https://github.com/3xDevOps/cloudfield/releases/download/"
 
 // selfupdate.ValidTag: nothing else is built into a URL.
 private val TAG = Regex("""v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?""")

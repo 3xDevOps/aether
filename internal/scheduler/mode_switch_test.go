@@ -260,7 +260,7 @@ func TestSwitchEnhancedRunToStandardAndBack(t *testing.T) {
 		t.Fatal("the adapter still runs beside the terminal")
 	}
 	bodies := e.sup.ran()
-	if len(bodies) != 1 || !strings.Contains(bodies[0], "unset "+coordtransport.EnhancedEnv+"\n") ||
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "unset "+coordtransport.EnhancedEnv+" CLOUDFIELD_ENHANCED\n") ||
 		!strings.Contains(bodies[0], "export "+coordtransport.WakeEnv+"='1'\n") ||
 		!strings.Contains(bodies[0], "exec 'omp' '--auto-approve' '--resume="+session+"' '-e' '/run/aether/status.ts'") {
 		t.Fatalf("supervisor ran %q", bodies)

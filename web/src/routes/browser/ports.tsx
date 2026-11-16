@@ -129,7 +129,7 @@ function PortList({ runID, ports, available, onOpen }: {
             </>
           ) : detail.kind === 'command' ? (
             <>
-              This dashboard is served by your Aether server, which cannot open a port on your computer. Run this there, then open localhost:{detail.port}.
+              This dashboard is served by your Cloudfield server, which cannot open a port on your computer. Run this there, then open localhost:{detail.port}.
               <span className="mt-1 block">
                 <span className="inline-flex max-w-full items-center gap-1">
                   <Code ref={command}>{forwardCommand(runID, detail.port)}</Code>

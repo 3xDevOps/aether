@@ -3,7 +3,9 @@
 // Release builds set these values via:
 //
 //	-ldflags "-X github.com/3xDevOps/Aether/internal/version.Version=v1.2.3 \
-//	          -X github.com/3xDevOps/Aether/internal/version.Commit=abc1234"
+//	          -X github.com/3xDevOps/Aether/internal/version.Commit=abc1234 \
+//	          -X github.com/3xDevOps/Aether/internal/version.Build=412 \
+//	          -X github.com/3xDevOps/Aether/internal/version.Hotfix=0"
 package version
 
 import (
@@ -17,6 +19,11 @@ var (
 	Version = "dev"
 	// Commit is the short git commit hash, or "unknown" for local builds.
 	Commit = "unknown"
+	// Build is the release's signed build number, "0" for a build from
+	// before release channels or from source.
+	Build = "0"
+	// Hotfix counts the hotfixes on top of Build's stable release.
+	Hotfix = "0"
 )
 
 // String renders the version and commit as a single human-readable string.

@@ -199,7 +199,7 @@ const maxUntrusted = 300
 // same text on every attempt.
 func waitBody(w *store.RunWait, link string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Aether: your wait %s %s", w.Spec, w.WaitState)
+	fmt.Fprintf(&b, "Cloudfield: your wait %s %s", w.Spec, w.WaitState)
 	if w.Outcome != "" && w.Outcome != w.WaitState {
 		fmt.Fprintf(&b, ": %s", w.Outcome)
 	}
@@ -234,7 +234,7 @@ func nextStep(w *store.RunWait) string {
 	case w.WaitState == protocol.WaitExpired:
 		return "nothing resolved in time; check the condition yourself, then continue or report again"
 	case w.WaitState == protocol.WaitError:
-		return "Aether cannot read the target; check its name and your access, or report blocked if a person must fix it"
+		return "Cloudfield cannot read the target; check its name and your access, or report blocked if a person must fix it"
 	case w.Kind == protocol.WaitKindRunFinished && (w.Outcome == "completed" || w.Outcome == "merged" || w.Outcome == "reported-success"):
 		return "that run finished; read its result and continue"
 	case w.Kind == protocol.WaitKindRunFinished:

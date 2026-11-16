@@ -23,8 +23,13 @@ services:
       AETHER_EDGE_EGRESS_BUDGET: "0"
       AETHER_EDGE_GITHUB_CLIENT_ID: <github-client-id>
       AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE: /run/secrets/github-client-secret
+      # A second origin pair with its own OAuth app (docs/edge.md, "More
+      # than one address pair"); add its hosts to the router rule and its
+      # secret below.
+      #AETHER_EDGE_ORIGIN_PAIRS: https://auth.example.net https://edge.example.net <github-client-id-2> /run/secrets/github-client-secret-2
     secrets:
       - github-client-secret
+      #- github-client-secret-2
     volumes:
       # edge_key and edge.db; owned by uid 65532, mode 0700.
       - ./data:/var/lib/aether-edge
@@ -42,6 +47,9 @@ secrets:
   # Readable by uid 65532 only: chown 65532 github-client-secret && chmod 0400 github-client-secret
   github-client-secret:
     file: ./github-client-secret
+  # Readable by uid 65532 only: chown 65532 github-client-secret-2 && chmod 0400 github-client-secret-2
+  #github-client-secret-2:
+  #  file: ./github-client-secret-2
 
 networks:
   # Shared with Traefik, which has a fixed address on it.

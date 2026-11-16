@@ -118,7 +118,7 @@ func TestIntegrationUnknownKeyRejectedOverRealSSH(t *testing.T) {
 	if err := cmd.Run(); err == nil {
 		t.Fatal("ssh with an unregistered key succeeded")
 	}
-	if !strings.Contains(stderr.String(), "no Aether member for this key") {
+	if !strings.Contains(stderr.String(), "no Cloudfield member for this key") {
 		t.Errorf("stderr = %q, want the rejection banner", stderr.String())
 	}
 }

@@ -269,7 +269,7 @@ object PushRegistration {
                 try {
                     context.callServer("push.unsubscribe", JSONObject().put("endpoint", endpoint))
                 } catch (e: Exception) {
-                    fail(context, "The push distributor dropped Aether, and the server was not told: ${e.message}")
+                    fail(context, "The push distributor dropped Cloudfield, and the server was not told: ${e.message}")
                 }
             }
             .start()

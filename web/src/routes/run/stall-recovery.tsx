@@ -143,7 +143,7 @@ export function StallCallout({ run, agent, rows, nav }: {
           </dl>
         )}
         {error && <p className="mt-1 text-ui-sm text-muted">Could not read the agent’s progress: {error}</p>}
-        <p className="mt-1 text-ui-sm text-muted">Aether restarts nothing on its own. A slow model can still answer.</p>
+        <p className="mt-1 text-ui-sm text-muted">Cloudfield restarts nothing on its own. A slow model can still answer.</p>
       </Callout>
       <AlertDialog open={confirm !== undefined} onOpenChange={(open) => { if (!open) setConfirm(undefined) }}>
         <AlertDialogContent>

@@ -15,7 +15,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/fallback"
-	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -95,7 +94,7 @@ func noFallbackReason(owner, harness string, measured fallback.Measured, from do
 	reason := usageLimitReason + owner + "'s account; "
 	switch {
 	case !fallback.Reads(harness):
-		return reason + "Aether cannot read " + harness + "'s usage, so its sessions do not move to another account"
+		return reason + "Cloudfield cannot read " + harness + "'s usage, so its sessions do not move to another account"
 	case others == 0:
 		return reason + "no other account is shared to fall back on"
 	case exhausted:
@@ -733,10 +732,6 @@ func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageF
 					return false, envErr
 				}
 			}
-		}
-		profile, _ := harness.Lookup(run.Harness)
-		if conflict := s.vmSingleConflict(ctx, profile, run.Harness, home, account, run.ID); conflict != nil {
-			return false, conflict
 		}
 		return s.FallbackLaunchable(ctx, home, from, account, run.Harness, mode)
 	})

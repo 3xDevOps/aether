@@ -58,7 +58,7 @@ class AetherPushService : PushService() {
     }
 
     override fun onRegistrationFailed(reason: FailedReason, instance: String) {
-        PushRegistration.fail(this, "The push distributor refused to register Aether: $reason")
+        PushRegistration.fail(this, "The push distributor refused to register Cloudfield: $reason")
     }
 
     override fun onUnregistered(instance: String) {

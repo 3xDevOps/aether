@@ -111,7 +111,7 @@ func TestGoogleGrantRefusedWithTheReason(t *testing.T) {
 	sig := ed25519.Sign(edge.priv, append([]byte("aether-edge-grant-v1\x00"), payload...))
 	edge.open(ec, openID, base64.RawURLEncoding.EncodeToString(payload)+"."+base64.RawURLEncoding.EncodeToString(sig))
 	r := expect[edgeproto.OpenResult](t, ec)
-	if r.ConnID != openID || !strings.Contains(r.Error, `sign-in provider "google" is not supported: Aether signs in with GitHub only`) {
+	if r.ConnID != openID || !strings.Contains(r.Error, `sign-in provider "google" is not supported: Cloudfield signs in with GitHub only`) {
 		t.Fatalf("open result %+v, want the reason", r)
 	}
 	select {

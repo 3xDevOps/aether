@@ -32,7 +32,7 @@ type Auth struct {
 	// mention the way back to automatic discovery.
 	explicit bool
 	// banners collects what the server said during the handshake. The
-	// client otherwise drops them, and "no Aether member for this key"
+	// client otherwise drops them, and "no Cloudfield member for this key"
 	// is the one line that explains most rejected keys.
 	banners []string
 }

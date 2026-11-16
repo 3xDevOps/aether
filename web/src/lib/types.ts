@@ -635,6 +635,9 @@ export interface ServerInfo {
   time: string
   member: Member
   tailnet_hostname?: string
+  /** The server release's signed build and hotfix; absent for a release from before channels. */
+  build?: number
+  hotfix?: number
   /** Absent on servers that predate feature advertising. */
   features?: string[]
   tailnet_identity_auth?: boolean
@@ -1901,6 +1904,11 @@ export interface UpdateStatus {
   cli: UpdateCheck
   /** Empty when the server did not answer; server_error then says why. */
   server_version: string
+  /** The signed builds of this CLI and of the server; absent for a release from before channels. */
+  cli_build?: number
+  cli_hotfix?: number
+  server_build?: number
+  server_hotfix?: number
   server_behind: boolean
   /** The CLI half is still answered in full when the SSH hop is down. */
   server_error?: string
@@ -1974,6 +1982,8 @@ export interface PendingServerUpdate {
   version: string
   requested_by: string
   requested_at: string
+  /** The server scheduled it itself, when its release check found a newer build on its channel. */
+  by_server?: boolean
 }
 
 /** What a pending update is still waiting for. Paused runs are reported
@@ -1997,6 +2007,25 @@ export interface ServerUpdateAttempt {
  * `manual_commands` says what to run on the server host. */
 export interface ServerUpdateStatus {
   server_version: string
+  /** Builds are the signed (build, hotfix) of a release, absent for one from before channels. */
+  server_build?: number
+  server_hotfix?: number
+  /** The release channel the server follows; absent on servers from before channels. */
+  channel?: ReleaseChannel
+  /** The server has not chosen a channel yet and follows beta. */
+  channel_pending?: boolean
+  /** The running build is above the channel's: the server stays on it until the channel reaches it. */
+  channel_wait?: boolean
+  /** Why the server last failed to schedule the newest release itself, such as its preflight. */
+  schedule_error?: string
+  /** The last cancel's `not_declined`: the build could not be recorded as declined. */
+  decline_note?: string
+  /** The newest release of each channel whose signed pointer the last check verified. Absent from an older server, and after a restart until the first check. */
+  channel_pointers?: Partial<Record<ReleaseChannel, ChannelPointer>>
+  /** The newest release on `channel`; empty until a check on it has run. */
+  latest_channel?: string
+  latest_build?: number
+  latest_hotfix?: number
   latest?: string
   update_available: boolean
   capable: boolean
@@ -2019,6 +2048,43 @@ export interface ServerUpdateStatus {
   error?: string
   from_version?: string
   to_version?: string
+}
+
+/** A verified channel pointer: the release it names and when it was signed. */
+export interface ChannelPointer {
+  version: string
+  build?: number
+  hotfix?: number
+  /** RFC3339 UTC. */
+  published_at: string
+}
+
+export type ReleaseChannel = 'stable' | 'beta' | 'nightly'
+
+/** A release and its place in the release order; build 0 is a release from before channels. */
+export interface ReleaseBuild {
+  version: string
+  channel?: string
+  build: number
+  hotfix?: number
+}
+
+/** server.release_channel_set. With `dry_run` it saves nothing and says what saving would do. */
+export interface ServerReleaseChannelSet {
+  channel: ReleaseChannel
+  previous: ReleaseChannel
+  saved: boolean
+  running: ReleaseBuild
+  /** The newest release on `channel`; absent when it could not be read, and `target_error` says why. */
+  target?: ReleaseBuild
+  target_error?: string
+  /** `running` is above `target`: the server stays on its build until the channel reaches it. */
+  wait: boolean
+  /** The pending update the change retires because the new channel does not take its release. */
+  retired?: string
+  /** A pending update left in place because its manifest could not be fetched to check it; `kept_error` is that error. */
+  kept?: string
+  kept_error?: string
 }
 
 /** server.sysbox.status and server.sysbox.install: whether runs can use
@@ -2058,6 +2124,8 @@ export interface ServerUpdateResult {
   version?: string
   requested_by?: string
   requested_at?: string
+  /** On a cancel: the release's build could not be recorded as declined, so the server may schedule it again by itself. */
+  not_declined?: string
 }
 
 /** How far one update has got. `restarting` is the last frame the socket
@@ -2212,12 +2280,15 @@ export interface Connector {
  * connector.list: the member's connectors and how they add one. `url` is
  * the URL to add; `universal_url` the edge's one URL for every server,
  * which differs from `url` until the member links a GitHub account;
- * `sign_in` means the consent page takes the edge sign-in, no code.
+ * `universal_urls` that URL at every address of the edge, `universal_url`
+ * among them; `sign_in` means the consent page takes the edge sign-in,
+ * no code.
  */
 export interface ConnectorList {
   connectors: Connector[]
   url?: string
   universal_url?: string
+  universal_urls?: string[]
   sign_in?: boolean
 }
 

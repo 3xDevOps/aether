@@ -955,7 +955,7 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 		{"aether_answer", map[string]any{"run_id": "run-2", "answer_id": "gone", "answer": "x"}, "session run-2 has nothing pending for you with that answer_id; it may be answered already; call aether_needs_attention"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Session rm"}, "action is not the pending request's untrusted.text word for word; call aether_needs_attention"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-7", "answer_id": "req-7", "decision": "allow", "action": strings.Repeat("x", 600) + "…"},
-			"session run-7's request is longer than the connector shows; decide it in the Aether dashboard at https://aether.example/?run=run-7"},
+			"session run-7's request is longer than the connector shows; decide it in the Cloudfield dashboard at https://aether.example/?run=run-7"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-3", "answer_id": "req-3", "decision": "allow", "action": ""}, "this item is a question, which is answered with aether_answer"},
 	} {
 		f.calls = nil

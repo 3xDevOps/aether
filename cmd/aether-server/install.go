@@ -315,7 +315,7 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 		if port != "2222" {
 			host = net.JoinHostPort(host, port)
 		}
-		line := "on your computer, on the same tailnet: in the Aether app's Connect step choose\n" +
+		line := "on your computer, on the same tailnet: in the Cloudfield app's Connect step choose\n" +
 			"     Tailscale and enter " + host + "; in a terminal:\n       " + show("aether link "+host)
 		if web := options.Lookup("web-port").Value.String(); web != "0" {
 			url := "https://" + tailnetHost + "/"
@@ -328,7 +328,7 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 	}
 	switch {
 	case claimCode != "":
-		computer = append(computer, relayFrom+": in the Aether app's Connect step choose Aether relay, sign in\n"+
+		computer = append(computer, relayFrom+": in the Cloudfield app's Connect step choose Cloudfield relay, sign in\n"+
 			"     with GitHub and paste the claim link above; in a terminal:\n       "+claim(claimCode))
 	case edgeURL != "" && owner == nil:
 		here = append(here, "on this machine, print a claim code:\n       "+show(sudo+"aether-server edge claim-code"+configFlag(configPath)))
@@ -337,7 +337,7 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 		computer = append(computer, "on your computer (the first link on a fresh server becomes admin):\n       "+
 			show("aether link "+net.JoinHostPort(cmp.Or(listen, "<this-host>"), port)))
 	}
-	install := "on your computer, install Aether if it is not there yet (Windows: docs/install.md):\n       " + show(clientInstall)
+	install := "on your computer, install Cloudfield if it is not there yet (Windows: docs/install.md):\n       " + show(clientInstall)
 	reach := append(here, append([]string{install}, computer...)...)
 	steps := append([]string{
 		"start the server on this machine:\n       " + show(strings.ReplaceAll(serversetup.ActivateCommand, "systemctl", sudo+"systemctl")),
@@ -355,7 +355,7 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 	return nil
 }
 
-const clientInstall = "curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client"
+const clientInstall = "curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client"
 
 // A claim code names no edge, and the client falls back to the project's,
 // so a server on another edge needs --edge on both commands.

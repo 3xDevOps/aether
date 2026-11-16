@@ -52,7 +52,7 @@ func TestAuthUnknownKeyRejected(t *testing.T) {
 		_ = client.Close()
 		t.Fatal("expected auth failure for unknown key")
 	}
-	if !strings.Contains(banner.String(), "no Aether member for this key") {
+	if !strings.Contains(banner.String(), "no Cloudfield member for this key") {
 		t.Errorf("banner = %q, want it to name the missing member", banner.String())
 	}
 }

@@ -1,15 +1,15 @@
 # Security model
 
-What Aether isolates, what it leaves exposed, and who can see or act on what.
-Read it before you run Aether for other people or let someone join your
-server.
+What Cloudfield isolates, what it leaves exposed, and who can see or act on
+what. Read it before you run Cloudfield for other people or let someone join
+your server.
 
-The Aether server runs on your Linux host and starts every agent in a sandbox:
-a Docker container, or with `session-runtime vm` a virtual machine. A member is
-a person admitted to the server. Each member has a home directory on the server
-and an environment, a long-lived sandbox where they install and sign in to
-agent CLIs. A session is one agent task in its own sandbox, with the launching
-member's home mounted into it. A workspace is a
+The Cloudfield server runs on your Linux host and starts every agent in a
+sandbox: a Docker container, or with `session-runtime vm` a virtual machine. A
+member is a person admitted to the server. Each member has a home directory on
+the server and an environment, a long-lived sandbox where they install and sign
+in to agent CLIs. A session is one agent task in its own sandbox, with the
+launching member's home mounted into it. A workspace is a
 repository and its sessions. [Concepts](README.md#concepts) has the full glossary.
 
 ## Report a vulnerability
@@ -45,13 +45,13 @@ credentials out of the report.
 | [Team memory](#team-memory) | Only members pin notes into briefs. Notes with secrets are refused. Agents cannot delete. | A note can be wrong or planted. It is data, never an instruction. |
 | [Sysbox](#the-agent-container) | Docker inside a session without the host socket. Container root maps to an unprivileged host user. | Installing it from the dashboard runs a root script on the host. |
 | [Release signing](#release-signing) | Updaters install only binaries listed in a signed manifest for that exact tag. | `aether gui build --zip` checks only the app layout of a local zip. |
-| [Self-update](#server-and-client-updates) | Only signed `v*` releases of `3xDevOps/Aether`. A failed download replaces nothing. | A super admin chooses which release the server runs. |
+| [Self-update](#server-and-client-updates) | Only signed `v*` releases of `3xDevOps/cloudfield`. A failed download replaces nothing. | A super admin chooses which release the server runs. |
 | [Vulnerability scanning](#vulnerability-scanning) | `govulncheck` runs on every pull request that changes code. | It is advisory: a finding does not fail the build. |
 
 ## The agent container
 
 The container is the only isolation boundary. It is not a VM: every session
-shares the host's kernel, and Aether builds no second boundary inside it.
+shares the host's kernel, and Cloudfield builds no second boundary inside it.
 
 With `session-runtime vm`, the boundary is a Cloud Hypervisor virtual machine
 with its own kernel instead
@@ -247,8 +247,8 @@ Two things in an Isolated session still reach outside it:
 
 ### Sudo in a Default session
 
-A Default session's `sudo` is Aether's shim at `/usr/local/bin/sudo`, ahead of
-the image's on `PATH`. Docker's `no-new-privileges` stops the image's own:
+A Default session's `sudo` is Cloudfield's shim at `/usr/local/bin/sudo`, ahead
+of the image's on `PATH`. Docker's `no-new-privileges` stops the image's own:
 `/usr/bin/sudo` fails with `sudo: The "no new privileges" flag is set, which
 prevents sudo from running as root.`
 
@@ -279,7 +279,7 @@ is the agent's: read it before you allow it.
 - The shim accepts `sudo [-u user] [-E] [-H] [-n] [--] command [args...]`.
   `-E` and `-H` change nothing. `-n` fails instead of asking, with `sudo: a
   person must allow this command; -n cannot wait for one`. Any other flag
-  fails, for example `sudo: -i is not supported in an Aether Default session`.
+  fails, for example `sudo: -i is not supported in a Cloudfield Default session`.
 - While the workspace [setup script](environments.md#setup-script) runs,
   before the agent starts, `sudo` runs without asking: an admin wrote the
   script.
@@ -330,6 +330,22 @@ file yours is mounted over and detach it. For `claude` that is
 they have no installation of the agent in their own `~/.local/bin`, they also
 get yours, read-only, with your whole `~/.local/bin` on their `PATH` after
 their own entries.
+
+In session VMs, three agents work differently. A `copilot` or `antigravity`
+session gets a copy of your login, made at each cold start of its VM; a copy
+of either login is not invalidated when another is used, and after a revoke
+the session moves off your account or stops, so the copy is replaced. An
+`omp` session gets no file: oh-my-pi asks an auth broker the server runs for
+your account, which holds your logins in your `~/.omp/agent/agent.db`. The
+server checks every request against the session's account, ends open ones
+within 10 seconds of a revoke, and refuses the next. A recipient's session
+may only read your omp logins, refresh one and report usage, not store,
+disable or block them. The broker runs as a transient systemd unit as the
+system user `aether-omp`, without capabilities, with the host read-only and
+the server's data directory hidden except your `~/.omp/agent` and the
+broker's own directory, so it cannot read your other agents' logins
+([harnesses.md](harnesses.md#oh-my-pi-in-session-vms)). A recipient's omp
+receives your access tokens and API keys, never the refresh tokens.
 
 Claude Code caches the account it is signed in to as `oauthAccount` in
 `~/.claude.json`, and `claude auth status` reports that cache, not the owner of
@@ -458,13 +474,13 @@ The private key is never in your home. The server keeps it in
 your sessions and environment through a read-only SSH agent mounted at
 `/run/aether-signing/agent.sock`, which `SSH_AUTH_SOCK` names. git signs
 through it with `ssh-keygen`. The agent lists and signs with your key and
-refuses to add, remove, lock or unlock keys. Aether signs its end-of-session
+refuses to add, remove, lock or unlock keys. Cloudfield signs its end-of-session
 commits with the same key, read from the data directory.
 
 Root in any of your sessions can read and replace the token and `~/.gitconfig`, and
 can sign anything with your key while the session lives. It cannot copy the key or
-make Aether sign with another one. The token carries gh's default scopes
-(`repo`, `read:org`, `gist`) plus the `admin:ssh_signing_key` scope Aether
+make Cloudfield sign with another one. The token carries gh's default scopes
+(`repo`, `read:org`, `gist`) plus the `admin:ssh_signing_key` scope Cloudfield
 needs to register the key, so an agent can push to the workspace's origin,
 open pull requests, and add or remove signing keys on your account: a key it
 registers signs commits that GitHub shows as Verified. It can also plant
@@ -536,8 +552,8 @@ someone who can run code in the workspace.
 ## The assistant
 
 The [assistant](assistant.md) is an agent that runs in a sandbox of its own
-per member, driven from the dashboard. Its Aether tools act as you, with your
-permissions, and it uses the account you signed it in to.
+per member, driven from the dashboard. Its Cloudfield tools act as you, with
+your permissions, and it uses the account you signed it in to.
 
 - Its home is `<data>/assistant/<member>/home` and its instructions are
   read-only. No session, environment or other member's container mounts either,
@@ -575,7 +591,7 @@ permissions, and it uses the account you signed it in to.
   messaging or stopping a session and saving your environment wait for you to
   approve a card. An unanswered card expires after 10 minutes, or 24 hours
   when a connector turn raised it. In a connector turn, auto-approval never
-  passes a call the connector's scopes do not cover. Only your own Aether
+  passes a call the connector's scopes do not cover. Only your own Cloudfield
   devices decide a card (`assistant.confirm`), and a connector its own
   turns' cards (see [ChatGPT and Claude connectors](#chatgpt-and-claude-connectors)),
   never the assistant's tool socket. A card approved
@@ -677,7 +693,7 @@ session branches and pull requests go. A source URL must not contain credentials
 | --- | --- | --- |
 | `github` | The configuring admin's own gh login, with all its scopes. | The admin's home. |
 | `public` | None. | None. |
-| `deploy-key` | An ed25519 key Aether generates for the mirror. | `<data-dir>/mirrors/<workspace>/private_key.<generation>`, mode `0600`. |
+| `deploy-key` | An ed25519 key Cloudfield generates for the mirror. | `<data-dir>/mirrors/<workspace>/private_key.<generation>`, mode `0600`. |
 
 - Mirroring private source shares its code with every member and run in the
   workspace. It does not lend them the admin's GitHub login.
@@ -725,7 +741,7 @@ phone's browser checks every other link ([privacy.md](privacy.md)). It holds
 the `RECORD_AUDIO` permission and grants the microphone only to the
 dashboard's origin, when you press the dashboard's mic button; every other
 origin and every other WebView permission request is denied. The audio goes to
-your Aether server for transcription and the app does not store it.
+your Cloudfield server for transcription and the app does not store it.
 
 ### Push notifications
 
@@ -749,7 +765,7 @@ library adds two exported components, as every UnifiedPush app has: a
 receiver for the distributor's broadcasts, which acts only on a registration
 it made and hands the app only what decrypts with its keys, and a service the
 distributor binds to keep the app running while it delivers. Any app can
-also open Aether at a dashboard route, as an `aether://` link can, or take
+also open Cloudfield at a dashboard route, as an `aether://` link can, or take
 down one of its notifications; a route is only shown, never acted on.
 
 ### Terminal image uploads
@@ -919,7 +935,7 @@ there is no terminal, file, settings or git-writing tool.
   reply, capped at 4 KiB, with saved preferences matched word for word
   withheld; a paraphrase still gets out, a risk the owner accepted. Your
   approval rules and auto-approval pass a connector turn's calls as they do a
-  dashboard turn's, so content the external host reads, which Aether cannot
+  dashboard turn's, so content the external host reads, which Cloudfield cannot
   see, can steer them; a method outside the connector's scopes, as they are
   when the call is made, never passes without a card, and a revoked
   connector's waiting prompts do not run. A connector decides only cards its own turns raised, and
@@ -932,7 +948,7 @@ there is no terminal, file, settings or git-writing tool.
   without them. Approving needs the scope of the method's own tool. A card
   over 2,000 characters, one showing a saved preference, or one whose summary
   holds a line break or a character not printed as itself is decided only
-  in Aether. The assistant's tool socket cannot call `assistant.ask` or
+  in Cloudfield. The assistant's tool socket cannot call `assistant.ask` or
   `assistant.confirm`, and no connector can create a rule or change
   auto-approval.
 - Audit history: a connector's write calls, refused ones included, and its
@@ -1009,7 +1025,7 @@ there is no terminal, file, settings or git-writing tool.
   server's instructions tell the assistant never to follow it. Outside that
   field are only fixed labels, ids, states, counts, times, links, workspace
   and agent names, branch names, file paths and the server's own errors.
-  ChatGPT and Claude ask you before each write tool; Aether adds no
+  ChatGPT and Claude ask you before each write tool; Cloudfield adds no
   confirmation of its own. A permission request is only ever allowed or
   denied once: the connector never picks an "always" option, refuses a
   decision whose `action` text differs from the pending request's, and
@@ -1092,6 +1108,14 @@ signature over it. `aether update`, the dashboard's **Update now** and
 require the manifest's version to match the tag, and check every download
 against it. [install.md](install.md#verified-releases) shows the check by hand.
 
+The key is an ed25519 key pair generated offline. The base64 of its 32-byte
+seed is the secret `AETHER_RELEASE_SIGNING_KEY`, set in the `release`
+environment and nowhere in the repository; the base64 of its 32-byte public
+key is an entry of `releaseKeys` in `internal/selfupdate/keys.go`. The
+nightly key is the same kind of pair: the secret `AETHER_NIGHTLY_SIGNING_KEY`
+in the `nightly` environment, and `nightlyKeys` in the same file. Keep a
+seed out of logs, shells that record history and agent sessions.
+
 `aether gui build` on Windows checks the desktop app zip the same way, but
 `aether gui build --zip <path>` checks only a local zip's layout: compare it
 with `checksums.txt` first.
@@ -1102,12 +1126,139 @@ with `aether update --version <bridge-tag>` (or `aether server update
 --version <bridge-tag>`), or reinstall with the install script. A client that
 has not installed a release past a leaked key still trusts that key.
 
+### Release channels
+
+A server and its clients follow a [release channel](install.md#release-channel)
+(`nightly`, `beta` or `stable`). Which release is newest on a channel comes
+from three signed documents, none from GitHub's own ordering or labels:
+
+- **The manifest** (above) signs the release's `channel`, which must match its
+  tag's form (`-nightly.N`, `-beta.N`, none), so a nightly cannot be
+  relabelled beta, and a `build` number and `hotfix` count. Releases order by
+  `(build, hotfix)`, never by the tag: version strings sort `beta` below
+  `nightly`, and a tag is only a label. A release from before channels has no
+  build and counts as 0; among those, the version decides.
+- **A pointer per channel**, `nightly.json`, `beta.json` and `stable.json`
+  with a `.sig`, are assets of the `channels` prerelease. Each names the
+  channel's newest release (its tag, commit, build, hotfix and store schema)
+  and when it was published. A client verifies the pointer, fetches the
+  manifest of the tag it names, and refuses the release unless the manifest
+  agrees with the pointer on version, commit, build, hotfix and store schema.
+- **Both sign their channel.** A client refuses a pointer for another channel
+  (`channel pointer beta.json is signed for channel "stable"; do not follow
+  it`) and a manifest its channel does not take (`v0.9.0-nightly.13 is a
+  nightly release, which an install on beta does not take`). A channel takes
+  its own releases and those above it ([channels](install.md#release-channel)).
+
+**The high-water mark.** Every install keeps the highest `(build, hotfix)` it
+has accepted from each channel's pointer: on a server in
+`server-update/check.json` in its data directory, on a client in `update.json`
+beside `config.json`. A pointer below the mark is refused, and the check
+counts as failed:
+
+```
+channel pointer beta.json names build 380, below build 412 seen before
+```
+
+So replaying an old pointer, or serving one from a stale mirror, can fail
+checks but cannot move an install back. A manifest below the running build is
+refused the same way, because an install refuses a lower build whatever the
+pointer says. Only a named release installs one: `aether server update
+--version <tag> --allow-downgrade`, which never crosses the database's
+schema, or `aether update --version <tag>`. A state file that exists but
+cannot be read fails the check and is never overwritten, because starting
+again would forget the marks.
+
+What the mark cannot do:
+
+- **Withheld updates.** Serving an old pointer forever, or a 404, stalls
+  updates without moving anything backward. Cloudfield cannot tell a stalled
+  channel from a quiet one except by the signed `published_at`, which the
+  dashboard's Release channel section shows as the pointer's age. A frozen
+  channel stalls security fixes too. Until an install has verified a pointer
+  once, a missing pointer falls back to GitHub's Latest, which only releases
+  the channel takes can satisfy; after that a missing pointer is a failed
+  check, never a fall back.
+- **A bad pointer that is validly signed.** The mark moves only on a pointer
+  whose signature, manifest and fields all verify. A validly signed pointer
+  with a very high build raises every install's mark for good: no later
+  pointer with a lower build is accepted, and only a release with a higher
+  build recovers. The pointer writer refuses to sign a lower build for that
+  reason, so withdrawing a bad release means shipping a higher build, not
+  moving the pointer back.
+
+**Two kinds of key.** Release keys sign any manifest and pointer. Nightly keys,
+a separate list in the binary, verify only a document whose signed `channel` is
+`nightly`; a nightly-signed pointer must also name a nightly release. The nightly
+list is empty until the first nightly key ships in a release, so no
+nightly verifies yet, and a client older than that release cannot verify any.
+Nightlies publish unattended, so their key lives in the `nightly` environment,
+limited to `main`, and never signs a beta or stable. Whoever holds a leaked
+nightly key and can put files in the repository's releases can:
+
+- publish a nightly release and move `nightly.json` to it, which every server
+  and client on `nightly` then installs, with code that runs as root on a
+  server; and set a very high nightly build, so that nightly installs refuse
+  any real nightly below it.
+
+It cannot move `beta.json` or `stable.json`, publish a beta or stable release,
+or relabel a nightly: those fail verification (`channel pointer nightly.json is
+signed by a nightly key but names <tag>, a beta release; do not install it`).
+Servers and clients on `beta` or `stable` are not reached. Rotate a nightly key
+as the release key is rotated ([above](#release-signing)): ship the next public
+key in a release before anything is signed with it.
+
+**The trusted signer.** Releases are built in one job and signed in another.
+The jobs that build run the released commit's code and hold no manifest or
+pointer signing key (the Android job is the exception, below). The
+job that signs checks out `main`, takes only the built artifacts and values,
+and runs `main`'s `release-manifest`, `publish-release.sh` and pointer writer
+with the key. Code from the commit being released, including a commit that
+Promote rebuilds under a new tag, therefore never runs next to the key, and a
+promoted old commit is signed in today's manifest format. Which key a run can
+reach is decided by its GitHub environment: `release` for beta and stable,
+`nightly` for nightlies. A run for one refuses a document of the other's kind
+before it signs.
+
+Limits of that arrangement:
+
+- The Android job decodes the Android keystore secrets and runs the released
+  commit's Gradle with them, so the keystore is within reach of the built
+  commit's code. `nightly.yml` passes those secrets too, so that happens
+  unattended on every nightly.
+- A Promote's signing job checks the re-running admin again. A nightly's
+  signing job and a pushed tag's do not, and the `nightly` environment has no
+  reviewers, so a non-admin with write access can re-run them. A re-run can
+  only finish what the original run resolved.
+- GitHub environments limit which refs a workflow may use a secret from, but
+  not which workflow file. A tag runs the tagged commit's own workflow files,
+  so a hotfix tag on a `release/X.Y` branch runs that branch's copies with the
+  release key. The guards are the branch's ruleset (reviewed pull requests,
+  admin-only creation), a tag ruleset that only admins and GitHub Actions can
+  create `v*` tags under, required reviewers on the `release` environment, and
+  an admin's own reading of the branch before tagging
+  ([CONTRIBUTING.md](../CONTRIBUTING.md#hotfixes)).
+- The workflow files on `main` reach the key like any code on `main`, and pass
+  the same merge gate.
+- A release tag, a hotfix and a Promote run check that the pusher or dispatcher
+  is a repository admin. A workflow file that skips that check is not stopped
+  by it; a scheduled nightly has no admin behind it, and builds only a `main`
+  commit whose CI is green.
+
+**What an admin can do by hand.** On the server host, `sudo aether-server update
+--version <tag>` and `aether update --version <tag>` install a release you name,
+signature checked, whatever the pointer says. Removing `server-update/check.json`
+(or a client's `update.json`) forgets the marks; the error for an unreadable
+state file names this. `sudo aether-server update --channel
+<channel> --yes` moves a server to another channel. Restoring a pointer is a
+maintainer step ([CONTRIBUTING.md](../CONTRIBUTING.md#releases)).
+
 ### Server and client updates
 
 `aether server update` lets a super admin replace the server's binaries without a
 shell on the host. That adds no power, since a super admin can already run any code
 on the server's Docker daemon. The version must be a `v` semver tag from the
-`3xDevOps/Aether` releases; a client never supplies a URL. Both binaries are
+`3xDevOps/cloudfield` releases; a client never supplies a URL. Both binaries are
 verified before either is replaced.
 
 **Install** in the **Docker inside sessions** row of **Settings → Server** (admins
@@ -1123,10 +1274,10 @@ When the `aether` CLI lives in a directory only root can write, such as
 macOS dialog titled `osascript`. It authorizes one fixed command that copies
 the download, staged in `~/Library/Caches/aether/update` (mode `0700`), into
 place as root after checking its SHA-256. Your password goes to macOS, never
-through Aether. A same-user process can make the update fail or stall, not
+through Cloudfield. A same-user process can make the update fail or stall, not
 install other bytes: the digest is part of the command. A mismatch afterwards
 reports `installed <path> does not match the release checksum; do not run it`.
-Where Aether cannot offer the dialog, the banner shows `sudo aether update`
+Where Cloudfield cannot offer the dialog, the banner shows `sudo aether update`
 ([local-gateway.md](local-gateway.md#localv1-verbs)).
 
 ## Vulnerability scanning

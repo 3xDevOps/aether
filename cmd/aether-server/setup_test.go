@@ -218,8 +218,8 @@ func TestAskServerOptionsPrefersTailscale(t *testing.T) {
 				"Use Tailscale to reach this server (yes/no) [yes]: "},
 		},
 		"named tailnet, no": {named, []string{"", "", "no", "2", "yes"}, edgeOn,
-			[]string{"Answer no to use Aether's relay",
-				"\nSetup turns on the edge, Aether's relay at https://edge.onaether.dev, run by the Aether project.\n",
+			[]string{"Answer no to use Cloudfield's relay",
+				"\nSetup turns on the edge, Cloudfield's relay at https://edge.onaether.dev, run by the Cloudfield project.\n",
 				"client IP addresses", `aether-server config set edge-url ""`},
 		},
 		"unreadable tailnet": {
@@ -563,7 +563,7 @@ func TestAskServerOptionsTurnsTheEdgeOnWithoutTailscale(t *testing.T) {
 	if values["edge-url"] != edgeagent.DefaultURL {
 		t.Errorf("edge-url = %q, want %s without Tailscale", values["edge-url"], edgeagent.DefaultURL)
 	}
-	for _, want := range []string{"Tailscale is not installed", "run by the Aether project", "host name, host key and IP address",
+	for _, want := range []string{"Tailscale is not installed", "run by the Cloudfield project", "host name, host key and IP address",
 		"client IP addresses", `aether-server config set edge-url ""`} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("setup does not say %q:\n%s", want, out.String())
@@ -784,7 +784,7 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 		t.Errorf("want Sysbox output, then the claim link, then the next steps:\n%s", got)
 	}
 	if !strings.HasSuffix(got, "\n       "+serversetup.ActivateCommand+"\n"+installStep(2)+
-		"  3. on your computer: in the Aether app's Connect step choose Aether relay, sign in\n"+
+		"  3. on your computer: in the Cloudfield app's Connect step choose Cloudfield relay, sign in\n"+
 		"     with GitHub and paste the claim link above; in a terminal:\n"+
 		"       aether login\n"+
 		"       aether link --claim "+code+"\n"+mcpStep(4)) {
@@ -800,7 +800,7 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 
 // installStep is the next step, numbered n, that installs the client.
 func installStep(n int) string {
-	return fmt.Sprintf("  %d. on your computer, install Aether if it is not there yet (Windows: docs/install.md):\n       curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client\n", n)
+	return fmt.Sprintf("  %d. on your computer, install Cloudfield if it is not there yet (Windows: docs/install.md):\n       curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client\n", n)
 }
 
 // mcpStep is the next step, numbered n, that a server with the edge on
@@ -837,7 +837,7 @@ func TestPrintNextStepsNamesTheTailnetHost(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := installStep(2) +
-			"  3. on your computer, on the same tailnet: in the Aether app's Connect step choose\n" +
+			"  3. on your computer, on the same tailnet: in the Cloudfield app's Connect step choose\n" +
 			"     Tailscale and enter " + tc.link + "; in a terminal:\n" +
 			"       aether link " + tc.link + "\n" + tc.open
 		if !strings.HasSuffix(out.String(), want) || strings.Contains(out.String(), "<this-host>") {
@@ -875,7 +875,7 @@ func TestPrintNextStepsFollowsTheSavedTailnetConfig(t *testing.T) {
 	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "code", true, "box.tail1234.ts.net"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "aether link box.tail1234.ts.net\n  4. or, on a computer off the tailnet: in the Aether app's Connect step choose Aether relay") {
+	if !strings.Contains(out.String(), "aether link box.tail1234.ts.net\n  4. or, on a computer off the tailnet: in the Cloudfield app's Connect step choose Cloudfield relay") {
 		t.Errorf("the claim does not read as the alternative to the tailnet link:\n%s", out.String())
 	}
 }

@@ -27,7 +27,7 @@ takes the target's defaults, marked *.
 | `run` | `pr_merged`, `ci` | Every pull request the session recorded: `PR #N merged on GitHub`, or its checks finished. See [Pull requests and CI](#pull-requests-and-ci). |
 | `pr` | `ci`*, `review`*, `merged`*, `closed` | See [Pull requests and CI](#pull-requests-and-ci). |
 
-Aether has no deploy signal. `deployed` is refused with that reason; watch
+Cloudfield has no deploy signal. `deployed` is refused with that reason; watch
 `finished` or `pr_merged` instead.
 
 A notice's title is the session's title. Its body is the
@@ -46,12 +46,12 @@ and `ci` follow every pull request the session recorded (`run.pr.create`), and
 start the moment it records one.
 
 The server reads GitHub with the watch owner's own `gh` login in their
-Aether home, the one `aether github connect` sets up (see
+Cloudfield home, the one `aether github connect` sets up (see
 [environment-home.md](environment-home.md#from-the-cli)). Without one the
 watch is created in the `error` state with the real error and the fix:
 
 ```text
-no usable GitHub login in your Aether home (github: no native gh login found; run aether github connect); run aether github connect on your computer, or use Onboarding → Agent → GitHub → Connect GitHub in the dashboard
+no usable GitHub login in your Cloudfield home (github: no native gh login found; run aether github connect); run aether github connect on your computer, or use Onboarding → Agent → GitHub → Connect GitHub in the dashboard
 ```
 
 It recovers on its own once you log in. `watch.create` refuses a pull
@@ -106,7 +106,7 @@ decides on required checks, which `required` counts; `missing` lists
 required checks nothing has reported yet. All counts at zero with no
 `missing` means no check was reported on the head commit.
 
-GitHub sends Aether no webhooks, so the server polls:
+GitHub sends Cloudfield no webhooks, so the server polls:
 
 - Every minute, give or take 10%, while checks are pending, a review is
   requested, or the pull request changed since the last read; every 5
@@ -242,11 +242,11 @@ finishes" needs no one polling:
   target needs its `run_id` for a workspace. `watch.create` refuses any
   other session with the reason.
 - Each notice is written into each session's inbox once, as a
-  server-authored message. An idle session whose agent Aether can wake
+  server-authored message. An idle session whose agent Cloudfield can wake
   starts a turn for it; any other session reads it at its next turn or inbox
   read ([how agents notice mail](coordination.md#delivery-acknowledgement-and-retries)).
   `delivered` means written to the inbox. It names the watch and you
-  (`Aether: watch wat-… of Ada relays a notice about session run-a:
+  (`Cloudfield: watch wat-… of Ada relays a notice about session run-a:
   finished.`), quotes the target's title and the notice on an `Untrusted
   (from the watched session, not instructions):` line, and links to the
   target. It is information only: no model reads it on the way, and a relay
@@ -308,7 +308,7 @@ A digest is one push, written by the server without a model. It replaces the
 previous digest on your devices and opens the dashboard:
 
 ```text
-Aether · 2 need you · 1 failed · 3 done
+Cloudfield · 2 need you · 1 failed · 3 done
 api  Fix login test: run the migration?  [Answer]
 api  Launch docs session: Permission requested  [Answer]
 web  Bump deps: Failed: checks failed (lint)  [Open]

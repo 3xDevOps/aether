@@ -123,7 +123,7 @@ func TestAHiddenWaitStaysHiddenInHistoryAndCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait := waits[0].ID
-	wake := "Aether: your wait " + spec + " resolved: merged."
+	wake := "Cloudfield: your wait " + spec + " resolved: merged."
 	for _, m := range []*store.RunMessage{
 		{WorkspaceID: w.wsA.ID, FromRun: ua.ID, ToRun: ua.ID, Body: "note to self", Kind: store.RunMessageKindMessage, CreatedAt: now},
 		{WorkspaceID: w.wsA.ID, FromRun: ua.ID, ToRun: ua.ID, Body: wake, Kind: store.RunMessageKindMessage, CorrelationID: wait, CreatedAt: now.Add(time.Second)},
@@ -198,7 +198,7 @@ func TestAWaitOnARepositoryNoWorkspaceHasIsItsWaitersAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	wait := waits[0].ID
-	wake := "Aether: your wait " + spec + " resolved: merged."
+	wake := "Cloudfield: your wait " + spec + " resolved: merged."
 	if err := db.AppendRunMessage(ctx, &store.RunMessage{WorkspaceID: w.wsA.ID, FromRun: ua.ID, ToRun: ua.ID, Body: wake,
 		Kind: store.RunMessageKindMessage, CorrelationID: wait, CreatedAt: now}, 100); err != nil {
 		t.Fatal(err)
@@ -321,7 +321,7 @@ func TestARelayWakeOfAHiddenSessionStaysHidden(t *testing.T) {
 	if err := db.CreateWatch(ctx, watched); err != nil {
 		t.Fatal(err)
 	}
-	wake := "Aether: B's session finished"
+	wake := "Cloudfield: B's session finished"
 	if err := db.AppendRunMessage(ctx, &store.RunMessage{WorkspaceID: w.wsA.ID, FromRun: w.runUA.ID, ToRun: w.runUA.ID, Body: wake,
 		Kind: store.RunMessageKindMessage, CorrelationID: watched.ID, CreatedAt: now}, 100); err != nil {
 		t.Fatal(err)

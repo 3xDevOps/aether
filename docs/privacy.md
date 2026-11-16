@@ -1,16 +1,16 @@
 # Privacy policy
 
-Aether is self-hosted software. Nothing about you reaches the people who
+Cloudfield is self-hosted software. Nothing about you reaches the people who
 publish it unless you sign in to the edge they run, at `auth.onaether.dev`
 and `edge.onaether.dev` ([What an edge stores](#what-an-edge-stores)). This page is the privacy
-policy for the Aether Android app (package `io.aether.android`), whether it
+policy for the Cloudfield Android app (package `io.aether.android`), whether it
 came from a GitHub release or from Google Play, for the dashboard the app
 shows, and for that edge. Effective 2026-10-16.
 
 ## Who publishes it
 
-Aether is published by 3xDevOps, <https://github.com/3xDevOps>. Questions
-about this policy go to <https://github.com/3xDevOps/Aether/issues>.
+Cloudfield is published by 3xDevOps, <https://github.com/3xDevOps>. Questions
+about this policy go to <https://github.com/3xDevOps/cloudfield/issues>.
 Privacy requests about what the project's edge holds, such as a copy or a
 deletion, go to <team@onaether.dev>; deleting your own account needs no
 request ([What an edge stores](#what-an-edge-stores)).
@@ -19,7 +19,7 @@ request ([What an edge stores](#what-an-edge-stores)).
 
 - **Which mode you chose and, in Tailscale mode, the server name you type on
   the first screen**, in the app's private storage.
-- **In Aether Edge mode, the CLI's state**, under the app's private files
+- **In Cloudfield Edge mode, the CLI's state**, under the app's private files
   directory in `.config/aether/`: `config.json` (the servers you linked),
   `edge-device-key` (this phone's SSH private key, mode `0600`),
   `edge-tokens.json` (the edge's sign-in token for this device, mode `0600`)
@@ -82,7 +82,7 @@ request ([What an edge stores](#what-an-edge-stores)).
   sees a different member or server, or any refusal of access (a rejected
   token, a refused or removed member, a revoked or pending device); after a
   refusal nothing is saved again until a load succeeds. It is skipped above
-  1 MB. In Aether Edge mode the dashboard never saves it and deletes any
+  1 MB. In Cloudfield Edge mode the dashboard never saves it and deletes any
   copy, because another app could serve script from the gateway's loopback
   port. `localStorage` itself stays on in the app's WebView there; the app
   turns off only its HTTP cache and service workers' network loads. It is
@@ -135,7 +135,7 @@ device-to-device transfer (`allowBackup=false` and
 - **In both modes, to `github.com` for the newest release.** When the app
   comes to the front, about once an hour, and when you tap **Check for
   updates**, the bundled CLI asks `github.com` for the tag of the newest
-  Aether release, so the app can say an update exists. GitHub sees the
+  Cloudfield release, so the app can say an update exists. GitHub sees the
   phone's IP address and that request, nothing about you or your server.
   The app downloads nothing itself: you install a release from Google Play,
   or download its APK in the browser.
@@ -169,7 +169,7 @@ device-to-device transfer (`allowBackup=false` and
   opens in the phone's browser, under that browser's own policy.
 
 Dashboard requests above go to the server you chose, not to an
-Aether-operated analytics service. Optional GitHub authorization and the
+Cloudfield-operated analytics service. Optional GitHub authorization and the
 server-side connections described below are separate external requests.
 Nothing is sold.
 
@@ -180,7 +180,7 @@ your own server. Your server contacts GitHub to verify the account, list
 repositories the account can access (including private collaborator and
 organization repositories), look up a selected repository, and fetch its
 selected source branch over HTTPS. GitHub receives these authenticated
-requests under its own policy. There is no new Aether-operated authorization
+requests under its own policy. There is no new Cloudfield-operated authorization
 broker or analytics service, and this connection is separate from signing
 in to an edge and from an agent's model-provider account.
 
@@ -188,7 +188,7 @@ The native token is stored in
 `homes/<member>/.config/gh/hosts.yml` on your server. The server reads it for
 GitHub API requests and source fetches. A source mirror stores only the
 authorizing member and numeric GitHub account binding with its source
-metadata, not a copy of the token. Aether does not send that token to the
+metadata, not a copy of the token. Cloudfield does not send that token to the
 dashboard, the edge, or other members, or put it in workspace database
 records, on-disk Git configuration, URLs, or command arguments. It is used
 in server memory and the fetch child's temporary environment.
@@ -240,7 +240,7 @@ push service receives:
   size, at most 4096 bytes, and when it was sent.
 - **A signed token** (RFC 8292): the public half of a key your server
   generated for this purpose, the push service's own address, an expiry, and
-  the fixed contact `https://github.com/3xDevOps/Aether`. It names neither
+  the fixed contact `https://github.com/3xDevOps/cloudfield`. It names neither
   your server nor you.
 - **Delivery settings**: a 24-hour time to live, high urgency (normal for a
   reported success and for the message that clears a need), and a topic,
@@ -274,9 +274,9 @@ Off until an admin runs `sudo aether-server slack setup`
 member the server sends Slack the titles of the sessions that need them, the
 need lines (which can quote an agent's reason), the text and options of
 pending requests, session IDs and the dashboard's address, and, in the
-link confirmation, the member's Aether display name and the server's host name.
-Replies and button presses pass through Slack to the server. Nothing is sent
-to Slack for members who never linked.
+link confirmation, the member's Cloudfield display name and the server's host
+name. Replies and button presses pass through Slack to the server. Nothing is
+sent to Slack for members who never linked.
 
 Slack keeps the messages under the workspace's retention settings. Unlinking
 or removing the bot does not delete messages already sent. The tokens stay in
@@ -356,7 +356,7 @@ draft thumbnail or deleting a session does not remove the member-home file; see
 
 The shared app browser runs on your server, not in the phone's WebView.
 Browser input, app-terminal input, observations, frames, and explicit capture
-requests travel through your Aether server. A page opened there makes its
+requests travel through your Cloudfield server. A page opened there makes its
 own network requests from the session's network namespace; those app endpoints
 and any third parties the page contacts receive the usual browser requests
 under their own policies. This is separate from the Android shell's lack of
@@ -428,7 +428,7 @@ expired captures are not a successful verification result.
 Nothing is retained automatically. Resetting the browser does not delete
 already-written PNGs, and retaining an image does not upload it to a public
 pull request. There is no credential-entry recording. Do not capture
-credentials or publish app logins, cookies, tokens, or customer data; Aether
+credentials or publish app logins, cookies, tokens, or customer data; Cloudfield
 cannot reliably redact secrets an app renders in pixels or text, or those
 you include in verification notes. A member who explicitly downloads,
 exports or publishes a capture creates a separate copy under that
@@ -535,8 +535,8 @@ or Settings) with the id of the message it was quoted from, and when it was
 created, changed and last read.
 
 Only you can read, change or delete your preferences. Teammates and admins
-cannot through Aether, nor can your sessions or connected apps. Server operators
-with access to the database file can read it.
+cannot through Cloudfield, nor can your sessions or connected apps. Server
+operators with access to the database file can read it.
 
 Forgetting a preference deletes its row. SQLite overwrites the deleted text
 (`secure_delete`) and the server checkpoints and truncates the write-ahead
@@ -632,4 +632,4 @@ screen links to both that page and the licence text.
 ## Changes
 
 Changes to this policy are commits to this file; its history is public at
-<https://github.com/3xDevOps/Aether/commits/main/docs/privacy.md>.
+<https://github.com/3xDevOps/cloudfield/commits/main/docs/privacy.md>.

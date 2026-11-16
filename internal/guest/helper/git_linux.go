@@ -188,6 +188,10 @@ type gitService struct {
 	watches    map[string]*gitWatch
 	workspaces map[string]domain.WorkspaceID
 	seq        atomic.Uint64
+	// watched holds what each checkout's Flush waits on. The checkout's next
+	// server watch to start closes it once it registers or fails to, and any
+	// watch of the checkout that registers closes it.
+	watched map[string]chan struct{}
 }
 
 type gitWatch struct {
@@ -203,7 +207,7 @@ type gitWatch struct {
 func newGitService(cfg gitengine.Config, mounts []guest.CheckoutMount) (*gitService, error) {
 	s := &gitService{
 		dir: cfg.CheckoutsDir, targets: map[string]string{},
-		watches: map[string]*gitWatch{}, workspaces: map[string]domain.WorkspaceID{},
+		watches: map[string]*gitWatch{}, watched: map[string]chan struct{}{}, workspaces: map[string]domain.WorkspaceID{},
 	}
 	for _, m := range mounts {
 		s.targets[m.Key] = m.Target
@@ -344,7 +348,14 @@ func (s *gitService) Watch(stream grpc.BidiStreamingServer[guestpb.WatchAck, gue
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	flushes := s.watched[key]
+	delete(s.watched, key)
+	s.mu.Unlock()
 	if err := s.engine.WatchCheckout(stream.Context(), ws, domain.RunID(key)); err != nil {
+		if flushes != nil {
+			close(flushes)
+		}
 		return gitStatus(err)
 	}
 	w := &gitWatch{stream: stream, acks: map[uint64]chan string{}, done: make(chan struct{})}
@@ -353,6 +364,13 @@ func (s *gitService) Watch(stream grpc.BidiStreamingServer[guestpb.WatchAck, gue
 		old.close()
 	}
 	s.watches[key] = w
+	if flushes != nil {
+		close(flushes)
+	}
+	if later := s.watched[key]; later != nil {
+		close(later)
+		delete(s.watched, key)
+	}
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
@@ -490,11 +508,29 @@ func (s *gitService) BranchMoved(ctx context.Context, key domain.RunID, head str
 	return s.deliver(ctx, key, &guestpb.WatchEvent{Kind: &guestpb.WatchEvent_Head{Head: head}})
 }
 
-func (s *gitService) Flush(_ context.Context, req *guestpb.FlushRequest) (*guestpb.FlushReply, error) {
-	if _, err := s.workspace(req.GetKey()); err != nil {
+// Flush takes the checkout's last snapshot once a server watches it, as only
+// a watch carries the snapshot to the server, once the first watch to start
+// after the call failed, or once ctx ends.
+func (s *gitService) Flush(ctx context.Context, req *guestpb.FlushRequest) (*guestpb.FlushReply, error) {
+	key := req.GetKey()
+	if _, err := s.workspace(key); err != nil {
 		return nil, err
 	}
-	s.engine.FinishWatch(domain.RunID(req.GetKey()))
+	s.mu.Lock()
+	_, watching := s.watches[key]
+	attempted, waiting := s.watched[key]
+	if !watching && !waiting {
+		attempted = make(chan struct{})
+		s.watched[key] = attempted
+	}
+	s.mu.Unlock()
+	if !watching {
+		select {
+		case <-attempted:
+		case <-ctx.Done():
+		}
+	}
+	s.engine.FinishWatch(domain.RunID(key))
 	return &guestpb.FlushReply{}, nil
 }
 

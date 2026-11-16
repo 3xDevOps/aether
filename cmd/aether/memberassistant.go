@@ -85,7 +85,7 @@ func assistantRules(c *protocol.Client, w io.Writer, revoke string) error {
 		return err
 	}
 	if len(res.Rules) == 0 {
-		_, err := fmt.Fprintln(w, "no approval rules; approve a card with Always approve in the Aether app to add one")
+		_, err := fmt.Fprintln(w, "no approval rules; approve a card with Always approve in the Cloudfield app to add one")
 		return err
 	}
 	day := func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") }

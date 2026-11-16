@@ -1,8 +1,8 @@
-# Aether
+# Cloudfield
 
-Aether is a self-hosted development environment for coding agents. The public
-repository contains one Go server, one Go CLI, an embedded dashboard, and the
-operational guides needed to run them on your own hardware.
+Cloudfield is a self-hosted development environment for coding agents. The
+public repository contains one Go server, one Go CLI, an embedded dashboard, and
+the operational guides needed to run them on your own hardware.
 
 ## Public documentation
 
@@ -15,9 +15,9 @@ prose, and repetition.
 
 ## Audience
 
-The reader is a software developer who is new to Aether. Assume working
+The reader is a software developer who is new to Cloudfield. Assume working
 fluency with git, a shell, containers, and coding-agent CLIs such as Claude
-Code, Codex, and opencode. Do not assume any knowledge of Aether's own
+Code, Codex, and opencode. Do not assume any knowledge of Cloudfield's own
 concepts - workspace, session, harness, tool snapshot - and introduce each one
 where it first appears.
 
@@ -40,6 +40,9 @@ In practice, across docs, CLI output, and dashboard copy:
 3. Keep credentials, host keys, invite codes, profile homes, transcripts, and
    runtime state outside the source tree.
 4. Prefer an end-to-end check over duplicate unit tests.
+5. Never make anything up. Paths, flags, environment variables, API fields,
+   versions, logos, measurements and citations come from the real source:
+   read it, run it, or say you do not know.
 
 ## Checks
 
@@ -153,13 +156,13 @@ refactor(store): collapse sessions into workspaces
 feat(cli)!: drop the aether dash command
 ```
 
-## Working in parallel as an Aether agent
+## Working in parallel as a Cloudfield agent
 
 Many sessions share the same CI runners.
 
 - Keep a pull request as a draft while you iterate. Pull request CI runs
-  only `changes`, `audit`, `lint`, `build-and-test` and `dashboard`; the
-  merge queue runs the full suite.
+  only `changes`, `audit`, `lint`, `build-and-test`, `store-tests` and
+  `dashboard`; the merge queue runs the full suite.
 - Push milestones freely; Greptile reviews them. Do not wait on CI or rerun
   it between pushes.
 - Run the checks for what you changed locally first; see
@@ -177,7 +180,7 @@ Many sessions share the same CI runners.
   reviewer (a subagent is enough) reviews dark-mode screenshots at the
   affected widths as a senior product designer would. Apply or rebut each
   point and re-shoot until none blocks.
-  Aether is dark-first, so every screenshot is dark mode; force
+  Cloudfield is dark-first, so every screenshot is dark mode; force
   `colorScheme: 'dark'` in headless browsers.
 
 ## Repository shape

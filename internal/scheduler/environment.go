@@ -16,6 +16,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -71,6 +72,16 @@ var unprivilegedUser = func() string {
 	return fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid())
 }()
 
+// sessionUser is the uid:gid a session runs as for an image whose user is
+// user: an image's root runs as unprivilegedUser. The home stays at /root,
+// so absolute paths saved in it keep working.
+func sessionUser(user string) string {
+	if uid, _, _ := strings.Cut(user, ":"); uid == "" || uid == "0" {
+		return unprivilegedUser
+	}
+	return user
+}
+
 // BuildEnvironmentPlan mounts the member's home. A run on another member's
 // shared account also mounts the harness's login paths from the owner's home
 // and, when the member has no installation, the owner's read-only - nothing
@@ -121,10 +132,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if home == "" {
 		home = "/root"
 	}
-	// The home stays at /root, so absolute paths saved in it keep working.
-	if uid, _, _ := strings.Cut(user, ":"); uid == "" || uid == "0" {
-		user = unprivilegedUser
-	}
+	user = sessionUser(user)
 	isolated := purpose == EnvironmentPurposeRun && run != nil && run.Permission == domain.PermissionIsolated
 	var setupScript string
 	var secrets map[string]string
@@ -235,6 +243,22 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			}
 			plan.Mounts = append(plan.Mounts, state...)
 		}
+		if s.ompFront != nil {
+			broker, brokerErr := s.ompBrokerMount(member.ID, run, profile, home, env)
+			if brokerErr != nil {
+				return nil, brokerErr
+			}
+			plan.Mounts = append(plan.Mounts, broker)
+			// An isolated session's writes stay in its overlay, so it does not
+			// share the home's omp plugins and sessions.
+			if !isolated {
+				shared, sharedErr := s.ompSharedMounts(member.ID, homePath, home)
+				if sharedErr != nil {
+					return nil, sharedErr
+				}
+				plan.Mounts = append(plan.Mounts, shared...)
+			}
+		}
 		nestings = make(map[string]string, len(plan.Mounts)-1)
 		for _, m := range plan.Mounts[1:] {
 			nestings[m.ContainerPath] = home
@@ -294,6 +318,9 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	var roots []string
 	if s.cfg.Homes != nil {
 		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot(), s.scratchRoot(), s.accountConfigRoot(), s.vmDatabasesRoot()}
+	}
+	if s.ompFront != nil {
+		roots = append(roots, s.ompBrokerRoot())
 	}
 	if s.cfg.Signing != nil {
 		agentDir, err := s.cfg.Signing.Serve(member.ID)
@@ -382,6 +409,22 @@ func explicitEnvironment(profile harness.Profile, ws *domain.Workspace, secrets 
 	}
 	maps.Copy(env, profile.Env)
 	return env, nil
+}
+
+// createContainer creates every container the scheduler starts. It empties
+// the CLOUDFIELD_ name of every variable the server sets in a session, so
+// a workspace variable or an image's ENV cannot stand in for one through
+// the new name. It runs after a terminal's fingerprint is taken, so the
+// emptied names do not make a kept terminal look changed.
+func (s *Scheduler) createContainer(ctx context.Context, spec runtime.Spec) (runtime.ID, error) {
+	spec.Env = maps.Clone(spec.Env)
+	if spec.Env == nil {
+		spec.Env = map[string]string{}
+	}
+	for _, name := range coordtransport.SessionEnv {
+		spec.Env[envname.New(name)] = ""
+	}
+	return s.cfg.Runtime.Create(ctx, spec)
 }
 
 // harnessEnvironment is the harness configuration a run's container was
@@ -534,6 +577,9 @@ func applyInstallEnvironment(env map[string]string, home string) {
 }
 
 func (s *Scheduler) loginMounts(ctx context.Context, launcher, account domain.MemberID, profile harness.Profile, home string) ([]runtime.Mount, error) {
+	if profile.LoginBroker && s.ompFront != nil {
+		return nil, nil
+	}
 	logins, err := s.accountLogins(ctx, account, profile)
 	if err != nil || len(logins) == 0 {
 		return nil, err

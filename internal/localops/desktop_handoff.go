@@ -77,37 +77,44 @@ type handoffOps struct {
 	endDaemon   func() bool
 	startDaemon func() error
 	install     func() error
-	launch      func() error
+	launch      func(appDir string) error
 }
 
 // FinishDesktopUpdate waits for pids to exit, ends the sync daemon's
 // Scheduled Task, runs install, starts the task again if it was running, and
-// starts the app at appDir. When any step
-// before the swap fails, or the swap does, the app still on disk is started
-// instead and the reason is recorded for the next dashboard
-// (RecordDesktopBuildError). install replaces the app with rollback, as
-// InstallDesktop does.
+// starts the app install put in place, which sits beside appDir when the
+// app installed there has the legacy product name. When any step before the
+// swap fails, or the swap does, the app at appDir is started instead and
+// the reason is recorded for the next dashboard (RecordDesktopBuildError).
+// install replaces the app with rollback, as InstallDesktop does.
 func FinishDesktopUpdate(appDir string, pids []int, install func() error) error {
-	exe := filepath.Join(appDir, desktopExe)
 	return finishDesktopUpdate(handoffOps{
 		waitExit:    waitForExit,
 		endDaemon:   endDaemonTask,
 		startDaemon: startDaemonTask,
 		install:     install,
-		launch: func() error {
-			cmd := exec.Command(exe)
-			cmd.Dir = appDir
+		launch: func(dir string) error {
+			cmd := exec.Command(DesktopAppExe("windows", dir))
+			cmd.Dir = dir
 			detach(cmd)
 			if err := cmd.Start(); err != nil {
 				return err
 			}
 			return cmd.Process.Release()
 		},
-	}, pids, handoffTimeout, handoffRetry)
+	}, appDir, swappedInApp(appDir), pids, handoffTimeout, handoffRetry)
 }
 
-func finishDesktopUpdate(ops handoffOps, pids []int, timeout, retry time.Duration) error {
+// swappedInApp is where the install puts the app that replaces the one at
+// appDir: beside it under this build's product name, which is appDir itself
+// unless that app has the legacy name.
+func swappedInApp(appDir string) string {
+	return filepath.Join(filepath.Dir(appDir), windowsAppDir(productName))
+}
+
+func finishDesktopUpdate(ops handoffOps, current, updated string, pids []int, timeout, retry time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	started := current
 	var err error
 	for _, pid := range pids {
 		if err = ops.waitExit(pid, time.Until(deadline)); err != nil {
@@ -125,7 +132,9 @@ func finishDesktopUpdate(ops handoffOps, pids []int, timeout, retry time.Duratio
 			}
 			time.Sleep(retry)
 		}
-		if err != nil {
+		if err == nil {
+			started = updated
+		} else {
 			err = fmt.Errorf("localops: the desktop app was not updated: %w", err)
 		}
 		if daemonWasRunning {
@@ -139,7 +148,7 @@ func finishDesktopUpdate(ops handoffOps, pids []int, timeout, retry time.Duratio
 			err = errors.Join(err, recordErr)
 		}
 	}
-	if launchErr := ops.launch(); launchErr != nil {
+	if launchErr := ops.launch(started); launchErr != nil {
 		err = errors.Join(err, fmt.Errorf("localops: start the desktop app: %w", launchErr))
 	}
 	return err

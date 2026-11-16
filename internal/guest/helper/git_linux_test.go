@@ -860,7 +860,12 @@ func TestGitServiceAnswersTheServersCheckoutCalls(t *testing.T) {
 		if err := sess.Start(runCtx, string(testRun)); err != nil {
 			t.Fatal(err)
 		}
-		go func() { _ = sess.Run(runCtx) }()
+		ran := make(chan error, 1)
+		go func() { ran <- sess.Run(runCtx) }()
+		t.Cleanup(func() {
+			cancel()
+			<-ran
+		})
 		deadline := time.Now().Add(20 * time.Second)
 		for {
 			if data, err := os.ReadFile(filepath.Join(p.checkout, "local.txt")); err == nil && string(data) == "from local" {
@@ -892,10 +897,11 @@ func TestStoppedVMSessionIsShownFromItsLastSnapshot(t *testing.T) {
 	if err := p.host.StartDiffWatch(ctx, testWorkspace, testRun); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(p.checkout, "README"), []byte("changed\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(p.checkout, "new.txt"), []byte("new\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(p.checkout, "new.txt"), []byte("new\n"), 0o644); err != nil {
+	p.nextDiff(t, hasFile("new.txt"))
+	if err := os.WriteFile(filepath.Join(p.checkout, "README"), []byte("changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink("README", filepath.Join(p.checkout, "link")); err != nil {

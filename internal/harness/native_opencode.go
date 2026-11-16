@@ -36,7 +36,7 @@ case "$version" in
     set -- "$executable" --standalone "$@"
     ;;
   *)
-    printf 'Aether: managed OpenCode coordination supports major versions 1 and 2; found %s. Use a custom harness definition for another major version.\n' "$version" >&2
+    printf 'Cloudfield: managed OpenCode coordination supports major versions 1 and 2; found %s. Use a custom harness definition for another major version.\n' "$version" >&2
     exit 64
     ;;
 esac

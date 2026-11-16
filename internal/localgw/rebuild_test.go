@@ -7,6 +7,7 @@
 package localgw
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -52,6 +53,18 @@ func stubRebuild(t *testing.T, script string, installed bool) {
 		return "/home/u/.local/share/aether/desktop", installed
 	}
 	cacheHome(t)
+	captureShellOut(t)
+}
+
+// captureShellOut collects what the gateway tells the desktop shell on
+// stdout.
+func captureShellOut(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var out bytes.Buffer
+	old := shellOut
+	shellOut = &out
+	t.Cleanup(func() { shellOut = old })
+	return &out
 }
 
 // cacheHome points os.UserCacheDir at a temporary directory so the build
@@ -153,6 +166,33 @@ func TestUpdateApplyRebuildsThenAsksForARelaunch(t *testing.T) {
 	}
 	if got := localops.LastDesktopBuildError(); got != "" {
 		t.Fatalf("a build that worked recorded %q", got)
+	}
+}
+
+// After the product rename a build installs the renamed app beside the
+// running one, so the shell has to relaunch into that app, not itself.
+func TestUpdateApplyNamesTheInstalledAppForTheRelaunch(t *testing.T) {
+	pinVersion(t)
+	for goos, tc := range map[string]struct{ installed, exe string }{
+		"darwin": {"/Applications/Cloudfield.app", "/Applications/Cloudfield.app/Contents/MacOS/Cloudfield"},
+		"linux":  {"/home/u/.local/share/cloudfield/desktop", "/home/u/.local/share/cloudfield/desktop/aether-desktop"},
+	} {
+		t.Run(goos, func(t *testing.T) {
+			g := updateGateway(t, &verbStubBackend{}, true)
+			stubRebuild(t, fakeBuild(t, `{"phase":"done","path":"`+tc.installed+`"}`+"\n", "", 0), true)
+			out := captureShellOut(t)
+			old := handoffOS
+			handoffOS = goos
+			t.Cleanup(func() { handoffOS = old })
+			applyForRebuild(t, g)
+			waitForExit(t, g)
+			if g.ExitCode() != ExitRelaunch {
+				t.Fatalf("exit code = %d, want %d", g.ExitCode(), ExitRelaunch)
+			}
+			if want := `{"relaunch":"` + tc.exe + `"}` + "\n"; out.String() != want {
+				t.Fatalf("shell got %q, want %q", out.String(), want)
+			}
+		})
 	}
 }
 

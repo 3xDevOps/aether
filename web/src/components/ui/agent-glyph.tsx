@@ -1,17 +1,32 @@
-import { Bot, Boxes, Claude, Github, type LucideIcon, MousePointer2, Orbit, Pi, Sparkle, SquarePi, SquareTerminal, Wrench } from '@/components/icons'
+import {
+  AntigravityInitial,
+  Bot,
+  Claude,
+  Cursor,
+  GeminiInitial,
+  GitHub,
+  type LucideIcon,
+  OhMyPi,
+  OpenAI,
+  OpenCode,
+  Pi,
+  Wrench,
+} from '@/components/icons'
 import { cn } from '@/lib/utils'
 
-// Keys are internal/harness registry names.
+// Keys are internal/harness registry names. OpenAI, OpenCode and GitHub
+// forbid recolouring their marks, so Codex, OpenCode and Copilot keep the
+// text colour.
 const agents: Record<string, { icon: LucideIcon; colour: string }> = {
   claude: { icon: Claude, colour: 'text-agent-claude' },
-  codex: { icon: SquareTerminal, colour: 'text-agent-codex' },
+  codex: { icon: OpenAI, colour: 'text-text' },
   pi: { icon: Pi, colour: 'text-agent-pi' },
-  omp: { icon: SquarePi, colour: 'text-agent-omp' },
-  opencode: { icon: Boxes, colour: 'text-agent-opencode' },
-  antigravity: { icon: Orbit, colour: 'text-agent-antigravity' },
-  copilot: { icon: Github, colour: 'text-agent-copilot' },
-  gemini: { icon: Sparkle, colour: 'text-agent-gemini' },
-  cursor: { icon: MousePointer2, colour: 'text-agent-cursor' },
+  omp: { icon: OhMyPi, colour: 'text-agent-omp' },
+  opencode: { icon: OpenCode, colour: 'text-text' },
+  antigravity: { icon: AntigravityInitial, colour: 'text-agent-antigravity' },
+  copilot: { icon: GitHub, colour: 'text-text' },
+  gemini: { icon: GeminiInitial, colour: 'text-agent-gemini' },
+  cursor: { icon: Cursor, colour: 'text-agent-cursor' },
   custom: { icon: Wrench, colour: 'text-muted' },
 }
 

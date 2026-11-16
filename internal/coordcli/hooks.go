@@ -17,6 +17,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -27,7 +28,7 @@ Run a native lifecycle hook, reading its JSON event from stdin. Supported
 harnesses: claude, codex, copilot, gemini, cursor, pi, omp, opencode, generic.
 The extension and generic integrations use "context" for plain context text;
 command hooks receive their harness's native JSON. Context/event hooks are
-empty outside an Aether session. Errors go to stderr with a nonzero exit.
+empty outside a Cloudfield session. Errors go to stderr with a nonzero exit.
 
 omp, pi, opencode and generic also accept "wake": read JSON
 {"seen_message_ids":[],"wait_seconds":30} from stdin (wait defaults to 30,
@@ -71,16 +72,16 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	}
 	harness, event := args[0], args[1]
 	claudeWaiter := harness == "claude" && event == "wake"
-	if os.Getenv(coordtransport.EnhancedEnv) == "1" {
+	if envname.Getenv(coordtransport.EnhancedEnv) == "1" {
 		if event == "wake" && !claudeWaiter {
-			return ExitUsage, errors.New("hook wake: this is an enhanced session, whose agent Aether wakes with a prompt; stop this receiver")
+			return ExitUsage, errors.New("hook wake: this is an enhanced session, whose agent Cloudfield wakes with a prompt; stop this receiver")
 		}
 		return ExitOK, nil
 	}
 	if event == "wake" && !claudeWaiter {
 		return hookWake(ctx, cfg)
 	}
-	if harness == "claude" && event == "Stop" && os.Getenv(coordtransport.ManagedHooksEnv) == "1" {
+	if harness == "claude" && event == "Stop" && envname.Getenv(coordtransport.ManagedHooksEnv) == "1" {
 		return ExitOK, nil
 	}
 	if _, err := os.Stat(cfg.Socket); errors.Is(err, fs.ErrNotExist) {
@@ -160,7 +161,7 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		defer writeHookNotices(path, announced)
 	}
 	text := hookContext(notices, stopping)
-	if starting && os.Getenv(coordtransport.RoleCardEnv) != "1" {
+	if starting && envname.Getenv(coordtransport.RoleCardEnv) != "1" {
 		card := coordhooks.RoleCard(coordhooks.StatusGuide(status))
 		if brief := sessionMemoryBrief(ctx, cfg.Socket, status); brief != "" {
 			card += "\n" + brief

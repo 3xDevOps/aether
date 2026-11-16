@@ -37,7 +37,7 @@ async function display(message) {
     const persist = current?.data?.persist === true
     // A card's notification says how it ended under the server's title.
     const ended = !notice && String(cleared).startsWith('card:') ? message.title : undefined
-    await self.registration.showNotification(ended || current?.title || message.title || 'Aether', {
+    await self.registration.showNotification(ended || current?.title || message.title || 'Cloudfield', {
       body: notice ? current.body : message.body,
       tag: cleared,
       silent: true,
@@ -47,7 +47,7 @@ async function display(message) {
     })
     return
   }
-  await self.registration.showNotification(message.title || 'Aether', {
+  await self.registration.showNotification(message.title || 'Cloudfield', {
     body: message.body || 'A session needs you.',
     // One notification per watch notice, run, workspace budget or page: a
     // newer one replaces the older and alerts again, but for a summary of

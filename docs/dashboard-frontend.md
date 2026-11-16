@@ -1,6 +1,6 @@
 # Dashboard SPA (`web/`)
 
-The dashboard is the browser client for Aether. A **workspace** is one
+The dashboard is the browser client for Cloudfield. A **workspace** is one
 repository and base branch; a **session** is one agent working on its own branch
 in its own sandbox, a container or virtual machine on the server. The dashboard shows a member's sessions, lets them launch,
 watch, message and review them, and holds the pages for agents, files,
@@ -185,10 +185,12 @@ square. That hex is deliberately darker than the dashboard's own dark
 `--canvas`, `#141516` - a launcher icon has to read as an object against a
 wallpaper - so the splash lightens slightly as the SPA paints over it.
 
-Every icon is generated from `web/public/aether-mark.png` by `python3
+The web icons are generated from `web/public/aether-mark.png` by `python3
 scripts/make-icons.py`, the same script that writes the desktop app's, and the
-output is committed. Maskable icons and the iOS icon are square and full-bleed
-because the platform applies its own mask; the rest carry the rounded tile.
+output is committed. The Android app's icons come from
+`scripts/android-icons.py` ([CONTRIBUTING.md](../CONTRIBUTING.md)). Maskable
+icons and the iOS icon are square and full-bleed because the platform applies
+its own mask; the rest carry the rounded tile.
 
 CI installs Bun with `oven-sh/setup-bun` (version pinned in
 `web/.bun-version`) in jobs that run `make build` or `make release-binaries`,
@@ -318,8 +320,8 @@ app, which badges itself.
 
 ### Sidebar
 
-The sidebar (`sidebar.tsx`) is a `nav` named "Aether", 260px wide by default and
-resizable from 220px to 400px; older saved widths are clamped. `Mod+B`, the
+The sidebar (`sidebar.tsx`) is a `nav` named "Cloudfield", 260px wide by default
+and resizable from 220px to 400px; older saved widths are clamped. `Mod+B`, the
 **Hide sidebar** button in its header and Enter on its splitter hide it
 completely; the content view's header then shows **Open sidebar** at its left
 edge. Hiding or showing it hands focus to the control that reverses it. From
@@ -415,7 +417,7 @@ attached to it, the viewer included: the `watching` lists of
 right edge and the age and the glyph move left to make
 room; a session nobody is on reserves none. A root with subsessions shows a
 `Network` glyph and their count before the agent glyph, and its name adds
-"2 subsessions · 1 working"; every subsession lists under it. Its chevron
+"2 subsessions · 1 working"; its subsessions list under it. Its chevron
 folds the subsessions for this browser session only; they start open, and the
 first child to arrive opens with the chevron's turn animation. Folding keeps
 subsessions that need you visible. The first avatar sits whole at the edge and
@@ -464,13 +466,21 @@ session), and `u` opens the next session that needs you, oldest first.
 A Finished or Failed row does not recede while no member has opened its session
 since it finished (`finish_unopened`, see [Session state](#session-state)): its title
 keeps the text colour and its accessible name says "Not opened yet" before
-the age. A finished subsession nested under its parent follows the same rule. Once
+the age. A finished subsession listed under its parent follows the same rule. Once
 any member opens the session, the row recedes in every member's dashboard.
 
-Every unarchived subsession is indented beneath its parent and joined to it
+Every subsession in the list is indented beneath its parent and joined to it
 by tree connectors: a vertical trunk under the parent's status dot and a
 horizontal wire into each subsession row
-([Styles](styles.md#shell-palette-and-focus)). **Mine** also filters
+([Styles](styles.md#shell-palette-and-focus)). A subsession that finished
+with nothing left for a person leaves the list: one that reported success
+(**Finished: reported to its parent**) or ended `completed`, `merged` or
+`abandoned`, such as one its parent stopped. Its parent's last nested line
+counts them (**3 finished**, outside the chevron's count) and lists them in place until **Hide finished**,
+for this browser session only; the one that is open lists there regardless.
+The parent's count and its Details (**Subsessions**) still include them. One that failed, was interrupted or
+needs you stays listed, and a finished one returns while it works again. The
+session stays open either way (`settled` in `src/store/selectors.ts`). **Mine** also filters
 these subsessions under Working and Finished; Needs you keeps the whole tree
 visible. Selecting a session row opens that session, from anywhere on the row
 outside its buttons. The whole tree sits in
@@ -755,8 +765,8 @@ launch sessions (`useAssistantAvailable`); the same check gates every entry poin
   `other_member` says that member (`other_owner`) owns the session, so it asks
   even with auto-approval on; for a launch it says their account pays.
 - **Action cards** (`components/assistant/action-card.tsx`,
-  `lib/assistant-actions.ts`): `assistantView` takes each Aether tool call out
-  of its step block as a card: one whose `tool_name` ends in an `aether_*`
+  `lib/assistant-actions.ts`): `assistantView` takes each Cloudfield tool call
+  out of its step block as a card: one whose `tool_name` ends in an `aether_*`
   tool (Claude Code's `mcp__aether__aether_launch_session`, or the bare name), or
   a Codex call titled `mcp.aether.aether_*`, whose `{server, tool, arguments}`
   input and `{result, error}` output are unwrapped from the call's latest
@@ -991,14 +1001,14 @@ secondary icon button to its right, which keeps the workspace switcher's
 room), or the top bar's first row while the sidebar is hidden; under 768px the
 **Assistant** tab of the [phone tab bar](#phone-layout) replaces it; keeping
 it out of the top bar's row leaves that row to the header destinations),
-`Mod+Shift+Space`, the palette's **Ask Aether**, a secondary **Ask Aether** in
-the board's empty states, and **Stuck? Ask Aether** under each onboarding
-step.
+`Mod+Shift+Space`, the palette's **Ask Cloudfield**, a secondary **Ask
+Cloudfield** in the board's empty states, and **Stuck? Ask Cloudfield** under
+each onboarding step.
 
 ### Landmarks and headers
 
 **Landmarks.** The skip link "Skip to content" is the first tab stop; the
-header navigation is `nav` "Main navigation"; the sidebar is `nav` "Aether"
+header navigation is `nav` "Main navigation"; the sidebar is `nav` "Cloudfield"
 containing `region` "Sessions"; the content is the one `main`, with one `h1` per
 view from `PaneHeader` (`tabIndex=-1`). After a route
 change focus moves to that `h1`, unless the view took focus for itself. Unit
@@ -1527,8 +1537,8 @@ team reads write it onto the stored info, which is the gauge's only reader. The 
 stays optional and the gauge stays hidden if the read fails. What `statfs`
 answers is the whole filesystem holding the data directory, not the directory
 itself, and the gauge is labelled as that: it is the number that says whether
-the box is running out of room, and claiming it as Aether's own usage would be
-an invention.
+the box is running out of room, and claiming it as Cloudfield's own usage would
+be an invention.
 
 `account.usage` is the quota RPC used by Settings > **Usage**. Its params
 are `{account_member_id?: string, refresh?: boolean}` and its result is
@@ -1628,7 +1638,9 @@ shows (`card-list.tsx`, virtua).
 In a flat session list (`run-list.tsx`) a root lists its subsessions
 under it with a toggle naming the count (**Show 2 subsessions
 **). Subsessions start shown, and a folded one that needs you still shows. Nested rows add the model to the
-agent.
+agent. **All workspaces** leaves out the finished subsessions the sidebar
+does (`withoutSettled`), from its rows and its count, except one with
+sessions under it.
 
 A card (`run-card.tsx`, on the `Card` primitive) has three parts:
 
@@ -1781,7 +1793,8 @@ Needs you count changes.
 
 ### Map
 
-**Map** exposes every individual session, subsessions included. `mapRuns()` reads
+**Map** exposes every individual session, subsessions included, finished ones
+too. `mapRuns()` reads
 the unaggregated `runRows()` presentation rather than Board's folded cards, and `useMapRuns` reuses unchanged card objects
 (`dequal`), so a `run.agent` event re-renders one card. A map card opens that
 individual session; its primary action still targets the condition that needs
@@ -2087,9 +2100,9 @@ message. *Cause* is the session's `cause` in words; it is shown only while the
 session is live and shows the state the server chose, so not for a paused session
 or a request shown as "Waiting for *name*".
 
-A session that shows a reported wait carries `wait`, what Aether verified about
-the conditions the agent named ([Waits Aether can
-check](failure-handling.md#waits-aether-can-check)). `waitLine` words it,
+A session that shows a reported wait carries `wait`, what Cloudfield verified
+about the conditions the agent named ([Waits Cloudfield can
+check](failure-handling.md#waits-cloudfield-can-check)). `waitLine` words it,
 and `stateWords` puts that in place of the agent's summary, even one that
 reads "Waiting for ...", which moves to the tooltip as "The agent reported:
 *summary*":
@@ -2100,7 +2113,7 @@ reads "Waiting for ...", which moves to the tooltip as "The agent reported:
 | `source_unknown` | "Waiting on *detail* since 01:10 — *error*": the local time of the last successful read and the source's error verbatim, never the last status as current | dashed clock, neutral |
 | `system_fault`, still waiting | "Wait fault: *detail* — *error*" | clock, failed colour |
 | `system_fault`, Needs you | the Needs you reason, then " — *error*" | amber ring |
-| `unverified` | the agent's summary; the tooltip adds "Not verified: the wait names no condition Aether can check." | the state's |
+| `unverified` | the agent's summary; the tooltip adds "Not verified: the wait names no condition Cloudfield can check." | the state's |
 
 `toneOf` picks the dot, and the tooltip gives the exact time of the last
 read. Only the server's `needs-you` state lists a broken wait in Needs you;
@@ -2208,7 +2221,7 @@ they come from the room, which the session's `state` does not cover, so push and
 | `state` `disconnected` (labelled Disconnected) | owner | the reason: Agent disconnected: … / Enhanced could not start: … |
 | `state` `needs-you` with a `blocked: <summary>` reason | owner | Blocked: … |
 | `state` `needs-you` with a `needs input: <question>` reason | owner | Agent asks: …, with **Reply** |
-| `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
+| `state` `needs-you` with a usage limit Cloudfield will not resume | owner | Usage limit reached on …, with **Open** |
 | `state` `needs-you` with an Enhanced `turn interrupted` or `turn ended: <stop reason>` reason | owner | Turn interrupted · reply to continue / Stopped: the reply reached its token limit · reply to continue, with **Reply** |
 | `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the session to see its request, with **Open** |
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
@@ -2451,7 +2464,7 @@ repository; unless you are already on that branch, its toast offers **Switch
 to it** (`pull.switch`, which refuses a dirty checkout with git's own
 reason) and **Copy command** (`git switch <branch>`). Board verbs (`boardCommands`): **Open the board**, **Open
 all workspaces**, **Connect ChatGPT or Claude** (these three in the Navigate
-group), **Ask Aether** (opens the assistant; offered when the server
+group), **Ask Cloudfield** (opens the assistant; offered when the server
 serves `assistant.status`), **New session…**, **Launch from a template…**,
 **Archive finished sessions…**, **Free retained sandboxes…** and the three theme
 commands. Each verb is offered only when the server would allow it: the gates
@@ -2708,7 +2721,7 @@ form and Launch, outside the scrolling form, so the keyboard cannot hide it;
 past 40% of the screen it scrolls. So a quick task is three steps: **New**,
 type, Launch.
 
-**Share to Aether.** Opening `/?new=1&prompt=<encodeURIComponent(text)>`, or
+**Sharing from another app.** Opening `/?new=1&prompt=<encodeURIComponent(text)>`, or
 the gateway URL with `&new=1&prompt=...` through an edge, opens New session
 with the text as its task. It is the entry point for sharing from another
 app, so the text only fills the form. At load, before any route is written to
@@ -3136,11 +3149,18 @@ and below 30rem **Multiplayer** keeps only its icon. The controller summary
 truncates instead of wrapping, at 12rem below a 48rem strip. Offline or
 failed presence reads mark the retained roster **(last known)**. Control and
 presence failures stay beside the action rather than inside a closed composer.
-With a mouse on a layout wider than the 767px phone breakpoint and motion allowed, the strip's
-dots fade to nothing under the pointer and return to full 54px away:
-`useDotFade` (`routes/run/dot-fade.ts`) writes the pointer position into a
-`mask-image` on `.control-matrix` from one `pointermove` listener, batched per
-frame, and eases the mask out over 1200ms on `pointerleave`.
+With a mouse or touch pointer on the multiplayer strip, `useDotFade`
+(`routes/run/dot-fade.ts`) swaps the strip's dot texture for SVG copies of
+it and springs each dot away from the pointer. Pointer speed adds a
+two-branch V wake, and a click or tap swells the nearby dots under a spreading
+ring. The clear bars behind text damp motion to 25%. The effect is decoration,
+so the strip is not a tab stop and takes no keys. The hook listens on the strip
+alone: `ControlButton`'s pointer capture and a touch's implicit capture keep a drag's
+moves there, and `touch-pan-y` keeps a horizontal touch drag from turning into
+a pan. Events only record the pointer; each animation frame measures the strip
+and its clear bars once, moves the dots, and rewrites only those not at rest.
+When every dot is back at rest the SVG is removed and the static texture
+returns. With reduced motion the strip keeps the static texture.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
 cancellation and server acknowledgement as Standard sessions. Streaming updates
@@ -3151,19 +3171,23 @@ generation. Takeover denials belong to the requester, not the holder.
 `MultiplayerControls` renders `ControlMatrix` as the strip's background,
 and `TerminalPane` renders it behind the agent terminal's toolbar. The
 component is a neutral dot layer, one `radial-gradient` tile, under a
-colored copy of the same dots. The bars give each group of text and
-buttons `.control-matrix-clear`, a 90% `--chrome` fill with a blurred
-shadow of the same colour that hides the dots under the group and fades
-them back in around it. A rule on the matrix's siblings turns
-`text-muted` on the bar to `--text`. The copy is clipped from the left by
-`--control-reach`, a registered `@property` number (1 empty, 0 full), so it
-is revealed from the right edge, where the control button sits. The
+colored copy of the same dots. While the strip's dots move, `useDotFade`
+removes these backgrounds and draws each layer's dots as an SVG inside the
+same element, red hold copy included, so the clipping, masks, colors and paint
+order below apply unchanged.
+The bars give each group of text and buttons `.control-matrix-clear`, a 90%
+`--chrome` fill with a blurred shadow of the same colour that hides the dots
+under the group and fades them back in around it. A rule on the matrix's
+siblings turns `text-muted` on the bar to `--text`. The copy is clipped from the
+left by `--control-reach`, a registered `@property` number (1 empty, 0 full),
+so it is revealed from the right edge, where the control button sits. The
 acquisition, release and takeover animations drive `--control-reach` and
 `color` on the colored layer. Its opacity is a separate animation: 70%
 while the dots move or a hold is under way, then half once acquisition
-settles, breathing on an infinite 8-second loop. During a hold
-`--control-hold` moves a 4rem gradient mask that fades the teal out and a
-red copy in. In
+settles. Behind the terminal toolbar it then breathes on an infinite 8-second
+loop; on the multiplayer strip, whose dots answer the pointer, it holds still.
+During a hold `--control-hold` moves a 4rem gradient mask that fades the teal
+out and a red copy in. In
 Enhanced sessions its appearance follows the acknowledged ACP lease, not the
 unused agent terminal's history or connection state, and it shows on every
 view that shows the strip. Voluntary release retracts it; takeover
@@ -3351,7 +3375,7 @@ prose stays in the conversation as `assistant` rows, and the work between
 two pieces of prose (thoughts, tool calls, plans, subagent launches and
 answered requests) joins one `steps` block. The prose after the last block
 is the answer. The `aether-internal report` call (or `aether_report` tool)
-that ends an Aether turn joins the block before the prose it follows, so a
+that ends a Cloudfield turn joins the block before the prose it follows, so a
 reply written before reporting stays the answer. A segment without work,
 such as `ping` and `pong`, has no block. The
 block's header names the work ("Read 12 files, ran 5 commands and edited 3
@@ -3831,7 +3855,7 @@ from the sessions the dashboard already holds, so a new subsession appears at on
 A call still open when its turn or subagent ended is **Stopped** at that end,
 unless it is a background task of a live session. Item times are log times, so a
 call that settled within 50ms is instant. A turn is named by the first line
-of its prompt, by Aether's wake-up wording ("Woken by new agent messages"),
+of its prompt, by Cloudfield's wake-up wording ("Woken by new agent messages"),
 or `Turn N`. The session's bar is its `run.status` history, coloured by state;
 `readTraceLog` (`src/store/trace-log.ts`) reads the session's `run.status` and
 `run.cost` events with `workspace.timeline` (newest first, at most 2,000),
@@ -5585,7 +5609,7 @@ The sections below cover only the member's own sessions in the same window.
 - **Time.** Median and slowest-10% session time, and, from the server's state
   record, median time working, waiting on you and your response time. When
   fewer sessions have state times than session times it says "measured for N of M
-  sessions; Aether records this from <date> on."
+  sessions; Cloudfield records this from <date> on."
 - **Usage**, collapsed: cost as a floor ("at least $4.12") with how many
   sessions reported it, tokens, and a link to **Settings › Usage** for
   subscription quota. Cost never stops a session.
@@ -6786,7 +6810,9 @@ Categories:
   {client}`, remounted when `identityKey` changes so a code never outlives
   its member. A ChatGPT / Claude segmented control picks numbered steps.
   `connector.list` gives the URL to show at once (`url`), the edge's
-  `universal_url` and `sign_in`. With `sign_in` the third step mints no code
+  `universal_url`, that URL at every address of the edge
+  (`universal_urls`) and `sign_in`. A URL in `universal_urls` is treated as
+  `universal_url` everywhere below. With `sign_in` the third step mints no code
   and **Watch for the connection** polls for 10 minutes, then says nothing
   connected; otherwise **Get a
   code** calls `connector.code` and shows its code with `useCountdown`. A
@@ -6814,7 +6840,7 @@ Categories:
   failed mint revokes nothing) and **Revoke** (confirm). A move or
   reconnect stays in progress past its code or watch, so **Get a code** or
   **Watch for the connection** continues it at its URL, until its
-  replacement calls Aether or **Stop** ends it; until then the status region
+  replacement calls Cloudfield or **Stop** ends it; until then the status region
   names it and the other **Move** and **Reconnect** buttons are disabled.
   Errors show verbatim with a fix:
   a server without `connector.list` (`-32601`) gets the update command and
@@ -7229,7 +7255,7 @@ working tree is dirty. The panel then shows both outputs in the order git
 produced them: the comparison's fetch, then the fast-forward. `diverged`
 means both sides moved on: the step names both tips and offers the fetch,
 log, rebase and push commands to resolve it by hand, copyable as one block,
-with no fast-forward button, because Aether never force-pushes.
+with no fast-forward button, because Cloudfield never force-pushes.
 
 Both states keep **Push now**, which re-compares - the thing to do after
 resolving by hand - and both take away the copyable `git push -u aether
@@ -7297,7 +7323,7 @@ navigating elsewhere marks the UI onboarded and clears wizard state.
 
 Connect asks **How does this computer reach your server?** with three
 radio cards (`src/routes/onboarding/connect-step.tsx`): **Tailscale**,
-marked Recommended and chosen by default, **Aether relay**, and **SSH
+marked Recommended and chosen by default, **Cloudfield relay**, and **SSH
 address**. On a phone the three share one row and the chosen card's
 one-line description shows below it, so the field below stays above the
 keyboard. A handed link, or **Link
@@ -7309,7 +7335,7 @@ which `link.apply` takes as the invite's display name or the saved link's
 profile name. Both send `link.apply`; only SSH address sends the invite and
 name.
 
-Aether relay signs in to an edge (`src/routes/onboarding/edge-link.tsx`):
+Cloudfield relay signs in to an edge (`src/routes/onboarding/edge-link.tsx`):
 **Sign in with GitHub** runs the edge's device flow through the local
 gateway, which keeps the device token, shows the code while it polls
 `edge.status`, then lists the servers the account reaches, each with one
@@ -7405,8 +7431,8 @@ The dashboard tracks three update targets: the **server**, **this client**
 (the `aether` binary running `aether gui`) and the **desktop shell**.
 `src/store/updates.ts` derives each target's state from the store:
 `up_to_date`, `checking`, `check_failed`, `available`, `required`,
-`scheduled`, `applying`, `restarting`, `ready_to_restart`, `failed` or
-`rolled_back`. Every surface below renders from those states:
+`scheduled`, `channel_wait`, `applying`, `restarting`, `ready_to_restart`,
+`failed` or `rolled_back`. Every surface below renders from those states:
 
 - the sidebar notice row,
 - the **Updates** dialog (`UpdateCenter` in
@@ -7423,6 +7449,38 @@ semver precedence:
 - numeric prerelease identifiers order numerically;
 - a `git describe` tail ranks just above its tag;
 - an unparseable version (`dev`, a bare commit) is never behind.
+
+That order decides only the dashboard's own comparisons, and only when a
+side reports no signed build. When the client and the server both report
+one (`cli_build` in `update.check`, `build` in `server.info`), the notice
+that the server is older than this client (`serverTooOld`) orders by
+`(build, hotfix)`, as the server's client gate does, so a beta promoted
+from a nightly is not older than that nightly.
+
+- **Release channel.** **Settings › Server** has a **Release channel**
+  section (`src/routes/settings/release-channel.tsx`) with Stable, Beta and
+  Nightly pills, shown once `server.update_status` names a `channel`. Every
+  member sees the current channel; only a super admin gets the pills.
+  Picking Nightly always asks **Switch to nightly builds?** first. Picking
+  Stable or Beta runs `server.release_channel_set` with `dry_run`, and when
+  the answer says `wait` (the running build is above that channel's newest),
+  or the channel's newest release could not be read, shows **Switch to
+  beta?** with the running and target versions and builds, or the dry run's
+  `target_error` verbatim. Anything else saves at once. Saving installs
+  nothing; a pending update the new channel does not take is cancelled and
+  the section says so. A server error shows as it came. On a nightly or beta
+  server a super admin also sees the newest beta, with the days since it
+  was cut, and the newest nightly, from `channel_pointers` in
+  `server.update_status` (each present only when the last check verified
+  that pointer, and absent after a restart until the first check). Each has
+  a **Promote** link to
+  `https://github.com/3xDevOps/cloudfield/actions/workflows/promote.yml`. The
+  link only opens that page; its Run button promotes.
+- **Channel wait.** While `server.update_status` reports `channel_wait`, the
+  server row says the server stays on its build, with both builds, until the
+  channel reaches it, instead of "up to date" or an offer. An update the
+  server scheduled itself (`pending.by_server`) reads "Scheduled by the
+  server".
 
 The server always comes first. It updates before its clients, and a server
 that runs a newer release than a client refuses that client
@@ -7475,7 +7533,7 @@ that runs a newer release than a client refuses that client
   its cache. The check always answers. With nothing to update, the dialog
   says *You're up to date (vX). Checked HH:MM.*, and each row says the same
   for its target; an out-of-date desktop app withholds that line. A check that failed shows the error verbatim:
-  - *Could not check for a new Aether release.*
+  - *Could not check for a new Cloudfield release.*
   - *The server could not check for a new release.*
   - *Could not read the server's update status.* when the status read
     itself failed.
@@ -7489,7 +7547,7 @@ that runs a newer release than a client refuses that client
      rolled back*;
   3. *Server X is available* (members: *Server X is available, ask an
      admin*);
-  4. *Update to Aether X failed* or *Aether X is available*;
+  4. *Update to Cloudfield X failed* or *Cloudfield X is available*;
   5. *The desktop app is out of date*.
 - **The dialog lists the server first.**
   - **Admins** get the server's version, the latest release and the
@@ -7564,8 +7622,8 @@ that runs a newer release than a client refuses that client
     directory only root can write, such as `/usr/local/bin/aether`): the
     button, and before the click: *macOS will ask for an administrator
     password: {cli_path} is in a directory this account cannot write to.
-    The dialog is labelled osascript, the tool Aether asks through. Aether
-    never sees your password.*
+    The dialog is labelled osascript, the tool Cloudfield asks
+    through. Cloudfield never sees your password.*
   - *manual*: no button. The row shows `sudo aether update` with a copy
     button.
 
@@ -7579,7 +7637,7 @@ that runs a newer release than a client refuses that client
   `applyClientUpdate` in `src/store/updates.ts` runs the click, shared with
   the gate:
   1. It re-reads `update.check` with `refresh: true`. A fresh answer that
-     finds this machine current installs nothing and says *Aether vX is the
+     finds this machine current installs nothing and says *Cloudfield vX is the
      newest release. Nothing was downloaded.* A fresh `cli_error` is the
      click's error, except on a gated client whose `target_version` is
      set: the server's release was found anyway, so the install goes on.
@@ -7600,8 +7658,8 @@ that runs a newer release than a client refuses that client
 
   When the gateway reports the CLI as `packaged` (the Android app), the
   client row and its notice are gone. The dialog says *Updates come from
-  the Android app: install its new version to update Aether.*, followed,
-  when a newer release exists, by *Aether <tag> is released; the app's
+  the Android app: install its new version to update Cloudfield.*, followed,
+  when a newer release exists, by *Cloudfield <tag> is released; the app's
   banner says when and where to update.* The app's own banner is the
   notice ([install.md](install.md#android-app)).
 - **The required-update gate.** The gate replaces the whole dashboard while
@@ -7651,11 +7709,11 @@ that runs a newer release than a client refuses that client
   with. A client that cannot update itself gets neither button nor
   command, only the line and release link the client row shows; a
   *packaged* one (the Android app) reads *Updates come from the Android
-  app: install its vX release to update Aether.* What follows a finished
+  app: install its vX release to update Cloudfield.* What follows a finished
   update depends on the gateway:
   - under the desktop shell, the gateway relaunches and the page comes
     back on the new version;
-  - in a browser tab, the gate says *Aether X is installed.*, says to
+  - in a browser tab, the gate says *Cloudfield X is installed.*, says to
     restart `aether gui`, and offers **Reload**.
 
   A later `update.check` that reached the server (`server_version` set, no

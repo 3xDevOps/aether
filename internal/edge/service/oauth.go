@@ -101,7 +101,7 @@ func (s *Service) signinStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setCookie(w, signinCookie, base64.RawURLEncoding.EncodeToString(raw), int(signinTTL.Seconds()))
-	http.Redirect(w, r, s.oauth.AuthCodeURL(st.State, oauth2.S256ChallengeOption(st.Verifier)), http.StatusFound)
+	http.Redirect(w, r, s.pair(r).oauth.AuthCodeURL(st.State, oauth2.S256ChallengeOption(st.Verifier)), http.StatusFound)
 }
 
 func (s *Service) signinCallback(w http.ResponseWriter, r *http.Request) {
@@ -131,13 +131,14 @@ func (s *Service) signinCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), oauth2.HTTPClient, s.client), providerTimeout)
 	defer cancel()
-	tok, err := s.oauth.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(st.Verifier))
+	p := s.pair(r)
+	tok, err := p.oauth.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(st.Verifier))
 	if err != nil {
 		s.githubErrors.Add(1)
 		s.fail(w, r, nil, pageErr(http.StatusBadGateway, "GitHub sign-in: exchange code: %v", err))
 		return
 	}
-	account, err := s.githubAccount(ctx, tok.AccessToken)
+	account, err := s.githubAccount(ctx, p.githubAPI, tok.AccessToken)
 	if err != nil {
 		// An account the edge refuses keeps its 403: only GitHub failing
 		// to answer is a 502, and logged.
@@ -201,13 +202,13 @@ func (s *Service) startSession(w http.ResponseWriter, r *http.Request, account e
 
 // githubAccount reads the GitHub user and keeps only a primary, verified
 // email.
-func (s *Service) githubAccount(ctx context.Context, accessToken string) (edgeproto.Account, error) {
+func (s *Service) githubAccount(ctx context.Context, api, accessToken string) (edgeproto.Account, error) {
 	var user struct {
 		ID    int64  `json:"id"`
 		Login string `json:"login"`
 		Name  string `json:"name"`
 	}
-	if err := s.getJSON(ctx, s.githubAPI+"/user", accessToken, &user); err != nil {
+	if err := s.getJSON(ctx, api+"/user", accessToken, &user); err != nil {
 		return edgeproto.Account{}, err
 	}
 	if user.ID <= 0 {
@@ -221,7 +222,7 @@ func (s *Service) githubAccount(ctx context.Context, accessToken string) (edgepr
 		Primary  bool   `json:"primary"`
 		Verified bool   `json:"verified"`
 	}
-	if err := s.getJSON(ctx, s.githubAPI+"/user/emails", accessToken, &emails); err != nil {
+	if err := s.getJSON(ctx, api+"/user/emails", accessToken, &emails); err != nil {
 		return edgeproto.Account{}, err
 	}
 	a := edgeproto.Account{

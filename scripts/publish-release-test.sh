@@ -29,8 +29,9 @@ cp "$dist"/* "$rebuilt"/
 manifest "$built" earlier "$published"
 manifest "$moved" earlier "$rebuilt"
 
-# The stub keeps the v0.2.0 release in $GH_STATE_DIR: state is none, draft,
-# published, duplicate or error, and assets lists its assets. GH_PUBLISHED
+# The stub keeps the $GH_TAG release in $GH_STATE_DIR: state is none, draft,
+# published, duplicate or error, prerelease its flag, and assets lists its
+# assets. GH_PUBLISHED
 # names other complete published releases, GH_LEGACY published releases
 # without a manifest, GH_TAG_SHA the commit the tag resolves to,
 # GH_DRAFT_BODY a replacement for the draft's binary and GH_RACE a release
@@ -61,6 +62,7 @@ if [ "$1" = api ]; then
 	printf 'api %s\n' "$path" >>"$GH_LOG"
 	state=$(cat "$state_dir/state")
 	assets=$(cat "$state_dir/assets")
+	prerelease=$(cat "$state_dir/prerelease" 2>/dev/null || echo false)
 	case $path in
 	*/releases\?per_page=100)
 		if [ "$state" = error ]; then
@@ -69,9 +71,9 @@ if [ "$1" = api ]; then
 		fi
 		json=$(
 			case $state in
-			draft) release v0.2.0 true false "$assets" ;;
-			published) release v0.2.0 false false "$assets" ;;
-			duplicate) release v0.2.0 true false "" && release v0.2.0 true false "" ;;
+			draft) release "$GH_TAG" true "$prerelease" "$assets" ;;
+			published) release "$GH_TAG" false "$prerelease" "$assets" ;;
+			duplicate) release "$GH_TAG" true false "" && release "$GH_TAG" true false "" ;;
 			esac
 			release v9.0.0 false true "$complete"
 			for other in ${GH_PUBLISHED:-} $(cat "$state_dir/raced" 2>/dev/null); do
@@ -80,10 +82,13 @@ if [ "$1" = api ]; then
 			for other in ${GH_LEGACY:-}; do
 				release "$other" false false aether-linux-amd64
 			done
+			for other in ${GH_PRERELEASED:-}; do
+				release "$other" false true "$complete"
+			done
 		)
 		printf '%s\n' "$json" | jq -s . | jq -r "$filter"
 		;;
-	*/commits/v0.2.0) printf '{"sha":"%s"}\n' "${GH_TAG_SHA:-$COMMIT}" | jq -r "$filter" ;;
+	*/commits/"$GH_TAG") printf '{"sha":"%s"}\n' "${GH_TAG_SHA:-$COMMIT}" | jq -r "$filter" ;;
 	*) exit 2 ;;
 	esac
 	exit 0
@@ -96,28 +101,29 @@ if [ -n "${GH_RACE:-}" ] && [ "$1 $2 ${4:-}" = "release edit --latest=true" ]; t
 	echo "$GH_RACE" >"$state_dir/raced"
 fi
 case "$1 $2 $3" in
-"release create v0.2.0")
+"release create $GH_TAG")
 	echo draft >"$state_dir/state"
 	: >"$state_dir/assets"
 	;;
-"release upload v0.2.0")
+"release upload $GH_TAG")
 	shift 4
 	for file in "$@"; do
 		basename "$file"
 	done >>"$state_dir/assets"
 	sort -u "$state_dir/assets" -o "$state_dir/assets"
 	;;
-"release delete-asset v0.2.0")
+"release delete-asset $GH_TAG")
 	grep -vxF "$4" "$state_dir/assets" >"$state_dir/kept" || true
 	mv "$state_dir/kept" "$state_dir/assets"
 	;;
-"release edit v0.2.0")
+"release edit $GH_TAG")
 	case $4 in
 	--draft=false) echo published >"$state_dir/state" ;;
 	--draft=true) echo draft >"$state_dir/state" ;;
 	esac
+	case ${5:-} in --prerelease=*) echo "${5#--prerelease=}" >"$state_dir/prerelease" ;; esac
 	;;
-"release download v0.2.0")
+"release download $GH_TAG")
 	mkdir -p "$5"
 	cp "$DIST"/* "$5"/
 	if [ -n "${GH_DRAFT_BODY:-}" ]; then
@@ -128,7 +134,10 @@ case "$1 $2 $3" in
 *) exit 2 ;;
 esac
 EOF
-# Serves anonymous downloads from PUBLIC, except a tampered CURL_TAMPER.
+# Serves anonymous downloads of the $GH_TAG release from PUBLIC, except a
+# tampered CURL_TAMPER. Another release's aether-release.json comes from
+# $OTHERS/<tag>.json, else describes that tag from before channels; none is
+# served for CURL_MISSING.
 cat >"$bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
@@ -138,14 +147,24 @@ while [ "$#" -gt 1 ]; do
 	shift
 done
 printf 'curl %s\n' "$1" >>"$GH_LOG"
-if [ "${1##*/}" = "${CURL_TAMPER:-}" ]; then
+release=${1%/*}
+release=${release##*/}
+if [ "$release" != "$GH_TAG" ]; then
+	[ "$release" != "${CURL_MISSING:-}" ] || exit 22
+	if [ -f "$OTHERS/$release.json" ]; then
+		cp "$OTHERS/$release.json" "$out"
+	else
+		printf '{"schema":1,"version":"%s"}\n' "$release" >"$out"
+	fi
+elif [ "${1##*/}" = "${CURL_TAMPER:-}" ]; then
 	printf '%s\n' tampered >"$out"
 else
 	cp "$PUBLIC/${1##*/}" "$out"
 fi
 EOF
 chmod 0755 "$bin/gh" "$bin/curl"
-export GH_LOG="$log" GH_STATE_DIR="$tmp/state" DIST="$dist" PUBLIC="$dist" GITHUB_REPOSITORY=3xDevOps/Aether COMMIT="$built"
+mkdir "$tmp/others"
+export GH_LOG="$log" GH_STATE_DIR="$tmp/state" DIST="$dist" PUBLIC="$dist" OTHERS="$tmp/others" GH_TAG=v0.2.0 GITHUB_REPOSITORY=3xDevOps/Aether COMMIT="$built"
 export PATH="$bin:$PATH"
 
 tag="v0.2.0"
@@ -160,13 +179,26 @@ expected="$tmp/expected.log"
 run() {
 	: >"$log"
 	echo "$GH_STATE" >"$tmp/state/state"
-	rm -f "$tmp/state/raced"
+	rm -f "$tmp/state/raced" "$tmp/state/prerelease"
 	printf '%s\n' "${GH_ASSETS:-}" | tr ' ' '\n' >"$tmp/state/assets"
-	sh "$script_dir/publish-release.sh" "$tag" "$dist" >/dev/null 2>"$tmp/err"
+	sh "$script_dir/publish-release.sh" "$GH_TAG" "$dist" >/dev/null 2>"$tmp/err"
 }
 
+# The anonymous manifest downloads that order the releases named.
+fetched() {
+	for other in "$@"; do
+		echo "curl https://github.com/3xDevOps/Aether/releases/download/$other/aether-release.json"
+	done
+}
+
+# Latest settles on $1 after reading the manifests of the releases after it,
+# which no earlier listing named.
 reconcile_lines() {
-	printf '%s\n' "$view" "release edit $1 --latest=true" "$view"
+	best=$1
+	shift
+	echo "$view"
+	fetched "$@"
+	printf '%s\n' "release edit $best --latest=true" "$view"
 }
 
 publish_lines() {
@@ -178,7 +210,7 @@ publish_lines() {
 		"curl $url/checksums.txt" \
 		"curl $url/aether-release.json" \
 		"curl $url/aether-release.json.sig"
-	reconcile_lines "$1"
+	reconcile_lines "$@"
 }
 
 refuses() {
@@ -199,10 +231,12 @@ not_logged() {
 export GH_STATE=none GH_PUBLISHED="v0.1.0 v0.2.0-alpha.3"
 run
 {
-	printf '%s\n' "$view" "$resolve" \
+	echo "$view"
+	fetched v0.1.0 v0.2.0-alpha.3
+	printf '%s\n' "$resolve" \
 		"release create $tag --draft --verify-tag --title $tag --generate-notes --notes-start-tag=v0.2.0-alpha.3" \
 		"$upload_all"
-	publish_lines "$tag"
+	publish_lines "$tag" "$tag"
 } >"$expected"
 diff -u "$expected" "$log"
 
@@ -210,8 +244,10 @@ diff -u "$expected" "$log"
 export GH_STATE=draft GH_ASSETS="aether-linux-amd64"
 run
 {
-	printf '%s\n' "$view" "$upload_all"
-	publish_lines "$tag"
+	echo "$view"
+	fetched v0.1.0 v0.2.0-alpha.3
+	echo "$upload_all"
+	publish_lines "$tag" "$tag"
 } >"$expected"
 diff -u "$expected" "$log"
 
@@ -219,9 +255,10 @@ diff -u "$expected" "$log"
 export GH_ASSETS="aether-linux-amd64 aether-linux-amd64.old"
 run
 {
-	printf '%s\n' "$view" "$upload_all" \
-		"release delete-asset $tag aether-linux-amd64.old --yes"
-	publish_lines "$tag"
+	echo "$view"
+	fetched v0.1.0 v0.2.0-alpha.3
+	printf '%s\n' "$upload_all" "release delete-asset $tag aether-linux-amd64.old --yes"
+	publish_lines "$tag" "$tag"
 } >"$expected"
 diff -u "$expected" "$log"
 
@@ -245,10 +282,12 @@ not_logged "release create"
 export GH_STATE=none GH_PUBLISHED="v0.3.0 v0.1.0 nightly" GH_LEGACY="v0.4.0"
 run
 {
-	printf '%s\n' "$view" "$resolve" \
+	echo "$view"
+	fetched v0.3.0 v0.1.0
+	printf '%s\n' "$resolve" \
 		"release create $tag --draft --verify-tag --title $tag --generate-notes --notes-start-tag=v0.1.0" \
 		"$upload_all"
-	publish_lines v0.3.0
+	publish_lines v0.3.0 "$tag"
 } >"$expected"
 diff -u "$expected" "$log"
 export GH_LEGACY=
@@ -256,8 +295,11 @@ export GH_LEGACY=
 # A newer release published while this run marks Latest takes it back.
 GH_STATE=draft GH_ASSETS="$complete" GH_PUBLISHED="v0.1.0" GH_RACE=v0.3.0 run
 {
-	printf '%s\n' "$view" "$upload_all"
-	publish_lines "$tag"
+	echo "$view"
+	fetched v0.1.0
+	echo "$upload_all"
+	publish_lines "$tag" "$tag"
+	fetched v0.3.0
 	printf '%s\n' "release edit v0.3.0 --latest=true" "$view"
 } >"$expected"
 diff -u "$expected" "$log"
@@ -267,7 +309,9 @@ diff -u "$expected" "$log"
 export GH_STATE=published GH_ASSETS="$complete" GH_PUBLISHED="v0.1.0"
 PUBLIC="$published" run
 {
-	printf '%s\n' "$view" \
+	echo "$view"
+	fetched "$tag" v0.1.0
+	printf '%s\n' \
 		"curl $url/aether-release.json" \
 		"curl $url/aether-release.json.sig" \
 		"curl $url/aether-linux-amd64" \
@@ -295,8 +339,10 @@ not_logged "release upload"
 export GH_ASSETS="aether-linux-amd64"
 run
 {
-	printf '%s\n' "$view" "release edit $tag --draft=true" "$upload_all"
-	publish_lines "$tag"
+	echo "$view"
+	fetched v0.1.0
+	printf '%s\n' "release edit $tag --draft=true" "$upload_all"
+	publish_lines "$tag" "$tag"
 } >"$expected"
 diff -u "$expected" "$log"
 grep -q "returning it to a draft" "$tmp/err"
@@ -317,6 +363,101 @@ diff -u "$expected" "$log"
 export GH_STATE=duplicate
 refuses run
 grep -q "$tag has more than one release" "$tmp/err"
+
+logged() {
+	grep -qxF -- "$1" "$log" || {
+		echo "publish-release did not run $1" >&2
+		exit 1
+	}
+}
+
+# Writes the aether-release.json another published release $1 serves.
+other() {
+	printf '%s\n' "$2" >"$OTHERS/$1.json"
+}
+
+# Signs $1 into dist's manifest with channel $2, build $3 and hotfix $4.
+stamp() {
+	jq -n --arg tag "$1" --arg channel "${2:-}" --argjson build "${3:-0}" --argjson hotfix "${4:-0}" \
+		--arg commit "$built" --arg sum "$sum" \
+		'{schema: 1, version: $tag, commit: $commit, assets: {"aether-linux-amd64": {sha256: $sum, size: 7}}}
+		+ (if $channel == "" then {} else {channel: $channel, build: $build} end)
+		+ (if $hotfix == 0 then {} else {hotfix: $hotfix} end)' >"$dist/aether-release.json"
+}
+
+# Latest is the stable release with the highest (build, hotfix): above a
+# stable with a higher version but a lower build, above every release from
+# before channels whatever its version, and never a prerelease, a nightly
+# or beta published without the prerelease flag, or a release whose
+# manifest describes another tag or carries a build without a channel.
+other v0.9.0 '{"version":"v0.9.0","channel":"stable","build":3}'
+other v0.9.1 '{"version":"v0.9.1","channel":"stable","build":3,"hotfix":1}'
+other v0.10.0 '{"version":"v0.10.0","channel":"stable","build":2}'
+other v0.11.0-nightly.1 '{"version":"v0.11.0-nightly.1","channel":"nightly","build":9}'
+other v0.12.0-beta.1 '{"version":"v0.12.0-beta.1","channel":"beta","build":8}'
+other v0.13.0 '{"version":"v0.13.0","build":50}'
+other v0.14.0 '{"version":"v0.1.0"}'
+other v0.15.0 '{"version":"v0.15.0","channel":"stable","build":"60"}'
+others="v0.10.0 v0.9.0 v5.0.0 v0.9.1 v0.12.0-beta.1 v0.13.0 v0.14.0 v0.15.0"
+export GH_STATE=published GH_ASSETS="$complete" GH_PUBLISHED="$others" GH_PRERELEASED="v0.11.0-nightly.1"
+PUBLIC="$published" run
+logged "release edit v0.9.1 --latest=true"
+test "$(grep -c -- '--latest=true' "$log")" -eq 1
+for bad in v0.13.0 v0.14.0 v0.15.0; do
+	grep -q "published release $bad has an aether-release.json for another tag or with invalid channel fields" "$tmp/err"
+done
+not_logged "download/v0.11.0-nightly.1/"
+
+# Two stable releases of one (build, hotfix) are one commit under two
+# labels; the higher version is Latest whichever the listing names first.
+other v0.9.2 '{"version":"v0.9.2","channel":"stable","build":3,"hotfix":1}'
+for listing in "v0.9.1 v0.9.2" "v0.9.2 v0.9.1"; do
+	GH_PUBLISHED="$listing" PUBLIC="$published" run
+	logged "release edit v0.9.2 --latest=true"
+	not_logged "release edit v0.9.1 --latest=true"
+done
+
+# Without a build anywhere, the highest version is Latest, as before.
+GH_PUBLISHED="v0.1.0 v5.0.0 v0.3.0-beta.2" PUBLIC="$published" run
+logged "release edit v5.0.0 --latest=true"
+
+# A manifest that cannot be read fails the run rather than leaving its
+# release out of the order.
+CURL_MISSING=v0.9.1 PUBLIC="$published" refuses run
+grep -q "cannot read the aether-release.json of published release v0.9.1 to order it" "$tmp/err"
+not_logged "--latest=true"
+
+# A nightly or beta is published as a prerelease and never becomes Latest;
+# a stable on a channel is published as a release and does.
+export GH_STATE=none GH_ASSETS='' GH_PUBLISHED="v0.1.0 v5.0.0" GH_PRERELEASED=''
+for c in "v0.3.0-nightly.2 nightly 6 true" "v0.3.0-beta.1 beta 6 true" "v0.3.0 stable 6 false"; do
+	# Split on purpose: each case is a few words.
+	# shellcheck disable=SC2086
+	set -- $c
+	stamp "$1" "$2" "$3"
+	GH_TAG=$1 run
+	logged "release create $1 --draft --verify-tag --title $1 --generate-notes --notes-start-tag=v5.0.0"
+	logged "release edit $1 --draft=false --prerelease=$4 --latest=false"
+	if [ "$4" = true ]; then
+		logged "release edit v5.0.0 --latest=true"
+		not_logged "release edit $1 --latest=true"
+	else
+		logged "release edit $1 --latest=true"
+	fi
+done
+
+# A nightly tag needs a build, and the manifest's channel must match its tag.
+for c in "v0.3.0-nightly.2" "v0.3.0 beta 6" "v0.3.0-beta.1 stable 6" "v0.3.0 stable 6 100"; do
+	# Split on purpose: each case is a few words.
+	# shellcheck disable=SC2086
+	set -- $c
+	stamp "$@"
+	GH_TAG=$1 refuses run
+	grep -q "does not describe $1 with channel fields an updater accepts, or $1 has no versionCode" "$tmp/err"
+	not_logged "release create"
+done
+stamp v0.2.0
+export GH_TAG=v0.2.0
 
 # No signature, no release.
 rm "$dist/aether-release.json.sig"

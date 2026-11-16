@@ -13,6 +13,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -413,6 +414,78 @@ func TestWriteFileInRefusesAnythingButARegularFile(t *testing.T) {
 		}
 		if got, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(got) != "{}" {
 			t.Fatalf("%s = %q, %v; want {}", name, got, err)
+		}
+	}
+}
+
+// A workspace variable or an image's ENV under the CLOUDFIELD_ name of a
+// variable the server sets must not reach that variable's readers, which
+// take the CLOUDFIELD_ name first.
+func TestSessionVariablesCannotBeSetThroughTheirCloudfieldNames(t *testing.T) {
+	variables := map[string]string{}
+	for _, name := range coordtransport.SessionEnv {
+		variables[envname.New(name)] = "workspace"
+	}
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Runtime: newFakeRuntime()}}
+	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{Variables: variables}}
+	plan, err := s.BuildEnvironmentPlan(t.Context(), nil, ws, &domain.Member{ID: "member"}, harness.Profile{}, EnvironmentPurposeRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := "fixed"
+	id, err := s.createContainer(t.Context(), runtime.Spec{Name: "n", Image: "standard:latest", Command: []string{"true"}, Env: plan.Env, Fingerprint: fingerprint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := s.cfg.Runtime.(*fakeRuntime).containers[id].spec
+	if created.Fingerprint != fingerprint {
+		t.Errorf("createContainer changed the fingerprint to %q", created.Fingerprint)
+	}
+	for _, name := range coordtransport.SessionEnv {
+		twin := envname.New(name)
+		if v, ok := created.Env[twin]; !ok || v != "" {
+			t.Errorf("created container %s = %q (set %v), want it set empty so neither the workspace nor an image's ENV supplies it", twin, v, ok)
+		}
+		if plan.Env[twin] != "workspace" {
+			t.Errorf("plan %s = %q; the workspace's value must stay in the plan, which a terminal's fingerprint hashes", twin, plan.Env[twin])
+		}
+	}
+}
+
+// A kept Environment terminal stays in use across this release: nothing
+// this server adds for CLOUDFIELD_ names enters the spec its fingerprint
+// hashes.
+func TestTerminalFingerprintHasNoCloudfieldNames(t *testing.T) {
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest"}}
+	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{Variables: map[string]string{"EXTRA": "yes"}}}
+	plan, err := s.BuildEnvironmentPlan(t.Context(), nil, ws, &domain.Member{ID: "member"}, harness.Profile{}, EnvironmentPurposeTerminal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key := range plan.Env {
+		if strings.HasPrefix(key, "CLOUDFIELD_") {
+			t.Errorf("terminal plan carries %s, which changes every kept terminal's fingerprint", key)
+		}
+	}
+}
+
+// Every container the scheduler makes goes through createContainer, the
+// only Create call in the package's code, whatever the runtime is named.
+func TestContainersAreCreatedThroughCreateContainer(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(data), ".Create("); n > 0 && (f != "environment.go" || n != 1) {
+			t.Errorf("%s calls Create %d times; create containers with s.createContainer", f, n)
 		}
 	}
 }

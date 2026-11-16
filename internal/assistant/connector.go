@@ -293,7 +293,7 @@ func (g grantGate) Call(ctx context.Context, method string, params json.RawMessa
 		}
 		if !live.Covers(method, g.s.cfg.ConnectorScopes) {
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
-				"%s was not run: %s connector %s may not call it; ask the member to do it in Aether", method, live.Client, live.Grant)}
+				"%s was not run: %s connector %s may not call it; ask the member to do it in Cloudfield", method, live.Client, live.Grant)}
 		}
 	}
 	return g.Caller.Call(ctx, method, params)

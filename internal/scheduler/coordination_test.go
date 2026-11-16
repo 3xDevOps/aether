@@ -224,6 +224,9 @@ func TestRunCarriesCoordinationAssets(t *testing.T) {
 	if cli.HostPath != bin.HostPath {
 		t.Fatalf("CLI mount source = %q, want staged bridge source %q", cli.HostPath, bin.HostPath)
 	}
+	if cloudfield, found := mountFor(container.spec, coordtransport.CloudfieldCLIPath); !found || cloudfield.HostPath != cli.HostPath || cloudfield.ReadOnly != cli.ReadOnly || cloudfield.Kind != cli.Kind {
+		t.Fatalf("cloudfield CLI mount = %+v, want %+v at %s", cloudfield, cli, coordtransport.CloudfieldCLIPath)
+	}
 	dir, ok := mountFor(container.spec, coordtransport.MountDir)
 	if !ok || !dir.ReadOnly {
 		t.Fatalf("no read-only coordination mount in %+v", container.spec.Mounts)

@@ -1,32 +1,32 @@
 <div align="center">
 
-<img src="docs/assets/aether-banner.svg" alt="Aether" width="100%">
+<img src="docs/assets/aether-banner.svg" alt="Cloudfield" width="100%">
 
-# Aether - Multiplayer Cloud Agent Runtime
+# Cloudfield - Multiplayer Cloud Agent Runtime
 
 **A self-hostable development environment and controller for AI coding agents running in the cloud, for teams of engineers & *multiplayer* control.**
 
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-6EE7D6?style=flat-square)](go.mod)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-4A6FA5?style=flat-square)](LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/3xDevOps/aether?include_prereleases&style=flat-square&color=4A6FA5)](https://github.com/3xDevOps/aether/releases)
+[![Latest release](https://img.shields.io/github/v/release/3xDevOps/cloudfield?include_prereleases&style=flat-square&color=4A6FA5)](https://github.com/3xDevOps/cloudfield/releases)
 ![Status: beta](https://img.shields.io/badge/status-beta-FF9D6B?style=flat-square)
 
 [Quickstart](docs/quickstart.md) · [Install](docs/install.md) · [Docs](docs/) · [Contributing](CONTRIBUTING.md)
 
 <!-- Goes live once docs/media/demo.gif exists. Shot list and recording recipe: docs/media/README.md.
-![Aether demo](docs/media/demo.gif)
+![Cloudfield demo](docs/media/demo.gif)
 -->
 
 </div>
 
 ---
 
-Aether is a **self-hostable** development environment and control surface for long-running AI coding agents in the cloud. It offers agent-agnostic sandboxed environments that can be hosted **anywhere** and be controlled by **anyone** on your team.  
+Cloudfield is a **self-hostable** development environment and control surface for long-running AI coding agents in the cloud. It offers agent-agnostic sandboxed environments that can be hosted **anywhere** and be controlled by **anyone** on your team.  
 </br>
 Leaving your laptop open for your agents is no longer needed. Your teammates can observe and steer your agents while you are away.  
 
 # Installation 
-Aether installs in two places: 
+Cloudfield installs in two places: 
 - A **desktop control surface client** & CLI for your laptop/PC
   - Builds exist for MacOS, Windows & Linux
 - A **server framework** for where you intend to run your agents - a server, PC, or an old laptop repurposed to be on all day long.
@@ -46,12 +46,12 @@ Aether installs in two places:
 Run the installer command on **both** your remote server & your client computer **(MacOS/Linux Clients)**
 ```sh
 # MacOS & Linux
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh
 ```
 
 To install the client app on **Windows**, run the Windows installer instead. 
 ```powershell
-Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 > See the [Windows install guide](docs/install.md#windows-install-script) for supported releases and script-policy requirements.
@@ -60,9 +60,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps
 **Next, see [docs/quickstart.md](docs/quickstart.md) to set up your first workspace and link your codebase, tools, and CLI agents.**   
 For manual installation or uninstallation, see [install.md](docs/install.md#manual-install).
 >[!TIP]
-> Aether can also be accessed on the go! You can use any mobile AI chatbot that supports MCP connectors. That way you can directly use the Claude or ChatGPT
+> Cloudfield can also be accessed on the go! You can use any mobile AI chatbot that supports MCP connectors. That way you can directly use the Claude or ChatGPT
 > apps on your phone to launch agents on aether and check in on them. We recommend that you go through onboarding first before setting up connectors. See
-> [Connectors Guide](https://github.com/3xDevOps/aether/blob/main/docs/connectors.md)  
+> [Connectors Guide](https://github.com/3xDevOps/cloudfield/blob/main/docs/connectors.md)  
 
 
 >[!TIP]
@@ -72,9 +72,9 @@ For manual installation or uninstallation, see [install.md](docs/install.md#manu
 >yet; the Play link replaces this sentence the day the listing goes live. What
 >it stores and sends is in [docs/privacy.md](docs/privacy.md).
 
-## Why Aether?
+## Why Cloudfield?
 
-Aether is designed to combat one of the biggest quality-of-life bottlenecks with agentic engineering today. 
+Cloudfield is designed to combat one of the biggest quality-of-life bottlenecks with agentic engineering today. 
 Coding agents can run for hours. In a team of engineers, everyone's agents run on their own laptops in a decentralized manner. 
 There is no collaborative observability - meaning you, and your agents, have no idea what other people and *their* agents are doing.  
 
@@ -83,7 +83,7 @@ lot of its resources, and they stop when you close the lid. Hosted agent
 services keep them running, but they charge per seat on top of your inference
 bill and keep a copy of your code.  
 
-Aether runs your agents on hardware you own,
+Cloudfield runs your agents on hardware you own,
 such as a home server or a spare PC, and you control them from your laptop,
 your phone or the desktop app. **Not only can you observe and steer your agents, but EVERYONE on your team can do so as well.**
 
@@ -106,14 +106,15 @@ your phone or the desktop app. **Not only can you observe and steer your agents,
 
 ```mermaid
 flowchart LR
-    you["Your laptop, phone<br>or desktop app"] -->|"SSH, a tailnet<br>or an edge"| server["Aether server"]
+    you["Your laptop, phone<br>or desktop app"] -->|"SSH, a tailnet<br>or an edge"| server["Cloudfield server"]
     server -->|"one container<br>per session"| run["Agent session"]
     run -->|"commits to"| branch["A git branch<br>you review"]
 ```
 
 ## Documentation
 
-[docs/README.md](docs/README.md) lists every guide and defines Aether's terms.  
+[docs/README.md](docs/README.md) lists every guide and defines Cloudfield's
+terms.  
 
 Common documentation:
 - [Quickstart](docs/quickstart.md): from install to your first reviewed run.

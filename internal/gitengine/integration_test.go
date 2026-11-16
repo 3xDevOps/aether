@@ -1509,7 +1509,7 @@ func TestReceivePackRejectsRunBranchForcePush(t *testing.T) {
 	gitc(t, cl, "reset", "--hard", "HEAD~1")
 	gitc(t, cl, "commit", "--allow-empty", "-m", "divergent")
 	out := gitcFail(t, cl, "push", "--force", url("ws1"), branch)
-	if !strings.Contains(out, "refs/heads/"+branch) || !strings.Contains(out, "owned by the Aether server") {
+	if !strings.Contains(out, "refs/heads/"+branch) || !strings.Contains(out, "owned by the Cloudfield server") {
 		t.Errorf("force-push rejection message unreadable:\n%s", out)
 	}
 	if got := bareRevParse(t, e, "ws1", "refs/heads/"+branch); got != tip {
@@ -1558,6 +1558,89 @@ func TestReceivePackAllowsFeatureBranchForcePush(t *testing.T) {
 	if got := bareRevParse(t, e, "ws1", "refs/heads/feature"); got != want {
 		t.Fatal("feature branch deleted through ReceivePack")
 	}
+}
+
+// The rename to Cloudfield moves new sessions to cloudfield/run- later;
+// both prefixes must be protected from the release that first accepts them.
+func TestReceivePackProtectsBothSessionBranchPrefixes(t *testing.T) {
+	for _, prefix := range []string{"aether/run-", "cloudfield/run-"} {
+		t.Run(prefix, func(t *testing.T) {
+			e := newTestEngine(t, nil)
+			url := serveTransport(t, e)
+			seedWorkspace(t, e, url, "ws1")
+			assertSessionBranchProtected(t, e, url, "ws1", prefix+"client-made")
+		})
+	}
+}
+
+// assertSessionBranchProtected pushes branch as a new branch, then checks
+// that a force-push is refused and a fast-forward lands.
+func assertSessionBranchProtected(t *testing.T, e *Engine, url func(domain.WorkspaceID) string, ws domain.WorkspaceID, branch string) {
+	t.Helper()
+	dst := t.TempDir()
+	gitc(t, dst, "clone", url(ws), "c")
+	cl := filepath.Join(dst, "c")
+	gitc(t, cl, "commit", "--allow-empty", "-m", "session work")
+	gitc(t, cl, "push", url(ws), "HEAD:refs/heads/"+branch)
+	tip := gitc(t, cl, "rev-parse", "HEAD")
+
+	gitc(t, cl, "reset", "--hard", "HEAD~1")
+	gitc(t, cl, "commit", "--allow-empty", "-m", "divergent")
+	out := gitcFail(t, cl, "push", "--force", url(ws), "HEAD:refs/heads/"+branch)
+	if !strings.Contains(out, "refs/heads/"+branch) || !strings.Contains(out, "owned by the Cloudfield server") {
+		t.Errorf("force-push rejection message unreadable:\n%s", out)
+	}
+	if got := bareRevParse(t, e, ws, "refs/heads/"+branch); got != tip {
+		t.Fatalf("%s tip = %s after rejected force-push, want %s", branch, got, tip)
+	}
+
+	gitc(t, cl, "reset", "--hard", tip)
+	gitc(t, cl, "commit", "--allow-empty", "-m", "fast-forward")
+	gitc(t, cl, "push", url(ws), "HEAD:refs/heads/"+branch)
+	if got := bareRevParse(t, e, ws, "refs/heads/"+branch); got != gitc(t, cl, "rev-parse", "HEAD") {
+		t.Fatalf("fast-forward push to %s did not land", branch)
+	}
+}
+
+func TestInitWorkspaceRepoRewritesOlderHook(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{ReposDir: filepath.Join(dir, "repos"), CheckoutsDir: filepath.Join(dir, "checkouts")}
+	before, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := before.InitWorkspaceRepo(t.Context(), "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = before.Close()
+
+	// The hook a server wrote before it accepted cloudfield/run-.
+	const both = "refs/heads/aether/run-* | refs/heads/cloudfield/run-*"
+	oldHook := strings.Replace(updateHook, both, "refs/heads/aether/run-*", 1)
+	if oldHook == updateHook {
+		t.Fatalf("update hook does not match %q", both)
+	}
+	hook := filepath.Join(repo, "hooks", "update")
+	if err := os.WriteFile(hook, []byte(oldHook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh engine stands in for a restarted server.
+	after, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = after.Close() })
+	if _, err := after.InitWorkspaceRepo(t.Context(), "ws1"); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(hook); string(data) != updateHook {
+		t.Fatalf("update hook of an existing repo not rewritten at start:\n%s", data)
+	}
+	url := serveTransport(t, after)
+	seedWorkspace(t, after, url, "ws1")
+	assertSessionBranchProtected(t, after, url, "ws1", "cloudfield/run-client-made")
 }
 
 func TestServerRewriteKeepsOldTipInReflog(t *testing.T) {

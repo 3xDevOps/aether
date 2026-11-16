@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/localgw"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
@@ -29,6 +32,10 @@ func init() {
 	})
 }
 
+// retireLegacyDesktop is localops.RetireLegacyDesktop, a variable so a test
+// can see the gateway call it.
+var retireLegacyDesktop = localops.RetireLegacyDesktop
+
 func runGUI(args []string) error {
 	if len(args) > 0 && args[0] == "build" {
 		return guiBuild(args[1:])
@@ -41,6 +48,10 @@ func runGUI(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// Unset so that nothing this gateway starts, such as a relaunched
+	// shell's own gateway, inherits it.
+	shellExe := os.Getenv(localops.ShellExeEnv)
+	_ = os.Unsetenv(localops.ShellExeEnv)
 	cfg, err := cli.Load()
 	if err != nil {
 		if !errors.Is(err, cli.ErrNotLinked) {
@@ -81,8 +92,11 @@ func runGUI(args []string) error {
 
 	// One checker serves both the startup nudge and the update verbs, so
 	// the dashboard reads the answer the banner already paid for.
-	checker := selfupdate.DefaultChecker()
-	packaged := os.Getenv(selfupdate.PackagedEnv)
+	checker, err := cli.NewFollowedChecker("https://github.com/"+selfupdate.Repo, time.Hour, cli.DefaultLinkChannel)
+	if err != nil {
+		return err
+	}
+	packaged := envname.Getenv(selfupdate.PackagedEnv)
 	gw, err := localgw.New(localgw.Config{
 		Port:    *port,
 		Backend: localgw.NewSSHBackend(cfg),
@@ -94,7 +108,7 @@ func runGUI(args []string) error {
 		// so an update applied from the dashboard can exit the process.
 		Supervised: *jsonOut,
 		// The desktop shell sets it when it quits on exit 76.
-		ShellQuitsOnHandoff: os.Getenv(localgw.ShellQuitsEnv) != "",
+		ShellQuitsOnHandoff: envname.Getenv(localgw.ShellQuitsEnv) != "",
 	})
 	if err != nil {
 		return err
@@ -116,6 +130,10 @@ func runGUI(args []string) error {
 		}
 		fmt.Println(string(line))
 		_ = os.Stdout.Sync()
+		// stdout is the shell's protocol; the next start retries.
+		if err := retireLegacyDesktop(runtime.GOOS, shellExe); err != nil {
+			fmt.Fprintf(os.Stderr, "aether gui: %v\n", err)
+		}
 	} else {
 		fmt.Println(url)
 		if !*urlOnly {
@@ -146,7 +164,7 @@ func runGUI(args []string) error {
 // the desktop shell parses. A failed check has no reader to report to and
 // no bearing on serving the dashboard, so it stays silent; `aether update
 // --check` reports the same failure with an exit status.
-func nudgeUpdate(c *selfupdate.Checker) {
+func nudgeUpdate(c cli.ReleaseChecker) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	check, err := c.Check(ctx)

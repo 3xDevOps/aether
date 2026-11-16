@@ -2,12 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
-  # A pull request runs changes, audit, lint, build-and-test and dashboard
-  # only. The merge queue and the nightly run on main run every job, except
-  # that the merge queue boots VMs only for a change that can affect them. A
-  # push to main runs only changes and CI gate when its commit passed the
-  # merge queue and changed nothing a cache key hashes.
+    branches: [main, 'release/[0-9]*.[0-9]*']
+  # A pull request runs changes, audit, lint, build-and-test, store-tests
+  # and dashboard only. The merge queue and the nightly run on main run
+  # every job, except that the merge queue boots VMs only for a change that
+  # can affect them. A push to main runs only changes and CI gate when its
+  # commit passed the merge queue and changed nothing a cache key hashes. A
+  # push to a release/X.Y hotfix branch runs every job and boots the VMs:
+  # release.yml reads its verdict.
   pull_request:
   merge_group:
   # Refreshes the per-commit caches, which only a run on main can write, and
@@ -98,7 +100,7 @@ jobs:
           BEFORE: ${{ github.event.before }}
           QUEUE_BASE: ${{ github.event.merge_group.base_ref }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
             verdict=$(sh scripts/ci-queue-verdict.sh "$GITHUB_REPOSITORY" "$BEFORE" "$GITHUB_SHA") || verdict=
             if [ -n "$verdict" ]; then
               echo "The merge queue passed this commit in $verdict; this push runs no other job." >> "$GITHUB_STEP_SUMMARY"
@@ -112,7 +114,8 @@ jobs:
             # group also carries to main, so a queue run compares with main.
             case $GITHUB_EVENT_NAME in
             merge_group) range="${QUEUE_BASE#refs/heads/}...$GITHUB_SHA" ;;
-            push) range="$BEFORE...$GITHUB_SHA" ;;
+            # A push to a release/X.Y hotfix branch always boots the VMs.
+            push) range=; if [ "$GITHUB_REF" = refs/heads/main ]; then range="$BEFORE...$GITHUB_SHA"; fi ;;
             *) range= ;;
             esac
             # A failed or truncated file list, or a failed classifier, runs
@@ -240,7 +243,7 @@ jobs:
       - name: Unit tests
         env:
           TEST_RACE: ${{ github.event_name != 'pull_request' && '-race' || '' }}
-        run: make test
+        run: make test TEST_SKIP=./internal/store
       # Only root keeps other owners, set-user-ID bits and file capabilities
       # when it extracts an image, as the server does.
       - name: Image store tests as root
@@ -264,6 +267,26 @@ jobs:
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
+
+  # internal/store under -race, on every event, pull requests included.
+  store-tests:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      - name: Store tests
+        run: make test-store
 
   dashboard:
     needs: changes
@@ -315,6 +338,7 @@ jobs:
       - audit
       - lint
       - build-and-test
+      - store-tests
       - dashboard
       - suite
     runs-on: ubuntu-latest
