@@ -151,7 +151,7 @@ test('the sidebar folds a parent session’s subsessions and leaves out the fini
   parentURL.searchParams.set('run', parent.id)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(parentURL.toString())
-  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+  const sidebar = page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' })
   const fold = () => sidebar.getByRole('button', { name: /^(Collapse|Expand) 1 subsession$/ })
   const childRow = sidebar.getByRole('button', { name: /Sidebar fold check/ })
   await expect(fold()).toHaveAttribute('aria-expanded', 'true')

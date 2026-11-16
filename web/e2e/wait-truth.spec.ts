@@ -47,7 +47,7 @@ test('a waiting run says what Aether last read, never a status it could not read
   await expect(stale).not.toContainText('Turn ended')
 
   // Only the broken wait asks for a person; the others are quiet.
-  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+  const sidebar = page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' })
   await expect(sidebar.getByRole('button', { name: new RegExp(`^Needs you · .*${tasks.broken}`) })).toBeVisible()
   for (const task of [tasks.condition, tasks.unknown, tasks.fault, tasks.stale]) {
     await expect(sidebar.getByRole('button', { name: new RegExp(task) })).not.toHaveAccessibleName(/^Needs you/)

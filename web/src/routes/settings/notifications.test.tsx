@@ -53,7 +53,7 @@ describe('notification settings', () => {
     expect(await screen.findByText(reason, { exact: false })).toBeDefined()
     if (state.kind === 'unsupported' && state.why === 'home-screen') {
       expect(screen.queryByRole('checkbox', { name: label })).toBeNull()
-      expect(screen.getByText('Install Aether to get notifications')).toBeDefined()
+      expect(screen.getByText('Install Cloudfield to get notifications')).toBeDefined()
     } else {
       expect(toggle()).toHaveProperty('disabled', true)
       expect(toggle().getAttribute('aria-checked')).toBe('false')
@@ -69,8 +69,8 @@ describe('notification settings', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
     cleanup()
     show({ kind: 'unsupported', why: 'home-screen' })
-    expect(await screen.findByText('On iPhone and iPad, notifications reach Aether only when it is opened from the home screen.', { exact: false })).toBeDefined()
-    expect(screen.queryByText('Install Aether to get notifications')).toBeNull()
+    expect(await screen.findByText('On iPhone and iPad, notifications reach Cloudfield only when it is opened from the home screen.', { exact: false })).toBeDefined()
+    expect(screen.queryByText('Install Cloudfield to get notifications')).toBeNull()
   })
 
   it('turns on, sends a test, and turns off', async () => {

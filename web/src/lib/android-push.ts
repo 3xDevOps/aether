@@ -45,7 +45,7 @@ export function watchAndroidPush(listener: (state: AndroidPushState) => void): (
 /** Sends op and resolves with the first settled state the app sends back. */
 export function androidPush(op: 'state' | 'enable' | 'disable'): Promise<AndroidPushState> {
   const app = bridge()
-  if (!app) return Promise.reject(new Error('Not running in the Aether Android app.'))
+  if (!app) return Promise.reject(new Error('Not running in Cloudfield for Android.'))
   return new Promise((resolve, reject) => {
     const done = () => {
       clearTimeout(timer)

@@ -318,8 +318,8 @@ app, which badges itself.
 
 ### Sidebar
 
-The sidebar (`sidebar.tsx`) is a `nav` named "Aether", 260px wide by default and
-resizable from 220px to 400px; older saved widths are clamped. `Mod+B`, the
+The sidebar (`sidebar.tsx`) is a `nav` named "Cloudfield", 260px wide by default
+and resizable from 220px to 400px; older saved widths are clamped. `Mod+B`, the
 **Hide sidebar** button in its header and Enter on its splitter hide it
 completely; the content view's header then shows **Open sidebar** at its left
 edge. Hiding or showing it hands focus to the control that reverses it. From
@@ -999,14 +999,14 @@ secondary icon button to its right, which keeps the workspace switcher's
 room), or the top bar's first row while the sidebar is hidden; under 768px the
 **Assistant** tab of the [phone tab bar](#phone-layout) replaces it; keeping
 it out of the top bar's row leaves that row to the header destinations),
-`Mod+Shift+Space`, the palette's **Ask Aether**, a secondary **Ask Aether** in
-the board's empty states, and **Stuck? Ask Aether** under each onboarding
-step.
+`Mod+Shift+Space`, the palette's **Ask Cloudfield**, a secondary **Ask
+Cloudfield** in the board's empty states, and **Stuck? Ask Cloudfield** under
+each onboarding step.
 
 ### Landmarks and headers
 
 **Landmarks.** The skip link "Skip to content" is the first tab stop; the
-header navigation is `nav` "Main navigation"; the sidebar is `nav` "Aether"
+header navigation is `nav` "Main navigation"; the sidebar is `nav` "Cloudfield"
 containing `region` "Sessions"; the content is the one `main`, with one `h1` per
 view from `PaneHeader` (`tabIndex=-1`). After a route
 change focus moves to that `h1`, unless the view took focus for itself. Unit
@@ -2111,7 +2111,7 @@ reads "Waiting for ...", which moves to the tooltip as "The agent reported:
 | `source_unknown` | "Waiting on *detail* since 01:10 — *error*": the local time of the last successful read and the source's error verbatim, never the last status as current | dashed clock, neutral |
 | `system_fault`, still waiting | "Wait fault: *detail* — *error*" | clock, failed colour |
 | `system_fault`, Needs you | the Needs you reason, then " — *error*" | amber ring |
-| `unverified` | the agent's summary; the tooltip adds "Not verified: the wait names no condition Aether can check." | the state's |
+| `unverified` | the agent's summary; the tooltip adds "Not verified: the wait names no condition Cloudfield can check." | the state's |
 
 `toneOf` picks the dot, and the tooltip gives the exact time of the last
 read. Only the server's `needs-you` state lists a broken wait in Needs you;
@@ -2462,7 +2462,7 @@ repository; unless you are already on that branch, its toast offers **Switch
 to it** (`pull.switch`, which refuses a dirty checkout with git's own
 reason) and **Copy command** (`git switch <branch>`). Board verbs (`boardCommands`): **Open the board**, **Open
 all workspaces**, **Connect ChatGPT or Claude** (these three in the Navigate
-group), **Ask Aether** (opens the assistant; offered when the server
+group), **Ask Cloudfield** (opens the assistant; offered when the server
 serves `assistant.status`), **New session…**, **Launch from a template…**,
 **Archive finished sessions…**, **Free retained sandboxes…** and the three theme
 commands. Each verb is offered only when the server would allow it: the gates
@@ -2719,7 +2719,7 @@ form and Launch, outside the scrolling form, so the keyboard cannot hide it;
 past 40% of the screen it scrolls. So a quick task is three steps: **New**,
 type, Launch.
 
-**Share to Aether.** Opening `/?new=1&prompt=<encodeURIComponent(text)>`, or
+**Sharing from another app.** Opening `/?new=1&prompt=<encodeURIComponent(text)>`, or
 the gateway URL with `&new=1&prompt=...` through an edge, opens New session
 with the text as its task. It is the entry point for sharing from another
 app, so the text only fills the form. At load, before any route is written to
@@ -5607,7 +5607,7 @@ The sections below cover only the member's own sessions in the same window.
 - **Time.** Median and slowest-10% session time, and, from the server's state
   record, median time working, waiting on you and your response time. When
   fewer sessions have state times than session times it says "measured for N of M
-  sessions; Aether records this from <date> on."
+  sessions; Cloudfield records this from <date> on."
 - **Usage**, collapsed: cost as a floor ("at least $4.12") with how many
   sessions reported it, tokens, and a link to **Settings › Usage** for
   subscription quota. Cost never stops a session.
@@ -7321,7 +7321,7 @@ navigating elsewhere marks the UI onboarded and clears wizard state.
 
 Connect asks **How does this computer reach your server?** with three
 radio cards (`src/routes/onboarding/connect-step.tsx`): **Tailscale**,
-marked Recommended and chosen by default, **Aether relay**, and **SSH
+marked Recommended and chosen by default, **Cloudfield relay**, and **SSH
 address**. On a phone the three share one row and the chosen card's
 one-line description shows below it, so the field below stays above the
 keyboard. A handed link, or **Link
@@ -7333,7 +7333,7 @@ which `link.apply` takes as the invite's display name or the saved link's
 profile name. Both send `link.apply`; only SSH address sends the invite and
 name.
 
-Aether relay signs in to an edge (`src/routes/onboarding/edge-link.tsx`):
+Cloudfield relay signs in to an edge (`src/routes/onboarding/edge-link.tsx`):
 **Sign in with GitHub** runs the edge's device flow through the local
 gateway, which keeps the device token, shows the code while it polls
 `edge.status`, then lists the servers the account reaches, each with one
@@ -7531,7 +7531,7 @@ that runs a newer release than a client refuses that client
   its cache. The check always answers. With nothing to update, the dialog
   says *You're up to date (vX). Checked HH:MM.*, and each row says the same
   for its target; an out-of-date desktop app withholds that line. A check that failed shows the error verbatim:
-  - *Could not check for a new Aether release.*
+  - *Could not check for a new Cloudfield release.*
   - *The server could not check for a new release.*
   - *Could not read the server's update status.* when the status read
     itself failed.
@@ -7545,7 +7545,7 @@ that runs a newer release than a client refuses that client
      rolled back*;
   3. *Server X is available* (members: *Server X is available, ask an
      admin*);
-  4. *Update to Aether X failed* or *Aether X is available*;
+  4. *Update to Cloudfield X failed* or *Cloudfield X is available*;
   5. *The desktop app is out of date*.
 - **The dialog lists the server first.**
   - **Admins** get the server's version, the latest release and the
@@ -7620,8 +7620,8 @@ that runs a newer release than a client refuses that client
     directory only root can write, such as `/usr/local/bin/aether`): the
     button, and before the click: *macOS will ask for an administrator
     password: {cli_path} is in a directory this account cannot write to.
-    The dialog is labelled osascript, the tool Aether asks through. Aether
-    never sees your password.*
+    The dialog is labelled osascript, the tool Cloudfield asks
+    through. Cloudfield never sees your password.*
   - *manual*: no button. The row shows `sudo aether update` with a copy
     button.
 
@@ -7635,7 +7635,7 @@ that runs a newer release than a client refuses that client
   `applyClientUpdate` in `src/store/updates.ts` runs the click, shared with
   the gate:
   1. It re-reads `update.check` with `refresh: true`. A fresh answer that
-     finds this machine current installs nothing and says *Aether vX is the
+     finds this machine current installs nothing and says *Cloudfield vX is the
      newest release. Nothing was downloaded.* A fresh `cli_error` is the
      click's error, except on a gated client whose `target_version` is
      set: the server's release was found anyway, so the install goes on.
@@ -7656,8 +7656,8 @@ that runs a newer release than a client refuses that client
 
   When the gateway reports the CLI as `packaged` (the Android app), the
   client row and its notice are gone. The dialog says *Updates come from
-  the Android app: install its new version to update Aether.*, followed,
-  when a newer release exists, by *Aether <tag> is released; the app's
+  the Android app: install its new version to update Cloudfield.*, followed,
+  when a newer release exists, by *Cloudfield <tag> is released; the app's
   banner says when and where to update.* The app's own banner is the
   notice ([install.md](install.md#android-app)).
 - **The required-update gate.** The gate replaces the whole dashboard while
@@ -7707,11 +7707,11 @@ that runs a newer release than a client refuses that client
   with. A client that cannot update itself gets neither button nor
   command, only the line and release link the client row shows; a
   *packaged* one (the Android app) reads *Updates come from the Android
-  app: install its vX release to update Aether.* What follows a finished
+  app: install its vX release to update Cloudfield.* What follows a finished
   update depends on the gateway:
   - under the desktop shell, the gateway relaunches and the page comes
     back on the new version;
-  - in a browser tab, the gate says *Aether X is installed.*, says to
+  - in a browser tab, the gate says *Cloudfield X is installed.*, says to
     restart `aether gui`, and offers **Reload**.
 
   A later `update.check` that reached the server (`server_version` set, no

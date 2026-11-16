@@ -107,7 +107,7 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
           {packaged && (
             <DialogDescription>
               {packagedLine(packaged)}
-              {packagedLatest && ` Aether ${packagedLatest} is released; the app's banner says when and where to update.`}
+              {packagedLatest && ` Cloudfield ${packagedLatest} is released; the app's banner says when and where to update.`}
             </DialogDescription>
           )}
           {line && <p role="status" className="text-ui text-muted">{line}</p>}
@@ -133,14 +133,14 @@ function ClientRow({ client, target, serverBehind }: { client: Api; target: Upda
   // A click's own answer, a cancel or "already current", stays on screen.
   if (answered && update) return <CliBanner update={update} client={client} serverBehind={serverBehind} />
   if (target.state === 'checking') {
-    return <StatusRow Icon={LoaderCircle} spin headline="Checking for a new Aether release…" />
+    return <StatusRow Icon={LoaderCircle} spin headline="Checking for a new Cloudfield release…" />
   }
   if (target.state === 'up_to_date') {
     const at = checkedTime(target.checkedAt)
     return (
       <StatusRow
         Icon={CircleCheck}
-        headline={`Aether on this computer is up to date (${target.version}).`}
+        headline={`Cloudfield on this computer is up to date (${target.version}).`}
         detail={at ? `Checked ${at}.` : undefined}
       />
     )
@@ -150,7 +150,7 @@ function ClientRow({ client, target, serverBehind }: { client: Api; target: Upda
     return (
       <StatusRow
         Icon={CircleAlert}
-        headline="Could not check for a new Aether release."
+        headline="Could not check for a new Cloudfield release."
         detail={at ? `Last successful check ${at}.` : undefined}
         error={target.error}
       />
@@ -185,10 +185,10 @@ export function useUpdateNotice(includeDismissed = false): { text: string; actio
   }
   // A packaged CLI's notice is its app's own, outside the dashboard.
   if (serves && !update?.cli.packaged && client.state === 'failed') {
-    return { text: `Update to Aether ${bareVersion(client.latest)} failed`, action: true }
+    return { text: `Update to Cloudfield ${bareVersion(client.latest)} failed`, action: true }
   }
   if (serves && !update?.cli.packaged && client.state === 'available' && dismissed.cli !== client.latest) {
-    return { text: `Aether ${bareVersion(client.latest)} is available`, action: true }
+    return { text: `Cloudfield ${bareVersion(client.latest)} is available`, action: true }
   }
   if (serves && cliVersion && shellIsStale(cliVersion) && dismissed.shell !== cliVersion) {
     return { text: 'The desktop app is out of date', action: true }

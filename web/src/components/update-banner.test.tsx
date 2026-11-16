@@ -629,7 +629,7 @@ describe('the desktop app rebuild notice', () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.3' }
     seed()
     const same = render(<UpdateHost client={fakeApi()} />)
-    await screen.findByText('Aether v1.3.0 is available.')
+    await screen.findByText('Cloudfield v1.3.0 is available.')
     expect(screen.queryByText(notice)).toBeNull()
     same.unmount()
 
@@ -637,7 +637,7 @@ describe('the desktop app rebuild notice', () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
     seed({ capabilities: caps({ version: undefined }) })
     render(<UpdateHost client={fakeApi()} />)
-    await screen.findByText('Aether v1.3.0 is available.')
+    await screen.findByText('Cloudfield v1.3.0 is available.')
     expect(screen.queryByText(notice)).toBeNull()
   })
 
@@ -656,7 +656,7 @@ describe('the desktop app rebuild notice', () => {
       shellWindow.aetherDesktop = { platform: 'linux', shellVersion }
       seed({ capabilities: caps({ version: cliVersion }) })
       const view = render(<UpdateHost client={fakeApi()} />)
-      await screen.findByText('Aether v1.3.0 is available.')
+      await screen.findByText('Cloudfield v1.3.0 is available.')
       expect(screen.queryByText(notice) !== null).toBe(stale)
       view.unmount()
     }
@@ -701,12 +701,12 @@ describe('the CLI release re-check', () => {
     seed()
     render(<UpdateHost client={client} />)
     await settle()
-    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.3.0 is available.')).toBeTruthy()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   // Coming back to a window fires both events. One return is one read: a
@@ -742,7 +742,7 @@ describe('the CLI release re-check', () => {
       window.dispatchEvent(new Event('focus'))
       await vi.advanceTimersByTimeAsync(200)
     })
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   test('reads nothing while the window is hidden', async () => {
@@ -757,7 +757,7 @@ describe('the CLI release re-check', () => {
       document.dispatchEvent(new Event('visibilitychange'))
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD * 4)
     })
-    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.3.0 is available.')).toBeTruthy()
   })
 
   // A failed re-check is recorded verbatim, but the banner it already drew
@@ -780,14 +780,14 @@ describe('the CLI release re-check', () => {
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
     expect(useStore.getState().clientCheckError).toBe('dial github.com: no route to host')
-    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
-    expect(screen.queryByText('Could not check for a new Aether release.')).toBeNull()
+    expect(screen.getByText('Cloudfield v1.3.0 is available.')).toBeTruthy()
+    expect(screen.queryByText('Could not check for a new Cloudfield release.')).toBeNull()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
     expect(useStore.getState().clientCheckError).toBeNull()
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   // Dismissal is keyed by version, so the next release is not silenced by
@@ -798,12 +798,12 @@ describe('the CLI release re-check', () => {
     seed({ dismissedUpdates: { cli: 'v1.3.0', server: '', shell: '' } })
     render(<UpdateHost client={client} />)
     await settle()
-    expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
+    expect(screen.queryByText('Cloudfield v1.3.0 is available.')).toBeNull()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   // The re-checks must not bypass the gateway's cache: every open tab
@@ -818,7 +818,7 @@ describe('the CLI release re-check', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD * 3)
     })
-    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.3.0 is available.')).toBeTruthy()
   })
 
   test('stops reading once the banners are gone', async () => {

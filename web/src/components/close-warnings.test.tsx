@@ -156,7 +156,7 @@ describe('CloseWarnings', () => {
       url: `https://github.com/acme/shop/pull/${n}`, number: n, observed_at: '2026-11-03T18:20:00Z' })) }} />)
     const items = within(screen.getByRole('list', { name: 'What closing affects' })).getAllByRole('listitem')
     expect(items).toHaveLength(1)
-    expect(items[0]!.textContent).toMatch(/^3 pull requests were open, not merged, when Aether last checked .+: acme\/shop#61, acme\/shop#62, acme\/shop#63\.$/)
+    expect(items[0]!.textContent).toMatch(/^3 pull requests were open, not merged, when Cloudfield last checked .+: acme\/shop#61, acme\/shop#62, acme\/shop#63\.$/)
     expect(screen.getByRole('link', { name: 'acme/shop#62' }).getAttribute('href')).toBe('https://github.com/acme/shop/pull/62')
   })
 

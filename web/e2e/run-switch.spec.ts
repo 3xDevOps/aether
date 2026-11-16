@@ -216,7 +216,7 @@ test('a second run never shows the first run output', async ({ page, aether }) =
   })
   unanswered = run.id
 
-  const sidebar = page.getByRole('navigation', { name: 'Aether' })
+  const sidebar = page.getByRole('navigation', { name: 'Cloudfield' })
   await sidebar.getByRole('button', { name: /the second session/ }).click()
   await expect(
     page.getByRole('heading', { name: 'the second session', exact: true }),
@@ -321,7 +321,7 @@ done
 
   await page.setViewportSize({ width: 1568, height: 1000 })
   await page.goto(alice.url)
-  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+  const sidebar = page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' })
   const surfaces = page.getByRole('navigation', { name: 'Main navigation' })
   const open = (task: string) => sidebar.getByRole('button', { name: task }).click()
   const board = () => surfaces.getByRole('button', { name: 'Board', exact: true }).click()
@@ -397,7 +397,7 @@ test('an owner returning to a run keeps steering it', async ({ page, aether }) =
     return controller
   }
   await page.goto(alice.url)
-  const sidebar = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+  const sidebar = page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' })
   const open = async (task: string) => {
     await sidebar.getByRole('button', { name: task }).click()
     await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()

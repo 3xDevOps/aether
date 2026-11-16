@@ -157,7 +157,7 @@ is linked, answer **How does this computer reach your server?**:
 | Choice | When | Then |
 | --- | --- | --- |
 | **Tailscale** (recommended) | This computer is on the server's tailnet. | Enter the name setup printed in **Server's tailnet name**, and click **Link**. |
-| **Aether relay** | Setup printed a claim link, or someone sent you an invitation. | Click **Sign in with GitHub**, open the address shown and confirm the code. Paste the claim link into **Claim or invite link** and click **Claim and link**. Or paste either link into **Have an invitation or claim link?** first. |
+| **Cloudfield relay** | Setup printed a claim link, or someone sent you an invitation. | Click **Sign in with GitHub**, open the address shown and confirm the code. Paste the claim link into **Claim or invite link** and click **Claim and link**. Or paste either link into **Have an invitation or claim link?** first. |
 | **SSH address** | This computer reaches the server's SSH port directly. | Enter `<server-host>:2222`, and an **Invite code** if an admin gave you one, then click **Link**. |
 
 Opening the `aether://claim` link on your computer opens the relay choice with

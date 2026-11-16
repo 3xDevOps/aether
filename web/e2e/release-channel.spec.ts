@@ -44,7 +44,7 @@ test('a super admin confirms nightly and a switch that makes the server wait bef
 
   await section.getByRole('radio', { name: 'Nightly' }).click()
   const nightly = page.getByRole('dialog', { name: 'Switch to nightly builds?' })
-  await expect(nightly.getByText('Not recommended unless you are developing Aether.')).toBeVisible()
+  await expect(nightly.getByText('Not recommended unless you are developing Cloudfield.')).toBeVisible()
   await nightly.getByRole('button', { name: 'Cancel' }).click()
   expect(calls).toEqual([])
 

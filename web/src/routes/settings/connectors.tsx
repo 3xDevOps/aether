@@ -131,7 +131,7 @@ const guides: Record<App, { open: ReactNode; paste: ReactNode; note: string }> =
 function SignInStep({ watching, busy, expired, onWatch }: { watching: boolean; busy: boolean; expired: boolean; onWatch: () => void }) {
   return (
     <>
-      <p>On the Aether pages that open, sign in to the edge with GitHub, select <strong>Continue</strong> next to this server, choose its scopes and select <strong>Allow</strong>. No code is needed.</p>
+      <p>On the Cloudfield pages that open, sign in to the edge with GitHub, select <strong>Continue</strong> next to this server, choose its scopes and select <strong>Allow</strong>. No code is needed.</p>
       {!watching && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <Button size="sm" variant="secondary" disabled={busy} onClick={onWatch}>Watch for the connection</Button>
@@ -197,7 +197,7 @@ function Setup({
             ? <SignInStep watching={watching} busy={busy} expired={expired} onWatch={onMint} />
             : (
                 <>
-                  <p>On the Aether page that opens, choose its scopes, paste this code if the page asks for one, and select <strong>Allow</strong>.</p>
+                  <p>On the Cloudfield page that opens, choose its scopes, paste this code if the page asks for one, and select <strong>Allow</strong>.</p>
                   <CodeStep code={code} busy={busy} expired={expired} onMint={onMint} />
                 </>
               )}
@@ -242,7 +242,7 @@ function Connectors({ client }: { client: Api }) {
     info: ListInfo
   } | null>(null)
   // The move or reconnect in progress, kept past an attempt's expiry until
-  // its replacement calls Aether or the member stops it, so a new code
+  // its replacement calls Cloudfield or the member stops it, so a new code
   // or watch continues it. `at` is its URL when not the one shown; `id`
   // and `known` are its claim and baseline, kept so a retry still takes a
   // replacement that appeared before it.
@@ -353,7 +353,7 @@ function Connectors({ client }: { client: Api }) {
       } else if (final) {
         finish()
         setPollError({
-          text: `${label(added)} has not called Aether yet, so ${label(old)} was not revoked. Revoke it once the new connection works.`,
+          text: `${label(added)} has not called Cloudfield yet, so ${label(old)} was not revoked. Revoke it once the new connection works.`,
           fix: <Link href={`${docs}/connectors.md#move-a-connector-to-the-universal-url`}>Moving a connector</Link>,
         })
       }
@@ -476,7 +476,7 @@ function Connectors({ client }: { client: Api }) {
             <p className="flex items-center gap-1.5 text-muted">
               <Spinner />
               {attempt.replaces && connected
-                ? `Waiting for ${label(connected)} to call Aether, then revoking ${label(attempt.replaces)}…`
+                ? `Waiting for ${label(connected)} to call Cloudfield, then revoking ${label(attempt.replaces)}…`
                 : `Waiting for ${attempt.app === 'chatgpt' ? 'ChatGPT' : 'Claude'} to connect…`}
             </p>
           )}
@@ -484,7 +484,7 @@ function Connectors({ client }: { client: Api }) {
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-muted">
               <span>
                 {target.kind === 'move' ? 'Moving' : 'Reconnecting'} {label(target.replaces)}
-                {attempt ? '' : `: ${signsInAt(info, target.at) ? 'watch for the connection' : 'get a new code'} to continue`}. It is revoked only once its replacement calls Aether; another move or reconnect waits until this one ends.
+                {attempt ? '' : `: ${signsInAt(info, target.at) ? 'watch for the connection' : 'get a new code'} to continue`}. It is revoked only once its replacement calls Cloudfield; another move or reconnect waits until this one ends.
               </span>
               <Button size="sm" variant="ghost" onClick={stop}>Stop</Button>
             </div>
@@ -495,7 +495,7 @@ function Connectors({ client }: { client: Api }) {
               title={`${label(connected)} connected`}
               actions={<Button ref={done} size="sm" variant="secondary" onClick={() => setConnected(null)}>Done</Button>}
             >
-              With {scopeList(connected)}. Ask it “What needs me in Aether?”
+              With {scopeList(connected)}. Ask it “What needs me in Cloudfield?”
             </Callout>
           )}
         </div>
@@ -504,7 +504,7 @@ function Connectors({ client }: { client: Api }) {
       </SettingRow>
       <SettingRow
         label="What a connector may do"
-        help="You choose its scopes on the Aether page that opens when you connect; ChatGPT and Claude do not. To change them, reconnect."
+        help="You choose its scopes on the Cloudfield page that opens when you connect; ChatGPT and Claude do not. To change them, reconnect."
       >
         <dl className="flex min-w-0 flex-col gap-2 text-ui-sm">
           {scopes.map(([name, text]) => (
@@ -516,7 +516,7 @@ function Connectors({ client }: { client: Api }) {
         </dl>
       </SettingRow>
       {connectors?.length === 0 && (
-        <SettingRow label="No connectors yet" help="One appears here once you select Allow on the Aether page." />
+        <SettingRow label="No connectors yet" help="One appears here once you select Allow on the Cloudfield page." />
       )}
       {connectors?.map((c) => {
         const universal = atUniversal(info, c.resource)
@@ -547,7 +547,7 @@ function Connectors({ client }: { client: Api }) {
       {confirming?.action === 'move' && (
         <Confirm
           title={`Move ${label(confirming.connector)} to the universal URL?`}
-          description={`Add Aether again in ${confirming.connector.client_name} with ${info.universal_url}${info.sign_in ? ' and sign in' : ' and paste the code'}. Once the new connection calls Aether, this connector is revoked; remove the old Aether connector in ${confirming.connector.client_name} too.`}
+          description={`Add Aether again in ${confirming.connector.client_name} with ${info.universal_url}${info.sign_in ? ' and sign in' : ' and paste the code'}. Once the new connection calls Cloudfield, this connector is revoked; remove the old Aether connector in ${confirming.connector.client_name} too.`}
           action="Move"
           pending="Starting…"
           onConfirm={async () => {
@@ -565,7 +565,7 @@ function Connectors({ client }: { client: Api }) {
       {confirming && confirming.action !== 'move' && (confirming.action === 'reconnect' ? (
         <Confirm
           title={`Reconnect ${label(confirming.connector)}?`}
-          description={`${signsIn(confirming.connector) ? 'Connect Aether again' : 'This gets a new code. Connect Aether again'} in ${confirming.connector.client_name}${signsIn(confirming.connector) ? ' and sign in' : ' and paste the code'}; you can choose other scopes. Once the new connection calls Aether, this connector is revoked.`}
+          description={`${signsIn(confirming.connector) ? 'Connect Aether again' : 'This gets a new code. Connect Aether again'} in ${confirming.connector.client_name}${signsIn(confirming.connector) ? ' and sign in' : ' and paste the code'}; you can choose other scopes. Once the new connection calls Cloudfield, this connector is revoked.`}
           action="Reconnect"
           pending="Reconnecting…"
           onConfirm={async () => {

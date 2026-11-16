@@ -107,7 +107,7 @@ it('tells an admin to update a server too old for connectors', async () => {
   expect(screen.queryByRole('button', { name: 'Get a code' })).toBeNull()
 })
 
-it('reconnects on the connector’s own tab with a code, revoking it only once its replacement calls Aether, from a server that lists no client_id', async () => {
+it('reconnects on the connector’s own tab with a code, revoking it only once its replacement calls Cloudfield, from a server that lists no client_id', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
   const older = { ...claude, client_id: undefined }
   const replacement = { ...older, id: 'con-claude00002', last_used_at: '2026-10-25T12:00:05Z' }
@@ -202,7 +202,7 @@ it('reconnects a connector on the server’s own URL there with a code, even whe
   })
   fireEvent.click(await screen.findByRole('button', { name: 'Reconnect Claude (claude.ai)' }))
   const dialog = await screen.findByRole('alertdialog')
-  expect(dialog.textContent).toContain('This gets a new code. Connect Aether again in Claude and paste the code; you can choose other scopes. Once the new connection calls Aether, this connector is revoked.')
+  expect(dialog.textContent).toContain('This gets a new code. Connect Aether again in Claude and paste the code; you can choose other scopes. Once the new connection calls Cloudfield, this connector is revoked.')
   fireEvent.click(within(dialog).getByRole('button', { name: 'Reconnect' }))
   expect(await screen.findByText('ABCD-EFGH')).toBeTruthy()
   const panel = screen.getByRole('tabpanel', { name: 'Claude' })
@@ -304,7 +304,7 @@ async function move(name: string) {
   fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Move' }))
 }
 
-it('moves a connector on the server’s own URL to the universal URL, revoking it only once its replacement calls Aether', async () => {
+it('moves a connector on the server’s own URL to the universal URL, revoking it only once its replacement calls Cloudfield', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
   const old = { ...chatgpt, resource: own }
   const added = { ...chatgpt, id: 'con-universal01', resource: universal }
@@ -317,11 +317,11 @@ it('moves a connector on the server’s own URL to the universal URL, revoking i
   expect(await screen.findByText(own)).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Move ChatGPT (chatgpt.com) to the universal URL' }))
   const dialog = await screen.findByRole('alertdialog')
-  expect(dialog.textContent).toContain(`Add Aether again in ChatGPT with ${universal} and sign in. Once the new connection calls Aether, this connector is revoked`)
+  expect(dialog.textContent).toContain(`Add Aether again in ChatGPT with ${universal} and sign in. Once the new connection calls Cloudfield, this connector is revoked`)
   fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
   expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
   await vi.advanceTimersByTimeAsync(6000)
-  expect(await screen.findByText('Waiting for ChatGPT (chatgpt.com) to call Aether, then revoking ChatGPT (chatgpt.com)…')).toBeTruthy()
+  expect(await screen.findByText('Waiting for ChatGPT (chatgpt.com) to call Cloudfield, then revoking ChatGPT (chatgpt.com)…')).toBeTruthy()
   expect(client.connectorRevoke).not.toHaveBeenCalled()
   await vi.advanceTimersByTimeAsync(3000)
   await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-7k2m9q4xbd'))
@@ -493,7 +493,7 @@ it('retries a move for its own app and still takes a replacement that appeared b
   expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
   connectors = [old, added]
   await vi.advanceTimersByTimeAsync(600_000)
-  expect((await screen.findByRole('alert')).textContent).toContain('ChatGPT (chatgpt.com) has not called Aether yet')
+  expect((await screen.findByRole('alert')).textContent).toContain('ChatGPT (chatgpt.com) has not called Cloudfield yet')
   fireEvent.mouseDown(screen.getByRole('tab', { name: 'Claude' }))
   expect(screen.getByRole('tab', { name: 'Claude' }).getAttribute('aria-selected')).toBe('true')
   fireEvent.click(screen.getByRole('button', { name: 'Watch for the connection' }))

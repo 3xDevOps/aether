@@ -17,7 +17,7 @@ const copy = {
   },
   acp: {
     title: 'Enhanced',
-    description: 'Aether reads what your agent is doing instead of only showing its terminal: messages, tool activity, file changes, approvals and progress appear as native controls.',
+    description: 'Cloudfield reads what your agent is doing instead of only showing its terminal: messages, tool activity, file changes, approvals and progress appear as native controls.',
     tradeOff: "Runs through an adapter, not the agent's own screen; some agent-specific commands and screens are missing; starts a few seconds slower.",
   },
 } satisfies Record<SetupMode, { title: string; description: string; tradeOff: string }>

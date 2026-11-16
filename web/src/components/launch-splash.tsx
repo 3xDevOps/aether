@@ -126,7 +126,7 @@ export function LaunchSplash() {
         <span
           className="launch-splash__status"
           data-testid="launch-splash-status"
-          aria-label="Starting Aether"
+          aria-label="Starting Cloudfield"
         />
       </div>
     </div>

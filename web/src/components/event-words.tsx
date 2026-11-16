@@ -86,7 +86,7 @@ function roomLine(p: Payload, actor: string): ReactNode {
     case 'reply':
       return <>{who} answered a question</>
     case 'system':
-      return 'Aether added a note'
+      return 'Cloudfield added a note'
     case 'steer_request': {
       const state = steerStates[text(p.state) as RoomMessageState]
       return state ? <>A message from <Who id={p.actor_id} object /> {state}</> : <>{who} messaged the agent</>
@@ -276,7 +276,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'run.model': (p) => (text(p.model) ? <>Model set to <Quote>{bounded(p.model, 160)}</Quote></> : "Model refused, so the agent's default runs"),
   'run.effort': (p) => <>Effort set to <Quote>{bounded(p.effort, 160)}</Quote></>,
   'run.sleep': (p) => p.waking ? 'Waking' : p.wake_error ? <>Wake failed: {bounded(p.wake_error, 160)}</> : p.asleep_since ? (p.asleep_saved ? 'Fell asleep: saved to disk with every process' : 'Fell asleep: its container stopped') : 'Woke',
-  'run.archived': (p, e) => <><Who id={e.actor_id} fallback="Aether" /> {p.archived_at ? 'archived the session' : 'restored the session'}</>,
+  'run.archived': (p, e) => <><Who id={e.actor_id} fallback="Cloudfield" /> {p.archived_at ? 'archived the session' : 'restored the session'}</>,
   'run.outcome_seen': (_, e) => <><Who id={e.actor_id} fallback="The owner" /> opened the finished session</>,
   'run.finish_opened': (_, e) => <><Who id={e.actor_id} fallback="A member" /> opened the finished session</>,
   'run.review': (p, e) => (

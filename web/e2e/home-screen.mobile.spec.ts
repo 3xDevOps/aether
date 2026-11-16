@@ -42,7 +42,7 @@ test('a phone is served everything it needs to install the dashboard', async ({
 
   const manifest = JSON.parse(await response.text())
   expect(manifest).toMatchObject({
-    name: 'Aether',
+    name: 'Cloudfield',
     start_url: '/',
     display: 'standalone',
   })

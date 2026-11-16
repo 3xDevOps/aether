@@ -85,7 +85,7 @@ export function StatusRow({
 }
 
 export function packagedLine(packaged: string, target = ''): string {
-  return `Updates come from the ${packaged}: install its ${target ? `${target} release` : 'new version'} to update Aether.`
+  return `Updates come from the ${packaged}: install its ${target ? `${target} release` : 'new version'} to update Cloudfield.`
 }
 
 /** What to do instead where update.apply cannot replace this binary. */

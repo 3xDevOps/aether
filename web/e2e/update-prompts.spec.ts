@@ -71,7 +71,7 @@ async function routeServerStatus(page: Page, status: ServerUpdateStatus) {
   await page.route('**/api/v1/server.update_status', (route) => json(route, status))
 }
 
-const shell = (page: Page) => page.getByRole('navigation', { name: 'Aether' })
+const shell = (page: Page) => page.getByRole('navigation', { name: 'Cloudfield' })
 const footer = (page: Page) => shell(page).getByRole('button', { name: /, (Connecting|Live|Reconnecting|Offline)$/ })
 const updates = (page: Page) => page.getByRole('dialog', { name: 'Updates' })
 
@@ -94,9 +94,9 @@ test('a release found by the half-hourly check surfaces in the sidebar', async (
   // RECHECK_MS is 30 minutes, jittered by up to 10% either way.
   await page.clock.fastForward('34:00')
 
-  await expect(notice).toHaveText(/^Aether 0\.8\.0 is available\s*· Update$/)
+  await expect(notice).toHaveText(/^Cloudfield 0\.8\.0 is available\s*· Update$/)
   await notice.getByRole('button', { name: 'Update' }).click()
-  await expect(updates(page).getByText('Aether v0.8.0 is available.')).toBeVisible()
+  await expect(updates(page).getByText('Cloudfield v0.8.0 is available.')).toBeVisible()
 })
 
 test('Check for updates says up to date, then shows a failed lookup verbatim', async ({ page, aether }) => {
@@ -120,13 +120,13 @@ test('Check for updates says up to date, then shows a failed lookup verbatim', a
   await expect(dialog.getByRole('status').first()).toHaveText(
     /^You're up to date \(v0\.7\.0\)\. Checked \d{1,2}:\d{2}( [AP]M)?\.$/,
   )
-  await expect(dialog.getByText('Aether on this computer is up to date (v0.7.0).')).toBeVisible()
+  await expect(dialog.getByText('Cloudfield on this computer is up to date (v0.7.0).')).toBeVisible()
 
   failing = true
   const before = checks.length
   await dialog.getByRole('button', { name: 'Check now' }).click()
 
-  await expect(dialog.getByText('Could not check for a new Aether release.')).toBeVisible()
+  await expect(dialog.getByText('Could not check for a new Cloudfield release.')).toBeVisible()
   await expect(dialog.getByText(rateLimited, { exact: true })).toBeVisible()
   await expect(dialog.getByText(/You're up to date/)).toHaveCount(0)
   expect(checks.slice(before)).toContainEqual({ refresh: true })
@@ -173,8 +173,8 @@ test('a server that refuses this client gates the dashboard until it updates', a
   await page.clock.install()
   await page.goto(alice.url)
 
-  const gate = page.getByRole('region', { name: 'Update Aether to keep using this server' })
-  await expect(gate.getByRole('heading', { name: 'Update Aether to keep using this server' })).toBeFocused()
+  const gate = page.getByRole('region', { name: 'Update Cloudfield to keep using this server' })
+  await expect(gate.getByRole('heading', { name: 'Update Cloudfield to keep using this server' })).toBeFocused()
   await expect(gate).toContainText(`The server said: ${refusal}. It accepts clients from v0.8.0.`)
   await expect(gate.getByText('aether update', { exact: true })).toBeVisible()
   await expect(gate.getByText(/curl/)).toHaveCount(0)
@@ -184,7 +184,7 @@ test('a server that refuses this client gates the dashboard until it updates', a
   await gate.getByRole('button', { name: 'Update now' }).click()
   await expect(gate.getByRole('status')).toHaveText('Downloading and verifying v0.8.0…')
   release()
-  await expect(gate.getByText('Aether v0.8.0 is installed.')).toBeVisible()
+  await expect(gate.getByText('Cloudfield v0.8.0 is installed.')).toBeVisible()
 
   // The next check after a minute finds the client accepted, which ends
   // the gate with one reload.
@@ -193,7 +193,7 @@ test('a server that refuses this client gates the dashboard until it updates', a
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect.poll(() => checks.length).toBeGreaterThan(before)
   await expect(footer(page)).toHaveAccessibleName(/, Live$/)
-  await expect(page.getByRole('heading', { name: 'Update Aether to keep using this server' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Update Cloudfield to keep using this server' })).toHaveCount(0)
 })
 
 test('the server updates before its clients, and only an admin can start it', async ({ page, browser, aether }) => {
@@ -215,7 +215,7 @@ test('the server updates before its clients, and only an admin can start it', as
 
   const dialog = updates(page)
   const serverRow = dialog.getByRole('status').filter({ hasText: 'Server v0.8.0 is available.' })
-  const clientRow = dialog.getByRole('status').filter({ hasText: 'Aether v0.8.0 is available.' })
+  const clientRow = dialog.getByRole('status').filter({ hasText: 'Cloudfield v0.8.0 is available.' })
   await expect(serverRow.getByRole('button', { name: 'Update now' })).toBeVisible()
   await expect(serverRow.getByRole('button', { name: 'Update when idle' })).toBeVisible()
   await expect(clientRow).toContainText('Update the server first, from its row above or with aether server update; this client updates after it.')

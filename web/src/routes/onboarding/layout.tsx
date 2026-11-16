@@ -33,7 +33,7 @@ export function Step({
       {children}
       {assistant && (
         <p className="text-ui-sm text-muted">
-          <Button variant="link" size="sm" onClick={() => useStore.getState().setAssistantOpen(true)}>Stuck? Ask Aether</Button>
+          <Button variant="link" size="sm" onClick={() => useStore.getState().setAssistantOpen(true)}>Stuck? Ask Cloudfield</Button>
         </p>
       )}
       {actions && <div className={actionRow}>{actions}</div>}

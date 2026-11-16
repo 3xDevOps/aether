@@ -32,7 +32,7 @@ test('a signed-out login warns everywhere, refuses a launch with the way back in
 
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' })).newPage()
   await page.goto(alice.url)
-  const nav = page.getByRole('navigation', { name: 'Aether' })
+  const nav = page.getByRole('navigation', { name: 'Cloudfield' })
   const alert = page.getByRole('alert').filter({ hasText: 'Sign in on Agents' })
   const recheck = () => page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(nav.getByRole('button', { name: 'New session' })).toBeVisible()

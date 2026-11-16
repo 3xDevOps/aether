@@ -206,9 +206,9 @@ function NightlyConfirm() {
   return (
     <DialogHeader>
       <DialogTitle>Switch to nightly builds?</DialogTitle>
-      <DialogDescription>Not recommended unless you are developing Aether.</DialogDescription>
+      <DialogDescription>Not recommended unless you are developing Cloudfield.</DialogDescription>
       <ul className="list-disc space-y-1 pl-5 text-ui text-muted">
-        <li>Nightly builds come from Aether&apos;s main branch. Breaking changes arrive as soon as they merge.</li>
+        <li>Nightly builds come from Cloudfield&apos;s main branch. Breaking changes arrive as soon as they merge.</li>
         <li>A nightly build may contain security issues that a later build fixes.</li>
         <li>You cannot go back right away. This server stays on its nightly build until the channel you return to catches up with it.</li>
       </ul>

@@ -12,7 +12,7 @@ export function isLaunch(method: string): boolean {
 }
 
 export const hearBack = {
-  run: 'Aether notifies you here, on the desktop app and on your phone when it finishes or needs you.',
+  run: 'Cloudfield notifies you here, on the desktop app and on your phone when it finishes or needs you.',
 }
 
 type Params = Record<string, unknown>

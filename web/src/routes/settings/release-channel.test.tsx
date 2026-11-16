@@ -31,7 +31,7 @@ describe('release channel section', () => {
     render(<ReleaseChannelSection client={client} />)
     fireEvent.click(screen.getByRole('radio', { name: 'Nightly' }))
     const dialog = await screen.findByRole('dialog', { name: 'Switch to nightly builds?' })
-    expect(within(dialog).getByText('Not recommended unless you are developing Aether.')).toBeDefined()
+    expect(within(dialog).getByText('Not recommended unless you are developing Cloudfield.')).toBeDefined()
     expect(within(dialog).getByText('A nightly build may contain security issues that a later build fixes.')).toBeDefined()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(client.serverReleaseChannelSet).not.toHaveBeenCalled()

@@ -112,7 +112,7 @@ async function openDesktop(page: Page, gateway: Gateway): Promise<void> {
     await route.fulfill({ response, json: { ...(await response.json()), version: 'v0.2.0' } })
   })
   await page.goto(gateway.url)
-  const sidebar = page.getByRole('navigation', { name: 'Aether' })
+  const sidebar = page.getByRole('navigation', { name: 'Cloudfield' })
   await expect(sidebar.getByText(/is available/)).toBeVisible()
   await sidebar.getByRole('button', { name: 'Update', exact: true }).click()
   await expect(page.getByText('The desktop app is out of date.')).toBeVisible()

@@ -116,7 +116,7 @@ describe('opening the assistant', () => {
 
   it('puts the button beside New run in the sidebar, and in the top bar only when the sidebar is hidden', async () => {
     render(<AppShell />)
-    const sidebar = within(screen.getByRole('navigation', { name: 'Aether' }))
+    const sidebar = within(screen.getByRole('navigation', { name: 'Cloudfield' }))
     const assistant = sidebar.getByRole('button', { name: 'Assistant' })
     expect(assistant.parentElement?.parentElement).toBe(sidebar.getByRole('group', { name: 'New session' }).parentElement)
     expect(assistant.parentElement?.parentElement).not.toBe(sidebar.getByRole('button', { name: 'Search' }).parentElement)
@@ -124,7 +124,7 @@ describe('opening the assistant', () => {
     expect(within(header).queryByRole('button', { name: 'Assistant' })).toBeNull()
 
     act(() => useStore.getState().toggleSidebar())
-    expect(screen.queryByRole('navigation', { name: 'Aether' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Cloudfield' })).toBeNull()
     const button = within(header).getByRole('button', { name: 'Assistant' })
     await userEvent.click(button)
     expect(button.getAttribute('aria-expanded')).toBe('true')
@@ -134,7 +134,7 @@ describe('opening the assistant', () => {
   it('opens from the palette command Ask Aether', async () => {
     render(<AppShell />)
     act(() => useStore.getState().togglePalette(true))
-    await userEvent.click(await screen.findByRole('option', { name: /Ask Aether/ }))
+    await userEvent.click(await screen.findByRole('option', { name: /Ask Cloudfield/ }))
     expect(await panel()).toBeDefined()
     expect(useStore.getState().assistantOpen).toBe(true)
   })
@@ -167,12 +167,12 @@ describe('opening the assistant', () => {
     useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'viewer' } }, members: { [alice.id]: { ...alice, role: 'viewer' } } })
     render(<AppShell />)
     expect(screen.queryByRole('button', { name: 'Assistant' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Ask Aether' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Ask Cloudfield' })).toBeNull()
     act(() => useStore.getState().toggleSidebar())
     expect(screen.queryByRole('button', { name: 'Assistant' })).toBeNull()
     act(() => useStore.getState().togglePalette(true))
     await screen.findByRole('dialog')
-    expect(screen.queryByRole('option', { name: /Ask Aether/ })).toBeNull()
+    expect(screen.queryByRole('option', { name: /Ask Cloudfield/ })).toBeNull()
     await userEvent.keyboard('{Escape}')
     await userEvent.keyboard('{Control>}{Shift>} {/Shift}{/Control}')
     expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
@@ -199,13 +199,13 @@ function acpOpen(items = [] as ReturnType<typeof say>[]) {
 describe('entry points', () => {
   it('offers Ask Aether on an empty board', async () => {
     render(<AppShell />)
-    await userEvent.click(await screen.findByRole('button', { name: 'Ask Aether' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask Cloudfield' }))
     expect(await panel()).toBeDefined()
   })
 
   it('offers Stuck? Ask Aether on an onboarding step', async () => {
     render(<><Step label="Agent" title="Set up an agent" /><AppShell /></>)
-    await userEvent.click(screen.getByRole('button', { name: 'Stuck? Ask Aether' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Stuck? Ask Cloudfield' }))
     expect(await panel()).toBeDefined()
   })
 })
