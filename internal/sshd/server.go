@@ -382,7 +382,7 @@ func (s *Server) authenticate(cm ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Perm
 		}
 		return nil, &ssh.BannerError{
 			Err:     errors.New("sshd: unknown public key"),
-			Message: "no Aether member for this key\n",
+			Message: "no Cloudfield member for this key\n",
 		}
 	}
 	return &ssh.Permissions{Extensions: map[string]string{memberIDExtension: string(m.ID)}}, nil

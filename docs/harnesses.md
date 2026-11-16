@@ -357,7 +357,7 @@ Standard sessions need Codex 0.131.0 or newer. With an older one, the session's 
 prints:
 
 ```text
-codex-cli 0.130.0 is too old: Aether attaches Codex's terminal to its app-server, which needs Codex 0.131.0 or newer.
+codex-cli 0.130.0 is too old: Cloudfield attaches Codex's terminal to its app-server, which needs Codex 0.131.0 or newer.
 Update it here, then start a new session:
   npm install -g --prefix "$HOME/.local" @openai/codex@latest
 ```
@@ -540,7 +540,7 @@ Updates skip OpenCode, agents you defined, shipped names an administrator
 overrides, agents installed in the image, and an account owner's installation
 that a recipient's session borrows. A `codex`, `pi`, `copilot` or `gemini` in
 `~/.local/bin` that `npm` did not install is not updated and reports, for
-example, `codex in ~/.local/bin was not installed with npm, so Aether cannot
+example, `codex in ~/.local/bin was not installed with npm, so Cloudfield cannot
 update it`.
 
 Cloudfield does not roll an update back. To turn updates off for the whole

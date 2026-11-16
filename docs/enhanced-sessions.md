@@ -329,7 +329,7 @@ Enhanced agent is not running`. The log records no notice for an adoption.
 A stopped server detaches cleanly. A killed one can, rarely, record twice the
 agent output it logged in the instant before it died. A server killed
 after it recorded a new turn but before the turn's prompt reached the keeper
-ends that turn with **Turn interrupted**: `Aether's server restarted before
+ends that turn with **Turn interrupted**: `Cloudfield's server restarted before
 this turn's prompt reached the agent. Send it again.`
 
 The server cannot reattach when the keeper or the agent exited, when the agent
@@ -384,7 +384,7 @@ agent's error followed by what to do, one of:
 
 ```text
 enhanced turn failed: ... Authentication required ...; Ada's Claude Code login is signed out. Sign in, then send the message again: dashboard Agents page, or aether agent login claude
-enhanced turn failed: ... Authentication required ...; Aether restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: dashboard Agents page, or aether agent login claude
+enhanced turn failed: ... Authentication required ...; Cloudfield restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: dashboard Agents page, or aether agent login claude
 enhanced turn failed: ... Authentication required ...; a restart did not help. Start a new session, or if Ada's Claude Code login is signed out, sign in: dashboard Agents page, or aether agent login claude
 ```
 

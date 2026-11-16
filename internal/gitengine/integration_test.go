@@ -1509,7 +1509,7 @@ func TestReceivePackRejectsRunBranchForcePush(t *testing.T) {
 	gitc(t, cl, "reset", "--hard", "HEAD~1")
 	gitc(t, cl, "commit", "--allow-empty", "-m", "divergent")
 	out := gitcFail(t, cl, "push", "--force", url("ws1"), branch)
-	if !strings.Contains(out, "refs/heads/"+branch) || !strings.Contains(out, "owned by the Aether server") {
+	if !strings.Contains(out, "refs/heads/"+branch) || !strings.Contains(out, "owned by the Cloudfield server") {
 		t.Errorf("force-push rejection message unreadable:\n%s", out)
 	}
 	if got := bareRevParse(t, e, "ws1", "refs/heads/"+branch); got != tip {
@@ -1587,7 +1587,7 @@ func assertSessionBranchProtected(t *testing.T, e *Engine, url func(domain.Works
 	gitc(t, cl, "reset", "--hard", "HEAD~1")
 	gitc(t, cl, "commit", "--allow-empty", "-m", "divergent")
 	out := gitcFail(t, cl, "push", "--force", url(ws), "HEAD:refs/heads/"+branch)
-	if !strings.Contains(out, "refs/heads/"+branch) || !strings.Contains(out, "owned by the Aether server") {
+	if !strings.Contains(out, "refs/heads/"+branch) || !strings.Contains(out, "owned by the Cloudfield server") {
 		t.Errorf("force-push rejection message unreadable:\n%s", out)
 	}
 	if got := bareRevParse(t, e, ws, "refs/heads/"+branch); got != tip {

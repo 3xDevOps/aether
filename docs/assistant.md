@@ -681,7 +681,7 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | `scheduler: Anthropic answered 400 Bad Request: the sign-in service refused the assistant's sign-in. Sign in again` | The vendor refused the refresh token. [Sign in again](#first-use) |
 | `scheduler: not signed in for the assistant. Sign in for the assistant first` | No sign-in was recorded, or the sign-in wrote no usable file. [Sign in](#first-use) |
 | `scheduler: the assistant's sign-in changed since you signed in. Sign in again` | The sign-in file is not the one you made; only the assistant's own agent writes it. [Sign in again](#first-use) |
-| `scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |
+| `scheduler: the assistant's sign-in held what Cloudfield does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |
 | `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
 | `assistant: 5 prompts are already queued; wait or remove one` | Five messages already wait. **Remove** one, or wait for the running turn |
 | `the server restarted while this turn ran; it was not sent again` | The turn may have done part of its work. Check, then send it again |

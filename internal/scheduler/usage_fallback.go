@@ -94,7 +94,7 @@ func noFallbackReason(owner, harness string, measured fallback.Measured, from do
 	reason := usageLimitReason + owner + "'s account; "
 	switch {
 	case !fallback.Reads(harness):
-		return reason + "Aether cannot read " + harness + "'s usage, so its sessions do not move to another account"
+		return reason + "Cloudfield cannot read " + harness + "'s usage, so its sessions do not move to another account"
 	case others == 0:
 		return reason + "no other account is shared to fall back on"
 	case exhausted:

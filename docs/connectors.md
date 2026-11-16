@@ -56,7 +56,7 @@ aether mcp
 ```
 
 ```
-Install Aether from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
+Install Cloudfield from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
   URL   https://edge.onaether.dev/mcp
   No code: on the page that opens, sign in to the edge with GitHub, pick this server and select Allow
 Connected:
@@ -242,7 +242,7 @@ connector:
 
 ```
 run.kill needs the control scope, which ChatGPT connector con-7k2m9q4xbd was not granted; select Reconnect next to it in Settings → ChatGPT and Claude and check Stop and approve on the consent page
-member.role: ChatGPT connector con-7k2m9q4xbd cannot call this method; no connector can, so use the Aether app or the aether CLI
+member.role: ChatGPT connector con-7k2m9q4xbd cannot call this method; no connector can, so use the Cloudfield app or the aether CLI
 ```
 
 To change scopes, revoke the connector and connect
@@ -480,7 +480,7 @@ Every part carries its source and the time it was read (`as_of` or
 and the summary line ends with `Not confirmed:` and the number of lookups
 that returned an error, sessions with pull requests not checked live, and
 unreadable reports. It adds `released` and `deployed` as `{"state":
-"unknown", "reason": "Aether does not track releases or deployments of this
+"unknown", "reason": "Cloudfield does not track releases or deployments of this
 repository"}`.
 
 The lookups are the same as `aether_pr_status`'s, for at most 5 sessions per
@@ -664,7 +664,7 @@ closes, merges, pull requests, mode switches and handoffs. A method no
 connector tool calls, such as saving the environment or your launch
 defaults, is decided only in Cloudfield. Declining needs no scope. Only a card a turn of this
 connector raised can be decided. A card reads `Waiting for your approval in
-Aether` and is decided only there when its text is over 2,000 characters,
+Cloudfield` and is decided only there when its text is over 2,000 characters,
 its summary holds a line break or a character not printed as itself, it forgets a
 preference or shows a saved one, or approving it needs a scope the
 connector lacks now or lacked when the turn ran. The connector offers only
@@ -828,10 +828,10 @@ On the page that opens when you connect:
 
 | Message | Cause |
 | --- | --- |
-| `That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Aether app, or aether mcp, and paste it here.` | The code is not live. A server restart also forgets codes |
+| `That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Cloudfield app, or aether mcp, and paste it here.` | The code is not live. A server restart also forgets codes |
 | `10 wrong codes came from your address in the last minute. Wait a minute, then paste the code again.` | 10 wrong codes in a minute from your address (your IPv6 /64). Other addresses are not affected |
 | `300 wrong codes came to this server from all addresses in the last minute. Wait a minute, then paste the code again.` | Someone is guessing codes from many addresses. Pairing resumes a minute after the guessing stops |
-| `Aether connectors work with ChatGPT and Claude; <host> is not one of them.` | Only `chatgpt.com` and `claude.ai` can connect |
+| `Cloudfield connectors work with ChatGPT and Claude; <host> is not one of them.` | Only `chatgpt.com` and `claude.ai` can connect |
 | `None of your servers can take this connection.` (edge sign-in page) | Each server listed under **Not available** says why: not connected, too old for the universal URL (an admin runs `sudo aether-server update`), or an invitation you have not joined |
 | The edge sign-in page does not list your server | Your GitHub account is not bound to a member there. Bind it (`aether member identities`) or use the `<edge>/mcp/<server id>` URL `aether mcp` prints |
 | `Cannot connect as your GitHub account: <account> is not a member of <server>; ...` | That GitHub account is not bound to a member. Sign in at the edge as the right account, or connect with a code |

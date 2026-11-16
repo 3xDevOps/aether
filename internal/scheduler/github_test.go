@@ -340,7 +340,7 @@ func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
 		t.Fatalf("EnsureTerminal: %v", err)
 	}
 	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
-	if err == nil || !strings.Contains(err.Error(), "does not include the signing key Aether generated") {
+	if err == nil || !strings.Contains(err.Error(), "does not include the signing key Cloudfield generated") {
 		t.Fatalf("ConnectGitHub error = %v, want the signing key mismatch", err)
 	}
 	fingerprint, ferr := signingFingerprint(homeKeyMaterial(t, e))

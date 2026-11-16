@@ -41,7 +41,7 @@ func (s *Server) assistantAsk(ctx context.Context, member domain.MemberID, raw j
 	const method = protocol.MethodAssistantAsk
 	id, _ := ctx.Value(connIdentityKey{}).(connIdentity)
 	if id.connector == "" || fromAssistant(ctx) {
-		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: method + " is for ChatGPT and Claude connectors; the Aether app sends prompts with " + protocol.MethodAssistantPrompt}
+		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: method + " is for ChatGPT and Claude connectors; the Cloudfield app sends prompts with " + protocol.MethodAssistantPrompt}
 	}
 	svc := s.cfg.Services.Assistant
 	if svc == nil {
@@ -173,7 +173,7 @@ func (s *Server) askDecide(ctx context.Context, svc AssistantService, member dom
 	}
 	if c.AetherOnly {
 		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
-			"card %s is long or shows a saved preference, so it is decided only in Aether; ask the person to open it there", p.CardID)}
+			"card %s is long or shows a saved preference, so it is decided only in Cloudfield; ask the person to open it there", p.CardID)}
 	}
 	if p.Card != c.Text {
 		return nil, invalidParams(fmt.Sprintf("card text does not match card %s; show the person the card and pass its text exactly", p.CardID))
@@ -181,7 +181,7 @@ func (s *Server) askDecide(ctx context.Context, svc AssistantService, member dom
 	approve := p.Decision == protocol.AssistantAskApprove
 	if approve {
 		if perr := s.cardRefusal(ctx, id, c); perr != nil {
-			return nil, &protocol.Error{Code: perr.Code, Message: fmt.Sprintf("card %s is decided only in Aether: %s", p.CardID, perr.Message)}
+			return nil, &protocol.Error{Code: perr.Code, Message: fmt.Sprintf("card %s is decided only in Cloudfield: %s", p.CardID, perr.Message)}
 		}
 	}
 	if err = svc.Confirm(ctx, member, p.CardID, approve); err != nil {

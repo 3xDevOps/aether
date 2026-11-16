@@ -113,7 +113,7 @@ func connectorScopeRefusal(ctx context.Context, method string) *protocol.Error {
 	scopes, listed := connectorMethodScopes[method]
 	if !listed {
 		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
-			"%s: %s cannot call this method; no connector can, so use the Aether app or the aether CLI", method, label)}
+			"%s: %s cannot call this method; no connector can, so use the Cloudfield app or the aether CLI", method, label)}
 	}
 	return scopeRefusal(id, method, scopes)
 }

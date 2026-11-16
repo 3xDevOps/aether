@@ -243,9 +243,9 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 // the user is asked once. The staged file stays for Discard: root copied
 // it rather than renaming it, so committed is never set.
 func (s *Staged) installWithAuthorization(ctx context.Context, admin adminInstaller, tag string) error {
-	prompt := fmt.Sprintf("Aether wants to replace %s with aether %s. "+
-		"macOS shows this request as osascript, the tool Aether asks through. "+
-		"Aether never sees your password.", s.dst, tag)
+	prompt := fmt.Sprintf("Cloudfield wants to replace %s with aether %s. "+
+		"macOS shows this request as osascript, the tool Cloudfield asks through. "+
+		"Cloudfield never sees your password.", s.dst, tag)
 	req := macinstall.Request{Src: s.tmp, Dst: s.dst, SHA256: s.sum}
 	for _, n := range newNames {
 		if filepath.Base(s.dst) == n.bin {

@@ -196,7 +196,7 @@ func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.M
 		return s.createAssistantContainer(ctx, member)
 	}
 	if len(removed) > 0 {
-		return "", fmt.Errorf("scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: %s. Retry starts with the rest; if the agent then reports no sign-in, sign in for the assistant again", strings.Join(removed, "; "))
+		return "", fmt.Errorf("scheduler: the assistant's sign-in held what Cloudfield does not keep, and it was removed: %s. Retry starts with the rest; if the agent then reports no sign-in, sign in for the assistant again", strings.Join(removed, "; "))
 	}
 	if err = s.verifyAssistantSignIn(ctx, member, agent); err != nil {
 		return "", err

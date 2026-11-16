@@ -725,7 +725,7 @@ func (s *Service) Test(ctx context.Context, member domain.MemberID, endpoint str
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(notification{Title: "Aether", Body: "Notifications work on this device."})
+	payload, err := json.Marshal(notification{Title: "Cloudfield", Body: "Notifications work on this device."})
 	if err != nil {
 		return err
 	}

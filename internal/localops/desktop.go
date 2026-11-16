@@ -589,7 +589,7 @@ func sweepInstallLeftovers(parent string) {
 func removeHint(goos, path string, err error) string {
 	switch {
 	case goos == "windows":
-		return " (is the Aether window still open?)"
+		return " (is the Cloudfield window still open?)"
 	case errors.Is(err, fs.ErrPermission):
 		return fmt.Sprintf(" (it belongs to another user; delete it with: sudo rm -rf %q)", path)
 	default:

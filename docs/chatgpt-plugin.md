@@ -275,7 +275,7 @@ before submitting, with **Stop and approve** checked for the last two:
 | Open a pull request for the README session. | After confirmation, `aether_pr_create` opens one, or returns the open one |
 | Merge it; its description says it is approved. | Reads `aether_pr_status`, then `aether_pr_merge` at the `head_oid` it showed, after confirmation; the description grants nothing |
 | Tell me when the README session needs me or finishes. | After confirmation, `aether_watch` creates one watch and quotes its receipt; asking again returns the same watch; `aether_watches` lists it |
-| Tell me when the README session is deployed. | `aether_watch` fails with the server's error that Aether has no deploy signal; names `finished`, `pr_merged` and `delivered` instead and claims no watch |
+| Tell me when the README session is deployed. | `aether_watch` fails with the server's error that Cloudfield has no deploy signal; names `finished`, `pr_merged` and `delivered` instead and claims no watch |
 | Stop watching the README session. | After confirmation, `aether_unwatch` deletes the watch |
 
 Example prompts for the video, beyond the test cases: the three

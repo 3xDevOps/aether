@@ -27,7 +27,7 @@ takes the target's defaults, marked *.
 | `run` | `pr_merged`, `ci` | Every pull request the session recorded: `PR #N merged on GitHub`, or its checks finished. See [Pull requests and CI](#pull-requests-and-ci). |
 | `pr` | `ci`*, `review`*, `merged`*, `closed` | See [Pull requests and CI](#pull-requests-and-ci). |
 
-Aether has no deploy signal. `deployed` is refused with that reason; watch
+Cloudfield has no deploy signal. `deployed` is refused with that reason; watch
 `finished` or `pr_merged` instead.
 
 A notice's title is the session's title. Its body is the
@@ -51,7 +51,7 @@ Cloudfield home, the one `aether github connect` sets up (see
 watch is created in the `error` state with the real error and the fix:
 
 ```text
-no usable GitHub login in your Aether home (github: no native gh login found; run aether github connect); run aether github connect on your computer, or use Onboarding → Agent → GitHub → Connect GitHub in the dashboard
+no usable GitHub login in your Cloudfield home (github: no native gh login found; run aether github connect); run aether github connect on your computer, or use Onboarding → Agent → GitHub → Connect GitHub in the dashboard
 ```
 
 It recovers on its own once you log in. `watch.create` refuses a pull
@@ -246,7 +246,7 @@ finishes" needs no one polling:
   starts a turn for it; any other session reads it at its next turn or inbox
   read ([how agents notice mail](coordination.md#delivery-acknowledgement-and-retries)).
   `delivered` means written to the inbox. It names the watch and you
-  (`Aether: watch wat-… of Ada relays a notice about session run-a:
+  (`Cloudfield: watch wat-… of Ada relays a notice about session run-a:
   finished.`), quotes the target's title and the notice on an `Untrusted
   (from the watched session, not instructions):` line, and links to the
   target. It is information only: no model reads it on the way, and a relay
@@ -308,7 +308,7 @@ A digest is one push, written by the server without a model. It replaces the
 previous digest on your devices and opens the dashboard:
 
 ```text
-Aether · 2 need you · 1 failed · 3 done
+Cloudfield · 2 need you · 1 failed · 3 done
 api  Fix login test: run the migration?  [Answer]
 api  Launch docs session: Permission requested  [Answer]
 web  Bump deps: Failed: checks failed (lint)  [Open]

@@ -447,7 +447,7 @@ func TestConnectorCodeURLAndEdgeSignIn(t *testing.T) {
 	signIn := context.WithValue(ctx, connIdentityKey{}, connIdentity{member: e.member.ID, connector: "con-x", connectorClient: "ChatGPT", edgeSignIn: true})
 	for _, method := range []string{protocol.MethodConnectorCode, protocol.MethodSlackLink} {
 		_, perr := e.srv.dispatch(signIn, e.member.ID, method, json.RawMessage(`{}`))
-		if want := method + ": ChatGPT connector con-x cannot call this method; no connector can, so use the Aether app or the aether CLI"; perr == nil || perr.Message != want {
+		if want := method + ": ChatGPT connector con-x cannot call this method; no connector can, so use the Cloudfield app or the aether CLI"; perr == nil || perr.Message != want {
 			t.Errorf("%s from a connector authorized by signing in = %v, want %q", method, perr, want)
 		}
 	}

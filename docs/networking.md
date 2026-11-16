@@ -192,7 +192,7 @@ a protected key first. Without a usable key the handshake fails with
 
 ### Everyone else
 
-An unknown key is refused with `no Aether member for this key`. An admin
+An unknown key is refused with `no Cloudfield member for this key`. An admin
 creates a one-time code (`--ttl` is in seconds, default 24 hours):
 
 ```sh

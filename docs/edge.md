@@ -236,7 +236,7 @@ GitHub accounts bound to a member.
 
 An invitation's link is `https://<relay host>/join/<server id>/<invitation
 id>#<secret>`. Opening it shows a page that opens the desktop app (**Open in
-Aether**) and offers the link to **Copy**, or run `aether link <link>`. The
+Cloudfield**) and offers the link to **Copy**, or run `aether link <link>`. The
 secret is the link's fragment, which a browser never sends, so no request to the
 edge carries it. There is no claim page, so no claim secret passes through the
 edge.

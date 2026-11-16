@@ -418,7 +418,7 @@ nothing written.
 | Question | Default | What it decides |
 | --- | --- | --- |
 | `Continue without Docker` | no | Asked only when Docker does not answer. No stops with `nothing written; install or start Docker, then run setup again`. |
-| `SSH listen address for Aether, not the system sshd` | `:2222` | The address and port clients connect to. |
+| `SSH listen address for Cloudfield, not the system sshd` | `:2222` | The address and port clients connect to. |
 | `Data directory` | `/var/lib/aether` | Where the server keeps everything ([data directory](#what-lives-in-the-data-directory)). |
 | `Use Tailscale to reach this server` | yes, when tailscaled names its tailnet | Asked only when Tailscale runs on the host. Yes signs people in by their tailnet login. No turns tailnet sign-in off and the edge on. |
 | `Let anyone on the tailnet join without an admin approving them` | no | Asked after a tailnet yes ([networking.md](networking.md#who-is-let-in)). |
@@ -795,9 +795,9 @@ same text):
 ```
 Switch to nightly builds?
 
-Not recommended unless you are developing Aether.
+Not recommended unless you are developing Cloudfield.
 
-- Nightly builds come from Aether's main branch. Breaking changes
+- Nightly builds come from Cloudfield's main branch. Breaking changes
   arrive as soon as they merge.
 - A nightly build may contain security issues that a later build fixes.
 - You cannot go back right away. This server stays on its nightly build

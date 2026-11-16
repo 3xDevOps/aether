@@ -198,7 +198,7 @@ func InstallSSHConfig() (SSHConfigResult, error) {
 	if slices.Contains(strings.Split(strings.ReplaceAll(string(existing), "\r\n", "\n"), "\n"), include) {
 		return out, nil
 	}
-	updated := "# Aether sessions as ssh hosts: <session-id>" + RunHostSuffix + " (aether ssh-config)\n" + include + "\n"
+	updated := "# Cloudfield sessions as ssh hosts: <session-id>" + RunHostSuffix + " (aether ssh-config)\n" + include + "\n"
 	if len(existing) > 0 {
 		updated += "\n" + string(existing)
 	}

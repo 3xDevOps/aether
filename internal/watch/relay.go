@@ -240,7 +240,7 @@ func relayBody(w *store.Watch, member *domain.Member, n *store.WatchNotification
 	if w.TargetKind == protocol.WatchTargetPR {
 		target = fmt.Sprintf("%s#%d", w.Repo, w.Number)
 	}
-	fmt.Fprintf(&b, "Aether: watch %s of %s relays a notice about %s %s: %s.\n", w.ID, member.DisplayName, kindWords[w.TargetKind], target, conditionWords[n.Condition])
+	fmt.Fprintf(&b, "Cloudfield: watch %s of %s relays a notice about %s %s: %s.\n", w.ID, member.DisplayName, kindWords[w.TargetKind], target, conditionWords[n.Condition])
 	text := n.Title + ": " + n.Body
 	if runes := []rune(text); len(runes) > maxUntrusted {
 		text = strings.TrimRight(string(runes[:maxUntrusted]), " ") + "…"

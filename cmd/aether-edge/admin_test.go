@@ -133,7 +133,7 @@ func TestGoogleAccountFromAnEarlierVersion(t *testing.T) {
 		t.Fatalf("accounts list:\n%s%v", out, err)
 	}
 	if _, err = run(t, dir, "accounts", "block", "google:g-1"); err == nil ||
-		!strings.Contains(err.Error(), `sign-in provider "google" is not supported: Aether signs in with GitHub only`) {
+		!strings.Contains(err.Error(), `sign-in provider "google" is not supported: Cloudfield signs in with GitHub only`) {
 		t.Fatalf("block: %v", err)
 	}
 	out, err = run(t, dir, "accounts", "delete", "google:g-1")

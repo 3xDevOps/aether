@@ -436,7 +436,7 @@ printed "This machine is your Aether server"
 printed "$quickstart"
 printed "  then, on your computer:"
 printed "  aether link <this-host>        # on a tailnet: the server's tailnet name"
-printed "  aether login                   # otherwise, sign in to the edge, Aether's relay"
+printed "  aether login                   # otherwise, sign in to the edge, Cloudfield's relay"
 ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
 printed "  sudo aether-server setup       # config, systemd unit, and how to start it"
 plain

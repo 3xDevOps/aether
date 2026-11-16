@@ -279,7 +279,7 @@ is the agent's: read it before you allow it.
 - The shim accepts `sudo [-u user] [-E] [-H] [-n] [--] command [args...]`.
   `-E` and `-H` change nothing. `-n` fails instead of asking, with `sudo: a
   person must allow this command; -n cannot wait for one`. Any other flag
-  fails, for example `sudo: -i is not supported in an Aether Default session`.
+  fails, for example `sudo: -i is not supported in a Cloudfield Default session`.
 - While the workspace [setup script](environments.md#setup-script) runs,
   before the agent starts, `sudo` runs without asking: an admin wrote the
   script.

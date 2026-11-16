@@ -416,7 +416,7 @@ if [ ! -d "$dir" ]; then
 		break
 	done
 fi
-[ -d "$dir" ] || { echo "{exe} in ~/.local/bin was not installed with npm, so Aether cannot update it" >&2; exit 1; }
+[ -d "$dir" ] || { echo "{exe} in ~/.local/bin was not installed with npm, so Cloudfield cannot update it" >&2; exit 1; }
 rm -rf "$HOME/.local/lib/.{exe}-update."*
 command -v npm >/dev/null 2>&1 || { echo "npm is not in this environment's PATH, and {exe} updates through npm" >&2; exit 1; }
 latest=$(npm view {pkg} version --fetch-retries=0) && [ -n "$latest" ] || exit 1

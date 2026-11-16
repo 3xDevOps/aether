@@ -778,7 +778,7 @@ func TestTestSendsNowAndReturnsTheRealError(t *testing.T) {
 	if err := h.svc.Test(h.ctx, h.ada.ID, phone.endpoint()); err != nil {
 		t.Fatalf("Test: %v", err)
 	}
-	phone.expect(t, notification{Title: "Aether", Body: "Notifications work on this device."})
+	phone.expect(t, notification{Title: "Cloudfield", Body: "Notifications work on this device."})
 
 	if err := h.svc.Test(h.ctx, h.bob.ID, phone.endpoint()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("testing another member's device = %v, want ErrNotFound", err)

@@ -264,7 +264,7 @@ func grantOf(c *store.Connector) sshd.ConnectorGrant {
 func (h *handler) server(r *http.Request) *mcp.Server {
 	c := auth.TokenInfoFromContext(r.Context()).Extra["connector"].(*store.Connector)
 	local := h.ssh.ConnectorLocal(grantOf(c), c.ID, c.ClientName, c.Scopes)
-	srv := mcp.NewServer(&mcp.Implementation{Name: mcpbridge.ServerName, Title: "Aether", Version: version.String()},
+	srv := mcp.NewServer(&mcp.Implementation{Name: mcpbridge.ServerName, Title: "Cloudfield", Version: version.String()},
 		&mcp.ServerOptions{Instructions: instructions})
 	ops.RegisterConnector(srv, func(ctx context.Context, method string, params, out any) error {
 		var raw json.RawMessage
@@ -346,7 +346,7 @@ func (h *handler) allowWrite(id string, now time.Time) error {
 }
 
 func (h *handler) serverName() string {
-	return cmp.Or(h.ssh.Name(), "your Aether server")
+	return cmp.Or(h.ssh.Name(), "your Cloudfield server")
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

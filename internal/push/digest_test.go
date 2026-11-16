@@ -108,7 +108,7 @@ func TestAnItemThatWaitsDoesNotMakeTheDigestDue(t *testing.T) {
 	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
 		t.Fatal(err)
 	}
-	phone.expect(t, notification{Title: "Aether · 1 done", Body: "proj  Upgrade the linter: Finished: review the result  [Review]", Notice: true})
+	phone.expect(t, notification{Title: "Cloudfield · 1 done", Body: "proj  Upgrade the linter: Finished: review the result  [Review]", Notice: true})
 	if got := h.digestItems(h.ada); len(got) != 1 || got[0].Key != "old" {
 		t.Fatalf("digest holds %+v, want the waiting item alone", got)
 	}
@@ -131,7 +131,7 @@ func TestTheBatchedLevelSendsOneDigestOnTheHalfHour(t *testing.T) {
 	h.clock.advance(30 * time.Minute)
 	h.svc.sendDigests(h.ctx)
 	phone.expect(t, notification{
-		Title:  "Aether · 2 done",
+		Title:  "Cloudfield · 2 done",
 		Body:   "proj  Upgrade the linter: Finished: review the result  [Review]\nproj  Rotate the keys: Finished: review the result  [Review]",
 		Notice: true,
 	})
@@ -160,7 +160,7 @@ func TestAnItemSeenBeforeTheDigestIsDroppedAndAnEmptyDigestIsNotSent(t *testing.
 		t.Fatal(err)
 	}
 	phone.expect(t, notification{
-		Title: "Aether · 1 done", Body: "proj  Rotate the keys: Finished: review the result  [Review]", Notice: true,
+		Title: "Cloudfield · 1 done", Body: "proj  Rotate the keys: Finished: review the result  [Review]", Notice: true,
 	})
 
 	late := h.run(h.ada, "Write the docs", domain.LaunchACP)
@@ -201,7 +201,7 @@ func TestQuietHoursHoldNeedsForADigestThatLeadsWithThem(t *testing.T) {
 	h.clock.advance(time.Hour + time.Minute)
 	h.svc.sendDigests(h.ctx)
 	phone.expect(t, notification{
-		Title:  "Aether · 1 need you",
+		Title:  "Cloudfield · 1 need you",
 		Body:   "Overnight: proj  Fix login test: run the migration?  [Answer]",
 		Notice: true,
 	})
@@ -271,7 +271,7 @@ func TestAPausedSessionsItemWaitsAndAnOpenedResultLeavesTheDigest(t *testing.T) 
 	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
 		t.Fatal(err)
 	}
-	phone.expect(t, notification{Title: "Aether · 1 done", Body: "proj  Paused: Finished: review the result  [Review]", Notice: true})
+	phone.expect(t, notification{Title: "Cloudfield · 1 done", Body: "proj  Paused: Finished: review the result  [Review]", Notice: true})
 	if got := h.digestItems(h.ada); len(got) != 0 {
 		t.Fatalf("digest still holds %d items", len(got))
 	}

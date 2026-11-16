@@ -2403,9 +2403,9 @@ the server snapshot from loading.
   2. It runs `/usr/bin/osascript -e 'do shell script "<command>" with
      prompt "<text>" with administrator privileges'`, which shows macOS's
      standard administrator dialog: titled `osascript`, Cloudfield's text
-     beneath it (`Aether wants to replace /usr/local/bin/aether with aether
-     v1.3.0. macOS shows this request as osascript, the tool Aether asks
-     through. Aether never sees your password.`), and the system's own
+     beneath it (`Cloudfield wants to replace /usr/local/bin/aether with aether
+     v1.3.0. macOS shows this request as osascript, the tool Cloudfield asks
+     through. Cloudfield never sees your password.`), and the system's own
      last line, "Touch ID or enter your password to allow this." The
      password or Touch ID match goes to macOS's authorization service;
      nothing is stored, piped, or logged by Cloudfield. Root sessions one fixed

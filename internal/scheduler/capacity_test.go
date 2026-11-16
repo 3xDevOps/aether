@@ -93,13 +93,13 @@ func TestCapacityDiskAdmissionBoundaries(t *testing.T) {
 		{name: "large maximum", total: 800 << 30, floor: 20 << 30},
 		{name: "explicit override", total: 200 << 30, floor: 7 << 30, override: 7 << 30},
 	} {
-		for _, resource := range []string{"Aether data filesystem", "containerd snapshotter"} {
+		for _, resource := range []string{"Cloudfield data filesystem", "containerd snapshotter"} {
 			t.Run(tc.name+"/"+resource, func(t *testing.T) {
 				for _, delta := range []uint64{1, 0} {
 					host := healthyAdmissionHost()
 					free := tc.floor + startupDiskBytes - delta
 					measure := healthyAdmissionData
-					if resource == "Aether data filesystem" {
+					if resource == "Cloudfield data filesystem" {
 						measure = func(string) (disk.Usage, error) {
 							return disk.Usage{TotalBytes: tc.total, FreeBytes: free}, nil
 						}

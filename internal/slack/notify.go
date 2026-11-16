@@ -151,7 +151,7 @@ func (s *Service) Notice(ctx context.Context, member domain.MemberID, n push.Not
 	}
 	blocks := []block{section("mrkdwn", "*"+escape(n.Title)+"*\n"+escape(n.Body))}
 	if info.DashboardURL != "" {
-		open := "<" + info.DashboardURL + "/?page=workspace&id=" + url.QueryEscape(string(n.Workspace)) + "|Open in Aether>"
+		open := "<" + info.DashboardURL + "/?page=workspace&id=" + url.QueryEscape(string(n.Workspace)) + "|Open in Cloudfield>"
 		blocks = append(blocks, block{"type": "context", "elements": []block{{"type": "mrkdwn", "text": open}}})
 	}
 	_, err = s.post(ctx, message{Channel: link.Channel, Text: escape(n.Title + ": " + n.Body), Blocks: blocks})
@@ -196,13 +196,13 @@ func render(run *domain.Run, n *push.Need, it *protocol.AttentionItem, dashboard
 	var notes []string
 	if dashboard != "" {
 		page := "/?run=" + url.QueryEscape(string(run.ID))
-		notes = append(notes, "<"+dashboard+page+"|Open in Aether>")
+		notes = append(notes, "<"+dashboard+page+"|Open in Cloudfield>")
 	}
 	switch {
 	case it != nil && len(buttons) == 0 && len([]rune(text)) > maxRequest:
-		notes = append(notes, "This request is longer than Slack shows; answer it in the Aether dashboard.")
+		notes = append(notes, "This request is longer than Slack shows; answer it in the Cloudfield dashboard.")
 	case it != nil && len(buttons) == 0:
-		notes = append(notes, "Answer it in the Aether dashboard.")
+		notes = append(notes, "Answer it in the Cloudfield dashboard.")
 	}
 	notes = append(notes, "Reply in this thread to message the session.")
 	blocks = append(blocks, block{"type": "context", "elements": []block{{"type": "mrkdwn", "text": strings.Join(notes, " · ")}}})

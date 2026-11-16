@@ -100,7 +100,7 @@ func Brief(g Guide) string {
 	if !g.Wake {
 		waiting = "never waiting: wait for mail in your turn with aether_inbox wait_seconds; "
 	}
-	return "Aether hosts this session. End every turn with exactly one aether_report (or `aether-internal report`) as your last action, a new idempotency_key each turn: " +
+	return "Cloudfield hosts this session. End every turn with exactly one aether_report (or `aether-internal report`) as your last action, new idempotency_key each turn: " +
 		answered + waiting + needsInput + "blocked = a human must act; success|failure = the work you own is verified done or cannot be done. " +
 		"Never report while working. Subagents and spawned workflows never report."
 }
@@ -190,16 +190,16 @@ func RoleCard(g Guide) string {
 	var b strings.Builder
 	switch {
 	case g.RunID != "" && g.Role != "":
-		fmt.Fprintf(&b, "You are Aether session %s (role: %s). ", g.RunID, g.Role)
+		fmt.Fprintf(&b, "You are Cloudfield session %s (role: %s). ", g.RunID, g.Role)
 	case g.RunID != "":
-		fmt.Fprintf(&b, "You are Aether session %s. ", g.RunID)
+		fmt.Fprintf(&b, "You are Cloudfield session %s. ", g.RunID)
 	case g.Role != "":
-		fmt.Fprintf(&b, "You are an Aether session (role: %s). ", g.Role)
+		fmt.Fprintf(&b, "You are a Cloudfield session (role: %s). ", g.Role)
 	default:
-		b.WriteString("You are an Aether session. ")
+		b.WriteString("You are a Cloudfield session. ")
 	}
 	b.WriteString("Before acting, run the shell command `aether-internal skill` (not a harness skill) for your live identity, capabilities, assignment and rules; `aether-internal status` or aether_status shows live state. " +
-		"Your own shell tool's shells never appear in the Aether dashboard, and a server restart can kill background commands they started; run long-running commands (dev servers, watchers, long builds) in an Aether terminal instead, which people can see and which keeps running through a restart: `aether-internal skill terminal`. " +
+		"Your own shell tool's shells never appear in the Cloudfield dashboard, and a server restart can kill background commands they started; run long-running commands (dev servers, watchers, long builds) in a Cloudfield terminal instead, which people can see and which keeps running through a restart: `aether-internal skill terminal`. " +
 		"Use only available capabilities.\n")
 	if g.Repos != "" {
 		b.WriteString("This session also has extra repositories beside the one in the working directory: " + g.Repos +

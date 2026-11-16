@@ -77,7 +77,7 @@ func rebuildDesktopAppTo(newBin string, out io.Writer) error {
 			err, strings.Join(argv, " "))
 	}
 	if wasRunning {
-		_, _ = fmt.Fprintln(out, "restart the Aether app to use the new version")
+		_, _ = fmt.Fprintln(out, "restart the Cloudfield app to use the new version")
 	}
 	return nil
 }
