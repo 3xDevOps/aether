@@ -78,7 +78,7 @@ The dashboard bundles these fonts under the SIL Open Font License 1.1:
   `web/public/fonts/saira-latin.woff2` is the normal-width variable font,
   weights 100-900, Latin subset, downloaded from
   [Google Fonts](https://fonts.googleapis.com/css2?family=Saira:wght@100..900&display=swap).
-- VT323 for the header and launch-splash wordmarks
+- VT323 for the launch-splash wordmark
   ([`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
   `web/public/fonts/vt323-latin.woff2` is the Latin subset at weight 400.
 - `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for xterm

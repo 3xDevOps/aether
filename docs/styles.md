@@ -50,10 +50,11 @@ appears; xterm keeps its own full-font family and cell metrics.
 The header shows the Cloudfield logo at 32px tall:
 `web/public/cloudfield-logo-small.svg`, the c and single-line letters, in the
 dark theme, and `cloudfield-logo-for-light-backgrounds.svg`, the c and
-three-line letters, in the light one, the only light-surface logo file. The splash
-wordmark is lowercase `cloudfield` in `--font-pixel` at its original
-`clamp(32px, 4vw, 48px)` size and `0.12em` letter spacing; other headings stay
-Saira.
+three-line letters, in the light one; the set has no light single-line file.
+The launch splash shows `cloudfield-mark.svg` at `clamp(150px, 22vw, 260px)`
+wide above the wordmark, lowercase `cloudfield` in `--font-pixel` at its
+original `clamp(32px, 4vw, 48px)` size and `0.12em` letter spacing; other
+headings stay Saira.
 
 The type scale, in `web/src/index.css`:
 
@@ -618,10 +619,11 @@ right, at most 85% wide, with `rounded-composer`; everything the agent wrote
 starts after the step rail's 24px gutter, where state dots and step marks
 sit. Turns are 24px apart and a turn's header and answer 12px. Its composer
 fills the available pane with balanced 16px side gutters, including when
-Details is open. An empty ACP
-conversation shows a subdued Cloudfield mark above the centered session title and
-metadata rows: workspace, agent, branch, owner and creation time. Symmetric
-scrollbar gutters keep the overview centered when its content needs scrolling.
+Details is open. An empty ACP conversation shows a subdued Cloudfield mark,
+`cloudfield-mark.svg` as a mask at `min(144px, 24vh)`, above the centered
+session title and metadata rows: workspace, agent, branch, owner and creation
+time. Symmetric scrollbar gutters keep the overview centered when its content
+needs scrolling.
 
 ## Session state and motion
 

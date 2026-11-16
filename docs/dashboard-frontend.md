@@ -179,11 +179,10 @@ The manifest's `theme_color` and the layout's viewport `themeColor` both read
 `web/src/app/theme-color.ts` and take the dark value, the default theme;
 `ThemeEffect` switches the page's `theme-color` meta to the light value when
 the member picks light. `background_color` is the separate
-`iconBackground` from that module, `#0a0a0a`: an installed app's splash centres
-an icon on it, and any other value would leave the icon's tile showing as a
-square. That hex is deliberately darker than the dashboard's own dark
-`--canvas`, `#141516` - a launcher icon has to read as an object against a
-wallpaper - so the splash lightens slightly as the SPA paints over it.
+`iconBackground` from that module, `#0d1424`, the navy tile of the Cloudfield
+icons: an installed app's splash centres an icon on it, and any other value
+would leave the icon's tile showing as a square. The splash changes to the
+dashboard's own `--canvas` as the SPA paints over it.
 
 The icons in `web/public/icons/` are the Cloudfield logo set's PNG renders,
 copied unchanged from `public/cloudfield/png/` in the website repository
