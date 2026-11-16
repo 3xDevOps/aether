@@ -88,7 +88,7 @@ About 120 names.
 | Link schemes | `aether://run`, `join`, `claim` | `desktop/electron-builder.yml:35-38`, `android/app/src/main/AndroidManifest.xml:61-68`, `internal/edge/service/pages.go:221` |
 | SSH banner and subsystems | 1 and 10 | `internal/cli/dial.go:23`, `internal/sshd/clientgate.go:20`, `internal/protocol/protocol.go:19` |
 | Signing context strings | 7 | `internal/edge/proto/enroll.go:18`, `grant.go:38`, `connector.go:57,75`, `internal/store/device.go:24`, `internal/connector/connector.go:361` |
-| HTTP headers | 5 | `internal/edge/proto/api.go:69,75` |
+| HTTP headers | 5, and a sixth since | `internal/edge/proto/api.go:69,75` |
 | Edge metric names | `aether_edge_*` | `cmd/aether-edge/metrics.go:204` |
 | Connector resource address | 1 per server | each server binds connector tokens to `<its edge address>/mcp` (`internal/connector/connector.go:156-160`, `authorize.go:186`) |
 | Server state on disk | about 8 | `/var/lib/aether`, `aether.db` (`internal/disk/disk.go:86`), `aether.db.pre-update` (`internal/serverupdate/trial.go:70`), unit name (`internal/serversetup/unit.go:11`) |
@@ -185,7 +185,7 @@ redirect after a repository rename.
 | The CLI's config directory | Still read | The CLI uses the `cloudfield` directory when it exists, else the old one. It never moves the directory, because an older CLI on the same machine would lose its links | Never |
 | Hosted edge address | The edge keeps serving `edge.onaether.dev` and `auth.onaether.dev`. A server that enrolled there keeps receiving grants issued in that name | [The domain move](#the-domain-move) | Not while the hosted edge exists |
 | Connector address | A server accepts connector tokens only for `<its edge address>/mcp` | A server learns every address of its edge and accepts each; the listings keep the old address | [The domain move](#the-domain-move) |
-| Edge update signer | An edge host's `edge-update.sh` accepts promotions signed by a workflow in `3xDevOps/aether` only | A script that accepts that identity and the renamed repository's, published and installed on every edge host **before** the repository is renamed. `promote-edge.yml` gets the same pair, because after the rename it must still verify images attested before it (`.github/workflows/promote-edge.yml:187-188,253-254`) | When no edge host runs the old script |
+| Edge update signer | An edge host's `edge-update.sh` accepts promotions signed by a workflow in `3xDevOps/aether` only | A script that accepts that identity and the renamed repository's, installed on every edge host before the first promotion after the rename. `scripts/edge-attestation.sh` accepts a build attested under either name, because a promotion must still verify images built before the rename; `promote-edge.yml` verifies its own run under the current name only | When no edge host runs the old script |
 | Container images | Each server pulls the image tagged with its own version, already published. Packages belong to the organisation, not the repository | Not renamed | Never deleted |
 | Link scheme `aether://` | Old apps handle `aether://` only, so the edge keeps emitting it | The desktop and Android apps also register `cloudfield://` | Never emitted less |
 | Branch prefix `aether/run-` | Existing sessions and open pull requests keep their branches | The server accepts both prefixes everywhere; new sessions get `cloudfield/run-` ([decision 8](#8-names-people-see-inside-sessions)) | Never |
@@ -224,7 +224,7 @@ Nothing a person sees changes. One release carries:
 - the edge serving several address pairs, and the server's connector
   accepting each ([The domain move](#the-domain-move)), deployed with the
   old pair only;
-- `edge-update.sh` and `promote-edge.yml` accepting both signer
+- `edge-update.sh` and `edge-attestation.sh` accepting both signer
   identities;
 - the server and CLI accepting `cloudfield/run-` branches;
 - the desktop and Android apps registering `cloudfield://`, the desktop
@@ -279,21 +279,15 @@ refuses a promotion signed under the new name and prints `has no valid
 promotion attestation`; and `3xDevOps/aether` stays an accepted signer on
 hosts until `:stable` carries a release promoted after the rename.
 
-The order that was planned for the rename:
+Still owed, as soon as each can land: pull request 22 changes the
+repository name wherever it is written, except the promotion predicate
+type, and the website's repository link changes with it, because its GitHub
+statistics come from a search by repository name and search does not follow
+a rename. The Go module path follows in its own pull request
+([decision 1](#1-how-deep-the-rename-goes)). The website repository's own
+rename belongs to the website's plan.
 
-- the two-identity `edge-update.sh` is on every edge host the project knows
-  of, and a release note tells other operators to copy it again;
-- no release is between its publication and its edge promotion;
-- release-channels pull requests 6 and 7 are merged.
-
-In the same hour, one pull request changes the repository name wherever it
-is written, except the promotion predicate type. The website's repository
-link changes in that hour too: its GitHub statistics come from a search by
-repository name, and search does not follow a rename. The Go module path
-follows in its own pull request
-([decision 1](#1-how-deep-the-rename-goes)).
-
-Conditions that hold from then on: the old repository names are never
+Conditions that hold from now on: the old repository names are never
 created again, the organisation is not renamed, old releases and tags are
 not deleted, and the release signing key and the `channels` release stay in
 the renamed repository.
@@ -376,9 +370,8 @@ Each step can be undone.
    `https://cloudfield.ai`, attach `cloudfield.ai` to it, and check it.
    Then turn `onaether.dev` into a redirect to the same path on
    `cloudfield.ai`.
-3. Edge: deploy a release that has pull requests 5 and 6 (edge protocol 6)
-   with only the old pair. Nothing
-   changes.
+3. Edge: deploy a release that has pull requests 5 and 6 (edge protocol
+   6) with only the old pair. Nothing changes.
 4. With pull request 7's `edge-update.sh` on the host and the
    multi-address release past its update, add the new pair. Test both
    directions: a server enrolled at the old
@@ -481,8 +474,8 @@ request 943 and its eleven implementation pull requests.
 - Its pull requests 4 and 11 add dashboard copy and docs that say Aether.
   The phase 1 sweep runs after them, and the name check keeps later ones
   clean.
-- The repository rename waits for its pull requests 6 and 7 and happens
-  between releases.
+- The repository was renamed on 2026-11-16, after its pull requests 6 and
+  7 had merged ([Phase 4](#phase-4-the-repositories)).
 
 ### Micro VM sessions
 
@@ -633,8 +626,8 @@ Stated by the design and not yet tested:
   `name`, and electron-builder copies only `extraMetadata` into the
   packaged file (read in the source of Electron 33 and electron-builder
   26; not checked with a packaged build). The directory is
-  `aether-desktop` today. Pull request 13 sets both product names, and
-  pull request 9 keeps an existing `aether-desktop` directory in use.
+  `aether-desktop` today, and pull request 9 keeps an existing
+  `aether-desktop` directory in use whatever the app is named.
 - A server's bare repositories get the two-prefix hook when the server
   starts: it rewrites `hooks/update` in every workspace's repository at
   start and on first use. Every release does this with its own hook text,
@@ -643,21 +636,24 @@ Stated by the design and not yet tested:
 - By reading, not by a run: a micro VM run gets both in-VM paths from
   pull request 3 with no change in that stack, because the mount is of the
   server-binary kind, which the guest helper binds itself.
-- The updater never fails an update over a link it cannot create, and a
-  host whose `aether` is itself a link into a directory the updater cannot
-  write is refused the update before it downloads. Only `aether-server
-  update`, run as root, reloads systemd; the server's own updater creates
-  the unit link and leaves the reload to it. Not run on a real systemd:
-  that a link made by hand resolves before a reload, on systemd 239 to 255.
-- The CLI's `cloudfield` config directory is matched by exact name. macOS
-  and Windows keep the desktop app's data directory beside it and ignore
-  case, so the renamed desktop app's data directory is named
-  `cloudfield-desktop`, never `Cloudfield`.
-- `edge move` (pull request 17) refuses or warns when the edge negotiates
-  a protocol below 6: below it a server accepts connector tokens only for
-  the address it is enrolled at.
+- The updater never fails an update over a link it cannot create. An
+  update that runs without administrator rights is refused before it
+  downloads when `aether` is itself a link into a directory it cannot
+  write. `aether-server update` and the installer reload systemd; the
+  server's own updater creates the unit link and does not, so after an
+  update from the dashboard the new unit name works only if systemd
+  resolves a hand-made link without a reload. That is still untested
+  ([To verify before building](#to-verify-before-building)).
+- The CLI's `cloudfield` config directory is matched by exact name. The
+  desktop app's data directory sits beside it, and macOS and Windows
+  ignore case there, so that directory can never be named `Cloudfield`.
+  Open for the owner: it stays `aether-desktop` for every install, which
+  needs no code and is what pull request 13 does unless told otherwise, or
+  new installs get `cloudfield-desktop`, which means a new `name` in
+  `desktop/package.json` and no `productName` there.
 - A doc line that quotes what the product shows changes in the pull request
-  that changes that string. Pull request 15 lists those lines for 11 to 14.
+  that changes that string. Pull request 15 lists those lines for 11, 12,
+  13 and 14, whose file lists gain them.
 - Not checked on real machines, owed before pull request 13: macOS 13 and
   later may refuse a renamed app moving `/Applications/Aether.app`; how a
   packaged build's `Info.plist` reads; Windows refusing to rename a running
@@ -745,11 +741,11 @@ Each is one session. Phase and dependencies are in brackets.
     `mcpbridge`, and their tests. Not `internal/runtime/vm`,
     `internal/guest`, `internal/vmimage`. [1; after release-channels 3 and 4]
 13. `feat(desktop)`: product name, dialogs and icons; Windows resources.
-    `productName` in `desktop/electron-builder.yml` and `package.json`,
-    `main.js`, `desktop/build/`, `packaging/windows/versioninfo.json`,
-    `scripts/update-smoke.ps1`, and the app paths in `docs/install.md`. The
-    data directory becomes `cloudfield-desktop` for new installs.
-    Design review. [1; after 9 and 9b are released]
+    `productName` in `desktop/electron-builder.yml`, `main.js`,
+    `desktop/build/`, `packaging/windows/versioninfo.json`,
+    `scripts/update-smoke.ps1`, and the app paths in `docs/install.md`.
+    `desktop/package.json` is unchanged, so the data directory stays
+    `aether-desktop`. Design review. [1; after 9 and 9b are released]
 14. `feat(android)`: app name, strings, launcher and notification icons,
     Play listing. `android/app/src/main/res/`, `android/listing/`. Design
     review. [1]
@@ -767,6 +763,9 @@ Each is one session. Phase and dependencies are in brackets.
     `internal/edge/client/edgeclient.go`, `cmd/aether-server/edge.go`,
     `setup.go`, `install.go`, `internal/sshd/server.go`,
     `scripts/install.sh`, `install-test.sh`, `docs/*.md`, `docs/legal/`.
+    `edge move` refuses or warns unless the edge negotiates protocol 6 or
+    later and announces both addresses: otherwise the moved server accepts
+    connector tokens only for the address it is enrolled at.
     [2; after steps 1 to 4 of the switch]
 18. `feat(cli)`: installers create the new command names and the unit
     link; printed `systemctl` lines use the new name. `scripts/install.sh`,
@@ -781,12 +780,14 @@ Each is one session. Phase and dependencies are in brackets.
     and the dashboard's copyable prompt; the old-to-new table; widen the
     name check to docs. `docs/*.md`, usage strings in `cmd/`,
     `web/src/lib/config-prompt.ts`, `scripts/public-audit.sh`. [3]
-21. Owner: rename the repositories. [4]
-22. `refactor`: the repository name where it is written, except the
-    promotion predicate type. `internal/selfupdate/selfupdate.go`,
-    `scripts/install.sh`, `install.ps1`, `android/.../UpdateTarget.kt`,
-    `internal/serversetup/unit.go`, `internal/push/webpush.go`, docs
-    links, `README.md` badges. [4; the hour of 21]
+21. Owner: rename the repositories. This repository: done 2026-11-16. [4]
+22. `fix`: the repository name where it is written, except the
+    promotion predicate type, the two-name signer checks and the systemd
+    unit text, which the server compares byte for byte.
+    `internal/selfupdate/selfupdate.go`, `scripts/install.sh`,
+    `install.ps1`, `android/.../UpdateTarget.kt`,
+    `internal/push/webpush.go`, the links the CLI, the dashboard and the
+    edge pages print, docs links, `README.md` badges. [4; after 21]
 23. `refactor`: Go module path, with `go.mod`, `Makefile`, `.golangci.yml`,
     `.github/workflows/ci-suite.yml`, `windows-install.yml`,
     `images/edge/Dockerfile`, `scripts/deploy.sh`, and regenerated
