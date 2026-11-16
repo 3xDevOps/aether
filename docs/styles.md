@@ -31,7 +31,7 @@ Fonts ship in the bundle; nothing is fetched from Google.
 | --- | --- | --- |
 | DM Sans (variable, Latin subset) | All UI text | `@fontsource-variable/dm-sans`, one WOFF2 |
 | Saira (variable, Latin subset) | `text-title` only | `web/public/fonts/saira-latin.woff2` |
-| VT323 (Latin subset, 400) | Header and launch-splash wordmarks | `web/public/fonts/vt323-latin.woff2` |
+| VT323 (Latin subset, 400) | Launch-splash wordmark | `web/public/fonts/vt323-latin.woff2` |
 | JetBrainsMono NFM | xterm primary font; UI private-use symbols through `Aether Nerd Symbols` | `web/public/fonts/jetbrains-mono-nfm-*.woff2` |
 | Noto Sans Symbols 2 | Braille and geometric symbols through `Aether Symbols` | `web/public/fonts/noto-sans-symbols-2-spinners.woff2` |
 | `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-code`), after symbol fallbacks | system |
@@ -47,11 +47,19 @@ Other scripts and symbols outside those ranges still use platform fallbacks.
 The aliases use `font-display: swap` and load only when a matching character
 appears; xterm keeps its own full-font family and cell metrics.
 
-The header wordmark is lowercase `aether` and uses `text-wordmark`: VT323 at
-24px, 400 weight and line height 1. The header logo and wordmark sit 1px above
-the row's center to align visually with navigation buttons. The splash keeps
-its original `clamp(32px, 4vw, 48px)` size and `0.12em` letter spacing. Both use
-`--font-pixel`; other headings stay Saira.
+The header shows the Cloudfield logo at 32px tall:
+`web/public/cloudfield-logo-small.svg`, the c and single-line letters, in the
+dark theme, and `cloudfield-logo-for-light-backgrounds.svg`, the c and
+three-line letters, in the light one; the set has no light single-line file.
+Where the navigation's destinations do not all fit beside the 162px logo, the
+32px `cloudfield-favicon.svg` tile replaces it, and the navigation still counts
+90px, the old brand's width, when it decides what fits, so it collapses at the
+same widths as before and the spare space falls at the row's empty right end.
+The launch splash shows `cloudfield-mark.svg` at `clamp(150px, 22vw, 260px)`
+wide, with no glow, above the wordmark: lowercase `cloudfield` in
+`--font-pixel`, in the logo's Cream `#f7f0e4`, at its original
+`clamp(32px, 4vw, 48px)` size and `0.12em` letter spacing; other headings stay
+Saira.
 
 The type scale, in `web/src/index.css`:
 
@@ -534,7 +542,7 @@ control** or **Release** ([terminal.md](terminal.md)). A session shell adds
 ## Shell, palette and focus
 
 The shell has a branded navigation header above one sidebar and the content
-view, with no icon rail or status bar. The Aether mark and title sit at its
+view, with no icon rail or status bar. The Cloudfield logo sits at its
 left; Board through Templates follow as horizontal `ListRow`s. Measure
 available width rather than assuming every label fits a breakpoint, and
 keep Board outside the overflow menu. The header and sidebar use
@@ -616,10 +624,11 @@ right, at most 85% wide, with `rounded-composer`; everything the agent wrote
 starts after the step rail's 24px gutter, where state dots and step marks
 sit. Turns are 24px apart and a turn's header and answer 12px. Its composer
 fills the available pane with balanced 16px side gutters, including when
-Details is open. An empty ACP
-conversation shows a subdued Aether mark above the centered session title and
-metadata rows: workspace, agent, branch, owner and creation time. Symmetric
-scrollbar gutters keep the overview centered when its content needs scrolling.
+Details is open. An empty ACP conversation shows a subdued Cloudfield mark,
+`cloudfield-mark.svg` as a mask at `min(144px, 24vh)`, above the centered
+session title and metadata rows: workspace, agent, branch, owner and creation
+time. Symmetric scrollbar gutters keep the overview centered when its content
+needs scrolling.
 
 ## Session state and motion
 
@@ -741,7 +750,8 @@ layers, stepped starfield and coloured stars, satellites and shooting stars,
 `launch-status-pulse`: the original 1.8s `ease-in-out` loop from opacity 1
 to 0.4 and back, not the shared `state-pulse`. The splash's original
 palette and keyframes stay scoped to `launch-splash` in `web/src/index.css`;
-do not restyle them to match the workbench. Reduced motion skips the splash
+do not restyle them to match the workbench. Only the logo follows the
+Cloudfield set: its mark, and the wordmark in the set's Cream. Reduced motion skips the splash
 entirely, and its CSS stops animation if the preference changes while it is
 visible. [Launch splash](dashboard-frontend.md#launch-splash) defines the
 session and startup timing.

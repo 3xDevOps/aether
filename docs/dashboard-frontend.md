@@ -179,18 +179,22 @@ The manifest's `theme_color` and the layout's viewport `themeColor` both read
 `web/src/app/theme-color.ts` and take the dark value, the default theme;
 `ThemeEffect` switches the page's `theme-color` meta to the light value when
 the member picks light. `background_color` is the separate
-`iconBackground` from that module, `#0a0a0a`: an installed app's splash centres
-an icon on it, and any other value would leave the icon's tile showing as a
-square. That hex is deliberately darker than the dashboard's own dark
-`--canvas`, `#141516` - a launcher icon has to read as an object against a
-wallpaper - so the splash lightens slightly as the SPA paints over it.
+`iconBackground` from that module, `#0d1424`, the navy tile of the Cloudfield
+icons: an installed app's splash centres an icon on it, and any other value
+would leave the icon's tile showing as a square. The splash changes to the
+dashboard's own `--canvas` as the SPA paints over it.
 
-The web icons are generated from `web/public/aether-mark.png` by `python3
-scripts/make-icons.py`, the same script that writes the desktop app's, and the
-output is committed. The Android app's icons come from
-`scripts/android-icons.py` ([CONTRIBUTING.md](../CONTRIBUTING.md)). Maskable
-icons and the iOS icon are square and full-bleed because the platform applies
-its own mask; the rest carry the rounded tile.
+The icons in `web/public/icons/` are the Cloudfield logo set's PNG renders,
+copied unchanged from `public/cloudfield/png/` in the website repository
+`3xDevOps/aether-web`: `icon-*.png` and `apple-touch-icon.png` are the square,
+full-bleed icon, `icon-maskable-*.png` keep the mark inside the 80% safe zone,
+and `favicon-16.png`, `favicon-32.png` and `favicon-48.png` are the small
+drawings the layout links as `rel="icon"`. The header logo and tile, the splash
+mark and the session overview's mask are the set's SVG files from
+`public/cloudfield/`, in `web/public/`. `python3 scripts/make-icons.py` draws
+only the desktop app's icons and the Play feature graphic, from
+`web/public/aether-mark.png`. The Android app's icons come from
+`scripts/android-icons.py` ([CONTRIBUTING.md](../CONTRIBUTING.md)).
 
 CI installs Bun with `oven-sh/setup-bun` (version pinned in
 `web/.bun-version`) in jobs that run `make build` or `make release-binaries`,
@@ -491,7 +495,8 @@ contribute to that group's count. Relationships come from the session snapshot's
 ### App header
 
 `top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
-Its first row shows the Aether mark and lowercase `aether` wordmark on the left, then **Board**,
+Its first row shows the Cloudfield logo on the left, or the 32px favicon tile when
+the destinations do not all fit beside the logo, then **Board**,
 **Activity**, **Insights**, **Memory**, **Files**, **Environment**, **Agents** and
 **Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
 styling and current-page selection. A `ResizeObserver` measures the row and
@@ -1084,9 +1089,10 @@ exists: a shell built by an older `aether gui build` lacks them.
 ### Launch splash
 
 `App.tsx` mounts `src/components/launch-splash.tsx` over the shell at desktop
-startup. It intentionally preserves the original animated night sky, logo
-and pixel wordmark, not the workbench's visual language
-([Styles](styles.md#session-state-and-motion)).
+startup. It intentionally preserves the original animated night sky and pixel
+wordmark, not the workbench's visual language
+([Styles](styles.md#session-state-and-motion)); its logo is the Cloudfield
+mark with no glow, and the wordmark is in the set's Cream.
 
 The splash requires `window.aetherDesktop` and plays once per desktop window,
 recorded by `aether.launchSplashShown` in `sessionStorage`. Browser tabs,
@@ -3290,7 +3296,7 @@ failed read shows the server's error with **Retry**. Conversation rows carry no 
 For a session with `acp: true` (Enhanced, or Background over ACP) the rows come
 from its [session item log](enhanced-sessions.md#instructions-and-the-session-log) instead.
 With no conversation rows or older-history control, the pane shows a
-decorative, low-contrast Aether mark above the session's title, workspace, agent
+decorative, low-contrast Cloudfield mark above the session's title, workspace, agent
 and mode, branch, owner and creation time. The title and each metadata row
 are centered in the conversation pane, including when long metadata needs
 scrolling. The overview gives way to the conversation as rows arrive. History
@@ -8193,7 +8199,7 @@ and finds it on screen with focus on its heading;
 rather than the middle, and that the launch form keeps its footer on screen on
 a viewport as short as a keyboard leaves; `toast-clearance.mobile.spec.ts`
 checks that a toast comes to rest 8px clear of the bottom edge;
-`home-screen.mobile.spec.ts` checks the manifest, icons and that the top bar
+`home-screen.mobile.spec.ts` checks the manifest, icons, favicons and that the top bar
 clears a phone status bar and the tab bar shows; `run-views.mobile.spec.ts`
 protects a session from More and reads its changes; and
 `files-browser.mobile.spec.ts` opens a second file from the tree sheet.
@@ -8287,7 +8293,7 @@ The installed app is a manual check too, because no browser lets a test
 emulate the `display-mode: standalone` a real install gives. On Android,
 Chrome's ⋮ menu should offer **Install app**; on iPhone, Safari's **Share >
 Add to Home Screen**. The icon that lands on the home screen should be the
-Aether mark on a dark tile, and opening it should give a full-screen dashboard
+Cloudfield mark on a navy tile, and opening it should give a full-screen dashboard
 with the shell's own top bar, safe-area padding intact under
 the notch, and the soft keyboard still shortening the layout rather than
 covering it. Watch what the server saw with:

@@ -119,9 +119,9 @@ export function LaunchSplash() {
       </div>
 
       <div className="launch-splash__logo">
-        <img src="/aether-mark.png" alt="" data-testid="launch-splash-mark" />
+        <img src="/cloudfield-mark.svg" alt="" data-testid="launch-splash-mark" />
         <span className="launch-splash__wordmark" data-testid="launch-splash-wordmark">
-          aether
+          cloudfield
         </span>
         <span
           className="launch-splash__status"

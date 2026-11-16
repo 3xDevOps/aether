@@ -4,8 +4,5 @@ export const themeColor = {
   dark: '#1b1c1d',
 } as const
 
-/**
- * The ground the icons are drawn on, so the splash tile does not show as a
- * square. Darker than `--canvas` on purpose; `scripts/make-icons.py` uses the same hex.
- */
-export const iconBackground = '#0a0a0a'
+/** The Cloudfield icons' tile colour, so an installed app's splash does not show the tile as a square. */
+export const iconBackground = '#0d1424'
