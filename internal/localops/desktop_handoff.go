@@ -88,14 +88,13 @@ type handoffOps struct {
 // the reason is recorded for the next dashboard (RecordDesktopBuildError).
 // install replaces the app with rollback, as InstallDesktop does.
 func FinishDesktopUpdate(appDir string, pids []int, install func() error) error {
-	updated := filepath.Join(filepath.Dir(appDir), windowsAppDir(productName))
 	return finishDesktopUpdate(handoffOps{
 		waitExit:    waitForExit,
 		endDaemon:   endDaemonTask,
 		startDaemon: startDaemonTask,
 		install:     install,
 		launch: func(dir string) error {
-			cmd := exec.Command(filepath.Join(dir, desktopExe))
+			cmd := exec.Command(DesktopAppExe("windows", dir))
 			cmd.Dir = dir
 			detach(cmd)
 			if err := cmd.Start(); err != nil {
@@ -103,7 +102,14 @@ func FinishDesktopUpdate(appDir string, pids []int, install func() error) error 
 			}
 			return cmd.Process.Release()
 		},
-	}, appDir, updated, pids, handoffTimeout, handoffRetry)
+	}, appDir, swappedInApp(appDir), pids, handoffTimeout, handoffRetry)
+}
+
+// swappedInApp is where the install puts the app that replaces the one at
+// appDir: beside it under this build's product name, which is appDir itself
+// unless that app has the legacy name.
+func swappedInApp(appDir string) string {
+	return filepath.Join(filepath.Dir(appDir), windowsAppDir(productName))
 }
 
 func finishDesktopUpdate(ops handoffOps, current, updated string, pids []int, timeout, retry time.Duration) error {

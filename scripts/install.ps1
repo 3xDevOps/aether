@@ -1152,7 +1152,8 @@ function Invoke-AetherInstall {
         if ($role -eq 'client') {
             Write-AetherStep 'installing the desktop app (the build output follows)'
             Invoke-AetherGuiBuild $destination
-            $installed = @($desktopPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+            # Both folders can exist; the one the install filled was written last.
+            $installed = @($desktopPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Sort-Object { (Get-Item -LiteralPath (Split-Path -Parent $_)).LastWriteTimeUtc })
             Write-AetherDetail ('installed {0}' -f $(if ($installed.Count -gt 0) { $installed[-1] } else { $desktopPaths[0] }))
         }
         Write-Host 'next:'

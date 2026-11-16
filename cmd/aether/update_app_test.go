@@ -23,10 +23,10 @@ import (
 // installed, and answers running for whether that app has a live process.
 func stubRebuild(t *testing.T, script string, running func() bool) {
 	t.Helper()
-	oldLookup, oldApp := lookupRealUser, installedDesktopApp
+	oldLookup, oldApp, oldApps := lookupRealUser, installedDesktopApp, installedDesktopApps
 	oldArgv, oldRunning := rebuildAppArgv, desktopAppRunning
 	t.Cleanup(func() {
-		lookupRealUser, installedDesktopApp = oldLookup, oldApp
+		lookupRealUser, installedDesktopApp, installedDesktopApps = oldLookup, oldApp, oldApps
 		rebuildAppArgv, desktopAppRunning = oldArgv, oldRunning
 	})
 	lookupRealUser = func() (localops.RealUser, error) {
@@ -34,6 +34,9 @@ func stubRebuild(t *testing.T, script string, running func() bool) {
 	}
 	installedDesktopApp = func(string, localops.RealUser) (string, bool) {
 		return "/home/u/.local/share/aether/desktop", true
+	}
+	installedDesktopApps = func(string, localops.RealUser) []string {
+		return []string{"/home/u/.local/share/aether/desktop"}
 	}
 	rebuildAppArgv = func(string, localops.RealUser, bool) []string { return []string{script} }
 	desktopAppRunning = func(string, string) bool { return running() }
@@ -104,6 +107,26 @@ func TestRebuildDesktopAppReportsAFailedBuild(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "restart the Aether app") {
 		t.Fatalf("output = %q, want no restart line after a failed build", out.String())
+	}
+}
+
+// With a renamed app beside the legacy one, the legacy app may be the one
+// running.
+func TestRebuildDesktopAppSeesEitherInstalledAppRunning(t *testing.T) {
+	stubRebuild(t, script(t, "exit 0\n"), nil)
+	renamed, legacy := "/home/u/.local/share/cloudfield/desktop", "/home/u/.local/share/aether/desktop"
+	installedDesktopApps = func(string, localops.RealUser) []string { return []string{renamed, legacy} }
+	desktopAppRunning = func(_ string, app string) bool { return app == legacy }
+	var out bytes.Buffer
+
+	if err := rebuildDesktopAppTo("/usr/local/bin/aether", &out); err != nil {
+		t.Fatalf("rebuildDesktopAppTo: %v", err)
+	}
+	if !strings.Contains(out.String(), "rebuilding the desktop app at "+renamed) {
+		t.Fatalf("output = %q, want the renamed app rebuilt", out.String())
+	}
+	if !strings.Contains(out.String(), "restart the Aether app to use the new version") {
+		t.Fatalf("output = %q, want the restart line for the running legacy app", out.String())
 	}
 }
 

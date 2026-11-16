@@ -43,26 +43,43 @@ type DesktopApp struct {
 // finds and rebuilds an app of either name.
 const legacyProductName = "Aether"
 
-// productName is the app's productName in desktop/electron-builder.yml. It
-// names the darwin bundle, and the linux and windows install locations
-// follow it. A variable so tests can install under another name.
-var productName = embeddedProductName()
+// builderConfig is what desktop/electron-builder.yml decides about the
+// installed app. productName names the darwin bundle, and the linux and
+// windows install locations follow it. The linux launcher file and the
+// executable it runs keep one name across a rename, so a renamed app's
+// launcher replaces the old one's and Electron registers that launcher as
+// the link handler.
+type builderConfig struct {
+	ProductName   string `yaml:"productName"`
+	ExtraMetadata struct {
+		DesktopName string `yaml:"desktopName"`
+	} `yaml:"extraMetadata"`
+	Linux struct {
+		ExecutableName string `yaml:"executableName"`
+	} `yaml:"linux"`
+}
 
-func embeddedProductName() string {
+var builder = embeddedBuilderConfig()
+
+// productName is builder.ProductName, a variable so tests can install under
+// another name.
+var productName = builder.ProductName
+
+func embeddedBuilderConfig() builderConfig {
 	raw, err := desktop.Source.ReadFile("electron-builder.yml")
 	if err != nil {
 		panic(fmt.Sprintf("localops: read the embedded electron-builder.yml: %v", err))
 	}
-	var cfg struct {
-		ProductName string `yaml:"productName"`
+	var cfg builderConfig
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		panic(fmt.Sprintf("localops: parse the embedded electron-builder.yml: %v", err))
 	}
-	if err := yaml.Unmarshal(raw, &cfg); err != nil || cfg.ProductName == "" {
-		panic(fmt.Sprintf("localops: the embedded electron-builder.yml names no productName: %v", err))
+	if cfg.ProductName == "" || cfg.ExtraMetadata.DesktopName == "" || cfg.Linux.ExecutableName == "" {
+		panic(fmt.Sprintf("localops: the embedded electron-builder.yml lacks productName, extraMetadata.desktopName or linux.executableName: %+v", cfg))
 	}
-	return cfg.ProductName
+	return cfg
 }
 
-// productNames are the names an installed app can carry, this build's first.
 func productNames() []string {
 	if productName == legacyProductName {
 		return []string{productName}
@@ -70,10 +87,23 @@ func productNames() []string {
 	return []string{productName, legacyProductName}
 }
 
-// The install location an app called name takes on each OS.
 func linuxAppDir(name string) string   { return strings.ToLower(name) }
 func darwinBundle(name string) string  { return name + ".app" }
 func windowsAppDir(name string) string { return name + " Desktop" }
+
+// DesktopAppExe is the executable of the app installed at app, the one the
+// desktop starts.
+func DesktopAppExe(goos, app string) string {
+	switch goos {
+	case "darwin":
+		// electron-builder names it after the bundle.
+		return filepath.Join(app, "Contents", "MacOS", strings.TrimSuffix(filepath.Base(app), ".app"))
+	case "windows":
+		return filepath.Join(app, desktopExe)
+	default:
+		return filepath.Join(app, builder.Linux.ExecutableName)
+	}
+}
 
 // macSystemApplications is the machine-wide Applications folder, the one
 // Finder's sidebar opens and a new user means by "my Applications folder".
@@ -627,7 +657,7 @@ func desktopLayout(goos, home string) (DesktopApp, error) {
 		}
 		return DesktopApp{
 			App:      filepath.Join(data, linuxAppDir(productName), "desktop"),
-			Launcher: filepath.Join(data, "applications", linuxAppDir(productName)+"-desktop.desktop"),
+			Launcher: filepath.Join(data, "applications", builder.ExtraMetadata.DesktopName),
 		}, nil
 	case "darwin":
 		system := filepath.Join(macSystemApplications, darwinBundle(productName))
@@ -677,14 +707,14 @@ func writableDir(dir string) bool {
 // matches electron-builder's own AppImage default: an unpacked Electron
 // cannot use its SUID helper without root, and Ubuntu 24.04+ denies the
 // namespace sandbox to unconfined binaries, so without the flag the app
-// refuses to start on the most common desktop. The renderer still runs with context
-// isolation and no Node access, locked to the loopback gateway.
+// refuses to start on the most common desktop. The renderer still runs with
+// context isolation and no Node access, locked to the loopback gateway.
 func desktopEntry(dir string) string {
 	return "[Desktop Entry]\n" +
 		"Type=Application\n" +
 		"Name=" + productName + "\n" +
 		"Comment=" + productName + " dashboard in its own window\n" +
-		"Exec=" + desktopExecQuote(filepath.Join(dir, "aether-desktop")) + " --no-sandbox %U\n" +
+		"Exec=" + desktopExecQuote(DesktopAppExe("linux", dir)) + " --no-sandbox %U\n" +
 		"Icon=" + filepath.Join(dir, desktopIcon) + "\n" +
 		"Terminal=false\n" +
 		"Categories=Development;\n" +

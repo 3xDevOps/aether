@@ -3,6 +3,7 @@ package localgw
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -45,6 +46,9 @@ var (
 	lookupRealUser      = localops.LookupRealUser
 	startHandoff        = localops.StartDesktopHandoff
 	handoffOS           = runtime.GOOS
+	// shellOut is the stdout the desktop shell reads `aether gui --json`'s
+	// lines from.
+	shellOut io.Writer = os.Stdout
 )
 
 // rebuildState tracks the desktop-app build update.apply started, for the
@@ -204,12 +208,12 @@ func (g *Gateway) startAppRebuild(bin, tag string) rebuildOutcome {
 	go func() {
 		defer g.builds.Done()
 		defer g.rebuild.release()
-		err := g.runRebuild(argv)
+		installed, err := g.runRebuild(argv)
 		if err == nil && handoff {
 			// The shell is this process's parent.
 			err = startHandoff(bin, []int{os.Getppid(), os.Getpid()})
 		}
-		g.finishRebuild(err, handoff)
+		g.finishRebuild(err, handoff, installed)
 	}()
 	return rebuildStarted
 }
@@ -230,29 +234,30 @@ const rebuildWaitDelay = 5 * time.Second
 // output on stderr. The child is tied to the gateway's context, so closing
 // the gateway - quitting the app mid-rebuild - stops it rather than
 // leaving it downloading Node and swapping the app directory on its own.
-func (g *Gateway) runRebuild(argv []string) error {
+// It returns the app the build installed, from its done phase.
+func (g *Gateway) runRebuild(argv []string) (string, error) {
 	cmd := exec.CommandContext(g.ctx, argv[0], argv[1:]...)
 	cmd.WaitDelay = rebuildWaitDelay
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return "", err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := cmd.Start(); err != nil {
-		return err
+		return "", err
 	}
 	// The phase the build reported last. `gui build` reports its own
 	// failure as an error phase carrying the real message, which beats the
 	// child's exit status ("exit status 1") as an explanation.
-	reported := ""
+	reported, installed := "", ""
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		reported = g.readPhases(stdout)
+		reported, installed = g.readPhases(stdout)
 	}()
 	go func() {
 		defer wg.Done()
@@ -261,9 +266,9 @@ func (g *Gateway) runRebuild(argv []string) error {
 	wg.Wait()
 	waitErr := cmd.Wait()
 	if reported != "" {
-		return errRebuild(reported)
+		return "", errRebuild(reported)
 	}
-	return waitErr
+	return installed, waitErr
 }
 
 // scanBuildOutput hands each line of r to line, with a bounded token and a
@@ -284,12 +289,13 @@ func (g *Gateway) scanBuildOutput(r io.Reader, line func(string)) {
 }
 
 // readPhases applies the build's JSON phase lines to update.status and
-// returns the message from an error phase, empty when there was none.
-func (g *Gateway) readPhases(r io.Reader) string {
-	failure := ""
+// returns the message from an error phase and the path the done phase
+// names, each empty when there was none.
+func (g *Gateway) readPhases(r io.Reader) (failure, installed string) {
 	g.scanBuildOutput(r, func(text string) {
 		var event struct {
 			Phase string `json:"phase"`
+			Path  string `json:"path"`
 			Error string `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(text), &event); err != nil || event.Phase == "" {
@@ -299,13 +305,16 @@ func (g *Gateway) readPhases(r io.Reader) string {
 			g.rebuild.addLine(text)
 			return
 		}
-		if event.Phase == localops.PhaseError {
+		switch event.Phase {
+		case localops.PhaseError:
 			failure = event.Error
 			return
+		case localops.PhaseDone:
+			installed = event.Path
 		}
 		g.rebuild.setPhase(event.Phase)
 	})
-	return failure
+	return failure, installed
 }
 
 // stoppedByQuit is what a rebuild the gateway cancelled reports instead of
@@ -324,13 +333,25 @@ func (e errRebuild) Error() string { return string(e) }
 // app and restarting it, so just quit; a plain exit 0 leaves the shell respawning
 // the sidecar, which is right after a failure because the CLI half of the
 // update did land.
-func (g *Gateway) finishRebuild(err error, handoff bool) {
+//
+// Before exit 75 the gateway names the executable of the app the build
+// installed, which is not the running shell's when a renamed app went in
+// beside it; a shell that knows the line relaunches into that app.
+func (g *Gateway) finishRebuild(err error, handoff bool, installed string) {
 	if err == nil {
 		g.rebuild.setPhase(localops.PhaseDone)
 		switch {
 		case handoff:
 			g.requestExit(ExitUpdaterRestarts)
 		case g.cfg.Supervised:
+			if installed != "" {
+				line, _ := json.Marshal(struct {
+					Relaunch string `json:"relaunch"`
+				}{localops.DesktopAppExe(handoffOS, installed)})
+				if _, writeErr := fmt.Fprintln(shellOut, string(line)); writeErr != nil {
+					g.rebuild.addLine("could not name the installed app to the shell: " + writeErr.Error())
+				}
+			}
 			g.requestExit(ExitRelaunch)
 		}
 		return

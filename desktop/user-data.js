@@ -3,8 +3,9 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-// Electron names the data directory after package.json's productName, else
-// its name (lib/browser/init.ts), so every Aether app so far has used this one.
+// The data directory of an app whose package.json has the name
+// aether-desktop and no productName: Electron names it after productName,
+// else name (lib/browser/init.ts).
 const LEGACY_USER_DATA = 'aether-desktop'
 
 // The data directory for an app called name: its own when that exists, the

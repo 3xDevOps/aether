@@ -8,6 +8,12 @@
 appId: io.aether.desktop
 productName: Aether
 
+# The linux launcher file `aether gui build` writes, which Electron names as
+# the handler of the app's link schemes. Fixed here, not derived from
+# package.json's name, so a renamed app replaces the launcher of the old one.
+extraMetadata:
+  desktopName: aether-desktop.desktop
+
 # `build/` is electron-builder's default buildResources directory: it holds
 # packaging inputs only and is never bundled into the app. icon.png there is
 # picked up for every platform - macOS and Windows convert it to .icns/.ico,
@@ -30,8 +36,8 @@ files:
 electronLanguages:
   - en-US
 
-# aether:// and cloudfield:// deep links (main.js handleDeepLink). macOS reads the
-# scheme from the bundle's Info.plist, so a runtime
+# aether:// and cloudfield:// deep links (main.js handleDeepLink). macOS
+# reads the schemes from the bundle's Info.plist, so a runtime
 # setAsDefaultProtocolClient alone is not enough there; Linux gets an
 # x-scheme-handler MIME entry in the .desktop file.
 protocols:
@@ -57,6 +63,8 @@ win:
     - nsis
 
 linux:
+  # The launcher's Exec runs it; fixed for the same reason as desktopName.
+  executableName: aether-desktop
   # The deb target refuses to build without an explicit maintainer; the
   # package.json author alone is only a fallback for the other targets.
   maintainer: 3xDevOps <aether@users.noreply.github.com>

@@ -9,6 +9,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/3xDevOps/Aether/desktop"
 )
 
 // renameProduct builds as an app whose electron-builder.yml names it
@@ -18,12 +22,6 @@ func renameProduct(t *testing.T) {
 	previous := productName
 	productName = "Cloudfield"
 	t.Cleanup(func() { productName = previous })
-}
-
-func TestEmbeddedProductNameIsReadFromElectronBuilder(t *testing.T) {
-	if got := embeddedProductName(); got != productName || got == "" {
-		t.Fatalf("embeddedProductName = %q, productName = %q", got, productName)
-	}
 }
 
 func TestDesktopAppPathsListTheRenamedAppThenTheLegacyOne(t *testing.T) {
@@ -89,15 +87,13 @@ func TestInstallDesktopLinuxPutsARenamedAppBesideTheLegacyOne(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", "")
 	data := filepath.Join(home, ".local", "share")
-	legacy := map[string]string{
-		filepath.Join(data, "aether", "desktop", "aether-desktop"):    "old app",
-		filepath.Join(data, "applications", "aether-desktop.desktop"): "old launcher",
-	}
-	for file, contents := range legacy {
+	legacy := filepath.Join(data, "aether", "desktop", "aether-desktop")
+	launcher := filepath.Join(data, "applications", "aether-desktop.desktop")
+	for _, file := range []string{legacy, launcher} {
 		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(file, []byte(contents), 0o644); err != nil {
+		if err := os.WriteFile(file, []byte("old"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -113,7 +109,8 @@ func TestInstallDesktopLinuxPutsARenamedAppBesideTheLegacyOne(t *testing.T) {
 	if want := filepath.Join(data, "cloudfield", "desktop"); app.App != want {
 		t.Fatalf("App = %q, want %q", app.App, want)
 	}
-	entry, err := os.ReadFile(filepath.Join(data, "applications", "cloudfield-desktop.desktop"))
+	// The one launcher now starts the renamed app, so the menu lists one.
+	entry, err := os.ReadFile(launcher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,10 +119,8 @@ func TestInstallDesktopLinuxPutsARenamedAppBesideTheLegacyOne(t *testing.T) {
 			t.Errorf("launcher missing %q:\n%s", want, entry)
 		}
 	}
-	for file, want := range legacy {
-		if got, err := os.ReadFile(file); err != nil || string(got) != want {
-			t.Errorf("the legacy %s = %q, %v; want it left in place", file, got, err)
-		}
+	if got, err := os.ReadFile(legacy); err != nil || string(got) != "old" {
+		t.Errorf("the legacy app = %q, %v; want it left in place", got, err)
 	}
 }
 
@@ -246,4 +241,81 @@ func waitFor(cond func() bool) bool {
 		}
 	}
 	return false
+}
+
+// The linux launcher file, the name Electron registers as the link handler
+// (package.json desktopName, which extraMetadata sets) and the executable
+// the launcher runs all come from electron-builder.yml, so a rename that
+// changes package.json's name or the productName cannot split them.
+func TestLinuxLauncherFollowsElectronBuilder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("linux layout uses unix permissions")
+	}
+	raw, err := desktop.Source.ReadFile("electron-builder.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		ExtraMetadata map[string]string `yaml:"extraMetadata"`
+		Linux         map[string]any    `yaml:"linux"`
+	}
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	desktopName := cfg.ExtraMetadata["desktopName"]
+	executable, _ := cfg.Linux["executableName"].(string)
+	if desktopName == "" || executable == "" {
+		t.Fatalf("electron-builder.yml sets desktopName %q and linux.executableName %q; it must set both", desktopName, executable)
+	}
+	for _, renamed := range []bool{false, true} {
+		if renamed {
+			renameProduct(t)
+		}
+		home := t.TempDir()
+		t.Setenv("XDG_DATA_HOME", "")
+		built := t.TempDir()
+		if err := os.WriteFile(filepath.Join(built, executable), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		app, err := InstallDesktop("linux", home, DesktopFrom(built), "/opt/aether/aether", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := filepath.Base(app.Launcher); got != desktopName {
+			t.Errorf("%s: launcher = %q, want desktopName %q", productName, got, desktopName)
+		}
+		entry, err := os.ReadFile(app.Launcher)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "Exec=\"" + filepath.Join(app.App, executable) + "\" "; !strings.Contains(string(entry), want) {
+			t.Errorf("%s: launcher lacks %q:\n%s", productName, want, entry)
+		}
+	}
+}
+
+func TestDesktopAppExePerOS(t *testing.T) {
+	for _, tc := range []struct{ goos, app, want string }{
+		{"darwin", "/Applications/Cloudfield.app", "/Applications/Cloudfield.app/Contents/MacOS/Cloudfield"},
+		{"darwin", "/Applications/Aether.app", "/Applications/Aether.app/Contents/MacOS/Aether"},
+		{"linux", "/home/u/.local/share/cloudfield/desktop", "/home/u/.local/share/cloudfield/desktop/aether-desktop"},
+		{"windows", "/l/Programs/Cloudfield Desktop", "/l/Programs/Cloudfield Desktop/aether-desktop.exe"},
+	} {
+		if got := DesktopAppExe(tc.goos, filepath.FromSlash(tc.app)); got != filepath.FromSlash(tc.want) {
+			t.Errorf("%s %s = %q, want %q", tc.goos, tc.app, got, tc.want)
+		}
+	}
+}
+
+// The Windows helper starts the app the swap put in place: beside a legacy
+// app, the renamed one.
+func TestSwappedInAppIsTheRenamedAppBesideTheLegacyOne(t *testing.T) {
+	renameProduct(t)
+	programs := filepath.Join(t.TempDir(), "Programs")
+	renamed := filepath.Join(programs, "Cloudfield Desktop")
+	for _, current := range []string{filepath.Join(programs, "Aether Desktop"), renamed} {
+		if got := swappedInApp(current); got != renamed {
+			t.Errorf("swappedInApp(%q) = %q, want %q", current, got, renamed)
+		}
+	}
 }

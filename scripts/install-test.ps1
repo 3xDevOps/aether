@@ -483,28 +483,33 @@ func main() {
     Assert-AetherTest (Get-AetherTestBytesEqual (Join-Path $env:SystemRoot 'System32\PING.EXE') $runningCli) 'install over a running CLI replaced it'
     Assert-AetherEqual $beforePath (Get-AetherTestUserPath) 'locked CLI changed user PATH'
 
-    # A desktop app running from its folder under the new product name stops a
-    # client install as one under the old name does.
-    $renamedLocal = Join-Path $root 'renamed-localappdata'
-    $renamedDesktop = Join-Path $renamedLocal 'Programs\Cloudfield Desktop\aether-desktop.exe'
-    New-Item -ItemType Directory -Path (Split-Path -Parent $renamedDesktop) -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\PING.EXE') -Destination $renamedDesktop
-    Write-AetherRelease $releaseRoot $version $fixture $fixture
-    $renamedProcess = Start-Process -FilePath $renamedDesktop -ArgumentList @('-n', '60', '127.0.0.1') -WindowStyle Hidden -PassThru
-    try {
-        $result = Invoke-AetherPowerShellFile $installer @('-Version', $version) @{
-            AETHER_BASE_URL = $baseUrl
-            LOCALAPPDATA = $renamedLocal
+    # With the desktop app installed under both product names, a running copy
+    # of either stops a client install.
+    foreach ($runningName in @('Aether', 'Cloudfield')) {
+        $renamedLocal = Join-Path $root ('both-names-{0}' -f $runningName)
+        foreach ($name in @('Aether', 'Cloudfield')) {
+            $exe = Join-Path $renamedLocal ('Programs\{0} Desktop\aether-desktop.exe' -f $name)
+            New-Item -ItemType Directory -Path (Split-Path -Parent $exe) -Force | Out-Null
+            Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\PING.EXE') -Destination $exe
         }
-    } finally {
-        Stop-Process -Id $renamedProcess.Id -Force -ErrorAction SilentlyContinue
-        $renamedProcess.WaitForExit()
+        $runningDesktop = Join-Path $renamedLocal ('Programs\{0} Desktop\aether-desktop.exe' -f $runningName)
+        Write-AetherRelease $releaseRoot $version $fixture $fixture
+        $renamedProcess = Start-Process -FilePath $runningDesktop -ArgumentList @('-n', '60', '127.0.0.1') -WindowStyle Hidden -PassThru
+        try {
+            $result = Invoke-AetherPowerShellFile $installer @('-Version', $version) @{
+                AETHER_BASE_URL = $baseUrl
+                LOCALAPPDATA = $renamedLocal
+            }
+        } finally {
+            Stop-Process -Id $renamedProcess.Id -Force -ErrorAction SilentlyContinue
+            $renamedProcess.WaitForExit()
+        }
+        Assert-AetherTest ($result.ExitCode -ne 0) ("install beside a running {0} desktop app was reported as success" -f $runningName)
+        foreach ($expected in @(('aether-desktop (pid {0}) {1}' -f $renamedProcess.Id, $runningDesktop), 'Nothing was changed.')) {
+            Assert-AetherTest ($result.Stderr.Contains($expected)) ("running {0} desktop message lacks [{1}]: {2}" -f $runningName, $expected, $result.Output)
+        }
+        Assert-AetherTest (-not (Test-Path -LiteralPath (Join-Path $renamedLocal 'Programs\Aether\aether.exe'))) ("install beside a running {0} desktop app installed the CLI" -f $runningName)
     }
-    Assert-AetherTest ($result.ExitCode -ne 0) 'install beside a running renamed desktop app was reported as success'
-    foreach ($expected in @(('aether-desktop (pid {0}) {1}' -f $renamedProcess.Id, $renamedDesktop), 'Nothing was changed.')) {
-        Assert-AetherTest ($result.Stderr.Contains($expected)) ("running renamed desktop message lacks [{0}]: {1}" -f $expected, $result.Output)
-    }
-    Assert-AetherTest (-not (Test-Path -LiteralPath (Join-Path $renamedLocal 'Programs\Aether\aether.exe'))) 'install beside a running renamed desktop app installed the CLI'
 
     # A fresh default install invokes the exact installed CLI and leaves the
     # generated desktop executable beside (not inside) the CLI directory.

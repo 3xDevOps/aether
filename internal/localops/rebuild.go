@@ -58,16 +58,28 @@ func realUser(sudoUser string, lookup func(string) (*user.User, error), homeDir 
 // account can write /Applications, and under sudo the environment carries
 // root's XDG_DATA_HOME, not the user's.
 func InstalledDesktopApp(goos string, ru RealUser) (string, bool) {
+	apps := InstalledDesktopApps(goos, ru)
+	if len(apps) == 0 {
+		return "", false
+	}
+	return apps[0], true
+}
+
+// InstalledDesktopApps is every desktop app installed for ru, most likely
+// first. A machine can hold an app under the legacy product name beside one
+// under this build's.
+func InstalledDesktopApps(goos string, ru RealUser) []string {
 	xdg := os.Getenv("XDG_DATA_HOME")
 	if ru.ViaSudo {
 		xdg = ""
 	}
+	var apps []string
 	for _, candidate := range desktopAppPaths(goos, ru.Home, xdg, os.Getenv("LOCALAPPDATA")) {
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate, true
+			apps = append(apps, candidate)
 		}
 	}
-	return "", false
+	return apps
 }
 
 // desktopAppPaths lists the candidate install locations for goos, most
@@ -188,8 +200,7 @@ func DesktopAppRunning(goos, app string) bool {
 		return procExeUnder(app)
 	case "darwin":
 		// The bundle's executable, the argv[0] LaunchServices starts it with.
-		// electron-builder names it after the bundle.
-		return pgrepMatches(filepath.Join(app, "Contents", "MacOS", strings.TrimSuffix(filepath.Base(app), ".app")))
+		return pgrepMatches(DesktopAppExe(goos, app))
 	default:
 		return false
 	}

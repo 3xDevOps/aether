@@ -18,7 +18,7 @@ const readline = require('node:readline')
 const { boundCli } = require('./cli-binding')
 const { SCHEMES, deepLinkSuffix, findDeepLink } = require('./deep-link')
 const notify = require('./notify')
-const { sidecarExitAction } = require('./sidecar-exit')
+const { relaunchTarget, sidecarExitAction } = require('./sidecar-exit')
 const { chooseUserData } = require('./user-data')
 const zoom = require('./zoom')
 
@@ -186,8 +186,16 @@ function main() {
       console.error('aether gui produced no handshake within 15s; killing it')
       spawned.kill('SIGKILL')
     }, 15000)
+    let relaunchPath = ''
+    let stdoutClosed = false
+    rl.on('close', () => {
+      stdoutClosed = true
+    })
     rl.on('line', (line) => {
-      if (parsed) return
+      if (parsed) {
+        relaunchPath = relaunchTarget(line) || relaunchPath
+        return
+      }
       let msg
       try {
         msg = JSON.parse(line)
@@ -222,10 +230,22 @@ function main() {
       // process is gone, so relaunching here would start into a half-swapped
       // one. Everything else keeps the respawn path.
       const action = sidecarExitAction(code)
-      if (action !== 'respawn') {
+      if (action === 'quit') {
         quitting = true
-        if (action === 'relaunch') app.relaunch()
         app.exit(0)
+        return
+      }
+      if (action === 'relaunch') {
+        quitting = true
+        // The line naming the app to relaunch can still be in the pipe
+        // when the exit event fires.
+        const relaunch = () => {
+          if (relaunchPath) app.relaunch({ execPath: relaunchPath })
+          else app.relaunch()
+          app.exit(0)
+        }
+        if (stdoutClosed) relaunch()
+        else rl.once('close', relaunch)
         return
       }
       respawns += 1

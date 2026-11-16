@@ -1,5 +1,7 @@
 'use strict'
 
+const path = require('node:path')
+
 // Exit statuses `aether gui --json` uses to say what the shell does next
 // (localgw.ExitRelaunch, localgw.ExitUpdaterRestarts).
 const RELAUNCH_EXIT = 75
@@ -15,4 +17,18 @@ function sidecarExitAction(code) {
   return 'respawn'
 }
 
-module.exports = { sidecarExitAction }
+// The executable a line from the sidecar names for the relaunch after exit
+// 75, empty for any other line. It differs from this shell's own when the
+// rebuild installed a renamed app beside it.
+function relaunchTarget(line) {
+  let msg
+  try {
+    msg = JSON.parse(line)
+  } catch {
+    return ''
+  }
+  const target = msg?.relaunch
+  return typeof target === 'string' && path.isAbsolute(target) ? target : ''
+}
+
+module.exports = { relaunchTarget, sidecarExitAction }
