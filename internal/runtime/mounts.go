@@ -168,7 +168,9 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 			if targets[j] == target {
 				return fmt.Errorf("runtime: mounts %d and %d: duplicate target %q", j, i, target)
 			}
-			if underSlash(target, targets[j]) {
+			// Only a session VM has state mounts, and its helper binds a home
+			// mount over one in order, as it binds every mount.
+			if underSlash(target, targets[j]) && mounts[j].Kind != MountState {
 				if policy.AllowedNestings[target] != targets[j] {
 					return fmt.Errorf("runtime: mount %d: target %q nests under mount %d target %q without approval", i, target, j, targets[j])
 				}

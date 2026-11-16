@@ -652,6 +652,7 @@ Their logins and other files stay shared:
 | `codex` | `~/.codex/vm-sqlite`, every `*.sqlite` | `CODEX_SQLITE_HOME` |
 | `opencode` | `~/.local/share/opencode/vm-db/opencode.db` | `OPENCODE_DB` |
 | `cursor` | `~/.cursor/ai-tracking` and `~/.local/state/cursor/agent-stores` | `CURSOR_AGENT_STORE_DIR` for the second |
+| `omp` | `~/.local/share/omp`, `~/.local/state/omp`, `~/.cache/omp` | omp's XDG layout, below |
 | `copilot` | `~/.copilot` | mounted over the home's, seeded |
 | `antigravity` | `~/.gemini/antigravity-cli` | mounted over the home's, seeded |
 
@@ -683,22 +684,84 @@ start of a session, not in a running one. Everything else in those
 directories, such as Copilot's plugins, agents and skills, is the session's
 own and starts empty.
 
-`omp` keeps its logins in a SQLite database where no setting moves them. Only
-one VM session at a time runs it on a home: the launcher's, and on a shared
-account also the owner's, whose `~/.omp/agent` it mounts. Every session that still has its VM
-counts, sleeping ones and ones shutting down too. A launch, or a move to a
-fallback account, that would make a second one is refused:
+#### oh-my-pi in session VMs
 
-```text
-scheduler: oh-my-pi keeps its logins in a SQLite database that two session VMs cannot share, and Ada's session run-k3v9q2m7xd already runs it on the same home; close or kill it first
-```
+oh-my-pi keeps its logins in `~/.omp/agent/agent.db`, among about a dozen
+SQLite databases spread through `~/.omp`. In session VMs the server holds the
+logins instead: it runs omp's own auth broker, `omp auth-broker serve`, for
+each account a session uses, from the oh-my-pi release pinned at
+`/usr/local/libexec/aether/omp`. `aether-server vm install` puts it there, and
+the server downloads it in the background when it starts without it; until
+then omp in VMs cannot sign in. The broker opens the account's
+`~/.omp/agent/agent.db`, the one copy of its logins, and refreshes them, so no
+session's refresh signs another out.
 
-A closed oh-my-pi session does not reopen while another runs it on the
-same home, nor after one did since it closed, because its VM kept the
-databases open: launch a new session instead. The member's environment
-terminal and the agent started by hand in a session's shell open the same
-databases from another kernel, so do not run the agent there, `aether agent
-login` included, while a VM session runs it.
+Every VM, sessions and the member's environment terminal alike, reaches the
+broker at `127.0.0.1:47630` and gets these variables. An omp session always
+gets them; any other VM keeps a value its workspace sets:
+
+| Variable | Value |
+| --- | --- |
+| `OMP_AUTH_BROKER_URL` | `http://127.0.0.1:47630` |
+| `OMP_AUTH_BROKER_TOKEN` | `aether-session`; the session's own socket identifies it, not the token |
+| `OMP_AUTH_BROKER_SNAPSHOT_TTL_MS` | `0`, so no login is cached on disk |
+| `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `~/.local/share`, `~/.local/state`, `~/.cache`, their defaults |
+
+With the XDG variables set and an `omp` directory in each, omp keeps every
+database under `~/.local/share/omp`, `~/.local/state/omp` and `~/.cache/omp`,
+never in `~/.omp/agent`. An omp session's VM has its own copy of those three;
+`~/.omp/plugins`, `~/.omp/agent/sessions` and `~/.omp/agent/blobs` stay shared
+from the home on top of it, so plugins and saved sessions are the member's;
+an Isolated session keeps its own, so nothing it writes there reaches the home.
+omp's memories, history and model cache are each session's own. Settings in
+`~/.omp/agent/config.yml` stay shared.
+
+The server checks every request: a session reaches only the broker of the
+account it runs on, while it is open and its launcher may still launch on that
+account. A session on another member's account may only read the logins,
+refresh one and report usage; storing, disabling or blocking the owner's
+logins is refused. Revoking a share cuts off the session's open requests
+within 10 seconds, and omp then reports that its broker is unreachable.
+
+A broker runs as a transient systemd unit,
+`aether-omp-broker-<member id>.service`, as the system user `aether-omp`,
+which the server adds with its own group and no login. It has no
+capabilities, a read-only view of the host, and none of the server's data
+directory except that member's `~/.omp/agent` and its own
+`<data dir>/omp-broker/<member id>`. The server binds `~/.omp/agent` at
+`<data dir>/omp-broker/<member id>.agent` first, resolved without leaving the
+home, so a symlink in the home cannot show the broker anything else. The bind
+is idmapped: the broker sees the files the member's sessions own as its own
+and creates its files as theirs, so on the host they stay the session user's,
+as Docker sessions on the same server, or after `session-runtime` goes back to
+`docker`, need them. Only what root owns there, such as the directory the
+server made, is handed to the session user first. The server starts a broker
+when a session first asks for that account and restarts it on the first
+request after the server itself restarts, so an update's oh-my-pi takes over;
+omp in running sessions reconnects. Removing a member, or merging them into
+another, stops their broker. `journalctl -u aether-omp-broker-<member id>`
+shows its log.
+
+Sign in to omp in the environment terminal: its `/login` stores the login
+through the broker.
+
+An omp session whose VM was made before the server ran brokers opens
+`~/.omp/agent/agent.db` itself. While one still has its VM, sleeping or
+shutting down included, the broker of its account and of its launcher's home
+does not start, and omp in newer sessions reports that, naming the session;
+such a closed session does not reopen. Close or kill it, and launch a new
+session instead.
+
+Only an omp, Copilot or Antigravity session has its own copy of that agent's
+databases. The environment terminal, and the agent started by hand in a
+session of another agent, use the home's `~/.local/share/omp`,
+`~/.local/state/omp`, `~/.cache/omp`, `~/.copilot` and
+`~/.gemini/antigravity-cli` from another kernel, as do two such VMs at once,
+so do not run the agent in two of them at a time. In a VM other than an omp
+session, a workspace that sets an XDG variable to a directory without an
+`omp` directory makes omp open `~/.omp/agent/agent.db`, which the broker holds
+open, and one that sets `OMP_AUTH_BROKER_URL` takes omp off this broker; do
+not run omp there while VM sessions use the account.
 
 ### Choose a model
 
@@ -924,10 +987,11 @@ mounts.
   message delivery.
 - Only Claude Code and Codex show subscription usage and can move to another
   account on a usage limit.
-- Sharing an `omp` account shares the whole `~/.omp/agent` directory. oh-my-pi
-  loads extensions and MCP commands from there, so a recipient's session can plant
-  code that runs in the owner's sessions. Share an `omp` account only with
-  someone you would give your home to ([security.md](security.md#account-sharing)).
+- In Docker sessions, sharing an `omp` account shares the whole `~/.omp/agent`
+  directory. oh-my-pi loads extensions and MCP commands from there, so a
+  recipient's session can plant code that runs in the owner's sessions. In
+  session VMs only the logins are shared, through the account's broker.
+  Share an `omp` account only with someone you would give your home to ([security.md](security.md#account-sharing)).
 - Aether does not update OpenCode, and does not roll back any update.
 - The Environment has no browser, so every OAuth login needs your own browser.
 

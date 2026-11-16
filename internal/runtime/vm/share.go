@@ -27,9 +27,10 @@ type plan struct {
 	// the VM's own disk.
 	shares []share
 	// home is every other host path, served by the file service.
-	home    []home.Share
-	mounts  []guest.Mount
-	sockets []guest.Socket
+	home      []home.Share
+	mounts    []guest.Mount
+	sockets   []guest.Socket
+	loopbacks []guest.Loopback
 	// links maps each vsock.sock_<port> to the host socket Cloud Hypervisor
 	// connects to for that port.
 	links map[string]string
@@ -92,6 +93,12 @@ func planMounts(checkouts, mounts []runtime.Mount, nestedDocker bool, dir string
 				}
 				for _, name := range sockets {
 					forward(filepath.Join(m.HostPath, name), filepath.Join(m.ContainerPath, name))
+				}
+				if m.Port != 0 {
+					if len(sockets) != 1 {
+						return plan{}, fmt.Errorf("vm runtime: mount %s with a loopback port holds %d sockets, not one", m.HostPath, len(sockets))
+					}
+					p.loopbacks = append(p.loopbacks, guest.Loopback{Port: m.Port, Path: filepath.Join(m.ContainerPath, sockets[0])})
 				}
 				if len(sockets) > 0 && !others {
 					continue

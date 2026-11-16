@@ -6,15 +6,22 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo=$(dirname -- "$script_dir")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
-mkdir -p "$tmp/bin" "$tmp/repo/scripts" "$tmp/repo/internal/harness" "$tmp/repo/images/agents"
+mkdir -p "$tmp/bin" "$tmp/repo/scripts" "$tmp/repo/internal/harness" "$tmp/repo/internal/serversetup" "$tmp/repo/images/agents"
 cp "$script_dir/bump-agent-pins.sh" "$tmp/repo/scripts/"
 cp "$repo/internal/harness/acpregistry.json" "$repo/internal/harness/acp.go" "$tmp/repo/internal/harness/"
 cp "$repo/images/agents/Dockerfile" "$tmp/repo/images/agents/"
+cp "$repo/internal/serversetup/omp.go" "$tmp/repo/internal/serversetup/"
 export FIXTURES="$tmp" PATH="$tmp/bin:$PATH" SDK=0.9.0
 
 cat >"$tmp/bin/curl" <<'STUB'
 #!/bin/sh
-cat "$FIXTURES/registry.json"
+for url; do :; done
+case $url in
+*/registry.json) cat "$FIXTURES/registry.json" ;;
+*/repos/can1357/oh-my-pi/releases/latest) echo '{"tag_name":"v99.1.2","assets":[{"name":"omp-linux-arm64","size":7},{"name":"omp-linux-x64","size":123456}]}' ;;
+*/releases/download/v99.1.2/SHA256SUMS.txt) printf '%s  omp-linux-arm64\n%s  omp-linux-x64\n' "$(printf 'a%.0s' $(seq 64))" "$(printf 'b%.0s' $(seq 64))" ;;
+*) echo "unexpected curl $url" >&2; exit 92 ;;
+esac
 STUB
 cat >"$tmp/bin/npm" <<'STUB'
 #!/bin/sh
@@ -45,7 +52,7 @@ fail() {
 }
 
 out=$(sh "$tmp/repo/scripts/bump-agent-pins.sh")
-[ "$(printf '%s\n' "$out" | wc -l)" -eq 7 ] || fail "want 7 moved pins, got: $out"
+[ "$(printf '%s\n' "$out" | wc -l)" -eq 11 ] || fail "want 11 moved pins, got: $out"
 printf '%s\n' "$out" | grep -q '^Codex in codex-acp .* -> 0.9.10$' || fail "Codex is not the newest in the range: $out"
 for want in \
 	'Package: "@agentclientprotocol/claude-agent-acp", Version: "9.0.0"' \
@@ -57,14 +64,17 @@ for want in \
 done
 grep -qx 'ARG CLAUDE_CODE_VERSION=2.9.1' "$tmp/repo/images/agents/Dockerfile" || fail "the agents image keeps its old Claude Code"
 grep -qx 'ARG CODEX_VERSION=0.9.11' "$tmp/repo/images/agents/Dockerfile" || fail "the agents image keeps its old Codex"
+for want in 'Name: "oh-my-pi 99.1.2"' 'oh-my-pi/releases/download/v99.1.2/omp-linux-x64"' "SHA256: \"$(printf 'b%.0s' $(seq 64))\"" 'Size:   123456,'; do
+	grep -qF "$want" "$tmp/repo/internal/serversetup/omp.go" || fail "omp.go lacks $want"
+done
 jq -e 'all(.agents[]; (keys == ["distribution", "id", "license", "name", "repository", "version"])
 	and .version == "9.0.0" and (.distribution | keys == ["npx"]) and (.distribution.npx.package | endswith("@9.0.0")))' \
 	"$tmp/repo/internal/harness/acpregistry.json" >/dev/null || fail "acpregistry.json is not the registry's entries in Aether's shape"
 
-before=$(cat "$tmp/repo/internal/harness/"* "$tmp/repo/images/agents/Dockerfile" | cksum)
+before=$(cat "$tmp/repo/internal/harness/"* "$tmp/repo/images/agents/Dockerfile" "$tmp/repo/internal/serversetup/omp.go" | cksum)
 out=$(sh "$tmp/repo/scripts/bump-agent-pins.sh")
 [ -z "$out" ] || fail "a second run moved pins: $out"
-[ "$(cat "$tmp/repo/internal/harness/"* "$tmp/repo/images/agents/Dockerfile" | cksum)" = "$before" ] || fail "a second run changed files"
+[ "$(cat "$tmp/repo/internal/harness/"* "$tmp/repo/images/agents/Dockerfile" "$tmp/repo/internal/serversetup/omp.go" | cksum)" = "$before" ] || fail "a second run changed files"
 
 if SDK='^0.9.0' sh "$tmp/repo/scripts/bump-agent-pins.sh" >/dev/null 2>"$tmp/err"; then
 	fail "an SDK range was accepted"

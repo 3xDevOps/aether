@@ -331,10 +331,21 @@ they have no installation of the agent in their own `~/.local/bin`, they also
 get yours, read-only, with your whole `~/.local/bin` on their `PATH` after
 their own entries.
 
-In session VMs, a `copilot` or `antigravity` session gets a copy of your
-login, made at each cold start of its VM; a copy of either login is not
-invalidated when another is used, and after a revoke the session moves off
-your account or stops, so the copy is replaced.
+In session VMs, three agents work differently. A `copilot` or `antigravity`
+session gets a copy of your login, made at each cold start of its VM; a copy
+of either login is not invalidated when another is used, and after a revoke
+the session moves off your account or stops, so the copy is replaced. An
+`omp` session gets no file: oh-my-pi asks an auth broker the server runs for
+your account, which holds your logins in your `~/.omp/agent/agent.db`. The
+server checks every request against the session's account, ends open ones
+within 10 seconds of a revoke, and refuses the next. A recipient's session
+may only read your omp logins, refresh one and report usage, not store,
+disable or block them. The broker runs as a transient systemd unit as the
+system user `aether-omp`, without capabilities, with the host read-only and
+the server's data directory hidden except your `~/.omp/agent` and the
+broker's own directory, so it cannot read your other agents' logins
+([harnesses.md](harnesses.md#oh-my-pi-in-session-vms)). A recipient's omp
+receives your access tokens and API keys, never the refresh tokens.
 
 Claude Code caches the account it is signed in to as `oauthAccount` in
 `~/.claude.json`, and `claude auth status` reports that cache, not the owner of

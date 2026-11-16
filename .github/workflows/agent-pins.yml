@@ -64,7 +64,7 @@ jobs:
               exit 0
             fi
             git fetch --quiet --depth=1 origin "$lease"
-            if git diff --quiet FETCH_HEAD -- internal/harness/acpregistry.json internal/harness/acp.go images/agents/Dockerfile; then
+            if git diff --quiet FETCH_HEAD -- internal/harness/acpregistry.json internal/harness/acp.go images/agents/Dockerfile internal/serversetup/omp.go; then
               echo "#$pr already proposes these pins."
               exit 0
             fi

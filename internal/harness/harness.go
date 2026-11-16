@@ -256,7 +256,7 @@ func (d Definition) Profile() Profile {
 		p.Env = maps.Clone(registered.Env)
 		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
 		p.VMState = slices.Clone(registered.VMState)
-		p.VMSingle = registered.VMSingle
+		p.LoginBroker = registered.LoginBroker
 		if p.ACPMode == "" {
 			p.ACPMode = registered.ACPMode
 		}
@@ -331,9 +331,9 @@ type Profile struct {
 	// sessions share. Sessions in separate VMs cannot share one, so in a
 	// session VM each directory is the session's own.
 	VMState []VMState
-	// VMSingle, when set, says why only one session VM at a time may run the
-	// CLI on a home: it keeps such databases where no setting moves them.
-	VMSingle string
+	// LoginBroker marks omp, whose logins the server's auth broker serves to
+	// session VMs instead of a shared account's login directory.
+	LoginBroker bool
 	// LocalRoot is the home-relative profile directory (e.g. ".claude");
 	// empty means no profile sync.
 	LocalRoot string
@@ -584,9 +584,12 @@ var profiles = map[string]Profile{
 		EffortLevels:   []string{"off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"},
 		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY"},
 		// omp keeps its login in a SQLite WAL database beside its config,
-		// and a WAL database cannot be shared file by file.
+		// and a WAL database cannot be shared file by file. In session VMs
+		// omp uses the XDG layout, which moves every database it keeps out
+		// of ~/.omp, and the server's auth broker for its logins.
 		CredentialPaths: []string{".omp/agent"},
-		VMSingle:        "keeps its logins in a SQLite database that two session VMs cannot share",
+		LoginBroker:     true,
+		VMState:         []VMState{{Dir: ".local/share/omp"}, {Dir: ".local/state/omp"}, {Dir: ".cache/omp"}},
 		LocalRoot:       ".omp",
 		// The WAL and shm files hold provider keys too.
 		DenyNames:       []string{"agent.db", "agent.db-wal", "agent.db-shm"},

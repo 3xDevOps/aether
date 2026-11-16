@@ -82,14 +82,20 @@ Both first open `/dev/kvm` and stop with the error when they cannot, such as
 then writes nothing. They install `qemu-img`, `mkfs.ext4`,
 `/usr/libexec/virtiofsd`, `iptables`, `nft` and `ip` with `apt-get` when
 missing (Debian 12 or Ubuntu 24.04 and newer ship `virtiofsd` at that path), Cloud Hypervisor
-v54.1 at `/usr/local/bin/cloud-hypervisor` after checking its SHA-256, and the
+v54.1 at `/usr/local/bin/cloud-hypervisor` after checking its SHA-256, the
+oh-my-pi release whose auth broker holds session VMs' omp logins at
+`/usr/local/libexec/aether/omp` after checking its SHA-256
+([harnesses.md](harnesses.md#oh-my-pi-in-session-vms)), and the
 release's guest kernel `aether-vmlinux-x86_64` at
 `/usr/local/lib/aether/vmlinux` after checking it against the signed release
 manifest, noting the release in `vmlinux.release` beside it. Nothing is
 replaced until every download has checked out. A `vm-kernel` set to another
 path, or a development build, keeps the kernel already there. With
-`session-runtime vm` the server manages `/usr/local/bin/cloud-hypervisor`:
-replace it, and the next start puts the pinned one back. `install` leaves
+`session-runtime vm` the server manages `/usr/local/bin/cloud-hypervisor` and
+`/usr/local/libexec/aether/omp`: replace either, and the next start puts the
+pinned one back, the omp in the background after the server is up. The server
+also adds the system user `aether-omp` that omp's auth brokers run as.
+`install` leaves
 Sysbox out: sessions and environment terminals run their own Docker daemon in
 their VM.
 

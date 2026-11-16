@@ -111,6 +111,9 @@ type Mount struct {
 	// Kind tells the VM runtime, which keeps a session on disks of its own,
 	// what the mount holds; Docker binds every kind alike.
 	Kind MountKind `json:",omitempty"`
+	// Port, for a directory holding one socket, is where programs in a
+	// session VM also reach that socket: 127.0.0.1:Port. Docker ignores it.
+	Port uint16 `json:",omitempty"`
 }
 
 // MountKind names what a mount holds.

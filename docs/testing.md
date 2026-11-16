@@ -396,8 +396,10 @@ request.
 each one it moved: the adapters in `acpregistry.json` and
 `internal/harness/acp.go` to the versions the
 [ACP registry](https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json)
-lists, each adapter's `CLIVersion` to the CLI that release installs, and the
-two CLIs above to npm's latest. It needs curl, jq and npm. Run the two commands
+lists, each adapter's `CLIVersion` to the CLI that release installs, the
+two CLIs above to npm's latest, and the oh-my-pi release session VMs' auth
+broker runs, in `internal/serversetup/omp.go`, to the newest GitHub release
+with its SHA-256 and size. It needs curl, jq and npm. Run the two commands
 above on the result, and fix what the new releases broke in the same pull
 request.
 
