@@ -2,7 +2,7 @@
 
 What to enter under **App content > App access** in the Play Console. Cloudfield
 is a client for a server the user runs themselves, reached over their own
-private Tailscale network (a "tailnet") or through the Cloudfield Edge, so a
+private Tailscale network (a "tailnet") or through Cloudfield Edge, so a
 reviewer needs one of the two to reach a dashboard. Play requires that access:
 "If your entire app or parts of your app are restricted based on login
 credentials, sign in details, memberships, location, or other forms of
@@ -43,7 +43,7 @@ the phone's Tailscale login identifies it, and the server decides what that
 member may do. The server and the dashboard are open source, with
 documentation at https://github.com/3xDevOps/cloudfield. In this mode the app
 sends nothing to us and only ever loads the server named above, over HTTPS.
-The other choice, "Cloudfield Edge", signs in with GitHub through the Cloudfield
+The other choice, "Cloudfield Edge", signs in with GitHub through the
 edge and needs no tailnet; it is not needed to review the dashboard.
 ```
 
@@ -59,7 +59,7 @@ screen only.
 
 ```
 Cloudfield is a client for a server the user runs themselves on their own
-private Tailscale network (a "tailnet") or through the Cloudfield Edge. In
+private Tailscale network (a "tailnet") or through Cloudfield Edge. In
 Tailscale mode the app has no accounts, no sign-in and no password: the
 phone's Tailscale login identifies it, and only devices on the same tailnet
 can reach the server. Instruction set 1
