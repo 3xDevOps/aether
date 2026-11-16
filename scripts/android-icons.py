@@ -103,7 +103,7 @@ def extent(element: ET.Element) -> tuple:
     if not m:
         sys.exit(f"cannot measure path {element.get('d')}: only M x y A r r 0 large sweep x y")
     x0, y0, r, large, sweep, x1, y1 = float(m[1]), float(m[2]), float(m[3]), m[4], m[5], float(m[6]), float(m[7])
-    half = float(element.get("stroke-width")) / 2
+    half = float(element.get("stroke-width", "1")) / 2
     mx, my, chord = (x0 + x1) / 2, (y0 + y1) / 2, math.hypot(x1 - x0, y1 - y0)
     offset = math.sqrt(r * r - chord * chord / 4)
     sign = -1 if large != sweep else 1
