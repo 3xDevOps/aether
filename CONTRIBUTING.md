@@ -496,9 +496,9 @@ only the push session. From a `main` checkout with `gh` and
 `jq`:
 
 ```sh
-git tag -a v0.8.0 -m v0.8.0 <commit>
-sh scripts/release-ci-check.sh 3xDevOps/aether "$(git rev-parse 'v0.8.0^{commit}')" &&
-git push origin v0.8.0
+git tag -a v0.8.7-beta.1 -m v0.8.7-beta.1 <commit>
+sh scripts/release-ci-check.sh 3xDevOps/aether "$(git rev-parse 'v0.8.7-beta.1^{commit}')" &&
+git push origin v0.8.7-beta.1
 ```
 
 Push tags one at a time: GitHub starts no workflow when more than three are
@@ -589,8 +589,10 @@ anything is built or tagged.
 
 With `NIGHTLY_PRUNE_ENABLED` also `true`, it deletes once a day (04:07 UTC) the release
 and images, never the git tag, of each nightly older than 14 days, except
-the newest and every nightly above `stable.json`'s build. It prunes nothing
-while `stable.json` cannot be read and verified. This lists what it would
+the newest, every nightly above `stable.json`'s build, and a nightly whose
+image a channel tag (`nightly`, `beta`, `stable` or `latest`) still carries,
+which keeps its release and images. It prunes nothing while `nightly.json` or
+`stable.json` cannot be read and verified. This lists what it would
 delete, and deletes nothing (`gh` needs the `read:packages` scope):
 
 ```sh
@@ -623,10 +625,11 @@ A workflow that moves a channel pointer (`<channel>.json` on the
 `channels` prerelease) keeps the pair it signed as the `pointer-<channel>`
 artifact for 90 days. If an upload leaves half a pair, restore that
 artifact with the `gh run download ... && gh release upload channels
---clobber ...` command the failed run prints. Once it has expired, remove
-what is left of the pointer and re-sign it with `first-pointer` for the
-release it named or one above it, never below: installs refuse a pointer
-lower than one they have seen.
+--clobber ...` command the failed run prints. Once the artifact has expired
+there is no workflow path to re-sign a pointer: `first-pointer` takes only the
+migration's `v0.8.7-beta.N` and refuses once a pointer exists, and
+`nightly.yml` has no such input. It needs a code change first. Never sign one
+below what installs have seen: they refuse a lower pointer.
 
 ### Hotfixes
 
@@ -718,9 +721,14 @@ Before the first hotfix, a repository admin sets up three protections:
 ### Set up releases
 
 Releases need these admin steps. Do them in order; nothing below publishes,
-tags or prunes until a step says so. Each of 1 to 4 is one-time.
+tags or prunes until a step says so. Each of 1 to 5 is one-time.
 
-1. **The `release` environment.** **Settings → Environments → release**:
+1. **No stray variables.** `gh variable list --org 3xDevOps` and `gh variable
+   list --repo 3xDevOps/aether` must show no `NIGHTLY_ENABLED` or
+   `NIGHTLY_PRUNE_ENABLED`. `nightly.yml` is on `main`, so an organization
+   variable set to `true` would start nightly runs as soon as the pointers
+   exist, and the first run would create an unprotected `nightly` environment.
+2. **The `release` environment.** **Settings → Environments → release**:
    under **Deployment branches and tags** allow only the tag rule `v*` and
    the branch `main` (Promote runs on `main`), and add the maintainers who
    release as **Required reviewers**. Put `AETHER_RELEASE_SIGNING_KEY` here
@@ -730,33 +738,39 @@ tags or prunes until a step says so. Each of 1 to 4 is one-time.
    Android job reads `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`,
    `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` as repository secrets;
    losing that keystore means no release can update an installed app again.
-2. **The `edge-promotion` environment**, limited to the branch `main`, with
+3. **The `edge-promotion` environment**, limited to the branch `main`, with
    no required reviewers, or every nightly would wait on a person. The first
    run creates it unprotected otherwise.
-3. **The `channels` prerelease** that holds the pointers. Latest and the
+4. **The `channels` prerelease** that holds the pointers. Latest and the
    installers never pick it, and its tag starts no release:
 
    ```sh
    gh release create channels --prerelease --title channels --notes 'Signed channel pointers.' --target main
    ```
 
-4. **Rulesets for hotfixes**, before the first one: `release/*` branches and
+5. **Rulesets for hotfixes**, before the first one: `release/*` branches and
    `v*` tags, with the commands under [Hotfixes](#hotfixes). If a `v*` tag
    ruleset exists, GitHub Actions must be allowed to create tags, or the
-   signer's tag step is refused and nothing is published.
-5. **The nightly key pair**, before the migration's tag. Generate an ed25519
+   signer's tag step is refused and nothing is published. The tag ruleset
+   must also let a repository admin push a tag, because `release.yml` checks
+   for a repository admin: GitHub's `OrganizationAdmin` bypass covers
+   organization owners only, so add **Repository admin** to the ruleset's
+   bypass list in **Settings → Rules** (the REST docs name no role id for
+   it).
+6. **The nightly key pair**, before the migration's tag. Generate an ed25519
    key pair offline ([Release signing](docs/security.md#release-signing) says
    the formats), and merge the public key into `nightlyKeys` in
    `internal/selfupdate/keys.go` in a reviewed pull request. Then
-   `v0.8.7-beta.N` and `v0.8.7` carry it. After the migration no release can
-   deliver it: a `main` tag publishes build 0, which channel-aware installs
-   are never offered, Promote needs a nightly, and an install whose
-   `nightlyKeys` is empty refuses `nightly.json`. The gate before the first
-   nightly is `main`'s `keys.go`: the `signing-key` job fails when `main` does
+   `v0.8.7-beta.N` and `v0.8.7` carry it. After the migration a `main` tag
+   publishes build 0, which channel-aware installs are never offered, and an
+   install whose `nightlyKeys` is empty refuses `nightly.json`; only a hotfix,
+   or a beta and stable promoted from a nightly built after the key merged,
+   can deliver it. The repository has no key
+   generation command: a maintainer generates the pair offline. The gate
+   before the first nightly is `main`'s `keys.go`: the `signing-key` job fails when `main` does
    not trust the nightly key. If the migration already happened without the
-   key, carry it in a hotfix, or in a beta and stable promoted from a nightly
-   built after the key merged.
-6. **The migration**, once. Ship the channel-aware updater as
+   key, use one of those two ways.
+7. **The migration**, once. Ship the channel-aware updater as
    `v0.8.7-beta.N` the old way (the tag flow above), which becomes Latest and
    reaches every install. Then promote it with `first-pointer`
    ([Promote](#promote)). It becomes `v0.8.7`, build 1, with the first
@@ -764,7 +778,7 @@ tags or prunes until a step says so. Each of 1 to 4 is one-time.
    signed build, so it shows the update but waits for a super admin's
    `aether server update`; from `v0.8.7` on it applies updates itself, and
    `AETHER_NO_UPDATE_CHECK=1` stops that.
-7. **The nightly environment and pruning**, before you switch nightlies on:
+8. **The nightly environment and pruning**, before you switch nightlies on:
    - **Settings → Environments → New environment**, named `nightly`:
      deployment branches limited to `main`, no required reviewers, and the
      secret `AETHER_NIGHTLY_SIGNING_KEY`. Do not put
@@ -775,13 +789,11 @@ tags or prunes until a step says so. Each of 1 to 4 is one-time.
      give this repository the **Admin** role. Without it a prune fails with
      403 partway: images go first and the release is kept, so the next prune
      retries.
-   - Run `gh variable list --org 3xDevOps`: it must show no
-     `NIGHTLY_ENABLED` or `NIGHTLY_PRUNE_ENABLED`.
-8. **Switch nightlies on** when `stable.json` and `beta.json` exist, with
+9. **Switch nightlies on** when `stable.json` and `beta.json` exist, with
    `gh variable set NIGHTLY_ENABLED` ([Nightlies](#nightlies)). The first
    nightly is `v0.9.0-nightly.1`, build 2. Run the prune dry run, then set
    `NIGHTLY_PRUNE_ENABLED`. Turn them off with `gh variable delete`.
-9. **Point the project's own server at nightly:** `sudo aether-server update
+10. **Point the project's own server at nightly:** `sudo aether-server update
    --channel nightly --yes` on it.
 
 <details>

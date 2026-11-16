@@ -1210,11 +1210,10 @@ Limits of that arrangement:
   commit's Gradle with them, so the keystore is within reach of the built
   commit's code. `nightly.yml` passes those secrets too, so that happens
   unattended on every nightly.
-- A signing job re-run by a non-admin with write access is not checked for
-  admin: the admin step covers a promotion's dispatch, and the `nightly`
-  environment has no reviewers. A re-run can only finish what the original
-  run resolved.
-
+- A Promote's signing job checks the re-running admin again. A nightly's
+  signing job and a pushed tag's do not, and the `nightly` environment has no
+  reviewers, so a non-admin with write access can re-run them. A re-run can
+  only finish what the original run resolved.
 - GitHub environments limit which refs a workflow may use a secret from, but
   not which workflow file. A tag runs the tagged commit's own workflow files,
   so a hotfix tag on a `release/X.Y` branch runs that branch's copies with the

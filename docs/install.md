@@ -890,8 +890,8 @@ a server update is already being applied: v0.9.0-nightly.13 is applying now and 
 
 An update whose download could not be undone refuses the next one until
 `aether-server` restarts and puts the previous binaries back. `--when idle`
-cannot go with `--allow-downgrade`: `allow_downgrade applies now only: use
---when now`. A release that is not above the running build is refused
+cannot go with `--allow-downgrade`; the CLI refuses with `aether server
+update: --allow-downgrade applies now only; drop --when idle`. A release that is not above the running build is refused
 without `--allow-downgrade`:
 
 ```
