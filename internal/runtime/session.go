@@ -19,10 +19,10 @@ const setupOutputLimit = 16 << 10
 // container's PATH, which puts the agent-writable ~/.local/bin first.
 const RootPath = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-// RootUser reports whether an exec user string runs as uid 0. It matches the
-// uid by value, not by text: "root" or any numeric spelling of 0 (e.g. "0" or
-// "00"), the way the engine resolves it, so a non-canonical spelling cannot
-// run as root while keeping the container PATH. The group half is ignored.
+// RootUser reports whether an exec user string names uid 0 as "root" or a plain
+// decimal zero such as "0" or "00"; the group half is ignored. The engine
+// accepts more spellings, so a caller that must not trust the text, as sudo
+// must not, applies RootPath unconditionally.
 func RootUser(user string) bool {
 	uid, _, _ := strings.Cut(user, ":")
 	if uid == "root" {
