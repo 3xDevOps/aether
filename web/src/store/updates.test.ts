@@ -262,6 +262,23 @@ describe('checkClient', () => {
     expect(serverTooOld(s.getState().update, s.getState().info?.server_version)).toBeNull()
   })
 
+  it('takes the server build a later check confirmed with its version', async () => {
+    const s = store()
+    s.setState({ info: { ...serverInfo, server_version: 'v0.9.0-nightly.10', build: 400 } })
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => ({
+        ...updateStatus(),
+        cli: { ...updateStatus().cli, version: 'v0.9.0-beta.2' },
+        cli_build: 412,
+        server_version: 'v0.9.0-beta.2',
+        server_build: 412,
+      })),
+    })
+    await checkClient(s, client)
+    expect(s.getState().info?.build).toBe(412)
+    expect(serverTooOld(s.getState().update, s.getState().info?.server_version, s.getState().info ?? undefined)).toBeNull()
+  })
+
   it('keeps a server version a hydration read while the check was out', async () => {
     const s = store()
     let answer: (status: UpdateStatus) => void = () => {}

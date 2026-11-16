@@ -123,8 +123,9 @@ export async function checkClient(store: Store, client: Api, refresh = false): P
       // that replays events never re-reads it. A hydration that landed while
       // the check was out read later than the gateway did, so it stands.
       const info = store.getState().info
-      if (info && info === asked && next.server_version && next.server_version !== info.server_version) {
-        store.getState().setInfo({ ...info, server_version: next.server_version })
+      const stale = info && (next.server_version !== info.server_version || next.server_build !== info.build || next.server_hotfix !== info.hotfix)
+      if (info && info === asked && next.server_version && stale) {
+        store.getState().setInfo({ ...info, server_version: next.server_version, build: next.server_build, hotfix: next.server_hotfix })
       }
       store.setState({ clientCheckError: status.cli_error || null })
       const s = store.getState()
