@@ -6808,7 +6808,9 @@ Categories:
   {client}`, remounted when `identityKey` changes so a code never outlives
   its member. A ChatGPT / Claude segmented control picks numbered steps.
   `connector.list` gives the URL to show at once (`url`), the edge's
-  `universal_url` and `sign_in`. With `sign_in` the third step mints no code
+  `universal_url`, that URL at every address of the edge
+  (`universal_urls`) and `sign_in`. A URL in `universal_urls` is treated as
+  `universal_url` everywhere below. With `sign_in` the third step mints no code
   and **Watch for the connection** polls for 10 minutes, then says nothing
   connected; otherwise **Get a
   code** calls `connector.code` and shows its code with `useCountdown`. A
