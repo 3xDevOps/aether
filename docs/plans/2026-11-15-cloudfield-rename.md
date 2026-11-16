@@ -6,8 +6,8 @@ keeps running, keeps reaching its edge, and still finds its update.
 
 **Status:** approved by the owner, 2026-11-16. The rename and the new
 domain are the owner's decisions of 2026-11-15; the choices under
-[Decisions](#decisions-2026-11-16) are the owner's of 2026-11-16. No code
-has changed.
+[Decisions](#decisions-2026-11-16) are the owner's of 2026-11-16. Phase 0
+is being built.
 
 ## The rule
 
@@ -190,7 +190,7 @@ redirect after a repository rename.
 | Link scheme `aether://` | Old apps handle `aether://` only, so the edge keeps emitting it | The desktop and Android apps also register `cloudfield://` | Never emitted less |
 | Branch prefix `aether/run-` | Existing sessions and open pull requests keep their branches | The server accepts both prefixes everywhere; new sessions get `cloudfield/run-` ([decision 8](#8-names-people-see-inside-sessions)) | Never |
 | MCP server and tool names | Unchanged | [Decision 8](#8-names-people-see-inside-sessions) | n/a |
-| Desktop product name | The app's bundle name and install folder are named after it. Its data directory is not: Electron names that after `name` in `desktop/package.json`, `aether-desktop` | The new app uses the old data directory when the new one does not exist. `aether gui` finds, stops and rebuilds the app under either name. On a machine that has the old app it installs the new one beside it and removes the old one after the new one has started once; a Dock or taskbar pin has to be made again | Never |
+| Desktop product name | The app's bundle name and install folder are named after it. Its data directory is named after `productName` in `desktop/package.json`, else `name` there: `aether-desktop` today | The new app uses the old data directory when the new one does not exist. `aether gui` finds, stops and rebuilds the app under either name. On a machine that has the old app it installs the new one beside it and removes the old one after the new one has started once; a Dock or taskbar pin has to be made again | Never |
 
 Two failures to design against, both found in the code:
 
@@ -227,8 +227,8 @@ Nothing a person sees changes. One release carries:
 - `edge-update.sh` and `promote-edge.yml` accepting both signer
   identities;
 - the server and CLI accepting `cloudfield/run-` branches;
-- the desktop and Android apps registering `cloudfield://`, and the
-  desktop data-directory fallback.
+- the desktop and Android apps registering `cloudfield://`, the desktop
+  data-directory fallback, and `aether gui` removing the old app.
 
 ### Phase 1: the name people read
 
@@ -489,7 +489,8 @@ in a published release yet. All are read only by programs, so by
   work item 12 (wording) uses the new name.
 - Its helper is the server binary run as `aether-internal`, so the
   `cloudfield-internal` name is answered with no change there, and a VM
-  gets both in-VM paths the way it gets the old one.
+  run gets both in-VM paths the way it gets the old one
+  ([found while building](#found-while-building-phase-0)).
 - Its work item 10 owns `cmd/aether-server` and `internal/serversetup`, and
   item 7 owns mounts. Pull requests 2 and 3 here touch the same files and
   are agreed with that stack's lead before they open.
@@ -616,22 +617,23 @@ Stated by the design and not yet tested:
   `workflow_call` still carries `promote-edge.yml@refs/heads/main` as its
   identity.
 
-Verified while building phase 0:
+### Found while building phase 0
 
 - Electron does not name its data directory after electron-builder's
   `productName`. It uses `productName` in `desktop/package.json`, else
   `name`, and electron-builder copies only `extraMetadata` into the
-  packaged file. The directory is `aether-desktop` today. Pull request 9
-  keeps that directory when it exists, so pull request 13 changes only
-  `productName` in `desktop/electron-builder.yml`.
+  packaged file (read in the source of Electron 33 and electron-builder
+  26; not checked with a packaged build). The directory is
+  `aether-desktop` today. Pull request 13 sets both product names, and
+  pull request 9 keeps an existing `aether-desktop` directory in use.
 - A server's bare repositories get the two-prefix hook when the server
   starts: it rewrites `hooks/update` in every workspace's repository at
-  start and on first use. A server rolled back below pull request 8
-  rewrites the hook to `aether/run-` only, which leaves any
-  `cloudfield/run-` branch open to a force-push.
-- A micro VM session gets both in-VM paths from pull request 3 with no
-  change in that stack: the mount is of the server-binary kind, which the
-  guest helper binds itself.
+  start and on first use. Every release does this with its own hook text,
+  so a server put back to a release below pull request 8 stops refusing a
+  force-push to `cloudfield/run-` branches.
+- By reading, not by a run: a micro VM run gets both in-VM paths from
+  pull request 3 with no change in that stack, because the mount is of the
+  server-binary kind, which the guest helper binds itself.
 
 ## Implementation pull requests
 
@@ -650,7 +652,9 @@ Each is one session. Phase and dependencies are in brackets.
    agreed with micro VM item 10]
 3. `feat(server)`: answer to `cloudfield-internal`; mount and reserve both
    in-container paths. `cmd/aether-server/main.go`,
-   `internal/coordtransport/paths.go`, `internal/runtime/mounts.go`.
+   `internal/coordtransport/paths.go`, `internal/runtime/mounts.go`,
+   `internal/scheduler/coordination.go`, `assistant_container.go`,
+   `docs/coordination.md`, `docs/mcp-bridge.md`.
    [0; agreed with micro VM items 3 and 7]
 4. `feat(envname)`: read `CLOUDFIELD_*`, else `AETHER_*`. New
    `internal/envname`; `internal/cli/config.go`, `cmd/aether-server/main.go`,
@@ -663,17 +667,17 @@ Each is one session. Phase and dependencies are in brackets.
    issuer is the address its server enrolled at; one OAuth app per sign-in
    address; announce the relay addresses to servers; per-address counters.
    `cmd/aether-edge/options.go`, `main.go`, `metrics.go`,
-   `internal/edge/service/service.go`, `universal.go`, `pages.go`,
-   `oauth.go`, `internal/edge/relay/control.go`, `connect.go`,
-   `internal/edge/proto`, `internal/edge/store`,
-   `packaging/systemd/aether-edge.service`, `packaging/edge/`,
-   `docs/edge.md`. [0]
+   `internal/edge/service`, `internal/edge/relay`, `internal/edge/proto`,
+   `packaging/edge/`, `docs/edge.md`. A registration keeps its address in
+   memory, so the edge's database and unit file do not change. [0]
 6. `feat(connector)`: the server's connector accepts every relay address
    its edge announced and keeps each token bound to its own.
    `internal/connector/connector.go`, `authorize.go`, `token.go`,
    `internal/sshd/connector.go`, `internal/edge/agent`. It raises the edge
-   protocol version: the edge counts connector calls per protocol version,
-   and step 6 of the switch reads that count. `internal/edge/proto`.
+   protocol version, because pull request 5 counts connector calls per
+   address and per negotiated protocol version, and step 6 of the switch
+   reads that count. The count tells old servers from new only while the
+   edge runs a release with this pull request. `internal/edge/proto`.
    [0; after 5]
 7. `feat(edge)`: `edge-update.sh` and `promote-edge.yml` accept both
    signer identities, with a manual step that makes hosts stop until the
@@ -690,17 +694,19 @@ Each is one session. Phase and dependencies are in brackets.
    directory, find, stop and rebuild the app under either name.
    `desktop/electron-builder.yml`, `desktop/main.js`,
    `internal/localops/desktop.go`, `rebuild.go`,
-   `internal/localgw/rebuild.go`, `scripts/install.ps1`. Removing the old
-   app after the new one has started once is a second pull request in
-   `cmd/aether/gui.go`, after release-channels 4 and before 13. [0]
+   `internal/localgw/rebuild.go`, `scripts/install.ps1`,
+   `desktop/deep-link.js`, `user-data.js`, `sidecar-exit.js`, `embed.go`,
+   `internal/localops/desktop_handoff.go`, `cmd/aether/update_app.go`. [0]
+
+   9b. `feat(desktop)`: remove the old app after the new one has started
+   once. `cmd/aether/gui.go`, `internal/localops`.
+   [0; after 9 and release-channels 4]
 10. `feat(android)`: register `cloudfield://`.
     `android/app/src/main/AndroidManifest.xml`, `DeepLink.kt`. [0]
 11. `feat(dashboard)`: Cloudfield name, mark and icons. `web/src/` copy,
     `web/src/app/layout.tsx`, `manifest.ts`, `web/public/sw.js`,
     `web/public/` mark and `icons/`, `scripts/make-icons.py`, unit and
-    end-to-end tests. The claim and join fields also accept
-    `cloudfield://` links (`web/src/lib/claim-link.ts`). Design review.
-    [1; after release-channels 4]
+    end-to-end tests. Design review. [1; after release-channels 4]
 12. `feat(cli)`: Cloudfield in CLI, server and edge messages, edge pages,
     assistant instructions, skill text, connector title. Strings in
     `cmd/`, `internal/cli`, `scheduler`, `assistant`,
@@ -708,10 +714,10 @@ Each is one session. Phase and dependencies are in brackets.
     `mcpbridge`, and their tests. Not `internal/runtime/vm`,
     `internal/guest`, `internal/vmimage`. [1; after release-channels 3 and 4]
 13. `feat(desktop)`: product name, dialogs and icons; Windows resources.
-    `desktop/electron-builder.yml`, `package.json`, `main.js`,
-    `desktop/build/`, `packaging/windows/versioninfo.json`,
+    `productName` in `desktop/electron-builder.yml` and `package.json`,
+    `main.js`, `desktop/build/`, `packaging/windows/versioninfo.json`,
     `scripts/update-smoke.ps1`, and the app paths in `docs/install.md`.
-    Design review. [1; after 9 and its second pull request are released]
+    Design review. [1; after 9 and 9b are released]
 14. `feat(android)`: app name, strings, launcher and notification icons,
     Play listing. `android/app/src/main/res/`, `android/listing/`. Design
     review. [1]
@@ -758,11 +764,12 @@ Each is one session. Phase and dependencies are in brackets.
 24. `feat(gitengine)`: new sessions get `cloudfield/run-` branches and the
     `cloudfield` remote. `internal/gitengine/slug.go`,
     `internal/localops/pull.go`, `push.go`, `compare.go`,
-    `cmd/aether/daemon.go`, the remote in the dashboard's copyable git
-    commands (`web/src/routes/diff/review-commands.tsx`), and the branch
-    rule in `docs/teams.md`. A sync daemon older than 8 does not fetch the
-    new branches, and a server rolled back below 8 stops protecting them
-    from a force-push. [5; after 8 is in a stable release and is the
-    oldest release a server rollback can reach]
+    `cmd/aether/daemon.go`, the dashboard's copyable git commands, which
+    name the remote `aether` (`web/src/routes/diff/review-commands.tsx`),
+    and the branch rule in `docs/teams.md`. Two limits remain after it: a
+    CLI older than 8 does not fetch the new branches until it updates,
+    though `aether pull` still does, and a server put back to a release
+    below 8 stops refusing a force-push to them.
+    [5; after 8 is in a stable release]
 
 The website's pull requests are listed in its own repository.
