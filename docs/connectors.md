@@ -183,6 +183,11 @@ The universal URL is `https://<relay host>/mcp` of whichever edge the server
 uses, so an operator's own edge has its own. `<edge>/mcp/<server id>` with a
 pairing code works on every edge from protocol 2 and under either policy.
 
+An edge with more than one relay host serves a connector at each of them once
+the edge and the server both speak edge protocol 6. A connector keeps working
+only at the host it was added at
+([edge.md](edge.md#more-than-one-address-pair)).
+
 ### Claude Code
 
 Claude Code connects at the same URLs:

@@ -77,6 +77,12 @@ const HeaderVersion = "Aether-Edge-Version"
 // authentication. A client cannot set it: the edge replaces any it sends.
 const HeaderClientAddr = "Aether-Edge-Client-Addr"
 
+// HeaderRelayOrigin carries, on each request the edge relays over a
+// KindHTTP connection, the relay origin the client sent it to. An edge
+// replaces any a client sends from VersionRelayOrigin on; an earlier one
+// passes it through, so a server ignores it below that version.
+const HeaderRelayOrigin = "Aether-Edge-Relay-Origin"
+
 // MaxRequestBodySize bounds the JSON body of any edge API request.
 const MaxRequestBodySize = 64 << 10
 

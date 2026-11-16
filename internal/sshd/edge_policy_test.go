@@ -586,6 +586,7 @@ func (f *fakeEdgeOwner) Owner() (*edgeproto.Account, error) { return f.owner, ni
 func (f *fakeEdgeOwner) Origin() string                     { return "https://edge.example" }
 func (f *fakeEdgeOwner) Connected() bool                    { return true }
 func (f *fakeEdgeOwner) EdgeVersion() int                   { return edgeproto.Version }
+func (f *fakeEdgeOwner) RelayOrigins() []string             { return []string{f.Origin()} }
 func (f *fakeEdgeOwner) EdgeState() string                  { return f.state }
 func (f *fakeEdgeOwner) EdgeKey() ed25519.PublicKey         { return nil }
 

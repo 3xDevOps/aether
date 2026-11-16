@@ -48,13 +48,17 @@ type Connector struct {
 // one. URL is the connector URL to add, empty while the server has no
 // edge; UniversalURL is the edge's one URL for every server, empty while
 // the edge does not serve it, and differs from URL for a member with no
-// GitHub account bound. SignIn is set when URL's consent page takes the
-// caller's edge sign-in instead of a pairing code.
+// GitHub account bound. UniversalURLs are the universal URLs at every
+// relay origin of the edge the server takes connectors at, UniversalURL
+// among them; a connector at any of them is at the universal URL. SignIn
+// is set when URL's consent page takes the caller's edge sign-in instead
+// of a pairing code.
 type ConnectorListResult struct {
-	Connectors   []Connector `json:"connectors"`
-	URL          string      `json:"url,omitempty"`
-	UniversalURL string      `json:"universal_url,omitempty"`
-	SignIn       bool        `json:"sign_in"`
+	Connectors    []Connector `json:"connectors"`
+	URL           string      `json:"url,omitempty"`
+	UniversalURL  string      `json:"universal_url,omitempty"`
+	UniversalURLs []string    `json:"universal_urls,omitempty"`
+	SignIn        bool        `json:"sign_in"`
 }
 
 type ConnectorRevokeParams struct {

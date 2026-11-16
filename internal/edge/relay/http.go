@@ -32,12 +32,13 @@ var responseHeaders = map[string]bool{
 }
 
 // forwardHeaders trims h, the request headers ReverseProxy passes on: it
-// drops Cookie, any X-Forwarded-* the client sent, HeaderBrowser, and
-// HeaderClientAddr, which it sets to addr. ReverseProxy drops hop-by-hop headers but puts
+// drops Cookie, any X-Forwarded-* the client sent, HeaderBrowser,
+// HeaderClientAddr, which it sets to addr, and HeaderRelayOrigin, which it
+// sets to origin. ReverseProxy drops hop-by-hop headers but puts
 // back Connection, Upgrade and Te; those go too, so no upgrade tunnels
 // past responseFilter. Accept-Encoding goes because Content-Encoding does
 // not come back.
-func forwardHeaders(h http.Header, addr netip.AddrPort) {
+func forwardHeaders(h http.Header, addr netip.AddrPort, origin string) {
 	for k := range h {
 		if strings.HasPrefix(k, "X-Forwarded-") {
 			delete(h, k)
@@ -49,6 +50,7 @@ func forwardHeaders(h http.Header, addr netip.AddrPort) {
 	if addr.IsValid() {
 		h.Set(edgeproto.HeaderClientAddr, addr.String())
 	}
+	h.Set(edgeproto.HeaderRelayOrigin, origin)
 }
 
 // errHTTPLimit refuses an http connection past MaxHTTPConnsPerServer.
@@ -219,7 +221,7 @@ func (r *Relay) forwardOnce(w http.ResponseWriter, req *http.Request, serverID s
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
-	addr := clientAddr(req.RemoteAddr)
+	addr, origin := clientAddr(req.RemoteAddr), r.originOf(client)
 	var unsent error
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -228,7 +230,7 @@ func (r *Relay) forwardOnce(w http.ResponseWriter, req *http.Request, serverID s
 			// Sent with its length, the body carries none of the client's
 			// trailers: net/http writes them only on a chunked body.
 			pr.Out.TransferEncoding = nil
-			forwardHeaders(pr.Out.Header, addr)
+			forwardHeaders(pr.Out.Header, addr, origin)
 			if browser != "" {
 				pr.Out.Header.Set(edgeproto.HeaderBrowser, browser)
 			}
