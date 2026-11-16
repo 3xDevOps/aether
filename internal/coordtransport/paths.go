@@ -23,6 +23,11 @@ const (
 	BinaryPath = "/opt/aether/aether-server"
 	// CLIPath is the staged coordination CLI path.
 	CLIPath = "/usr/local/bin/aether-internal"
+	// CloudfieldCLIPath is the same CLI under the new product name. A
+	// container made by an older server has only CLIPath, and member homes
+	// are shared across server versions, so the server's own execs and
+	// files written into homes call CLIPath.
+	CloudfieldCLIPath = "/usr/local/bin/cloudfield-internal"
 	// SudoPath mounts the same binary as the sudo shim of Default and
 	// Isolated runs, ahead of the image's /usr/bin/sudo on PATH.
 	SudoPath = "/usr/local/bin/sudo"
