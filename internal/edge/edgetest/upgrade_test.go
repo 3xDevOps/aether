@@ -95,6 +95,10 @@ type qualify struct {
 	h      *harness
 	// fingerprint is the edge key's, which every release must keep.
 	fingerprint string
+	// releases holds each release's signed digest and, for this tree's
+	// builds, manifest; signed names those builds by digest. Both are
+	// shared by every starting point, like the registry.
+	releases, signed string
 
 	// fetches counts the requests for each release's manifest, and
 	// withdrawn holds releases whose manifests the fake GitHub answers 404
@@ -132,17 +136,65 @@ func TestEdgeUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SSL_CERT_FILE", tls.ca)
+	lab := newLab(t, root)
+	imgs := lab.thisTree()
 	for i, s := range starts {
-		if !t.Run(s.tag, func(t *testing.T) { qualifyFrom(t, tls, s, i == 0) }) {
+		if !t.Run(s.tag, func(t *testing.T) { qualifyFrom(t, tls, lab, imgs, s, i == 0) }) {
 			return
 		}
 	}
 }
 
+// builds are this tree's test releases: a is this tree, f fails its
+// migration, mf raises the floor and then fails, and m migrates.
+type builds struct{ a, f, mf, m edgeImage }
+
+// newLab starts the registry every starting point pushes to, and the
+// directories of the releases built into it.
+func newLab(t *testing.T, root string) *qualify {
+	lab := &qualify{t: t, root: root, work: t.TempDir()}
+	var err error
+	if lab.docker, err = exec.LookPath("docker"); err != nil {
+		t.Fatal(err)
+	}
+	registry := fmt.Sprintf("aether-edge-qualify-%d-registry", os.Getpid())
+	lab.dockerRun("run", "-d", "--name", registry, "-p", "127.0.0.1::5000", registryImage)
+	t.Cleanup(func() { _, _ = lab.run(lab.docker, "rm", "-f", "-v", registry) })
+	lab.registry = lab.dockerRun("port", registry, "5000/tcp")
+	t.Cleanup(func() {
+		ids, _ := lab.run(lab.docker, "image", "ls", "-q", lab.registry+"/aether-edge")
+		for _, id := range strings.Fields(ids) {
+			_, _ = lab.run(lab.docker, "image", "rm", "-f", id)
+		}
+	})
+	lab.releases, lab.signed = filepath.Join(lab.work, "releases"), filepath.Join(lab.work, "signed")
+	lab.mkdir(lab.releases, 0o755)
+	lab.mkdir(lab.signed, 0o755)
+	return lab
+}
+
+// thisTree builds and signs this tree's test releases once for every
+// starting point.
+func (q *qualify) thisTree() builds {
+	q.t.Helper()
+	a := q.signedBuild(1, q.patched(qualifyVersion+"1"), "")
+	failing := "INSERT INTO qualify_missing VALUES (1)"
+	return builds{
+		a: a,
+		f: q.signedBuild(2, q.patched(qualifyVersion+"2", migrationStep{a.schema + 1, failing}), a.version),
+		mf: q.signedBuild(3, q.patched(qualifyVersion+"3",
+			migrationStep{a.schema + 1, "CREATE TABLE qualify_raised (id INTEGER PRIMARY KEY)"},
+			migrationStep{a.schema + 2, failing}), a.version),
+		m: q.signedBuild(4, q.patched(qualifyVersion+"4",
+			migrationStep{a.floor, "CREATE TABLE qualify_additive (id INTEGER PRIMARY KEY)"}), a.version),
+	}
+}
+
 // qualifyFrom updates an edge from prev to this tree. With full it then
 // goes through the failing, migrating and rollback releases.
-func qualifyFrom(t *testing.T, tls qualifyTLS, prev start, full bool) {
-	q := newQualify(t, tls)
+func qualifyFrom(t *testing.T, tls qualifyTLS, lab *qualify, imgs builds, prev start, full bool) {
+	q := newQualify(t, tls, lab)
+	a, f, mf, m := imgs.a, imgs.f, imgs.mf, imgs.m
 	prevTag := prev.tag
 	worktree := filepath.Join(q.work, "previous")
 	q.git("worktree", "add", "--detach", worktree, prevTag)
@@ -151,7 +203,6 @@ func qualifyFrom(t *testing.T, tls qualifyTLS, prev start, full bool) {
 	go func() { peer <- q.buildPreviousServer(worktree) }()
 
 	prevImg := q.build(prevTag, worktree, prev.build)
-	a := q.signed(1, q.patched(qualifyVersion+"1"), prevTag)
 
 	q.setDigest(prevImg.digest)
 	q.compose("up", "-d", "--wait", "aether-edge")
@@ -181,14 +232,6 @@ func qualifyFrom(t *testing.T, tls qualifyTLS, prev start, full bool) {
 		q.previousServer(<-peer, worktree, clients[0])
 		return
 	}
-
-	failing := "INSERT INTO qualify_missing VALUES (1)"
-	f := q.signed(2, q.patched(qualifyVersion+"2", migrationStep{a.schema + 1, failing}), a.version)
-	mf := q.signed(3, q.patched(qualifyVersion+"3",
-		migrationStep{a.schema + 1, "CREATE TABLE qualify_raised (id INTEGER PRIMARY KEY)"},
-		migrationStep{a.schema + 2, failing}), a.version)
-	m := q.signed(4, q.patched(qualifyVersion+"4",
-		migrationStep{a.floor, "CREATE TABLE qualify_additive (id INTEGER PRIMARY KEY)"}), a.version)
 
 	// From here the running release is this tree's, whose release-check
 	// verifies the signed manifests the fake GitHub serves.
@@ -242,13 +285,9 @@ func qualifyFrom(t *testing.T, tls qualifyTLS, prev start, full bool) {
 	}
 }
 
-func newQualify(t *testing.T, tls qualifyTLS) *qualify {
-	q := &qualify{t: t, work: t.TempDir(), github: newFakeGitHub(t), fetches: map[string]int{}, withdrawn: map[string]bool{}}
-	var err error
-	if q.docker, err = exec.LookPath("docker"); err != nil {
-		t.Fatal(err)
-	}
-	q.root = q.mustRun("git", "rev-parse", "--show-toplevel")
+func newQualify(t *testing.T, tls qualifyTLS, lab *qualify) *qualify {
+	q := &qualify{t: t, work: t.TempDir(), github: newFakeGitHub(t), fetches: map[string]int{}, withdrawn: map[string]bool{},
+		docker: lab.docker, root: lab.root, registry: lab.registry, releases: lab.releases, signed: lab.signed}
 	// The updater execs into the container by its fixed name, so the test
 	// edge cannot run beside a real one.
 	if id := q.dockerRun("ps", "-aq", "--filter", "name=^aether-edge$"); id != "" {
@@ -259,17 +298,6 @@ func newQualify(t *testing.T, tls qualifyTLS) *qualify {
 	q.dockerRun("network", "create", q.network)
 	t.Cleanup(func() { _, _ = q.run(q.docker, "network", "rm", q.network) })
 	gateway := q.dockerRun("network", "inspect", "--format", "{{(index .IPAM.Config 0).Gateway}}", q.network)
-
-	registry := q.network + "-registry"
-	q.dockerRun("run", "-d", "--name", registry, "-p", "127.0.0.1::5000", registryImage)
-	t.Cleanup(func() { _, _ = q.run(q.docker, "rm", "-f", "-v", registry) })
-	q.registry = q.dockerRun("port", registry, "5000/tcp")
-	t.Cleanup(func() {
-		ids, _ := q.run(q.docker, "image", "ls", "-q", q.registry+"/aether-edge")
-		for _, id := range strings.Fields(ids) {
-			_, _ = q.run(q.docker, "image", "rm", "-f", id)
-		}
-	})
 
 	// The edge reaches GitHub at fixed URLs: the proxy answers for
 	// github.com and api.github.com and forwards to the fake on the host's
@@ -358,10 +386,8 @@ networks:
 		}
 		q.write(filepath.Join(bin, stub), data, 0o755)
 	}
-	releases, promoted, signed := filepath.Join(q.work, "releases"), filepath.Join(q.work, "promoted"), filepath.Join(q.work, "signed")
-	q.mkdir(releases, 0o755)
+	promoted := filepath.Join(q.work, "promoted")
 	q.mkdir(promoted, 0o755)
-	q.mkdir(signed, 0o755)
 	config := filepath.Join(q.work, "aether-edge-update.env")
 	q.write(config, fmt.Appendf(nil, `AETHER_EDGE_UPDATE_RELAY_URL=https://%s
 AETHER_EDGE_UPDATE_COMPOSE_DIR=%s
@@ -378,8 +404,8 @@ AETHER_EDGE_UPDATE_PUBLIC_WAIT=60
 	})
 	q.env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"AETHER_EDGE_UPDATE_CONFIG="+config, "CURL_CA_BUNDLE="+ca, "QUALIFY_DOCKER="+q.docker,
-		"QUALIFY_IMAGE="+q.registry+"/aether-edge", "QUALIFY_RELEASES="+releases, "QUALIFY_PROMOTED="+promoted,
-		"QUALIFY_SIGNED="+signed, "QUALIFY_NETWORK="+q.network, "QUALIFY_CA="+ca)
+		"QUALIFY_IMAGE="+q.registry+"/aether-edge", "QUALIFY_RELEASES="+q.releases, "QUALIFY_PROMOTED="+promoted,
+		"QUALIFY_SIGNED="+q.signed, "QUALIFY_NETWORK="+q.network, "QUALIFY_CA="+ca)
 	return q
 }
 
@@ -444,7 +470,7 @@ func (q *qualify) build(version, context string, build int) edgeImage {
 		"--label", "org.opencontainers.image.version="+version, "-t", ref, context)
 	q.dockerRun("push", "-q", ref)
 	img := edgeImage{version: version, digest: q.manifestDigest(version), build: build}
-	q.write(filepath.Join(q.work, "releases", version), []byte(img.digest), 0o644)
+	q.write(filepath.Join(q.releases, version), []byte(img.digest), 0o644)
 	var v struct {
 		StoreSchema      int  `json:"store_schema"`
 		StoreCompatFloor *int `json:"store_compat_floor"`

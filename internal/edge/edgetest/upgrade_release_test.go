@@ -87,11 +87,11 @@ func mustOutput(t *testing.T, name string, args ...string) string {
 	return string(out)
 }
 
-// signed builds context as this tree's test release n and signs its
+// signedBuild builds context as this tree's test release n and signs its
 // manifest, on stable at build qualifyBuild+n, upgrading from
 // minUpgradeFrom or later. The fake GitHub serves it, and the docker stub
 // runs this image's own release-check.
-func (q *qualify) signed(n int, context, minUpgradeFrom string) edgeImage {
+func (q *qualify) signedBuild(n int, context, minUpgradeFrom string) edgeImage {
 	q.t.Helper()
 	version := fmt.Sprintf("%s%d", qualifyVersion, n)
 	img := q.build(version, context, qualifyBuild+n)
@@ -124,10 +124,9 @@ func (q *qualify) signed(n int, context, minUpgradeFrom string) edgeImage {
 	if err != nil {
 		q.t.Fatal(err)
 	}
-	releases := filepath.Join(q.work, "releases")
-	q.write(filepath.Join(releases, version+".json"), data, 0o644)
-	q.write(filepath.Join(releases, version+".json.sig"), sig, 0o644)
-	q.write(filepath.Join(q.work, "signed", img.digest), []byte(version), 0o644)
+	q.write(filepath.Join(q.releases, version+".json"), data, 0o644)
+	q.write(filepath.Join(q.releases, version+".json.sig"), sig, 0o644)
+	q.write(filepath.Join(q.signed, img.digest), []byte(version), 0o644)
 	return img
 }
 
@@ -148,7 +147,7 @@ func (q *qualify) serveRelease(w http.ResponseWriter, rest string) {
 	case selfupdate.SignatureName:
 		file = tag + ".json.sig"
 	}
-	data, err := os.ReadFile(filepath.Join(q.work, "releases", file))
+	data, err := os.ReadFile(filepath.Join(q.releases, file))
 	if file == "" || withdrawn || err != nil {
 		http.NotFound(w, nil)
 		return

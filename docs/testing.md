@@ -621,7 +621,9 @@ serves. From step 3 on, the fake answers 404 for the running release's
 manifest, so the updater orders by the copy it kept.
 
 It refuses to start while a container named `aether-edge` exists, removes
-everything it creates, and takes about two minutes with warm caches. CI runs
+everything it creates, and takes about two and a half minutes with warm
+caches, plus about a minute for each further starting point; this tree's
+builds are made once for all of them. CI runs
 it in `edge-image.yml` in the merge queue and on `main`, and in
 `release-build.yml` before a release publishes.
 
