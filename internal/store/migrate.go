@@ -2665,13 +2665,22 @@ ALTER TABLE server_update_state ADD COLUMN declined_hotfix INTEGER NOT NULL DEFA
 }
 
 // existingDatabaseMigrations run after their version's migration, in the
-// same transaction, only on a database that had a schema before this
-// open: what a server that predates the change keeps, which a new one
-// must not get.
+// same transaction, only on a database this migrator did not create (see
+// newDatabaseMarker): what a server that predates the change keeps, which
+// a new one must not get.
 var existingDatabaseMigrations = map[int]string{
 	113: `INSERT INTO server_update_state (id, release_channel) VALUES (1, 'beta')
 	ON CONFLICT (id) DO UPDATE SET release_channel = 'beta';`,
 }
+
+// newDatabaseMarker is set in the transaction of migration 1, so a database
+// this migrator created carries it however early a run is interrupted. A
+// database with applied versions and no marker is a server that existed
+// before it, including one a build without the marker left interrupted at
+// the version before a migration in existingDatabaseMigrations: that
+// cannot be told from a real one and gets the pre-channel setting, the
+// safe side.
+const newDatabaseMarker = `PRAGMA user_version = 1`
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
 // reference with ON DELETE CASCADE. See applyMigration.
@@ -2754,7 +2763,11 @@ func migrateOnce(db *sql.DB) error {
 	).Scan(&current); err != nil {
 		return fmt.Errorf("store: read schema version: %w", err)
 	}
-	existing := current > 0
+	var born int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&born); err != nil {
+		return fmt.Errorf("store: read database birth marker: %w", err)
+	}
+	existing := current > 0 && born == 0
 	for current < len(migrations) {
 		var err error
 		current, err = applyMigration(db, current+1, existing)
@@ -2839,6 +2852,11 @@ func applyMigration(db *sql.DB, version int, existing bool) (int, error) {
 	}
 	if _, err := tx.Exec(migrations[version-1]); err != nil {
 		return 0, fmt.Errorf("store: apply migration %d: %w", version, err)
+	}
+	if version == 1 {
+		if _, err := tx.Exec(newDatabaseMarker); err != nil {
+			return 0, fmt.Errorf("store: mark new database: %w", err)
+		}
 	}
 	if extra := existingDatabaseMigrations[version]; existing && extra != "" {
 		if _, err := tx.Exec(extra); err != nil {

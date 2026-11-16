@@ -274,3 +274,22 @@ func TestPointersReturnAfterARestart(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// A channel change that cannot fetch the pending update's manifest keeps
+// the update and says so, with the fetch error, in a dry run and when
+// saved.
+func TestChannelChangeReportsAPendingUpdateItKept(t *testing.T) {
+	e := autoEnv(t, selfupdate.ChannelNightly)
+	e.busy = domain.ServerBusy{Runs: 1}
+	if _, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{Version: "v0.9.0-nightly.14", When: protocol.ServerUpdateIdle}); err != nil {
+		t.Fatal(err)
+	}
+	e.rel.Unsign()
+	for _, dry := range []bool{true, false} {
+		set, err := e.svc.SetChannel(t.Context(), "mem_a", protocol.ServerReleaseChannelSetParams{Channel: selfupdate.ChannelStable, DryRun: dry})
+		if err != nil || set.Kept != "v0.9.0-nightly.14" || set.KeptError == "" || set.Retired != "" || set.Saved == dry {
+			t.Fatalf("dry run %v = %+v, %v; want nightly.14 kept with the fetch error", dry, set, err)
+		}
+		e.wantPending(t, "v0.9.0-nightly.14", "mem_a")
+	}
+}

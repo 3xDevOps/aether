@@ -194,3 +194,59 @@ func TestRetireClearsOnlyThePendingItNames(t *testing.T) {
 		t.Fatalf("retire = %v, %v; want it retired", retired, err)
 	}
 }
+
+// A new database stays unchosen however its first migration run went: one
+// interrupted early and reopened is still new, so it is not pinned to
+// beta, while a database that existed before channels, including one at
+// the version just before them, is. Opening again changes nothing.
+func TestReleaseChannelOfADatabaseWhoseFirstRunWasInterrupted(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	interrupted := func(t *testing.T, through int) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "aether.db")
+		raw, err := openRaw(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = raw.Close() }()
+		if _, err = raw.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)`); err != nil {
+			t.Fatal(err)
+		}
+		for v := 1; v <= through; v++ {
+			if _, err = applyMigration(raw, v, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return path
+	}
+	for name, tc := range map[string]struct {
+		path func(*testing.T) string
+		want string
+	}{
+		"new database interrupted early":                {func(t *testing.T) string { return interrupted(t, 40) }, ""},
+		"new database interrupted just before channels": {func(t *testing.T) string { return interrupted(t, releaseChannelSchema-1) }, ""},
+		"new database, one run":                         {func(t *testing.T) string { return filepath.Join(t.TempDir(), "aether.db") }, ""},
+		"server from before channels": {func(t *testing.T) string {
+			path := filepath.Join(t.TempDir(), "aether.db")
+			_ = openLegacy(t, path, releaseChannelSchema-1).Close()
+			return path
+		}, "beta"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path := tc.path(t)
+			for range 2 {
+				db, err := Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := db.ReleaseChannel(ctx)
+				_ = db.Close()
+				if err != nil || got != tc.want {
+					t.Fatalf("channel = %q, %v; want %q", got, err, tc.want)
+				}
+			}
+		})
+	}
+}
