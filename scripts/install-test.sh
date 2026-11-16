@@ -1383,7 +1383,7 @@ installed_from v0.7.0-alpha.12 linux-arm64 aether
 installed_from v0.7.0-alpha.12 linux-arm64 aether-server
 
 case_name="release keys"
-go_keys="$(grep -o '"[A-Za-z0-9+/]\{43\}="' "$script_dir/../internal/selfupdate/keys.go" | tr -d '"' | sort | tr '\n' ' ')"
+go_keys="$(sed -n '/^var releaseKeys/,/^)/p' "$script_dir/../internal/selfupdate/keys.go" | grep -o '"[A-Za-z0-9+/]\{43\}="' | tr -d '"' | sort | tr '\n' ' ')"
 sh_keys="$(sed -n 's/^RELEASE_KEYS="\(.*\)"$/\1/p' "$script_dir/install.sh" | tr ' ' '\n' | sort | tr '\n' ' ')"
 [ -n "$go_keys" ] && [ "$go_keys" = "$sh_keys" ] ||
 	fail "RELEASE_KEYS in install.sh ($sh_keys) differs from internal/selfupdate/keys.go ($go_keys)"
