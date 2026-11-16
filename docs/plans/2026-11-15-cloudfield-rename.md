@@ -4,10 +4,10 @@
 its name, and lives at `cloudfield.ai`. An install that has not updated yet
 keeps running, keeps reaching its edge, and still finds its update.
 
-**Status:** draft for the owner's review, 2026-11-15. The rename and the new
-domain are the owner's decisions of 2026-11-15. Everything under
-[Decisions for the owner](#decisions-for-the-owner) is open; the rest of the
-plan assumes the recommended option of each. No code has changed.
+**Status:** approved by the owner, 2026-11-16. The rename and the new
+domain are the owner's decisions of 2026-11-15; the choices under
+[Decisions](#decisions-2026-11-16) are the owner's of 2026-11-16. No code
+has changed.
 
 ## The rule
 
@@ -176,8 +176,8 @@ redirect after a repository rename.
 | --- | --- | --- | --- |
 | Release repository | GitHub redirects `releases/latest`, release downloads, the API and raw file addresses of a renamed repository. The updater follows redirects (`internal/selfupdate/selfupdate.go:41-53`), as do `curl -L` in `install.sh:340` and `install.ps1` | After the rename, `Repo` and the installer defaults change to the new name | Never: the old repository name must never be reused |
 | Release files and manifest | Unchanged names | Not renamed | Never |
-| Binaries on a server or client | The updater writes over the files it finds. Every host, old or new, keeps the real files `aether` and `aether-server` | `cloudfield` and `cloudfield-server` are symlinks to them, created by the installer and by the updater. On Windows, where a per-user install cannot create symlinks, `cloudfield.cmd` calls `aether.exe`. One layout everywhere means a downgrade to any old release still finds its files | Never |
-| Server unit | An old binary that returns after a failed update trial runs `systemctl restart aether-server` (`internal/serverupdate/host.go:68,96`). The unit file stays `aether-server.service` with its text unchanged, on every host | The installer and the updater, both running as root, link `/etc/systemd/system/cloudfield-server.service` to it and reload systemd. Printed and documented `systemctl` lines say `cloudfield-server` only once that is in a stable release | Never |
+| Binaries on a server or client | The updater writes over the files it finds. Every host, old or new, keeps the real files `aether` and `aether-server` | `cloudfield` and `cloudfield-server` are symlinks to them, created by the installer, by the updater, and by the binary itself when it starts and finds one missing in a directory it can write. The last case covers an install that an older updater brought straight to a release from phase 3 or later; the server, running as root, links the CLI too. On Windows, where a per-user install cannot create symlinks, `cloudfield.cmd` calls `aether.exe`. One layout everywhere means a downgrade to any old release still finds its files | Never |
+| Server unit | An old binary that returns after a failed update trial runs `systemctl restart aether-server` (`internal/serverupdate/host.go:68,96`). The unit file stays `aether-server.service` with its text unchanged, on every host | The installer, the updater and the server at start, all running as root, link `/etc/systemd/system/cloudfield-server.service` to it and reload systemd. Printed and documented `systemctl` lines say `cloudfield-server` only once that is in a stable release | Never |
 | `aether-internal` in sessions | The path is fixed when a container is created. Hook and plugin files in member homes call `/usr/local/bin/aether-internal`, and a home is shared with containers made by any server version | New containers also get `/usr/local/bin/cloudfield-internal`. Prompts name it only in a container that has it. Everything written into a home keeps calling the old path | Never |
 | `AETHER_*` read by a program | Still read | The reader takes `CLOUDFIELD_X` when set, else `AETHER_X` | Never |
 | `AETHER_*` set inside sessions | Still set, under the old name only. Readers accept both, and setting one name keeps an override such as `AETHER_X=… cmd` unambiguous | Docs name the variable `AETHER_RUN_ID` and its siblings as they are | n/a |
@@ -216,7 +216,8 @@ published release.
 
 Nothing a person sees changes. One release carries:
 
-- the updater creating the new-name symlinks and the unit link;
+- the updater, and each binary at start, creating the new-name symlinks
+  and the unit link;
 - the server binary answering to `cloudfield-internal`, and new containers
   getting both in-container paths;
 - the variable rule: read the new name, else the old;
@@ -292,7 +293,8 @@ the renamed repository.
 ### Phase 5: names inside sessions
 
 New sessions get `cloudfield/run-` branches. MCP names change as
-[decision 8](#8-names-people-see-inside-sessions) settles.
+[decision 8](#8-names-people-see-inside-sessions) decided: the title
+only.
 
 ## The domain move
 
@@ -321,9 +323,10 @@ The edge change, one pull request:
 
 - The edge takes a list of address pairs in a new setting. The two
   existing settings keep naming the old pair, so an edge host that rolls
-  back to an older image still serves it. The edge's upgrade record
-  (`packaging/edge/upgrade.json`) raises the rollback floor to this
-  release once a second pair is configured.
+  back to an older image still serves it. `edge-update.sh --rollback`
+  checks only database compatibility today (`scripts/edge-update.sh:303-312`),
+  so it gains a check: with the new setting present on the host, it
+  refuses to go below this release unless forced.
 - A request is served by the pair its host belongs to: sign-in pages,
   connector metadata, cookies, join links, certificates
   (`cmd/aether-edge/main.go:227`) and the 421 text. No pair is preferred.
@@ -418,9 +421,11 @@ dashboard's `web/public/icons/`, the desktop's `desktop/build/icon.ico` and
 `desktop/build/icons/`, the Android launcher `mipmap-*` and the Play
 feature graphic.
 
-1. Add the mark to `web/public/` and point `scripts/make-icons.py` at it.
-   The script also writes the wordmark (`FEATURE_WORDMARK`, `:100`) and the
-   tagline into the Play graphic.
+1. Render the mark's SVG to a transparent PNG, commit it in `web/public/`
+   and point `scripts/make-icons.py` at it. The script opens its source
+   with Pillow (`load_mark`, `:120`), which does not read SVG. The script
+   also writes the wordmark (`FEATURE_WORDMARK`, `:100`) and the tagline
+   into the Play graphic.
 2. Run it and commit what it writes.
 3. Redraw by hand what the script does not make: the Android notification
    icon `ic_stat_aether.xml` (traced from the mark),
@@ -483,51 +488,48 @@ in a published release yet. All are read only by programs, so by
   item 7 owns mounts. Pull requests 2 and 3 here touch the same files and
   are agreed with that stack's lead before they open.
 
-## Decisions for the owner
+## Decisions (2026-11-16)
+
+The owner chose the recommended option of each. The options not taken are
+listed with what they would have cost.
 
 ### 1. How deep the rename goes
 
-| Option | What changes | Cost |
-| --- | --- | --- |
-| A. Brand only | Copy, docs, logos, app names, website, domain | Phases 1 and 2, plus the edge shim. People install Cloudfield and type `aether` |
-| B. Brand, commands, variables | A, plus new command names, `CLOUDFIELD_*`, a second unit name, both link schemes | All phases. 24 pull requests. Old names stay as aliases |
-| C. Everything | B, plus release files, images, data paths, app ids, wire names | Doubles every release, adds migrations of `/var/lib/aether` and the database with rollback risk, and makes a second Android and desktop app |
+Brand, commands and variables, with the Go module path as the last step.
+The module path is source only and mechanical, but it touches 1,422 files,
+so it needs a window with the merge queue empty.
 
-Recommendation: **B**, plus the Go module path as the last step. The module
-path is source only and mechanical, but it touches 1,422 files, so it needs
-a quiet hour on `main`. Not C: nothing in it is visible to a person.
+| Not taken | Cost |
+| --- | --- |
+| Brand only: copy, docs, logos, app names, website, domain | People install Cloudfield and type `aether` |
+| Everything: also release files, images, data paths, app ids, wire names | Doubles every release, adds migrations of `/var/lib/aether` and the database with rollback risk, and makes a second Android and desktop app. None of it is visible to a person |
 
 ### 2. Command names
 
-| Option | Cost |
-| --- | --- |
-| `cloudfield`, `cloudfield-server`, `cloudfield-internal` | Ten characters to type |
-| A short name such as `cf` | `cf` is already the Cloud Foundry CLI and Cloudflare's CLI |
-| Keep `aether` | Depth A |
-
-Recommendation: the full names, no short alias shipped. The edge command
-stays `aether-edge`: it runs inside the edge's container, and the updater
-script on every edge host calls it by that name.
+`cloudfield`, `cloudfield-server` and `cloudfield-internal`. No short alias
+ships: `cf` is already the Cloud Foundry CLI and Cloudflare's CLI. The edge
+command stays `aether-edge`: it runs inside the edge's container, and the
+updater script on every edge host calls it by that name.
 
 ### 3. Old command names
 
-| Option | Cost |
+The old names stay the real files and the new names are links, with no end
+date. The same holds for in-container paths and `AETHER_*` variables.
+People see `aether-server` in `ps` and in `/usr/local/bin`.
+
+| Not taken | Cost |
 | --- | --- |
-| Old names stay the real files; new names are links, with no end date | People see `aether-server` in `ps` and in `/usr/local/bin`. Nothing to enforce, and any downgrade works |
 | New installs get real files under the new names | A downgrade to a release from before the rename writes through the links and corrupts the layout. Needs a floor on downgrades in both updaters and the install script |
 | Remove old names at 1.0 | Breaks scripts, hook files in member homes and every host installed before the rename. Needs a migration command |
 
-Recommendation: the first, for command names, in-container paths and
-`AETHER_*` variables alike.
-
 ### 4. Spelling
-
-Recommendation:
 
 - "Cloudfield": one word, capital C only. Never "CloudField" or "Cloud
   Field". Lowercase `cloudfield` in commands, paths and addresses.
 - "Cloudfield Edge" for the relay as a product and for the hosted service;
-  "an edge" for one running relay, as the docs do today.
+  "an edge" for one running relay, as the docs do today. "Edge" alone as a
+  proper name reads as Microsoft Edge in a sentence about browsers and
+  sign-in.
 - "Enhanced", "Standard" and "Assistant" stay. "Ask Aether" becomes "Ask
   Cloudfield".
 - Other parts are plain nouns after the name: Cloudfield server, Cloudfield
@@ -535,82 +537,64 @@ Recommendation:
 - Hostnames: `cloudfield.ai`, `edge.cloudfield.ai`, `auth.cloudfield.ai`.
   Contact: `team@cloudfield.ai`.
 
-The alternative is "Edge" alone as a proper name, which reads as Microsoft
-Edge in a sentence about browsers and sign-in.
-
 ### 5. Android application id
 
-`io.aether.android` (`android/app/build.gradle.kts:50`). The Play listing is
-unpublished; every install today is the signed APK from a release.
+`io.aether.android` (`android/app/build.gradle.kts:50`) and the desktop app
+id `io.aether.desktop` both stay. The Android id appears in the Play Store
+address and in Android's app details for good.
 
-| Option | Cost |
-| --- | --- |
-| Keep `io.aether.android` | The id appears in the Play Store address and in Android's app details, for good |
-| Change to `ai.cloudfield.android` before the first Play publication | A changed id is a different app. Every current install keeps the old app, which never updates again; each person installs the new one and links it again. The old app needs one last release that says so |
-
-Recommendation: keep. The same goes for the desktop app id
-`io.aether.desktop`: changing it makes a second app and drops taskbar pins
-and notification permission. If the Play address matters, this is the only
-cheap moment to change the Android id, and it must be decided before the
-listing is published.
+Not taken: `ai.cloudfield.android` before the first Play publication. A
+changed id is a different app: every current install would keep the old
+app, which never updates again, and each person would install the new one
+and link it again. A changed desktop id makes a second app and drops
+taskbar pins and notification permission.
 
 ### 6. Release files and images
 
-| Option | Cost |
+The `aether-*` release files and image names stay. The release page and
+`docker ps` show the old name.
+
+| Not taken | Cost |
 | --- | --- |
-| Keep `aether-*` release files and image names | The release page and `docker ps` show the old name |
 | Publish release files under both names | 15 more files per release, with their verification time, with no end date: an old updater cannot learn the new names |
 | Rename | Strands every old install; a renamed manifest does so silently |
 
-Recommendation: keep. Revisit publishing both only if the release page
-becomes something users read.
-
 ### 7. Repository names and the old domain
 
-Recommendation: `cloudfield` for this repository, in the same organisation.
-Never create a repository at an old name again. Keep `onaether.dev`
-registered with no end date, and keep the old edge addresses served while
-the hosted edge exists.
+This repository becomes `cloudfield`, in the same organisation. No
+repository is created at an old name again. `onaether.dev` stays registered
+with no end date, and the old edge addresses stay served while the hosted
+edge exists.
 
 ### 8. Names people see inside sessions
 
-- **Branch prefix.** `aether/run-…` is on every pull request a session
-  opens. Options: keep it; or new sessions get `cloudfield/run-…` while both
-  are accepted. Recommendation: change it for new sessions.
-- **MCP names.** The connector's server name `aether` and 55 `aether_*`
-  tools show in Claude and ChatGPT. Options: keep the tool names and change
-  only the display title to Cloudfield; or rename to `cloudfield_*` for new
-  sessions and on the new connector address only. Renaming costs every
-  member's saved approvals for those tools, and four more characters on
-  each of 55 names against a tool-description budget that is nearly full.
-  Recommendation: change the title now, keep the tool names, and decide the
-  rest after phase 3.
+- **Branch prefix.** New sessions get `cloudfield/run-…`; both prefixes are
+  accepted. Existing sessions keep `aether/run-…`.
+- **MCP names.** The connector's display title becomes Cloudfield. The
+  server name `aether` and the 55 `aether_*` tool names stay. Renaming them
+  would cost every member's saved approvals for those tools, and four more
+  characters on each of 55 names against a tool-description budget that is
+  nearly full.
 
 ### 9. Micro VM names
 
-Options: keep the `aether` names that stack introduces; or have it pick
-`cloudfield` names before the first release that contains them, after which
-they are fixed. Recommendation: keep. An operator sees only
+The `aether` names that stack introduces stay. An operator sees only
 `aether-vm-<key>.service`, next to an `aether.slice` that existing hosts
 keep anyway.
 
 ### 10. Moving existing servers to the new edge address
 
-Options: an admin runs `cloudfield-server edge move`; or a server whose
-address is exactly the old default moves by itself when the edge tells it
-the preferred address. Recommendation: the command first. Add the automatic
-move in a later release if the counters show servers staying behind.
+An admin runs `cloudfield-server edge move`. A server that moves by itself
+when the edge announces a preferred address can follow in a later release,
+if the per-address counters show servers staying behind.
 
 ### 11. First release and directory listings
 
-- **Which release first says Cloudfield.** Options: `v0.8.7`, the first
-  stable, which delays it until phases 0 and 1 are merged; or `v0.9.0`,
-  which lets `v0.8.7` ship now as Aether. Recommendation: `v0.9.0`.
-- **Claude and ChatGPT directories.** A new name, title and description
-  need a re-review by each directory, with a lead time the project does
-  not control. Options: resubmit at phase 1 with the old connector
-  address; or leave the listings as Aether until the connector address can
-  move too. Recommendation: resubmit at phase 1.
+- `v0.9.0` is the first release that says Cloudfield. `v0.8.7`, the first
+  stable, ships as Aether.
+- The Claude and ChatGPT listings are resubmitted with the new name, title
+  and description at phase 1, keeping the old connector address. Each
+  directory re-reviews on a lead time the project does not control.
 
 ## To verify before building
 
@@ -633,12 +617,14 @@ Stated by the design and not yet tested:
 Each is one session. Phase and dependencies are in brackets.
 
 1. `docs(plans)`: this plan.
-2. `feat(selfupdate)`: the updater creates `cloudfield` and
-   `cloudfield-server` symlinks beside the real files and the
-   `cloudfield-server.service` link, and never writes through a symlink.
-   `internal/selfupdate/update.go`, `internal/serverupdate/apply.go`,
-   `serverupdate.go`, `host.go`, `cmd/aether/update.go`,
-   `cmd/aether-server/update.go`. [0; after release-channels 1, 2 and 3;
+2. `feat(selfupdate)`: the updater, and each binary at start, creates the
+   `cloudfield` and `cloudfield-server` symlinks beside the real files and
+   the `cloudfield-server.service` link when they are missing, and never
+   writes through a symlink. Tested with a direct update from a release
+   older than this one. `internal/selfupdate/update.go`,
+   `internal/serverupdate/apply.go`, `serverupdate.go`, `host.go`,
+   `cmd/aether/update.go`, `cmd/aether/main.go`,
+   `cmd/aether-server/update.go`, `main.go`. [0; after release-channels 1, 2 and 3;
    agreed with micro VM item 10]
 3. `feat(server)`: answer to `cloudfield-internal`; mount and reserve both
    in-container paths. `cmd/aether-server/main.go`,
@@ -666,7 +652,8 @@ Each is one session. Phase and dependencies are in brackets.
    `internal/sshd/connector.go`, `internal/edge/agent`. [0; after 5]
 7. `feat(edge)`: `edge-update.sh` and `promote-edge.yml` accept both
    signer identities, with a manual step that makes hosts stop until the
-   script is copied again. `scripts/edge-update.sh`,
+   script is copied again; the script's rollback refuses to go below the
+   multi-address release while the address list is set. `scripts/edge-update.sh`,
    `edge-update-test.sh`, `.github/workflows/promote-edge.yml`,
    `packaging/edge/upgrade.json`, `internal/edge/edgetest/testdata/`,
    `docs/edge.md`. [0; after release-channels 6, 7 and 8]
