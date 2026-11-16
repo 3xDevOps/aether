@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -103,27 +105,31 @@ func listChildren(run string) error {
 		if err := c.Call(protocol.MethodRunChildren, protocol.RunChildrenParams{RunID: run}, &out); err != nil {
 			return err
 		}
-		if len(out.Children) == 0 {
-			fmt.Printf("session %s has no subsessions\n", run)
-		}
-		for _, ch := range out.Children {
-			agent := ch.Harness
-			if ch.Model != "" {
-				agent += " " + ch.Model
-			}
-			line := fmt.Sprintf("%s  %-12s  %s  %s  account %s", ch.RunID, ch.State, agent, printable(ch.Purpose), ch.AccountMemberID)
-			if ch.Detached {
-				line += "  detached"
-			}
-			fmt.Println(line)
-		}
-		u := out.Usage
-		cost := fmt.Sprintf("$%.2f", u.CostUSD)
-		if u.UnmeteredRuns > 0 {
-			cost = fmt.Sprintf("at least $%.2f (%d of %d sessions report no cost)", u.CostUSD, u.UnmeteredRuns, u.Runs)
-		}
-		fmt.Printf("usage   %s, %d input and %d output tokens across %d sessions\n", cost, u.InputTokens, u.OutputTokens, u.Runs)
-		fmt.Printf("limits  %d busy at once per parent\n", out.Limits.MaxLive)
+		renderChildren(os.Stdout, run, out)
 		return nil
 	})
+}
+
+func renderChildren(w io.Writer, run string, out protocol.RunChildrenResult) {
+	if len(out.Children) == 0 {
+		_, _ = fmt.Fprintf(w, "session %s has no subsessions\n", run)
+	}
+	for _, ch := range out.Children {
+		agent := ch.Harness
+		if ch.Model != "" {
+			agent += " " + ch.Model
+		}
+		line := fmt.Sprintf("%s  %-12s  %s  %s  account %s", ch.RunID, ch.State, agent, printable(ch.Purpose), ch.AccountMemberID)
+		if ch.Detached {
+			line += "  detached"
+		}
+		_, _ = fmt.Fprintln(w, line)
+	}
+	u := out.Usage
+	cost := fmt.Sprintf("$%.2f", u.CostUSD)
+	if u.UnmeteredRuns > 0 {
+		cost = fmt.Sprintf("at least $%.2f (%d of %d sessions report no cost)", u.CostUSD, u.UnmeteredRuns, u.Runs)
+	}
+	_, _ = fmt.Fprintf(w, "usage   %s, %d input and %d output tokens across %d sessions\n", cost, u.InputTokens, u.OutputTokens, u.Runs)
+	_, _ = fmt.Fprintf(w, "limits  %d busy at once per parent\n", out.Limits.MaxLive)
 }
