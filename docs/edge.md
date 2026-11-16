@@ -717,7 +717,7 @@ the secret in as a systemd credential. If the file is missing the start fails wi
 
 The release publishes `ghcr.io/3xdevops/aether-edge` for linux/amd64 and
 linux/arm64, running as uid and gid 65532. `<release-tag>` never moves. The
-other tags are release channels, the same three Aether servers follow
+other tags are release channels, the same three Cloudfield servers follow
 ([install.md](install.md#release-channel)), and each moves only when a
 workflow promotes a release onto it ([Promoting an edge
 release](#promoting-an-edge-release-to-stable)). `stable` is the one to run:
@@ -1155,7 +1155,7 @@ fixed address, put it in `AETHER_EDGE_TRUSTED_PROXIES`, and keep
 `forwardedHeaders.trustedIPs` and `forwardedHeaders.insecure` unset on the entry
 point the edge uses.
 
-The hosted Aether Edge service follows `stable`, like any host left on the
+The hosted Cloudfield Edge service follows `stable`, like any host left on the
 default.
 
 #### Installing the updater

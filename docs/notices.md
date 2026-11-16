@@ -1,6 +1,6 @@
 # Open source notices
 
-Aether, including the Android app (package `io.aether.android`) and the
+Cloudfield, including the Android app (package `io.aether.android`) and the
 dashboard it shows, is licensed under the GNU General Public License version
 3. The full text is [LICENSE](../LICENSE) in this repository, which the app's
 first screen links to. The source for the exact build a release ships is the
@@ -9,7 +9,7 @@ tag that release was cut from.
 These notices cover the Android APK, dashboard assets, and the separately
 distributed standard-environment and browser-companion images. The APK does not
 contain the server or these container images. Each bundled dependency keeps its
-own license; Aether's GPL-3.0 license does not replace those terms.
+own license; Cloudfield's GPL-3.0 license does not replace those terms.
 
 ## In the APK
 
@@ -185,7 +185,7 @@ transitive component has been independently license-audited.
 
 ## Not distributed by the app
 
-Enhanced-mode adapters are not distributed with Aether. `agent.install` and
+Enhanced-mode adapters are not distributed with Cloudfield. `agent.install` and
 `aether agent add --enhanced` install them from the npm registry into the
 member's home, each under its own licence, which
 `internal/harness/acpregistry.json` records: `@agentclientprotocol/claude-agent-acp`

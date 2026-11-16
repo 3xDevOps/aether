@@ -1,6 +1,6 @@
 # Troubleshooting and failure handling
 
-What Aether does when the host reboots, a disk fills, an agent hangs or a
+What Cloudfield does when the host reboots, a disk fills, an agent hangs or a
 connection drops, and what you do next, for whoever runs the server and for
 members who find a session in an unexpected state. Terms such as environment,
 Enhanced mode and subsession are defined in [Concepts](README.md#concepts).
@@ -12,7 +12,7 @@ shown beside the status says why it is there.
 
 ## What happens when
 
-| When | What you see | What Aether does | What you do |
+| When | What you see | What Cloudfield does | What you do |
 | --- | --- | --- | --- |
 | The server restarts or is killed, and session sandboxes survive | Sessions keep their status. | Reattaches to every live sandbox. An Enhanced agent keeps running under its keeper, and the new server adopts its conversation, turn and open requests ([Restarts and failures](enhanced-sessions.md#restarts-and-failures)). A kill accepted before the crash is issued again. | Nothing. When the keeper is gone, the conversation is restored in a fresh process and a turn that was cut off parks with `turn interrupted`: send a message to continue. |
 | The host reboots, or Docker restarts without `live-restore` | Live sessions read `interrupted` with `server restarted: container exited <code>` (or `server restarted` when the container is gone). | Commits the partial work as `wip: <task>`, publishes the session branch and keeps the checkout. | Pull the branch (`aether pull <session-id>`) or start a new session. An interrupted session cannot be reopened. |
@@ -27,7 +27,7 @@ shown beside the status says why it is there.
 | The agent hits its account's usage limit | `Usage limit reached on <owner>'s account; ...` when it cannot continue. | Moves the session to another account that has usage left. | [Usage limit mid-session](#usage-limit-mid-session). |
 | The owner of the session's shared account revokes the share | `account share revoked: <owner> revoked access to their account; ...` when it cannot continue. | Moves the session to another account the launcher may use, or fails it and removes its container. | [Account sharing](security.md#account-sharing). |
 | An agent update fails, or the vendor is unreachable | Timeline note `could not update <agent> from <version>: the updater exited <code>: <output>`. | Launches whatever is installed without waiting for the update. Tries again from that home after 15 minutes. | Usually nothing. `sudo aether-server config set agent-update false` turns updates off. |
-| An agent update an older Aether interrupted left the agent's npm package missing | The launch that starts the repair may not find the agent. | Restores the copy in `~/.local/lib/.<agent>-update.*/previous` in the background, before contacting npm. | Launch again. The next launch finds the agent. |
+| An agent update an older Cloudfield interrupted left the agent's npm package missing | The launch that starts the repair may not find the agent. | Restores the copy in `~/.local/lib/.<agent>-update.*/previous` in the background, before contacting npm. | Launch again. The next launch finds the agent. |
 | An SSH connection drops during an attach | The CLI or dashboard disconnects. | Nothing changes for the session: its terminal lives on the server. Input that never reached the server is dropped whole. | Attach again. The full transcript replays before live output. |
 | An `aether forward` connection drops | The local port stops answering. | Closes both ends of the tunnel. | Run `aether forward <run-id|terminal> <port>` again. |
 | A launch cannot refresh the workspace mirror | The launch fails with `gitengine: mirror <kind> for branch "<branch>": <diagnostic>`. No session is created. | Never falls back to an older base on its own. | [Launch and mirror failures](#launch-and-mirror-failures). |
@@ -41,7 +41,7 @@ shown beside the status says why it is there.
 | The server is down when a schedule is due | Nothing. | Skips the missed occurrence and waits for the next one. | Launch the session by hand if it matters. |
 
 A lost connection does not prove that a command failed. Before you retry
-something, check its files and processes. After a crash Aether does not
+something, check its files and processes. After a crash Cloudfield does not
 replay an agent's tool calls, but a Background Enhanced session is asked to
 continue its turn, so an action can run twice.
 
@@ -58,7 +58,7 @@ A live session carries a state that says what it is doing. The dashboard and
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
 | `waiting` | Turn ended, or Stale wait for a stale wait (`aether sessions`: Waiting) | The turn ended with no report (`turn ended without a report`), the session stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
-| `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, an Enhanced turn that waits for a reply, or a [broken wait](#waits-aether-can-check). |
+| `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Cloudfield cannot continue from, an Enhanced turn that waits for a reply, or a [broken wait](#waits-cloudfield-can-check). |
 | `finished` | Finished: review | An interactive session reported `success`. Asks nothing of you. |
 | `failed` | Failed | The session reported `failure`, or its turn failed. |
 | `disconnected` | Disconnected | The Enhanced session failed or ended while the session is open. |
@@ -72,12 +72,12 @@ still holds background tasks or, as a parent, has a live subsession
 or unread subsession mail. Its reason becomes `no update for <duration>: <summary>`.
 A CI or process wait keeps its state; an agents wait shows `waiting`, or
 `waiting-agents` while a subsession is live again. A wait goes stale once; the
-next turn starts it over. A wait Aether infers from subsessions or background
-tasks lasts exactly as long as they do.
+next turn starts it over. A wait Cloudfield infers from subsessions or
+background tasks lasts exactly as long as they do.
 
-### Waits Aether can check
+### Waits Cloudfield can check
 
-A waiting report can name conditions Aether checks for the agent, such as
+A waiting report can name conditions Cloudfield checks for the agent, such as
 a pull request's checks finishing, so it wakes the agent when one resolves.
 While the session shows such a wait, `aether sessions <session-id>` prints a `wait` line, the session record carries
 `wait {kind, detail, verified_at, error}`, and the state is judged by the
@@ -86,7 +86,7 @@ evidence:
 | `wait.kind` | When | What you see | Needs you |
 | --- | --- | --- | --- |
 | `condition` | Every condition is pending and its source was read within twice its poll interval, or one resolved and its wake is on its way. | The state, and `<condition> (checked 2m ago)`. | No. The wait never goes stale on inactivity. |
-| `source_unknown` | A pending condition was not read within twice its poll interval, or its reads fail. | `Waiting for CI (status unknown)` and `<condition>: status unknown (last read 12m ago)`. | No. Aether keeps retrying. |
+| `source_unknown` | A pending condition was not read within twice its poll interval, or its reads fail. | `Waiting for CI (status unknown)` and `<condition>: status unknown (last read 12m ago)`. | No. Cloudfield keeps retrying. |
 | `system_fault` | A condition errored or expired, for example the pull request is gone, and the agent is being told. | `Waiting for CI (wait fault)` and the condition. | No. The agent decides what to do next. |
 | `system_fault` | A condition resolved, errored or expired, and its wake was not delivered within 5 minutes. | `Needs you`, reason `wait broken: <condition> resolved, but the agent was not woken`, and the delivery error. | Yes. The agent will not move on its own. Send it a message. |
 | `system_fault` | A pending condition's source went unread for an hour. | `Needs you`, reason `wait broken: cannot read <condition> for over 1h, so the agent will not be woken`. | Yes. |
@@ -230,11 +230,11 @@ which browsers showed a need, so one announced before it is not replaced.
 
 ## Recover from disk pressure
 
-Every launch checks that the Aether data filesystem and Docker's storage keep
-a reserve free: by default the larger of 5 GiB and 5% of the filesystem,
+Every launch checks that the Cloudfield data filesystem and Docker's storage
+keep a reserve free: by default the larger of 5 GiB and 5% of the filesystem,
 capped at 20 GiB, plus 1 GiB for this launch and each one already starting.
 When free space
-drops below the reserve plus 4 GiB, Aether frees space on its own, on every
+drops below the reserve plus 4 GiB, Cloudfield frees space on its own, on every
 poll and before refusing a launch, in this order, until it is back above:
 
 1. The saved memory of sleeping Enhanced session VMs whose agent restores
@@ -262,7 +262,7 @@ scheduler: insufficient disk headroom: <filesystem> has <n> free bytes; reserve 
 
 With `session-runtime vm`, a session's disks are sparse files that grow as
 it writes, so a running session can take the filesystem below the reserve.
-When the Aether data filesystem first falls below the reserve, the server
+When the Cloudfield data filesystem first falls below the reserve, the server
 notes each VM's disk use, and every 5 seconds after that pauses every session
 whose disks have grown by 64 MiB or more since that point and stops its whole
 VM, so root in it cannot write either. Measuring against the point it fell
@@ -304,7 +304,7 @@ hides it and frees nothing. **Archive finished sessions…** also offers live
 sessions idle and done for over a day; it closes each one you leave checked
 before archiving it.
 
-`scheduler: host capacity unavailable: ...` means Aether could not measure a
+`scheduler: host capacity unavailable: ...` means Cloudfield could not measure a
 filesystem or host memory, for example a Docker daemon whose storage it cannot
 see or a probe that timed out. Fix what the error names; free space in `df`
 on a different machine does not count. When Docker does not answer, the error
@@ -424,7 +424,7 @@ moment, up to three times, then recorded as `failed`.
 
 After the swap, the new version must open and migrate the database, then bind
 its SSH listener and recover the sessions within 5 minutes of migrating. If it
-fails to finish booting twice, or misses those 5 minutes, Aether rolls back:
+fails to finish booting twice, or misses those 5 minutes, Cloudfield rolls back:
 the previous binaries go back into place, and if the schema already changed,
 the database copy taken before the update is restored. Every change made after
 that copy is lost.
@@ -451,7 +451,7 @@ binaries by hand as described in [install.md](install.md#upgrading).
 ## Launch and mirror failures
 
 A workspace with a mirror refreshes it from the upstream before every launch.
-If that fails, the launch is refused and no session is created; Aether never
+If that fails, the launch is refused and no session is created; Cloudfield never
 starts from the previously accepted commit on its own. When an accepted commit
 exists, the CLI prints a one-off retry from it:
 
@@ -508,10 +508,10 @@ login shell stay up.
 | --- | --- | --- |
 | The session cannot start, for example because the agent is not signed in | **Disconnected**, `enhanced session failed: <error>`. Messages are refused with `scheduler: the enhanced session is not running: <error>`. | Fix the cause, then press **Retry Enhanced** in the Chat view. |
 | The agent's process exits | The turn in flight shows **Turn interrupted**; **Disconnected**, `enhanced session ended: the agent's ACP server exited with code <n>`, with `; stderr: <tail>` when it printed any. | **Retry Enhanced**. |
-| The agent drops its conversation but keeps running, as Claude's adapter does when Claude Code dies | **Prompt failed** with `Session not found`, then **Agent conversation lost** while Aether restores the conversation. Lost again within 5 minutes: **Disconnected**, `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`. | Send the failed message again. After a second loss, **Retry Enhanced**. |
-| The agent refuses a turn with `Authentication required` | **Sign-in refused**, or **Agent signed out** when the login file cannot sign the agent in, while Aether restarts the agent in its container, then `enhanced turn failed: ... Authentication required ...; <owner>'s <agent> login is signed out. Sign in, then send the message again: dashboard Agents page, or aether agent login <agent>`, or `...; Aether restarted the agent to reread <owner>'s login: send the message again. Refused again? Sign in: ...` when the login file looks sound. The account owner's dashboard shows **\<agent\> is signed out** or **\<agent\>'s sign-in was refused** until the login works again. | Send the message again when the reason says so. Otherwise the account's owner signs in on the **Agents** page or with `aether agent login <agent>`, then you send it again ([harnesses.md](harnesses.md#when-a-login-is-signed-out)). |
+| The agent drops its conversation but keeps running, as Claude's adapter does when Claude Code dies | **Prompt failed** with `Session not found`, then **Agent conversation lost** while Cloudfield restores the conversation. Lost again within 5 minutes: **Disconnected**, `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`. | Send the failed message again. After a second loss, **Retry Enhanced**. |
+| The agent refuses a turn with `Authentication required` | **Sign-in refused**, or **Agent signed out** when the login file cannot sign the agent in, while Cloudfield restarts the agent in its container, then `enhanced turn failed: ... Authentication required ...; <owner>'s <agent> login is signed out. Sign in, then send the message again: dashboard Agents page, or aether agent login <agent>`, or `...; Aether restarted the agent to reread <owner>'s login: send the message again. Refused again? Sign in: ...` when the login file looks sound. The account owner's dashboard shows **\<agent\> is signed out** or **\<agent\>'s sign-in was refused** until the login works again. | Send the message again when the reason says so. Otherwise the account's owner signs in on the **Agents** page or with `aether agent login <agent>`, then you send it again ([harnesses.md](harnesses.md#when-a-login-is-signed-out)). |
 | `run.launch` answers `<owner>'s <agent> login is signed out: <problem>. Sign in, then launch again: dashboard Agents page, or aether agent login <agent>` | The login file on the account cannot sign the agent in. Nothing was created. | The account's owner signs in, then launch again. A workspace variable that signs the agent in, such as `ANTHROPIC_API_KEY`, lets the launch through ([harnesses.md](harnesses.md#use-an-api-key)). |
-| Root in one of your sessions took your shared home, for example a package install that ran `systemd-tmpfiles` | **Home restored** with the owner and mode Aether found, before the agent starts again. If restoring fails: **Disconnected**, `enhanced session failed: the agent cannot read its home: ...`. | Send the refused message again. Run `sudo chown "$(id -u):$(id -g)" "$HOME" && sudo chmod u+rwx "$HOME"` in the session's **Terminal** tab, which runs as the session's user, when restoring failed, or when the agent stays connected while its tools fail with `permission denied` or exit status 127, which no restore covers. After a failed restore, press **Retry Enhanced**. |
+| Root in one of your sessions took your shared home, for example a package install that ran `systemd-tmpfiles` | **Home restored** with the owner and mode Cloudfield found, before the agent starts again. If restoring fails: **Disconnected**, `enhanced session failed: the agent cannot read its home: ...`. | Send the refused message again. Run `sudo chown "$(id -u):$(id -g)" "$HOME" && sudo chmod u+rwx "$HOME"` in the session's **Terminal** tab, which runs as the session's user, when restoring failed, or when the agent stays connected while its tools fail with `permission denied` or exit status 127, which no restore covers. After a failed restore, press **Retry Enhanced**. |
 | The server restarts mid-turn | The turn keeps running in the adopted conversation; a message queued behind it is sent again unless the agent already had it. | Nothing. |
 | The server restarts and cannot reattach to the agent's keeper, or the session's sandbox predates keepers | **Agent restarted** with the reason, then **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `aether-internal terminal` terminals keep running. | Send a message to continue. |
 | You cancel a turn or press Stop | **Waiting**, `turn cancelled`. | Send a message when you want it to go on. |
@@ -526,8 +526,8 @@ agent to continue.
 
 ## Usage limit mid-session
 
-When an agent reports that its account's usage limit stopped it, Aether moves
-the session to another account that has usage left
+When an agent reports that its account's usage limit stopped it, Cloudfield
+moves the session to another account that has usage left
 ([usage fallback](teams.md#usage-fallback)): the same session, checkout and branch
 continue on the new account's login, and a room note says so. When it cannot
 move, interactive sessions park as **Needs you**, a Background session fails, and the reason says why:
@@ -548,8 +548,8 @@ server restart: the next start finishes it.
 
 ## Raise file-watch limits
 
-Aether watches each session's checkout for changes with inotify. The kernel caps
-watches and instances per user, and a server running as root shares that
+Cloudfield watches each session's checkout for changes with inotify. The kernel
+caps watches and instances per user, and a server running as root shares that
 budget with every root process in its session containers. When the kernel refuses,
 the session still launches and its file changes arrive up to 60 seconds late,
 which also delays stall detection.
@@ -581,7 +581,7 @@ polling until it is reopened.
 
 An Enhanced session of an agent whose conversation survives a container
 restart falls asleep after `--run-sleep-after` (default `30m`) without
-activity: Aether runs `docker stop` on its container, never `docker rm`.
+activity: Cloudfield runs `docker stop` on its container, never `docker rm`.
 Memory and CPU are freed. Only Claude Code sleeps
 ([harnesses.md](harnesses.md#supported-agents), **Idle sleep**). Standard
 sessions never sleep, because starting their container again reruns the
@@ -633,7 +633,7 @@ files the agent wrote but did not commit; the container's own disk layer;
 the conversation, the transcript and the branch.
 
 What it loses: every process that was still running, which only a process
-Aether cannot see can be, such as one started with `nohup` or `&`, or nested
+Cloudfield cannot see can be, such as one started with `nohup` or `&`, or nested
 Docker containers such as those of `docker compose up -d`; open network
 connections; anything held only in memory; and the Claude Code session's
 scheduled wakeups (`/loop`, `ScheduleWakeup`, `CronCreate`), which live in
@@ -676,7 +676,7 @@ lost, so more sessions sleep, sooner:
 - The conditions above keep a VM awake as they keep a container, and so
   do two more: a VM using more than a tenth of its CPU, such as a build or
   a test run left in the background, and a wakeup the agent set that has
-  yet to fire. A save that fails leaves the session running; Aether tries
+  yet to fire. A save that fails leaves the session running; Cloudfield tries
   again after another `--run-sleep-after`.
 - A closed session is saved as soon as the close finishes, instead of
   staying paused in memory, unless `--run-sleep-after` is `0`. It stays
@@ -699,8 +699,8 @@ fired 44 seconds after the wake, the time they still had left. So an
 Enhanced Claude Code session stays awake while a wakeup it set with
 `ScheduleWakeup` (as `/loop` does) or a one-shot `CronCreate` has yet to
 fire, and while a recurring `CronCreate` job runs, until `CronDelete`.
-Timers that Aether cannot see, such as a Standard session's or a `sleep`
-in a script, wait for the next wake. Aether's own wakes still wake a
+Timers that Cloudfield cannot see, such as a Standard session's or a `sleep`
+in a script, wait for the next wake. Cloudfield's own wakes still wake a
 sleeping session, Standard or Enhanced: mail, `aether-internal report
 --until` conditions and watches reach it as any message does.
 
@@ -726,7 +726,7 @@ as it is on the next wake.
 
 A saved VM takes about as much disk as the memory its processes use, after
 the guest drops its page cache: 0.6 to 1.3 GB for those test sessions in
-2 GiB VMs. When disk runs low, Aether deletes the saved
+2 GiB VMs. When disk runs low, Cloudfield deletes the saved
 memory of the longest-sleeping sessions first
 ([Recover from disk pressure](#recover-from-disk-pressure)). A server
 restart or update leaves sleeping VMs asleep; the next use wakes them.
@@ -752,20 +752,20 @@ removed. The sweep reads only this server's journals under
 another server on the same Docker daemon started, is left alone.
 
 The session branch is published before a checkout is removed, so cleanup never
-loses committed work. When disk runs low, Aether removes both sooner
+loses committed work. When disk runs low, Cloudfield removes both sooner
 ([Recover from disk pressure](#recover-from-disk-pressure)). Relaunching resumes
 the same container and checkout; it restarts no process that had stopped. When
 retention ends, a closed session's reason reads `retained container expired` or
 `retained container unavailable`; when low disk space removes the container
 early it reads `retained container reclaimed for disk space`.
 
-Aether captures evidence before it removes a container or checkout, and
+Cloudfield captures evidence before it removes a container or checkout, and
 retries a failed capture every `--poll-interval`. If the checkout is already
 gone, no retry can capture it: cleanup finishes without an evidence packet and
 the reason gains `evidence unavailable: session checkout missing`.
 
 A checkout over the evidence storage limit cannot be captured, so the session
-gets no evidence packet. Aether commits the checkout's files as a `wip:`
+gets no evidence packet. Cloudfield commits the checkout's files as a `wip:`
 commit, publishes the session branch, adds `evidence unavailable: evidence
 storage limit exceeded` to the session's reason (shown by `aether sessions
 <session-id>` and the dashboard), and only then removes the checkout. If the
@@ -782,7 +782,7 @@ server restarts.
 
 A member's containers share one uid:gid mapping, so a launch under another
 mapping is refused while one of them is live. A closed session whose cleanup
-is still retrying counts only while its container exists: Aether asks Docker
+is still retrying counts only while its container exists: Cloudfield asks Docker
 before refusing, and the refusal names it as `session <id> (cleanup pending)`
 and includes any Docker error.
 
@@ -832,7 +832,7 @@ builds. Lower it to a minute or two for many short scripted sessions.
 
 An Enhanced session is judged on its agent's progress: messages, thoughts, tool
 calls, plans, subagents, compaction, background task progress and permission
-requests. Aether's own calls to the agent, the history a restored session
+requests. Cloudfield's own calls to the agent, the history a restored session
 replays, and mode, command and usage updates are not progress. How long it may
 stay quiet depends on where the turn is, its phase:
 
@@ -851,8 +851,8 @@ minutes without streaming a thought parks at the short limit and returns to
 `running` with its next update. A resume or a server restart starts the quiet
 time over.
 
-Aether restarts nothing on its own. The session's Chat view shows the agent's
-last progress, the phase and the connection, and offers:
+Cloudfield restarts nothing on its own. The session's Chat view shows the
+agent's last progress, the phase and the connection, and offers:
 
 - **Stop turn** cancels the turn. It costs nothing.
 - **Open trace** opens the turn's model calls and tool calls.
@@ -879,6 +879,6 @@ are in [Recover from disk pressure](#recover-from-disk-pressure).
   the database stays consistent.
 - A Standard agent survives a server restart only if its own process
   survived. Extra terminals in a session lose their old output streams.
-- Aether does not restart an agent killed for memory, and an exit code alone
+- Cloudfield does not restart an agent killed for memory, and an exit code alone
   does not prove memory was the cause. A cgroup v1 host posts no
   out-of-memory note; check `docker inspect` and the kernel log there.

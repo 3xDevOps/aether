@@ -46,7 +46,7 @@ and `ci` follow every pull request the session recorded (`run.pr.create`), and
 start the moment it records one.
 
 The server reads GitHub with the watch owner's own `gh` login in their
-Aether home, the one `aether github connect` sets up (see
+Cloudfield home, the one `aether github connect` sets up (see
 [environment-home.md](environment-home.md#from-the-cli)). Without one the
 watch is created in the `error` state with the real error and the fix:
 
@@ -106,7 +106,7 @@ decides on required checks, which `required` counts; `missing` lists
 required checks nothing has reported yet. All counts at zero with no
 `missing` means no check was reported on the head commit.
 
-GitHub sends Aether no webhooks, so the server polls:
+GitHub sends Cloudfield no webhooks, so the server polls:
 
 - Every minute, give or take 10%, while checks are pending, a review is
   requested, or the pull request changed since the last read; every 5
@@ -242,7 +242,7 @@ finishes" needs no one polling:
   target needs its `run_id` for a workspace. `watch.create` refuses any
   other session with the reason.
 - Each notice is written into each session's inbox once, as a
-  server-authored message. An idle session whose agent Aether can wake
+  server-authored message. An idle session whose agent Cloudfield can wake
   starts a turn for it; any other session reads it at its next turn or inbox
   read ([how agents notice mail](coordination.md#delivery-acknowledgement-and-retries)).
   `delivered` means written to the inbox. It names the watch and you

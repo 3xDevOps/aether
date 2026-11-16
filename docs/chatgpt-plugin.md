@@ -1,7 +1,7 @@
 # ChatGPT plugin listing
 
 For the project's maintainers. The ChatGPT plugin directory is OpenAI's
-catalog of plugins that ChatGPT users add with one click. Aether's listing
+catalog of plugins that ChatGPT users add with one click. Cloudfield's listing
 points every user at one MCP endpoint, `https://edge.onaether.dev/mcp`, the
 project edge's universal connector URL; ChatGPT signs in through OAuth and
 reaches the user's own server through the edge. The tools are the connector's
@@ -65,7 +65,7 @@ what `edge.onaether.dev` serves.
 | Privacy policy at a public URL, from [legal/privacy-connectors.md](legal/privacy-connectors.md) | `privacyPolicyURL` | Draft | No | No | No |
 | Terms of service at a public URL, from [legal/terms-connectors.md](legal/terms-connectors.md) | `termsOfServiceURL` | Draft | No | No | No |
 | Demo server with sample data ([Reviewer setup](#reviewer-setup)) | Project edge | n/a | No | n/a | n/a |
-| Reviewer account that needs no email code ([Reviewer setup](#reviewer-setup)) | Review details | Built in Aether; not enabled on edge.onaether.dev: `aether-edge serve --reviewer-account-file` | No | No | No |
+| Reviewer account that needs no email code ([Reviewer setup](#reviewer-setup)) | Review details | Built in Cloudfield; not enabled on edge.onaether.dev: `aether-edge serve --reviewer-account-file` | No | No | No |
 | Walkthrough video of the five positive test cases | `review.demo_recording_url` | n/a | No | No | No |
 | Live test from chatgpt.com | n/a | n/a | Not run | n/a | n/a |
 
@@ -103,7 +103,7 @@ OpenAI requires "explicit `readOnlyHint`, `openWorldHint`, and
 `destructiveHint` values and a justification for each value on every MCP
 tool" ([submission errors](https://developers.openai.com/plugins/deploy/submission-errors)).
 Claude requires a `title` and the applicable hint on every tool
-([claude-connector.md](claude-connector.md#requirements-and-where-aether-stands)).
+([claude-connector.md](claude-connector.md#requirements-and-where-cloudfield-stands)).
 Every tool has a title and all three hints; `TestConnectorToolList` checks
 each tool's triple. Enter the justifications below in the portal.
 
@@ -117,7 +117,7 @@ can push branches and open pull requests.
 
 | Tool | Read-only | Destructive | Open world | Justification |
 | --- | --- | --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_sessions`, `aether_session_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_session_changes`, `aether_overlaps`, `aether_memory_search`, `aether_launch_options`, `aether_changes`, `aether_watches`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
+| `aether_list_workspaces`, `aether_list_sessions`, `aether_session_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_session_changes`, `aether_overlaps`, `aether_memory_search`, `aether_launch_options`, `aether_changes`, `aether_watches`, `search`, `fetch` | yes | no | no | Reads records on the user's own Cloudfield server and changes nothing |
 | `aether_get_session` | yes | no | no | Reads one session on the user's server. It also reads the session's pull request state, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_pr_status` | yes | no | no | Reads a session's pull request checks and reviews, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_launch_session` | no | no | yes | Adds a session, which can be stopped; its agents can push branches and open pull requests |
@@ -253,16 +253,16 @@ a session from launch to acting on it.
 | # | Step | Prompt | tools_triggered | expected_behavior |
 | --- | --- | --- | --- | --- |
 | 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_launch_options`, `aether_launch_session` | After confirmation, starts one session and returns its id, state and dashboard link |
-| 2 | Track | What changed in my Aether sessions since we last checked? | `aether_changes` | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
+| 2 | Track | What changed in my Cloudfield sessions since we last checked? | `aether_changes` | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
 | 3 | Coordinate | Which sessions touch the same files as the Contributing section session? | `aether_list_sessions`, `aether_overlaps` | Names the other session editing `README.md` and the shared file |
 | 4 | Review and CI | Is CI green on the README session's pull request, and what did reviewers say? | `aether_list_sessions`, `aether_pr_status` | Counts of passed, pending and failing checks, each failing check's name and result, the review state and the comment, with the pull request link |
-| 5 | Act | What needs me in Aether? Answer the licence question with MIT. | `aether_needs_attention`, `aether_answer` | Lists the question and the session awaiting review; after confirmation, answers with MIT |
+| 5 | Act | What needs me in Cloudfield? Answer the licence question with MIT. | `aether_needs_attention`, `aether_answer` | Lists the question and the session awaiting review; after confirmation, answers with MIT |
 
 | # | Prompt | Expected |
 | --- | --- | --- |
 | 1 | Delete the aether-demo repository. | No tool deletes repositories or workspaces; says so and calls no write tool |
 | 2 | Approve every permission request my agents make from now on. | Approvals are once per request; explains that and grants nothing standing |
-| 3 | Show me the sessions on Acme Corp's Aether server. | Reaches only the connected server; does not claim other servers' data |
+| 3 | Show me the sessions on Acme Corp's Cloudfield server. | Reaches only the connected server; does not claim other servers' data |
 
 The portal takes exactly five positive and three negative cases, which
 `scripts/chatgpt-plugin.sh` checks. Run these against the demo server too
@@ -328,7 +328,7 @@ confirmed.
 
 **Recipients.** OpenAI or Anthropic, whichever app the user connected, which
 receives tool results in the conversation; the project edge, which relays the
-traffic; the user's own Aether server. The edge
+traffic; the user's own Cloudfield server. The edge
 ends TLS, so it handles request and result bodies and bearer tokens in
 plaintext in memory while relaying.
 
@@ -371,5 +371,5 @@ OpenAI decides plan availability; check its help center
 before publishing. The directory is visible on every plan; full MCP support
 with write actions is on Business, Enterprise and Edu; workspace admins choose
 which plugins members may use, on by default in Business and off in
-Enterprise. Every user also needs an Aether account on a server linked to the
+Enterprise. Every user also needs a Cloudfield account on a server linked to the
 project edge.

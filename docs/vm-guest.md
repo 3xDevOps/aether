@@ -1,12 +1,12 @@
 # The VM helper
 
 A session that runs in a Cloud Hypervisor VM, rather than a Docker container
-(see the [plan](plans/2026-11-13-microvm-sessions.md)), has one Aether process
-inside it from the first instruction on: `aether-internal guest`, the helper.
-It is PID 1 of the VM, does what Docker and its init do for a container, and
-serves the API the server uses in place of `docker exec` and `docker attach`.
-The code is in `internal/guest/helper`; the server's client of the API is
-`internal/guest`.
+(see the [plan](plans/2026-11-13-microvm-sessions.md)), has one Cloudfield
+process inside it from the first instruction on: `aether-internal guest`, the
+helper. It is PID 1 of the VM, does what Docker and its init do for a container,
+and serves the API the server uses in place of `docker exec` and `docker
+attach`. The code is in `internal/guest/helper`; the server's client of the API
+is `internal/guest`.
 
 The helper is the `aether-server` binary itself. The kernel boots the
 read-only helper disk, which holds that binary as `/init`, and passes it the
@@ -433,7 +433,7 @@ workspace's.
 The final commit is built on the server, so the member's signing key never
 enters the VM. The VM stages the checkout; the server copies the tree,
 checks it, and writes the commit with `git commit-tree`, authored by the
-member, committed by Aether, the message cleaned as `git commit -m` cleans
+member, committed by Cloudfield, the message cleaned as `git commit -m` cleans
 it, and signed. `Install` then moves the staged objects into the checkout,
 adds the commit object, the only one the server sends, and makes it HEAD,
 moving HEAD only from the commit it was staged on. As on the server's disk,

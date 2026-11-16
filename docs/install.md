@@ -1,15 +1,19 @@
-# Install, upgrade and remove Aether
+# Install, upgrade and remove Cloudfield
 
-This guide installs, upgrades and removes Aether on every platform. For the
+The product is named Cloudfield. Its commands, variables, paths and hostnames,
+and what the apps and the CLI print, still say `aether` or Aether until later
+releases.
+
+This guide installs, upgrades and removes Cloudfield on every platform. For the
 shortest path to a first session, follow [quickstart.md](quickstart.md), then come
-back here for other platforms, options and errors. Aether's terms are defined
-in the [glossary](README.md#concepts).
+back here for other platforms, options and errors. Cloudfield's terms are
+defined in the [glossary](README.md#concepts).
 
 ## What gets installed where
 
-Aether has two parts. The server, `aether-server`, runs on one Linux machine:
-it keeps your repositories and runs each agent in its own Docker container or
-[virtual machine](#hosts-for-vm-sessions). A
+Cloudfield has two parts. The server, `aether-server`, runs on one Linux
+machine: it keeps your repositories and runs each agent in its own Docker
+container or [virtual machine](#hosts-for-vm-sessions). A
 client is any machine you work from: the `aether` CLI, the desktop app and the
 Android app all connect to that server.
 
@@ -44,7 +48,8 @@ flowchart LR
   between members ([teams.md](teams.md#agent-accounts)) needs Docker Engine
   26.0 or newer; `docker version --format '{{.Server.Version}}'` prints yours.
 - git, and `ssh-keygen` (package `openssh-client` on Debian and Ubuntu), which
-  git uses to sign the commits Aether makes for members who connected GitHub.
+  git uses to sign the commits Cloudfield makes for members who connected
+  GitHub.
 - At least 2.5 GiB of available memory and 6 GiB of free disk, plus disk for
   the images the server pulls on first use. A session starts only while 2 GiB of
   memory (a tenth of RAM above 20 GiB) plus 512 MiB per session starting stays
@@ -228,8 +233,8 @@ installs only the CLI), or `AETHER_VERSION`, `AETHER_BIN_DIR`, `AETHER_ROLE`,
 PowerShell cannot check the manifest's signature, so the script checks SHA-256
 and size only.
 
-To reinstall or upgrade, close Aether and rerun the script with the same
-`-BinDir`. If Aether still runs, the script prints the `Stop-Process -Id
+To reinstall or upgrade, close Cloudfield and rerun the script with the same
+`-BinDir`. If Cloudfield still runs, the script prints the `Stop-Process -Id
 <pids>` (and `schtasks /End /TN aether-daemon`) to run, and changes nothing.
 If only the desktop step fails, it prints the `gui build` command to rerun.
 
@@ -254,8 +259,9 @@ stopped by default (as admin: `Start-Service ssh-agent` and
 
 ### Windows Defender and SmartScreen
 
-Aether's Windows binaries and locally built desktop apps are not code-signed,
-so SmartScreen, Smart App Control or an antivirus may warn about or block them.
+Cloudfield's Windows binaries and locally built desktop apps are not
+code-signed, so SmartScreen, Smart App Control or an antivirus may warn about or
+block them.
 
 | What you see | What it is | What to do |
 | --- | --- | --- |
@@ -340,7 +346,7 @@ that ran it, and the app starts that one (`AETHER_BIN` overrides it). If that
 CLI is moved or deleted, the app's error names the path; restore it, set
 `AETHER_BIN`, or rerun `gui build`. The dashboard ships inside the CLI, and
 `aether update` rebuilds the app ([Upgrading](#upgrading)). On Windows, close
-Aether before rebuilding by hand.
+Cloudfield before rebuilding by hand.
 
 On Windows the app runs its dashboard server without opening a console window.
 To diagnose startup failures, run `aether gui` in a terminal.
@@ -367,7 +373,7 @@ backups. Uninstalling the app or clearing its storage deletes the key, so the
 phone signs in as a new device and may need approval again. To switch mode or
 check for updates, long-press the app icon and choose **Connection**.
 
-**Share** text or a link to Aether's **New session** from any app and the
+**Share** text or a link to Cloudfield's **New session** from any app and the
 dashboard opens a new session with it as the prompt, cut to 8000 characters;
 nothing starts until you send it. Back walks the dashboard's history, returns
 to its home from a page a share or notification opened, and leaves the app
@@ -487,7 +493,7 @@ after the key and value of `config set`.
 | `min-free-disk` | `0` (5% of the filesystem, 5 to 20 GiB) | Free-space reserve below which new sessions are refused. Negative turns the check off. |
 | `checkout-ttl` | `72h` | How long a finished session's checkout is kept after the session ends. It also stays while the session's container is kept. Negative keeps it forever. |
 | `run-container-ttl` | `168h` | How long a closed session's container is kept so the session can be relaunched. A relaunched session's clock restarts at its next close. |
-| `run-sleep-after` | `30m`; `5m` for session VMs | How long an idle Enhanced Claude Code session keeps its container running before Aether stops it until its next use, and how long an idle session VM runs before Aether saves it to disk ([Idle sleep](failure-handling.md#idle-sleep)). A value you set applies to both. `0` keeps every session awake. |
+| `run-sleep-after` | `30m`; `5m` for session VMs | How long an idle Enhanced Claude Code session keeps its container running before Cloudfield stops it until its next use, and how long an idle session VM runs before Cloudfield saves it to disk ([Idle sleep](failure-handling.md#idle-sleep)). A value you set applies to both. `0` keeps every session awake. |
 | `browser-image` | `ghcr.io/3xdevops/aether-browser:<release>` | The image a session's **Browser** tab starts from. Set it and updates stop moving it. |
 | `conflict-coordination` | on | Let overlapping sessions message each other ([coordination.md](coordination.md)). |
 
@@ -737,7 +743,7 @@ sudo systemctl start aether-server
 
 ### Release channel
 
-Aether ships three release channels. A channel takes its own releases and
+Cloudfield ships three release channels. A channel takes its own releases and
 those of every channel above it in stability:
 
 | Channel | Takes | Where its releases come from |
@@ -751,7 +757,7 @@ and the signed manifest carries it too ([Verified
 releases](#verified-releases)). Nightly builds come straight from `main`:
 breaking changes arrive when they merge, and a nightly can contain a
 security issue that a later build fixes. Run `nightly` only to develop
-Aether. A promotion rebuilds the same commit under the new tag and keeps its
+Cloudfield. A promotion rebuilds the same commit under the new tag and keeps its
 build number, so a nightly and the beta promoted from it are the same code.
 
 A server follows one channel, the `release_channel` setting. Its release
@@ -1141,7 +1147,7 @@ you had none.
 ### Windows client
 
 Sign out of every edge as under [Client](#client) (`edge-tokens.json` is in
-`%APPDATA%\aether`), close Aether, and run this in PowerShell. A line for
+`%APPDATA%\aether`), close Cloudfield, and run this in PowerShell. A line for
 something you never installed prints an error; the rest still run:
 
 ```powershell
@@ -1228,7 +1234,7 @@ Test-Path "$env:LOCALAPPDATA\Programs\Aether Desktop\aether-desktop.exe"
 if (Test-Path $link) { (New-Object -ComObject WScript.Shell).CreateShortcut($link).TargetPath }
 ```
 
-It must point at `aether-desktop.exe`, not the CLI. If not, close Aether and
+It must point at `aether-desktop.exe`, not the CLI. If not, close Cloudfield and
 run `& "$env:LOCALAPPDATA\Programs\Aether\aether.exe" gui build`, which prints
 `launcher <path>` for the shortcut it writes. A missing entry alone is not a
 Defender quarantine (check **Protection history**). If it still fails, open an

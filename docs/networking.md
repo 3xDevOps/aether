@@ -14,7 +14,7 @@ flowchart LR
     C[Client] -->|tailnet| T[Tailscale]
     C -->|GitHub sign-in| E[Edge relay]
     C -->|SSH key| L["LAN, VPN or public IP"]
-    T --> S["Aether server :2222"]
+    T --> S["Cloudfield server :2222"]
     E -->|server dials out| S
     L --> S
 ```

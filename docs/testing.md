@@ -234,7 +234,7 @@ Both use `busybox:1.36`, which must be pulled; the full matrix takes about four 
 ## Real-agent smoke tests
 
 `internal/harness/smoke_integration_test.go` starts the vendors' real agent
-CLIs to check that the command lines Aether builds are still accepted. A
+CLIs to check that the command lines Cloudfield builds are still accepted. A
 vendor renaming a flag breaks every session of that agent, and nothing else
 catches it.
 
@@ -309,15 +309,15 @@ process (`internal/server/mockmodel_integration_test.go`) serves streaming
 Anthropic `/v1/messages` and OpenAI `/v1/responses`. Each prompt the test
 sends carries a tag, `aether-script:<turn>;`, naming the script the mock
 plays for that turn: one tool call per step, then a text answer. The mock
-answers each report reminder Aether sends with `aether-internal report`.
+answers each report reminder Cloudfield sends with `aether-internal report`.
 
 One Standard and one Enhanced session per agent play these turns in order. The
 launch starts `turn`, mail starts `wake`, and `run.inject` starts the rest:
 
 | Turn | The agent | The session must show |
 | --- | --- | --- |
-| `turn` | runs a command and ends the turn without a report | `answered` after one reminder; Standard Codex, which Aether cannot remind, `waiting` |
-| `wake` | gets mail while idle | a new turn, where Aether can wake the session |
+| `turn` | runs a command and ends the turn without a report | `answered` after one reminder; Standard Codex, which Cloudfield cannot remind, `waiting` |
+| `wake` | gets mail while idle | a new turn, where Cloudfield can wake the session |
 | `waiting` | reports `waiting --for ci` | `waiting-ci` with the summary |
 | `answered` | reports `answered` | `answered`, not Needs you |
 | `late-report` | reports `waiting --for process` from a detached process five seconds later | the report landing after the session parked, then `waiting-tools` |
@@ -334,12 +334,12 @@ or a report recorded but shown as the wrong state (`misclassified`). The
 first turn and every Background session also require the launch to record where
 its instructions went.
 
-The `wake` turn runs where Aether can wake the session: every Enhanced session, and a
+The `wake` turn runs where Cloudfield can wake the session: every Enhanced session, and a
 Standard session whose agent sets `IdleWake` in its capabilities
 (`internal/harness/capabilities.go`); the others skip it. A session must never
 need you while its subagent works. It should show `working`, or
 `waiting-agents` when Standard Claude Code ends the turn with the subagent
-still running in the background. Aether gets no
+still running in the background. Cloudfield gets no
 signal for a Codex subagent, and Standard Claude Code's Stop hook can arrive
 without the subagent among its background tasks, so those sessions can read as
 idle; the test logs their idle states as a known gap and fails any other.
@@ -891,7 +891,7 @@ runner image's Defender exclusions and adds one for GitHub's own agent,
 `provjobd.exe*` in the runner user's Temp. On `windows-11-arm`, Defender
 flags that agent as `Trojan:Win32/Gracing.I` and removes it; the job then
 hangs until GitHub fails it with "The hosted runner lost communication with
-the server". Nothing Aether builds or installs is excluded.
+the server". Nothing Cloudfield builds or installs is excluded.
 
 ## How CI runs the suites
 
@@ -1007,8 +1007,8 @@ To rerun only the failed jobs of a session: `gh run rerun <session-id> --failed`
 
 ## Running the Docker suites inside a session
 
-You can work on Aether from inside an Aether run (an agent's container on an
-Aether server). Two things differ there.
+You can work on Cloudfield from inside a Cloudfield run (an agent's container on
+an Cloudfield server). Two things differ there.
 
 A session sets `AETHER_*` variables (`AETHER_RUN_ID`, `AETHER_HARNESS`,
 `AETHER_WORKSPACE_ID` and others) that some tests read. `internal/coordcli`

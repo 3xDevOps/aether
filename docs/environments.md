@@ -44,7 +44,8 @@ The server uses the image tagged for its own release, from
 
 ### Git in session environments
 
-Aether commits for a session with the Git in the session's sandbox. Stock Ubuntu
+Cloudfield commits for a session with the Git in the session's sandbox. Stock
+Ubuntu
 24.04 Git is enough. These commits do not run commit hooks, so if your
 repository needs hooks, run `git commit` in the session's terminal. A custom image
 whose Git lacks prepared reference transactions (`git update-ref --stdin`
@@ -111,7 +112,7 @@ pushed to a registry.
 - Each save replaces the previous one as your saved image. The new image
   records a previous image: the saved image your environment was created
   from, or, when it runs the standard image, the image new sessions started
-  from until then. Aether keeps that one on the server and removes older
+  from until then. Cloudfield keeps that one on the server and removes older
   ones. To fix a bad save, repair it and save again, or reset.
 - Every save is checked before it becomes your saved image
   ([Saved image checks](#saved-image-checks)).
@@ -119,7 +120,7 @@ pushed to a registry.
   with `environment terminal is not running`. Open it with `aether terminal`,
   check your changes are there, then save.
 - The environment survives a stop, a shell exit and a server
-  restart, so unsaved changes stay until you reset. Aether recreates the
+  restart, so unsaved changes stay until you reset. Cloudfield recreates the
   container, and the unsaved changes are lost, when the next open finds
   different settings than the container was created with (the standard image,
   environment variables, mounts, user or resource limits). Save before an
@@ -137,7 +138,7 @@ pushed to a registry.
 
 ### Saved image checks
 
-After the commit, Aether reads every file of the new image. An owner uid or
+After the commit, Cloudfield reads every file of the new image. An owner uid or
 gid above 65535 has no owner inside a container, and under Sysbox no
 container starts from such an image. If any file has one, the save fails,
 for example:
@@ -174,7 +175,7 @@ does not fix the host.
 An image saved before these checks may still hold such owners. A container
 from it then fails to start with `value too large for defined data type`, or
 with a `mkdirall` `permission denied` on one of the image's own directories.
-Aether then starts that session, or your environment terminal, from your
+Cloudfield then starts that session, or your environment terminal, from your
 previous image, or from the standard image when there is none or it fails
 the same way. A session's status names the images that failed; the
 terminal shows nothing, and only the server log records its fallback:
@@ -184,10 +185,10 @@ Saved image <name> cannot start (value too large for defined data type); this se
 ```
 
 Open your environment, which now runs the same fallback image, and save it
-again. Aether skips a failed image only after another image started, and
+again. Cloudfield skips a failed image only after another image started, and
 remembers it until the server restarts. When the standard image fails the
 same way, the image was not the cause: the launch fails with the runtime's
-own error and Aether forgets the failed images. A `permission denied` under
+own error and Cloudfield forgets the failed images. A `permission denied` under
 a directory mounted into the container, such as your home, is never blamed
 on the image.
 
@@ -219,7 +220,7 @@ your sessions and terminal fail with an error that names the missing tag:
 scheduler: saved environment image "<tag>" is missing from the runtime; run aether env reset to return to the standard image
 ```
 
-Aether does not fall back to the standard image silently. Run `aether env reset`.
+Cloudfield does not fall back to the standard image silently. Run `aether env reset`.
 
 ## Docker inside sessions
 
@@ -306,12 +307,12 @@ support for CPU quotas, memory and swap limits, and PID limits, or new
 containers are refused.
 
 Before it creates a session, environment, browser or agent-updater container,
-Aether checks that the host has free disk and memory, and that the server is
+Cloudfield checks that the host has free disk and memory, and that the server is
 not stalling on memory (its cgroup's `memory.pressure`, `some avg60` below
 10%). Otherwise the launch fails with `scheduler: insufficient disk headroom`,
 `scheduler: insufficient host memory headroom` or `scheduler: host capacity
-unavailable`. Aether never stops a running agent to make room, and reopening a
-retained session needs no check. [Recover from disk
+unavailable`. Cloudfield never stops a running agent to make room, and reopening
+a retained session needs no check. [Recover from disk
 pressure](failure-handling.md#recover-from-disk-pressure) and [Recover from
 memory pressure](failure-handling.md#recover-from-memory-pressure) have the
 thresholds and what to do.

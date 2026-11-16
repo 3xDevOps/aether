@@ -1,6 +1,7 @@
-# Running Aether with a team
+# Running Cloudfield with a team
 
-One Aether server can serve several people. Each person is a **member** with a
+One Cloudfield server can serve several people. Each person is a **member** with
+a
 **role**, and everyone's agents run side by side in the same **workspaces** (a
 workspace is one repository plus its settings). A solo setup is a team of one,
 so there is nothing to switch on: you add members.
@@ -171,7 +172,7 @@ another admin or super admin the server's owner at its edge.
 
 ### Single sign-on
 
-Aether has no identity provider settings of its own: sign your tailnet in
+Cloudfield has no identity provider settings of its own: sign your tailnet in
 through yours, such as Okta, Google Workspace, Microsoft Entra ID or GitHub
 ([Tailscale's providers](https://tailscale.com/docs/integrations/identity)), and
 have people join [over the tailnet](#over-a-tailnet). Each such member is a
@@ -361,7 +362,7 @@ aether workspace mirror refresh --workspace myproject
 ```
 
 `--auth` is `public`, `github` (your own GitHub login on the server, read access
-is enough) or `deploy-key` (Aether prints a public key to add as a read-only
+is enough) or `deploy-key` (Cloudfield prints a public key to add as a read-only
 deploy key). A new mirror starts pending: verify it and adopt its first revision
 before the first session. While it is pending, `refresh`, `status` and every
 refused launch print the exact `aether workspace mirror adopt` command for the
@@ -498,12 +499,12 @@ Answer an agent's plan or permission prompt in the session's Chat view
 once, with no acceptance step. The agent account, cost attribution and the
 container's home stay the launcher's.
 
-When a session is handed off or finishes, Aether saves an **evidence packet**: the
+When a session is handed off or finishes, Cloudfield saves an **evidence packet**: the
 objective, base and final git revisions, changed files and a transcript copy. It
-records what Aether observed and does not prove a command succeeded or that
+records what Cloudfield observed and does not prove a command succeeded or that
 anyone reviewed the result. Packets expire after 30 days, and a session whose
-checkout exceeds 64 MiB gets no finish packet. If saving fails, Aether keeps the
-checkout and transcript instead of deleting them.
+checkout exceeds 64 MiB gets no finish packet. If saving fails, Cloudfield keeps
+the checkout and transcript instead of deleting them.
 
 ```sh
 aether close <session> --outcome merged|abandoned   # close a finished session after reviewing it
@@ -546,15 +547,15 @@ Change yours with `aether member color <#rrggbb>` and your display name under
 off, change settings) is recorded in the timeline with who did it.
 
 Set your git identity under **Profile → Git identity**, or `aether member git
---name "Dana Lee" --email dana@example.com`. The agent in a session commits as the
-member who launched it, fixed when the container starts. Aether's own commits
-(when a session finishes, is stopped or is recovered) use the session's current owner.
-With no identity set, commits use your display name and `<member-id>@aether.local`,
-which matches no GitHub account. Signed commits show **Verified** on GitHub only
-if the commit email is verified there
+--name "Dana Lee" --email dana@example.com`. The agent in a session commits as
+the member who launched it, fixed when the container starts. Cloudfield's own
+commits (when a session finishes, is stopped or is recovered) use the session's
+current owner. With no identity set, commits use your display name and
+`<member-id>@aether.local`, which matches no GitHub account. Signed commits show
+**Verified** on GitHub only if the commit email is verified there
 ([security.md](security.md#github-credentials-and-signing-keys)).
 
-Anyone who messages a session is added to its co-authors. Aether's commits end with a
+Anyone who messages a session is added to its co-authors. Cloudfield's commits end with a
 `Co-authored-by:` line for each, and the session's agent finds the list in
 `/run/aether/co-authors` ([coordination.md](coordination.md)).
 
@@ -671,7 +672,7 @@ lists exactly what is shared.
 ### Usage fallback
 
 When a `claude` or `codex` launch's account has used 95% or more of its
-subscription quota, Aether starts the session on another account with usage left.
+subscription quota, Cloudfield starts the session on another account with usage left.
 Other agents always launch as requested, and so does an account whose usage
 cannot be read (an API-key login, signed out, or a vendor read over 3 seconds).
 
@@ -700,11 +701,11 @@ the session launches on the requested one. A session that fell back stays owned 
 launcher. Its header reads **On `<name>`'s account (fallback)**, and `aether
 sessions` appends ` (fallback)` to the `ACCOUNT` column.
 
-A session also moves to another account mid-session when its agent reports the usage
-limit. Aether starts a new container on the next account and resumes the agent's
-session there. The session keeps its ID, checkout and branch, but processes in the
-old container, terminals included, end. This works for Enhanced and Background
-sessions of `claude` and `codex` and Standard `claude` sessions
+A session also moves to another account mid-session when its agent reports the
+usage limit. Cloudfield starts a new container on the next account and resumes
+the agent's session there. The session keeps its ID, checkout and branch, but
+processes in the old container, terminals included, end. This works for Enhanced
+and Background sessions of `claude` and `codex` and Standard `claude` sessions
 ([harnesses.md](harnesses.md#usage-limit-signals)). Cost stays with the account
 that spent it. The account that ran out is not read again: the agent's report
 counts as exhausted. The move picks an account with usage left as a launch

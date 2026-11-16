@@ -1,4 +1,4 @@
-# Aether connector for ChatGPT and Claude: terms of service
+# Cloudfield connector for ChatGPT and Claude: terms of service
 
 > **DRAFT. Not published and not in effect.** The project owner and legal
 > counsel must approve this text before it is hosted at the URL entered as
@@ -8,15 +8,15 @@
 
 Effective: [date of publication]
 
-These terms govern your use of the Aether connector at
+These terms govern your use of the Cloudfield connector at
 `https://edge.onaether.dev/mcp` and the project edge it runs through
 (`edge.onaether.dev`, `auth.onaether.dev`), operated by 3xDevOps
-("we"). The Aether software itself is licensed under the GPL-3.0; these
+("we"). The Cloudfield software itself is licensed under the GPL-3.0; these
 terms do not change that licence.
 
 ## What the service is
 
-The connector relays requests from ChatGPT or Claude to an Aether server you
+The connector relays requests from ChatGPT or Claude to a Cloudfield server you
 are a member of, and returns the server's answers. It does not host agents,
 run code, or hold provider credentials: every tool call runs on that server,
 under its administrator's control and with your role there.
@@ -54,7 +54,7 @@ allow.
 ## Third parties
 
 ChatGPT and Claude are provided by OpenAI and Anthropic under their own
-terms. Your Aether server is operated by its administrator. We are not
+terms. Your Cloudfield server is operated by its administrator. We are not
 responsible for either.
 
 ## Availability and changes

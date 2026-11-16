@@ -1,8 +1,8 @@
 # Quickstart
 
 This guide takes you from nothing to an agent's change published as a pull
-request, in eight steps. Each step ends with how you know it worked. Aether's
-terms are defined in the [glossary](README.md#concepts).
+request, in eight steps. Each step ends with how you know it worked.
+Cloudfield's terms are defined in the [glossary](README.md#concepts).
 A coding agent can do these steps from the CLI: paste the prompt in
 [agents.md](agents.md) into it.
 
@@ -60,8 +60,8 @@ Setup decides how your computer reaches the server. **Tailscale** is the
 simplest: on a host where Tailscale runs, Enter at the tailnet question picks
 it, and people link by this host's tailnet name with their tailnet login
 ([networking.md](networking.md#tailscale)). Otherwise setup turns on the
-**edge**, a relay the Aether project runs at `https://edge.onaether.dev`. The
-server and your computer both dial out to it, so neither needs an open port.
+**edge**, a relay the Cloudfield project runs at `https://edge.onaether.dev`.
+The server and your computer both dial out to it, so neither needs an open port.
 SSH runs end to end through it: the edge cannot read your traffic, but sees
 host names, IP addresses and who signs in ([edge.md](edge.md));
 `aether-server config set edge-url ""` turns it off.
@@ -204,7 +204,7 @@ aether member git --name "Ada Lovelace" --email ada@example.com
 A **workspace** is one repository, its **base branch** (the branch new sessions
 start from), and the sessions started from it. Only an admin or super admin can create one, and the creator owns it ([workspace access](teams.md#workspace-access)).
 
-Open the **dashboard**, the web app where you work with Aether. The desktop
+Open the **dashboard**, the web app where you work with Cloudfield. The desktop
 app shows it, and so does `aether gui`, which serves it in a browser tab from
 your computer. It shows **Onboarding** (**Connect**, **Repository**, **Agent**,
 **First session**, which match steps 3 to 6 here) until you finish. If you linked
@@ -216,7 +216,7 @@ there. **Settings → General → Setup guide → Open guide** reopens onboardin
 1. In **Onboarding → Repository**, under **From GitHub**, click **Add GitHub
    repository**.
 2. Click **Connect GitHub**, then **Copy code and open GitHub**. Enter the code
-   on GitHub and authorize **GitHub CLI**, which Aether uses to connect. The
+   on GitHub and authorize **GitHub CLI**, which Cloudfield uses to connect. The
    dialog shows **Connected as `<login>`** by itself.
 3. Choose a repository. Private and organization repositories need no deploy
    key.
@@ -287,8 +287,8 @@ the vendor's own login. Your **home** there persists, so this is done once.
 5. Click **Check**.
 
 It worked if the dialog shows **Installed** and **Login found**, and after
-**Done** the agent's button reads **Run**. Aether only looks for the login file;
-the agent proves the login when a session starts.
+**Done** the agent's button reads **Run**. Cloudfield only looks for the login
+file; the agent proves the login when a session starts.
 
 From the CLI, on your computer. The environment has no `aether` command, so do
 not run these in its terminal:
@@ -488,10 +488,11 @@ permission request, a `needs-input` or `blocked` report, or a disconnected
 agent), 4 when it is parked with nothing pending, because its turn ended with
 an `answered` report or no report or it went silent, and a message continues it (`aether message
 <session-id> "<reply>"`), 5 when its wait broke (a condition it waited on resolved
-and the wake never reached the agent, or its source went unread for an hour; see [Waits Aether can
-check](failure-handling.md#waits-aether-can-check)), and 124 on timeout. Before exiting it prints `run
+and the wake never reached the agent, or its source went unread for an hour; see [Waits Cloudfield can
+check](failure-handling.md#waits-cloudfield-can-check)), and 124 on timeout.
+Before exiting it prints `run
 <session-id> <state>: <reason>`, with the state as `aether sessions` labels it. It keeps waiting
-while the session waits on agents, CI or a process. When Aether cannot vouch for that wait
+while the session waits on agents, CI or a process. When Cloudfield cannot vouch for that wait
 it says so once on stderr: `session <session-id> still waits, but <condition>: status
 unknown (last read 12m ago): <error>`. It also exits 1 on its
 own error, such as an unknown session id, with the error on stderr and nothing on
