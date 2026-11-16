@@ -137,7 +137,7 @@ they are.
 
 - `aether-release.json`, its `.sig`, `checksums.txt` and the 15 binary file
   names of a release.
-- The SSH banner `SSH-2.0-Aether`, the 10 subsystem names, the 5 headers and
+- The SSH banner `SSH-2.0-Aether`, the 10 subsystem names, the 6 headers and
   the 7 signing context strings.
 - `/var/lib/aether`, `aether.db`, `aether.db.pre-update`, `/etc/aether`,
   `aether.slice`.
@@ -271,7 +271,15 @@ has updated.
 
 ### Phase 4: the repositories
 
-The owner renames both repositories. Before the rename:
+This repository was renamed to `3xDevOps/cloudfield` on 2026-11-16, before
+pull request 7 had merged. No promotion had ever run, so no edge host was
+refused one. What that leaves: every edge host gets the script from pull
+request 7 before the first promotion, because a host with the older script
+refuses a promotion signed under the new name and prints `has no valid
+promotion attestation`; and `3xDevOps/aether` stays an accepted signer on
+hosts until `:stable` carries a release promoted after the rename.
+
+The order that was planned for the rename:
 
 - the two-identity `edge-update.sh` is on every edge host the project knows
   of, and a release note tells other operators to copy it again;
@@ -368,7 +376,8 @@ Each step can be undone.
    `https://cloudfield.ai`, attach `cloudfield.ai` to it, and check it.
    Then turn `onaether.dev` into a redirect to the same path on
    `cloudfield.ai`.
-3. Edge: deploy the multi-address release with only the old pair. Nothing
+3. Edge: deploy a release that has pull requests 5 and 6 (edge protocol 6)
+   with only the old pair. Nothing
    changes.
 4. With pull request 7's `edge-update.sh` on the host and the
    multi-address release past its update, add the new pair. Test both
@@ -634,6 +643,25 @@ Stated by the design and not yet tested:
 - By reading, not by a run: a micro VM run gets both in-VM paths from
   pull request 3 with no change in that stack, because the mount is of the
   server-binary kind, which the guest helper binds itself.
+- The updater never fails an update over a link it cannot create, and a
+  host whose `aether` is itself a link into a directory the updater cannot
+  write is refused the update before it downloads. Only `aether-server
+  update`, run as root, reloads systemd; the server's own updater creates
+  the unit link and leaves the reload to it. Not run on a real systemd:
+  that a link made by hand resolves before a reload, on systemd 239 to 255.
+- The CLI's `cloudfield` config directory is matched by exact name. macOS
+  and Windows keep the desktop app's data directory beside it and ignore
+  case, so the renamed desktop app's data directory is named
+  `cloudfield-desktop`, never `Cloudfield`.
+- `edge move` (pull request 17) refuses or warns when the edge negotiates
+  a protocol below 6: below it a server accepts connector tokens only for
+  the address it is enrolled at.
+- A doc line that quotes what the product shows changes in the pull request
+  that changes that string. Pull request 15 lists those lines for 11 to 14.
+- Not checked on real machines, owed before pull request 13: macOS 13 and
+  later may refuse a renamed app moving `/Applications/Aether.app`; how a
+  packaged build's `Info.plist` reads; Windows refusing to rename a running
+  app's folder; a real relaunch after an update on Linux and macOS.
 
 ## Implementation pull requests
 
@@ -679,13 +707,16 @@ Each is one session. Phase and dependencies are in brackets.
    reads that count. The count tells old servers from new only while the
    edge runs a release with this pull request. `internal/edge/proto`.
    [0; after 5]
-7. `feat(edge)`: `edge-update.sh` and `promote-edge.yml` accept both
-   signer identities, with a manual step that makes hosts stop until the
-   script is copied again; `--rollback` refuses to go below the
-   multi-address release while the address list is set, unless forced by
-   a flag. `scripts/edge-update.sh`,
-   `edge-update-test.sh`, `.github/workflows/promote-edge.yml`,
-   `packaging/edge/upgrade.json`, `internal/edge/edgetest/testdata/`,
+7. `feat(edge)`: `edge-update.sh` accepts a promotion signed under either
+   repository name, and `edge-attestation.sh` a build attested under
+   either; `promote-edge.yml` keeps verifying its own run under the current
+   name only. `--rollback` refuses to go below the multi-address release
+   (edge protocol 6) while the address list is set, unless
+   `--drop-origin-pairs` forces it. The script reads `CLOUDFIELD_*` before
+   `AETHER_*`. No manual step in `packaging/edge/upgrade.json`: a host with
+   the older script fails at the signature, before it reads that file.
+   `scripts/edge-update.sh`, `edge-update-test.sh`, `edge-attestation.sh`,
+   `edge-attestation-test.sh`, `internal/edge/edgetest/testdata/`,
    `docs/edge.md`. [0; after release-channels 6, 7 and 8]
 8. `feat(gitengine)`: accept `cloudfield/run-` branches beside
    `aether/run-`. `internal/gitengine/engine.go`, `transport.go`,
@@ -716,7 +747,8 @@ Each is one session. Phase and dependencies are in brackets.
 13. `feat(desktop)`: product name, dialogs and icons; Windows resources.
     `productName` in `desktop/electron-builder.yml` and `package.json`,
     `main.js`, `desktop/build/`, `packaging/windows/versioninfo.json`,
-    `scripts/update-smoke.ps1`, and the app paths in `docs/install.md`.
+    `scripts/update-smoke.ps1`, and the app paths in `docs/install.md`. The
+    data directory becomes `cloudfield-desktop` for new installs.
     Design review. [1; after 9 and 9b are released]
 14. `feat(android)`: app name, strings, launcher and notification icons,
     Play listing. `android/app/src/main/res/`, `android/listing/`. Design
