@@ -17,7 +17,7 @@ cat >"$bin/release-hotfix" <<'EOF'
 set -eu
 echo "$*" >"$STATE/tool"
 [ ! -e "$STATE/refuse" ] || { echo "release-hotfix: v0.9.4 has no signed aether-release.json" >&2; exit 1; }
-printf 'build=412\nhotfix=%s\nbase-tag=%s\nbase-commit=%s\nprevious-commit=%s\npointer=stable\npointer-if-above=beta\n' \
+printf 'build=412\nhotfix=%s\nbase-tag=%s\nbase-commit=%s\nprevious-commit=%s\n' \
 	"${2##*.}" "$BASE_TAG" "$BASE" "$PREVIOUS"
 EOF
 chmod +x "$bin/release-hotfix"
@@ -85,7 +85,7 @@ refuse() {
 export BASE_TAG=v0.9.0 BASE="$base" PREVIOUS="$base"
 head "$fix1"
 accept 'first hotfix' v0.9.1 "$fix1"
-[ "$(cat "$tmp/out")" = "$(printf 'build=412\nhotfix=1\nbase-tag=v0.9.0\nbase-commit=%s\nprevious-commit=%s\npointer=stable\npointer-if-above=beta' "$base" "$base")" ] ||
+[ "$(cat "$tmp/out")" = "$(printf 'build=412\nhotfix=1\nbase-tag=v0.9.0\nbase-commit=%s\nprevious-commit=%s' "$base" "$base")" ] ||
 	{ echo "FAIL: first hotfix printed:" >&2; cat "$tmp/out" >&2; exit 1; }
 [ "$(cat "$STATE/tool")" = '-tag v0.9.1 -repo https://github.com/3xDevOps/Aether' ] ||
 	{ echo "FAIL: first hotfix ran:" >&2; cat "$STATE/tool" >&2; exit 1; }

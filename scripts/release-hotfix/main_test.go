@@ -80,44 +80,23 @@ func line(t *testing.T) releases {
 }
 
 func TestDerivesBuildAndHotfixFromSignedReleases(t *testing.T) {
-	r := line(t)
-	got, err := r.derive(t, "v0.9.3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if w := "build=412\nhotfix=3\nbase-tag=v0.9.0\nbase-commit=" + commit("v0.9.0") + "\nprevious-commit=" + commit("v0.9.2") +
-		"\npointer=stable\npointer-if-above=beta\n"; got != w {
-		t.Fatalf("got\n%s\nwant\n%s", got, w)
-	}
-
-	r = line(t)
-	r.stable(t, "v0.9.0", 412, 0)
-	if got, err = r.derive(t, "v0.9.1"); err != nil {
-		t.Fatal(err)
-	}
-	if w := "build=412\nhotfix=1\nbase-tag=v0.9.0\nbase-commit=" + commit("v0.9.0") + "\nprevious-commit=" + commit("v0.9.0") +
-		"\npointer=stable\npointer-if-above=beta\n"; got != w {
-		t.Fatalf("first hotfix: got\n%s\nwant\n%s", got, w)
-	}
-
-	// The first stable with channels is v0.8.7, so its line's base is not
-	// vX.Y.0. stable.json names a newer line, so no pointer moves.
-	r = line(t)
-	if got, err = r.derive(t, "v0.8.9"); err != nil {
-		t.Fatal(err)
-	}
-	if w := "build=1\nhotfix=2\nbase-tag=v0.8.7\nbase-commit=" + commit("v0.8.7") + "\nprevious-commit=" + commit("v0.8.8") +
-		"\npointer=\npointer-if-above=\n"; got != w {
-		t.Fatalf("older line: got\n%s\nwant\n%s", got, w)
-	}
-
-	// A rerun after the pointer moved keeps it.
-	r = line(t)
-	if got, err = r.derive(t, "v0.9.2"); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasSuffix(got, "\npointer=\npointer-if-above=\n") {
-		t.Fatalf("rerun: got\n%s", got)
+	for name, c := range map[string]struct{ tag, base, previous, want string }{
+		"next hotfix":  {"v0.9.3", "v0.9.0", "v0.9.2", "build=412\nhotfix=3\n"},
+		"first hotfix": {"v0.9.1", "v0.9.0", "v0.9.0", "build=412\nhotfix=1\n"},
+		// The first stable with channels is v0.8.7, so its line's base is
+		// not vX.Y.0.
+		"line based on v0.8.7": {"v0.8.9", "v0.8.7", "v0.8.8", "build=1\nhotfix=2\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := line(t).derive(t, c.tag)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := c.want + "base-tag=" + c.base + "\nbase-commit=" + commit(c.base) + "\nprevious-commit=" + commit(c.previous) + "\n"
+			if got != want {
+				t.Fatalf("got\n%s\nwant\n%s", got, want)
+			}
+		})
 	}
 }
 

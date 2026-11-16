@@ -88,7 +88,6 @@ jobs:
       channel: ${{ steps.authorize.outputs.channel }}
       build: ${{ steps.authorize.outputs.build }}
       hotfix: ${{ steps.authorize.outputs.hotfix }}
-      pointer: ${{ steps.authorize.outputs.pointer }}
       pointer-if-above: ${{ steps.authorize.outputs.pointer-if-above }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -121,20 +120,13 @@ jobs:
             core=${GITHUB_REF_NAME#v}
             branch=release/${core%.*}
             url=$(sh scripts/release-ci-check.sh --branch "$branch" "$GITHUB_REPOSITORY" "$sha")
-            {
-              echo channel=stable
-              grep -E '^(build|hotfix|pointer|pointer-if-above)=' "$RUNNER_TEMP/hotfix"
-            } >> "$GITHUB_OUTPUT"
-            moves='no pointer: stable.json is not below it'
-            if grep -qx 'pointer=stable' "$RUNNER_TEMP/hotfix"; then
-              moves='stable.json, and beta.json if the hotfix is above it'
-            fi
-            echo "Hotfix $GITHUB_REF_NAME of $base: stable, build $build, hotfix $hotfix, on \`$branch\`; moves $moves" >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' channel=stable "build=$build" "hotfix=$hotfix" 'pointer-if-above=stable beta' >> "$GITHUB_OUTPUT"
+            echo "Hotfix $GITHUB_REF_NAME of $base: stable, build $build, hotfix $hotfix, on \`$branch\`; moves stable.json, then beta.json, each only if the hotfix is above it" >> "$GITHUB_STEP_SUMMARY"
           else
             sh scripts/android-version-code.sh "$GITHUB_REF_NAME"
             url=$(sh scripts/release-ci-check.sh "$GITHUB_REPOSITORY" "$sha")
             branch=main
-            printf '%s\n' channel= build=0 hotfix=0 pointer= pointer-if-above= >> "$GITHUB_OUTPUT"
+            printf '%s\n' channel= build=0 hotfix=0 pointer-if-above= >> "$GITHUB_OUTPUT"
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "tools=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -143,13 +135,13 @@ jobs:
   # Every job in release-build.yml gets at most these permissions and
   # narrows them to what it needs. Its release job runs in the release
   # environment, whose signing key takes precedence over the repository
-  # secret passed here. A hotfix that moves a pointer waits for the
+  # secret passed here. A hotfix, which may move pointers, waits for the
   # channels group every pointer writer shares; the other group is never
   # contended and only stands in, since a group cannot be empty.
   release-build:
     needs: release-policy
     concurrency:
-      group: ${{ needs.release-policy.outputs.pointer != '' && 'channels' || format('release-build-{0}', github.ref) }}
+      group: ${{ needs.release-policy.outputs.pointer-if-above != '' && 'channels' || format('release-build-{0}', github.ref) }}
       cancel-in-progress: false
     permissions:
       contents: write
@@ -165,7 +157,6 @@ jobs:
       channel: ${{ needs.release-policy.outputs.channel }}
       build: ${{ fromJSON(needs.release-policy.outputs.build) }}
       hotfix: ${{ fromJSON(needs.release-policy.outputs.hotfix) }}
-      pointer: ${{ needs.release-policy.outputs.pointer }}
       pointer-if-above: ${{ needs.release-policy.outputs.pointer-if-above }}
     secrets:
       AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}

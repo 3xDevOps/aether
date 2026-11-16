@@ -7,13 +7,12 @@
 // vX.Y.(Z-1) must be a stable release with a build. Its hotfix count h
 // names the line's base, vX.Y.(Z-1-h), which must be the stable release on
 // the same build with hotfix 0: the release the line's release/X.Y branch
-// is cut from. The hotfix signs that build and hotfix h+1. A hotfix above
-// the current stable.json moves it and, when above it, beta.json; a hotfix
-// on an older line moves neither.
+// is cut from. The hotfix signs that build and hotfix h+1. It also verifies
+// the current stable.json, so a hotfix whose pointers cannot be moved is
+// refused before anything builds; the signer decides which pointers move.
 //
-// It prints build, hotfix, base-tag, base-commit, previous-commit, pointer
-// and pointer-if-above as name=value lines. scripts/release-hotfix.sh runs
-// it.
+// It prints build, hotfix, base-tag, base-commit and previous-commit as
+// name=value lines. scripts/release-hotfix.sh runs it.
 package main
 
 import (
@@ -77,16 +76,11 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	hotfix := previous.Hotfix + 1
 
-	stable, err := selfupdate.FetchPointer(ctx, repo, selfupdate.ChannelStable)
-	if err != nil {
+	if _, err = selfupdate.FetchPointer(ctx, repo, selfupdate.ChannelStable); err != nil {
 		return err
 	}
-	pointer, ifAbove := "", ""
-	if stable.Build < base.Build || stable.Build == base.Build && stable.Hotfix < hotfix {
-		pointer, ifAbove = selfupdate.ChannelStable, selfupdate.ChannelBeta
-	}
-	_, err = fmt.Fprintf(stdout, "build=%d\nhotfix=%d\nbase-tag=%s\nbase-commit=%s\nprevious-commit=%s\npointer=%s\npointer-if-above=%s\n",
-		base.Build, hotfix, baseTag, base.Commit, previous.Commit, pointer, ifAbove)
+	_, err = fmt.Fprintf(stdout, "build=%d\nhotfix=%d\nbase-tag=%s\nbase-commit=%s\nprevious-commit=%s\n",
+		base.Build, hotfix, baseTag, base.Commit, previous.Commit)
 	return err
 }
 

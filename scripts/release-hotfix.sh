@@ -1,11 +1,10 @@
 #!/bin/sh
 # Decides whether the hotfix tag $2, vX.Y.Z with Z at least 1, may release
 # commit $3 of repository $1, and prints the name=value lines release.yml
-# passes to release-build.yml: build, hotfix, base-tag, base-commit,
-# previous-commit, pointer and pointer-if-above. Run it from a checkout of
-# main whose origin is the repository, with RELEASE_HOTFIX naming the built
-# scripts/release-hotfix command, which derives every value from the signed
-# manifests of published releases.
+# needs: build, hotfix, base-tag, base-commit and previous-commit. Run it
+# from a checkout of main whose origin is the repository, with
+# RELEASE_HOTFIX naming the built scripts/release-hotfix command, which
+# derives every value from the signed manifests of published releases.
 #
 # The commit must be the head of release/X.Y, contain vX.Y.(Z-1) and
 # differ from it.

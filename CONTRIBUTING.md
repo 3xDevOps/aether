@@ -558,18 +558,19 @@ git push origin v0.9.1
 `release.yml` then runs `scripts/release-hotfix.sh` from `main`. It reads
 the signed manifest of the published `vX.Y.(Z-1)`, which must be a stable
 release with a build; its hotfix count leads back to the base, whose
-manifest must be stable on the same build with hotfix 0. It refuses the tag
-unless its commit is on `release/X.Y`, contains `vX.Y.(Z-1)` and differs
-from it, and the branch's only merge base with `main` is the base commit,
-so the branch carries nothing newer from `main`. The release is stable,
+manifest must be stable on the same build with hotfix 0. `stable.json`
+must verify too. It refuses the tag unless its commit is the head of
+`release/X.Y`, contains `vX.Y.(Z-1)` and differs from it, and the branch's
+only merge base with `main` is the base commit, so the branch carries
+nothing newer from `main`. The release is stable,
 with the base's build and the next hotfix count. A line whose base is from
-before channels has no build and cannot take a hotfix. The hotfix moves
-`stable.json`, and `beta.json` when it is above it, unless `stable.json`
-already names a newer line: then it moves no pointer, and only installs
-that ask for that tag get it. Once a nightly carries the fix, promote it to
-beta too, because beta can sit at a build above the hotfix that lacks the
-fix. A hotfix that moves a pointer waits for the `channels` concurrency
-group that every pointer writer shares. GitHub keeps one pending run per
+before channels has no build and cannot take a hotfix. After publishing,
+the signer moves `stable.json` and then `beta.json`, each only when the
+hotfix is above it. A hotfix on a line older than `stable.json` moves
+neither, and only installs that ask for that tag get it. Once a nightly
+carries the fix, promote it to beta too, because beta can sit at a build
+above the hotfix that lacks the fix. A hotfix waits for the `channels`
+concurrency group that every pointer writer shares. GitHub keeps one pending run per
 group, so a pending hotfix can be cancelled when another writer queues;
 re-run it with `gh run rerun <run-id>`.
 
