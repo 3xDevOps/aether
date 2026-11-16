@@ -40,7 +40,7 @@ import type {
 } from '@/lib/types'
 import { memberName } from '@/lib/member-name'
 import { cn, focusRing } from '@/lib/utils'
-import { compareVersions } from '@/lib/version'
+import { buildLabel, compareVersions } from '@/lib/version'
 import { useStore } from '@/store'
 import { useCapability, useIsSuperAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -352,8 +352,8 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
     )
   }
   if (target.state === 'channel_wait') {
-    const stays = `${target.version}${target.build ? ` (build ${target.build})` : ''}`
-    const at = `${target.latest}${target.latestBuild ? ` (build ${target.latestBuild})` : ''}`
+    const stays = `${target.version}${target.build ? ` (${buildLabel(target.build, target.hotfix)})` : ''}`
+    const at = `${target.latest}${target.latestBuild ? ` (${buildLabel(target.latestBuild, target.latestHotfix)})` : ''}`
     return (
       <StatusRow
         Icon={ServerCog}

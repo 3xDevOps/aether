@@ -11,6 +11,7 @@ import { releaseFinishedPlan } from '@/lib/commands'
 import { api, type Api } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { buildLabel } from '@/lib/version'
 import { rootCommand, useSysbox } from '@/lib/use-sysbox'
 import { workspaceRuns } from '@/routes/board/selectors'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
@@ -55,7 +56,7 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
   const checking = server.state === 'checking' || cli.state === 'checking'
   const waiting = server.state === 'channel_wait' ? server : null
   const checkedLine = waiting
-    ? `Stays on ${waiting.build ? `build ${waiting.build}` : waiting.version} until ${waiting.channel} reaches it.`
+    ? `Stays on ${buildLabel(waiting.build, waiting.hotfix) || waiting.version} until ${waiting.channel} reaches it.`
     : current && !update && checkedTime(current.checkedAt)
       ? `Up to date${channel ? ` on ${channel}` : ''}. Checked ${checkedTime(current.checkedAt)}.`
       : ''

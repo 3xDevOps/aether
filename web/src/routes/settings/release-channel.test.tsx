@@ -178,6 +178,19 @@ describe('release channel context', () => {
   })
 })
 
+describe('hotfix builds', () => {
+  it('names the hotfix in the confirmation, since the same build can still be above the channel', async () => {
+    seed({ channel: 'nightly' })
+    const client = fakeApi({
+      serverReleaseChannelSet: vi.fn(async () => dry({ running: { version: 'v0.9.1', build: 412, hotfix: 1 }, target: { version: 'v0.9.0', build: 412 } })),
+    })
+    render(<ReleaseChannelSection client={client} />)
+    fireEvent.click(screen.getByRole('radio', { name: 'Beta' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Switch to beta?' })
+    expect(dialog.textContent).toContain('This server runs v0.9.1 (build 412 hotfix 1). Beta is at v0.9.0 (build 412). The server stays on its current build until beta reaches build 412 hotfix 1')
+  })
+})
+
 describe('confirmation', () => {
   it('asks for nightly always and for others only when the server would wait or cannot tell', () => {
     expect(confirmation('nightly')).toBe('nightly')

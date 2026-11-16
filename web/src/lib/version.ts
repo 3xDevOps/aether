@@ -74,3 +74,9 @@ const releaseTag = /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/
 export function releasePage(tag: string): string {
   return releaseTag.test(tag) ? `https://github.com/3xDevOps/Aether/releases/tag/${tag}` : ''
 }
+
+/** "build 412", or "build 412 hotfix 1"; empty for a release from before builds. */
+export function buildLabel(build?: number, hotfix?: number): string {
+  if (!build) return ''
+  return hotfix ? `build ${build} hotfix ${hotfix}` : `build ${build}`
+}

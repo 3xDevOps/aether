@@ -257,6 +257,18 @@ describe('the server update banner', () => {
     }
   })
 
+  test('the wait row names the hotfix on either side', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({
+        server_version: 'v0.9.1', server_build: 412, server_hotfix: 1, channel: 'beta',
+        latest: 'v0.9.0', latest_version: 'v0.9.0', latest_build: 412, channel_wait: true,
+      }),
+    })
+    render(<UpdateHost client={client} />)
+    expect(await screen.findByText('The server stays on v0.9.1 (build 412 hotfix 1) until the beta channel reaches it.')).toBeTruthy()
+    expect(screen.getByText('The beta channel is at v0.9.0 (build 412). The server never installs an older build.')).toBeTruthy()
+  })
+
   test('an update the server scheduled itself is not attributed to a member', async () => {
     const client = seedServer({
       status: serverUpdateStatus({

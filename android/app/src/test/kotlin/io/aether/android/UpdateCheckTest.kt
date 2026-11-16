@@ -146,4 +146,15 @@ class UpdateCheckTest {
         assertNull(noticeFor(beta, InstallSource.PLAY, 10 + 30 * DAY, 0))
         assertEquals("v1.3.0-beta.2", noticeFor(beta, InstallSource.RELEASE, 10, 0)?.latest)
     }
+
+    @Test
+    fun anAnswerIsOnlyGoodForTheConnectionThatMadeIt() {
+        val gateway = afterCheck(StoredUpdate(), 10, line("v1.3.0", true), "", 0, 0.0, VIA_GATEWAY)
+        assertEquals("v1.3.0", noticeFor(gateway, InstallSource.RELEASE, 20, 0, VIA_GATEWAY)?.latest)
+        // The member switched to Tailscale mode: the Edge server's offer is not shown there,
+        assertNull(noticeFor(gateway, InstallSource.RELEASE, 20, 0, VIA_CLI))
+        // and a check runs at once instead of waiting for the deadline.
+        assertFalse(checkDue(20, gateway, 0, VIA_GATEWAY))
+        assertTrue(checkDue(20, gateway, 0, VIA_CLI))
+    }
 }

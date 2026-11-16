@@ -22,7 +22,7 @@ export type UpdateTarget =
   | { state: 'scheduled'; latest: string; by: string; byServer?: boolean }
   // The server runs a build above its channel's newest and stays on it
   // until the channel reaches it.
-  | { state: 'channel_wait'; version: string; build?: number; channel: string; latest: string; latestBuild?: number }
+  | { state: 'channel_wait'; version: string; build?: number; hotfix?: number; channel: string; latest: string; latestBuild?: number; latestHotfix?: number }
   | { state: 'applying'; latest: string; step?: string }
   | { state: 'restarting'; latest: string }
   | { state: 'ready_to_restart'; latest: string }
@@ -333,9 +333,11 @@ export function serverTarget(s: RootState, now: number): UpdateTarget {
       state: 'channel_wait',
       version: running,
       build: status.server_build,
+      hotfix: status.server_hotfix,
       channel: status.channel ?? '',
       latest,
       latestBuild: status.latest_build,
+      latestHotfix: status.latest_hotfix,
     }
   }
   if (isBehind && latest) return { state: 'available', version: running, latest, notesUrl: status?.notes_url }

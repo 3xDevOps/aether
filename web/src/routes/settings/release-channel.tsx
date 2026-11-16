@@ -15,6 +15,7 @@ import { RadioPills, RadioPillsItem } from '@/components/ui/radio-pills'
 import { Spinner } from '@/components/ui/spinner'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { buildLabel } from '@/lib/version'
 import type { ChannelPointer, ReleaseChannel, ServerReleaseChannelSet } from '@/lib/types'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
@@ -176,7 +177,7 @@ function daysAgo(iso: string, now = Date.now()): string {
 
 function PromoteRow({ channel, pointer }: { channel: 'beta' | 'nightly'; pointer: ChannelPointer }) {
   const age = daysAgo(pointer.published_at)
-  const build = pointer.build ? ` (build ${pointer.build})` : ''
+  const build = pointer.build ? ` (${buildLabel(pointer.build, pointer.hotfix)})` : ''
   const to = channel === 'nightly' ? 'beta' : 'stable'
   return (
     <SettingRow
@@ -211,15 +212,15 @@ function WaitConfirm({ channel, dry }: { channel: ReleaseChannel; dry?: ServerRe
   const name = label[channel]
   const lower = name.toLowerCase()
   const running = dry?.running
-  const runs = running && <>This server runs <Code>{running.version}</Code>{running.build > 0 && ` (build ${running.build})`}. </>
+  const runs = running && <>This server runs <Code>{running.version}</Code>{running.build > 0 && ` (${buildLabel(running.build, running.hotfix)})`}. </>
   return (
     <DialogHeader>
       <DialogTitle>Switch to {lower}?</DialogTitle>
       {dry?.target ? (
         <DialogDescription>
           {runs}
-          {name} is at <Code>{dry.target.version}</Code>{dry.target.build > 0 && ` (build ${dry.target.build})`}.
-          {' '}The server stays on its current build until {lower} reaches {running && running.build > 0 ? `build ${running.build}` : 'it'}, then updates as usual. It never installs an older build.
+          {name} is at <Code>{dry.target.version}</Code>{dry.target.build > 0 && ` (${buildLabel(dry.target.build, dry.target.hotfix)})`}.
+          {' '}The server stays on its current build until {lower} reaches {running && running.build > 0 ? buildLabel(running.build, running.hotfix) : 'it'}, then updates as usual. It never installs an older build.
         </DialogDescription>
       ) : (
         <>

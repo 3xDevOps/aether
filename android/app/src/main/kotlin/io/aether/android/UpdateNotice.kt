@@ -36,6 +36,7 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
     private var facts: InstallFacts? = null
     private var check: Future<*>? = null
     private var checkUrl: String? = null
+    private var via = VIA_CLI
     private var destroyed = false
     private var shown = ""
 
@@ -74,6 +75,7 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
      * says one is on its way, so no check is made before it is up.
      */
     fun resume(gatewayUrl: String?, awaitGateway: Boolean) {
+        via = if (gatewayUrl != null) VIA_GATEWAY else VIA_CLI
         val stored = activity.storedUpdate()
         render(stored)
         // A running check for another gateway must not swallow this one.
@@ -89,7 +91,7 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
                     render(activity.storedUpdate())
                 }
                 if (awaitGateway && gatewayUrl == null) return@submit
-                if (checkDue(System.currentTimeMillis(), stored, read.updatedAt)) {
+                if (checkDue(System.currentTimeMillis(), stored, read.updatedAt, via)) {
                     val run = gatewayUrl?.let(::gatewayCheck) ?: runCheck(context)
                     main.post {
                         if (destroyed) return@post
@@ -109,7 +111,7 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
     private fun render(stored: StoredUpdate) {
         val read = facts
         val now = System.currentTimeMillis()
-        val found = read?.let { noticeFor(stored, it.source, now, it.updatedAt) }
+        val found = read?.let { noticeFor(stored, it.source, now, it.updatedAt, via) }
         val failure = checkFailure(stored, now)
         if (read == null || (found == null && failure == null)) {
             banner.visibility = View.GONE
@@ -133,7 +135,7 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
 }
 
 /** What one run of `aether update --check --json` printed: the check line, else why there is none. */
-class CheckRun(val line: String?, val error: String)
+class CheckRun(val line: String?, val error: String, val via: String = VIA_CLI)
 
 /**
  * The check of the server the gateway at [handshakeUrl] connects to, or
@@ -145,7 +147,7 @@ fun gatewayCheck(handshakeUrl: String): CheckRun? {
     return try {
         serverReleaseCheck(postGateway(call, "{}"))
     } catch (e: IOException) {
-        CheckRun(null, e.message ?: e.toString())
+        CheckRun(null, e.message ?: e.toString(), VIA_GATEWAY)
     }
 }
 
@@ -162,6 +164,7 @@ fun recordCheck(context: Context, run: CheckRun, appUpdatedAt: Long): StoredUpda
             run.error,
             appUpdatedAt,
             Random.nextDouble(-CHECK_JITTER, CHECK_JITTER),
+            run.via,
         )
     context.storeUpdate(next)
     return next

@@ -234,6 +234,14 @@ describe('settings view', () => {
     expect(screen.queryByText(/Up to date/)).toBeNull()
   })
 
+  it('says which hotfix the server stays on when beta already reports its build', () => {
+    seed({
+      serverUpdate: serverUpdateStatus({ server_build: 412, server_hotfix: 1, latest_version: 'v0.9.0', latest_build: 412, channel: 'beta', channel_wait: true }),
+    })
+    render(<ServerSection client={fakeApi()} />)
+    expect(screen.getByText(/Stays on build 412 hotfix 1 until beta reaches it\./)).toBeDefined()
+  })
+
   it('keeps the server admin rows from a collaborator', () => {
     seed({ info: { ...serverInfo, member: bob } })
     render(<SettingsRoute params={{ section: 'server' }} client={fakeApi()} />)
