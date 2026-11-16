@@ -1246,8 +1246,8 @@ updater does the rest.
 - An updater copied before the repository took its current name refuses every
   promotion made since: each run exits 1 with `<tag> (<digest>) on <channel> has
   no valid promotion attestation from promote-edge.yml on main`, after cosign's
-  error naming the signer it got. Copy the script again from the release you
-  install:
+  error naming the signer it got. Install the new updater on every host before
+  the first promotion after the rename, from the release you install:
 
   ```sh
   curl -fsSL -o edge-update.sh https://raw.githubusercontent.com/3xDevOps/Aether/<release-tag>/scripts/edge-update.sh
