@@ -185,10 +185,12 @@ square. That hex is deliberately darker than the dashboard's own dark
 `--canvas`, `#141516` - a launcher icon has to read as an object against a
 wallpaper - so the splash lightens slightly as the SPA paints over it.
 
-Every icon is generated from `web/public/aether-mark.png` by `python3
+The web icons are generated from `web/public/aether-mark.png` by `python3
 scripts/make-icons.py`, the same script that writes the desktop app's, and the
-output is committed. Maskable icons and the iOS icon are square and full-bleed
-because the platform applies its own mask; the rest carry the rounded tile.
+output is committed. The Android app's icons come from
+`scripts/android-icons.py` ([CONTRIBUTING.md](../CONTRIBUTING.md)). Maskable
+icons and the iOS icon are square and full-bleed because the platform applies
+its own mask; the rest carry the rounded tile.
 
 CI installs Bun with `oven-sh/setup-bun` (version pinned in
 `web/.bun-version`) in jobs that run `make build` or `make release-binaries`,

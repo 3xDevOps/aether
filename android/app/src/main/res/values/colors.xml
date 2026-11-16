@@ -16,7 +16,6 @@
     <color name="accent_fill">#367f77</color>
     <color name="accent_text">#306f69</color>
     <color name="on_accent">#ffffff</color>
-    <!-- The adaptive launcher icon's background layer: the Cloudfield icon
-         tile, the one fill of cloudfield-android-background.svg. -->
+    <!-- The fill of cloudfield-android-background.svg. -->
     <color name="ic_launcher_background">#0d1424</color>
 </resources>
