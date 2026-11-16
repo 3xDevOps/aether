@@ -233,6 +233,7 @@ func (s *Service) untaken(ctx context.Context, channel string) (*store.PendingSe
 	}
 	m, err := feed(s.cfg.Releases, s.cfg.Checker.BaseURL()).Fetch(ctx, state.Pending.Version)
 	if err != nil {
+		slog.Warn("serverupdate: keeping the pending update across a channel change", "version", state.Pending.Version, "error", err)
 		return nil, "", keptUpdate{Version: state.Pending.Version, Error: err.Error()}, nil
 	}
 	if err := m.AcceptedOn(channel); err != nil {
