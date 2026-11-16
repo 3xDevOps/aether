@@ -543,19 +543,16 @@ func applyConfigFile(fs *flag.FlagSet, path string, optional bool) (string, erro
 // linkSecondNames gives this binary, the aether beside it and, as root,
 // the unit their second names when they are missing. An update from a
 // release that predates them leaves only the real files, so the first
-// start of this release under systemd completes the layout. Every process
-// a session runs from this binary dispatches before serve and links
-// nothing.
+// start of this release under systemd completes the layout. Binaries it
+// may not link are left silently: a unit that runs as another user would
+// repeat the warning at every start, and `aether-server update` and
+// `aether update` name the command. Every process a session runs from
+// this binary dispatches before serve and links nothing.
 func linkSecondNames(host serverupdate.Host) {
-	self, err := os.Executable()
-	if err == nil {
-		self, err = filepath.EvalSymlinks(self)
-	}
-	if err == nil {
-		err = selfupdate.Link(filepath.Dir(self))
-	}
-	if err != nil {
-		slog.Warn("could not give the binaries their second names", "error", err)
+	if self, err := os.Executable(); err == nil {
+		if self, err = filepath.EvalSymlinks(self); err == nil {
+			_ = selfupdate.Link(filepath.Dir(self))
+		}
 	}
 	created, err := host.LinkUnit()
 	if err != nil {

@@ -28,20 +28,12 @@ var applyUpdate = func(ctx context.Context, baseURL, tag string) ([]string, erro
 	if err := selfupdate.RefuseDowngrade(ctx, baseURL, tag); err != nil {
 		return nil, err
 	}
-	updated, err := selfupdate.UpdateWithAuthorization(ctx, baseURL, tag)
-	if err == nil {
-		linkSecondName(updated[0])
-	}
-	return updated, err
+	return selfupdate.UpdateWithAuthorization(ctx, baseURL, tag)
 }
 
-// linkSecondName gives the binary just installed at path its second name.
-// A link that cannot be made never fails the update; it is logged.
-func linkSecondName(path string) {
-	if err := selfupdate.Link(filepath.Dir(path)); err != nil {
-		slog.Warn("could not give the updated binary its second name", "error", err)
-	}
-}
+// linkBinaries is selfupdate.LinkAll behind a variable, so a test can make
+// it fail and no test links the paths it hands to a stubbed applyUpdate.
+var linkBinaries = selfupdate.LinkAll
 
 // probeAccess is selfupdate.Probe behind a variable so tests can describe
 // a binary that is not the test process.
@@ -270,6 +262,10 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 		updated, err = applyUpdate(r.Context(), g.cfg.Update.BaseURL(), target)
 		if err != nil {
 			return nil, applyError(err, target)
+		}
+		// A second name that cannot be made never fails the update.
+		if err = linkBinaries(updated); err != nil {
+			slog.Warn("could not give the updated binaries their second names", "error", err)
 		}
 		g.installed.Store(&installedRelease{tag: target, paths: updated})
 	}

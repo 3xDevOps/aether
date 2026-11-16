@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/shellquote"
@@ -74,6 +75,20 @@ func Link(dir string) error {
 	return err
 }
 
+// LinkAll runs Link in each directory that holds one of paths, the
+// binaries an update just replaced.
+func LinkAll(paths []string) error {
+	var dirs []string
+	var errs []error
+	for _, p := range paths {
+		if d := filepath.Dir(p); !slices.Contains(dirs, d) {
+			dirs = append(dirs, d)
+			errs = append(errs, Link(d))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // ErrNameTaken is a second name that already holds something other than
 // a link to its binary.
 var ErrNameTaken = errors.New("the name is taken by something else; left as it is")
@@ -116,10 +131,13 @@ func linksTo(path, target string) bool {
 func writeShim(dir, target, name string) error {
 	path := filepath.Join(dir, name)
 	shim := []byte("@\"%~dp0" + target + "\" %*\r\n")
-	got, err := os.ReadFile(path)
+	info, err := os.Lstat(path)
 	switch {
-	case err == nil && bytes.Equal(got, shim):
-		return nil
+	case err == nil && info.Mode().IsRegular():
+		if got, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(got, shim) {
+			return nil
+		}
+		return fmt.Errorf("%s: %w", path, ErrNameTaken)
 	case err == nil:
 		return fmt.Errorf("%s: %w", path, ErrNameTaken)
 	case !errors.Is(err, fs.ErrNotExist):

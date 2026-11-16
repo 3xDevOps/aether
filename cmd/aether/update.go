@@ -127,14 +127,14 @@ func runUpdate(args []string) error {
 		return err
 	}
 	fmt.Printf("updating aether %s -> %s\n", version.String(), *tag)
-	replaced, err := selfupdate.Update(ctx, base, *tag)
+	replaced, err := selfUpdate(ctx, base, *tag)
 	for _, path := range replaced {
 		fmt.Printf("updated %s\n", path)
 	}
 	if err != nil {
 		return err
 	}
-	if err = selfupdate.Link(filepath.Dir(replaced[0])); err != nil {
+	if err = linkBinaries(replaced); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
 	}
 	if len(replaced) > 1 {
@@ -151,6 +151,13 @@ func runUpdate(args []string) error {
 	// is where the new binary now sits.
 	return rebuildDesktopApp(replaced[0])
 }
+
+// The update and the links after it, behind variables so a test can
+// install nothing and make the links fail.
+var (
+	selfUpdate   = selfupdate.Update
+	linkBinaries = selfupdate.LinkAll
+)
 
 // The calls the hand-off makes, behind variables so a test can stand in
 // for systemd and for replacing the process.

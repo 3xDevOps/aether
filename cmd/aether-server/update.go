@@ -101,7 +101,7 @@ func updateCmd(args []string) error {
 	if *channel != "" {
 		return setChannel(context.Background(), os.Stdout, baseURL, stateDir, database, *channel, *yes)
 	}
-	linkSecondNamesAndReload(self)
+	linkUnitAndReload()
 	unlock, err := serverupdate.Lock(stateDir)
 	if err != nil {
 		return err
@@ -119,6 +119,10 @@ func updateCmd(args []string) error {
 		prepareVMs = func(ctx context.Context) error { return installVMFiles(ctx, self, serveArgs) }
 	}
 	if target == version.Version {
+		// An update links the binaries in its swap; this run swaps nothing.
+		if err := selfupdate.Link(filepath.Dir(self)); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
+		}
 		return restartIfStale(self, *o.addr, database, prepareVMs)
 	}
 	fmt.Printf("aether-server %s -> %s\n%s/releases/tag/%s\n", version.Version, target, baseURL, target)
@@ -183,15 +187,10 @@ func installVMFiles(ctx context.Context, self string, serveArgs []string) error 
 	return nil
 }
 
-// linkSecondNamesAndReload gives the binaries beside self and the unit
-// their second names when they are missing, whether or not an update
-// follows, and reloads systemd when it does not resolve the unit link it
-// just made. The update goes ahead whatever this finds; each problem is a
-// warning.
-func linkSecondNamesAndReload(self string) {
-	if err := selfupdate.Link(filepath.Dir(self)); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
-	}
+// linkUnitAndReload gives the unit its second name when it is missing,
+// whether or not an update follows, and reloads systemd when it does not
+// resolve the link just made. The update goes ahead whatever this finds.
+func linkUnitAndReload() {
 	created, err := (serverupdate.Host{UnitDir: filepath.Dir(serversetup.UnitPath)}).LinkUnit()
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)

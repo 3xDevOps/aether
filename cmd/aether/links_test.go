@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -8,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -74,5 +77,48 @@ func TestUpdateWithNothingToInstallLinks(t *testing.T) {
 	}
 	if got, err := os.Readlink(filepath.Join(dir, "cloudfield")); err != nil || got != "aether" {
 		t.Fatalf("cloudfield -> %q, %v; want aether", got, err)
+	}
+}
+
+// TestUpdateThatInstallsWarnsOfALinkItCannotMake drives runUpdate through
+// an install with the swap stubbed: the links are made beside every
+// replaced binary, and a link that cannot be made is a warning, never a
+// failed update.
+func TestUpdateThatInstallsWarnsOfALinkItCannotMake(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(selfupdate.PackagedEnv, "")
+	self, err := executablePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldUpdate, oldLink := selfUpdate, linkBinaries
+	t.Cleanup(func() { selfUpdate, linkBinaries = oldUpdate, oldLink })
+	selfUpdate = func(context.Context, string, string) ([]string, error) { return []string{self}, nil }
+
+	var linked []string
+	linkBinaries = func(paths []string) error {
+		linked = paths
+		return errors.New("symlink aether /usr/local/bin/cloudfield: permission denied\nrun: sudo ln -s aether /usr/local/bin/cloudfield")
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stderr
+	os.Stderr = w
+	runErr := runUpdate([]string{"--version", "v9.9.9", "--force", "--no-app"})
+	os.Stderr = saved
+	if err = w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stderr, _ := io.ReadAll(r)
+	if runErr != nil {
+		t.Fatalf("runUpdate = %v, want the update to succeed despite the link", runErr)
+	}
+	if len(linked) != 1 || linked[0] != self {
+		t.Fatalf("linked %v, want the replaced %s", linked, self)
+	}
+	if !strings.Contains(string(stderr), "warning: symlink aether") || strings.Count(string(stderr), "ln -s") != 1 {
+		t.Fatalf("stderr = %q, want the warning with one ln -s line", stderr)
 	}
 }

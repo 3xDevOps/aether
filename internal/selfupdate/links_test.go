@@ -187,6 +187,12 @@ func TestWindowsShimRunsAetherBesideIt(t *testing.T) {
 	if err := writeShim(dir, "aether.exe", "empty.cmd"); !errors.Is(err, ErrNameTaken) {
 		t.Fatalf("writeShim over an empty file = %v, want ErrNameTaken", err)
 	}
+	if err := os.Mkdir(filepath.Join(dir, "dir.cmd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeShim(dir, "aether.exe", "dir.cmd"); !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("writeShim over a directory = %v, want ErrNameTaken", err)
+	}
 
 	other := filepath.Join(dir, "other.cmd")
 	if err := os.WriteFile(other, []byte("@echo someone else's\r\n"), 0o644); err != nil {
@@ -306,5 +312,20 @@ func TestUpdateProbesTheDirectoryALinkedCompanionResolvesTo(t *testing.T) {
 	_, err := UpdateBinaries(t.Context(), srv.URL, "v1.3.0", filepath.Join(dir, "aether"), "aether", "aether-server")
 	if !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), elsewhere+" is not writable by this user; re-run as `sudo aether update`") {
 		t.Fatalf("UpdateBinaries = %v, want the unwritable directory and the sudo command", err)
+	}
+}
+
+func TestLinkAllLinksEachDirectoryOnce(t *testing.T) {
+	skipOnWindows(t)
+	one, two := t.TempDir(), t.TempDir()
+	writeBinaries(t, one, "bin", "aether")
+	writeBinaries(t, two, "bin", "aether-server")
+	if err := LinkAll([]string{filepath.Join(one, "aether"), filepath.Join(two, "aether-server"), filepath.Join(one, "aether")}); err != nil {
+		t.Fatal(err)
+	}
+	for link, target := range map[string]string{filepath.Join(one, "cloudfield"): "aether", filepath.Join(two, "cloudfield-server"): "aether-server"} {
+		if got, err := os.Readlink(link); err != nil || got != target {
+			t.Fatalf("%s -> %q, %v; want %s", link, got, err, target)
+		}
 	}
 }

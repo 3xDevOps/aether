@@ -8,6 +8,7 @@ package localgw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -515,31 +517,38 @@ func TestUpdateCheckLeavesTheServerFirstForAnOldServersAdmin(t *testing.T) {
 	}
 }
 
-// TestLinkSecondNameAfterAnUpdate is what applyUpdate runs after the
-// swap: the second name appears beside the binary, and a directory that
-// refuses it changes nothing for the update.
-func TestLinkSecondNameAfterAnUpdate(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "aether")
-	if err := os.WriteFile(bin, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	linkSecondName(bin)
-	if got, err := os.Readlink(filepath.Join(dir, "cloudfield")); err != nil || got != "aether" {
-		t.Fatalf("cloudfield -> %q, %v; want aether", got, err)
-	}
-	if os.Geteuid() == 0 {
-		return
-	}
-	if err := os.Remove(filepath.Join(dir, "cloudfield")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(dir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
-	linkSecondName(bin)
-	if _, err := os.Lstat(filepath.Join(dir, "cloudfield")); !os.IsNotExist(err) {
-		t.Fatalf("cloudfield in a read-only directory: %v", err)
+// TestUpdateApplyLinksAndNeverFailsOverALink drives update.apply with
+// the swap stubbed: the second names appear beside the replaced binary,
+// and a link that cannot be made leaves the update answered as done.
+func TestUpdateApplyLinksAndNeverFailsOverALink(t *testing.T) {
+	for _, fails := range []bool{false, true} {
+		pinVersion(t)
+		stubRebuild(t, "/bin/true", false)
+		g := updateGateway(t, &verbStubBackend{}, false)
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "aether")
+		if err := os.WriteFile(bin, []byte("binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		stubApply(t, func(context.Context, string, string) ([]string, error) { return []string{bin}, nil })
+		linkBinaries = selfupdate.LinkAll
+		if fails {
+			linkBinaries = func([]string) error { return errors.New("symlink: operation not supported") }
+		}
+
+		rec := do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("fails=%v: status = %d: %s", fails, rec.Code, rec.Body)
+		}
+		var got struct {
+			Updated []string `json:"updated"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got.Updated) != 1 || got.Updated[0] != bin {
+			t.Fatalf("fails=%v: updated = %v, %v; want %s", fails, got.Updated, err, bin)
+		}
+		target, err := os.Readlink(filepath.Join(dir, "cloudfield"))
+		if !fails && (err != nil || target != "aether") {
+			t.Fatalf("cloudfield -> %q, %v; want aether", target, err)
+		}
 	}
 }

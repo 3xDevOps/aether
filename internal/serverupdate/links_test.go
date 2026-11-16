@@ -130,7 +130,7 @@ func TestLinkUnitWithoutTheUnitLinksNothing(t *testing.T) {
 func TestALinkThatCannotBeMadeNeverFailsTheUpdate(t *testing.T) {
 	old := linkBinaries
 	t.Cleanup(func() { linkBinaries = old })
-	linkBinaries = func(string) error { return errors.New("symlink: operation not supported") }
+	linkBinaries = func([]string) error { return errors.New("symlink: operation not supported") }
 	e := newEnv(t, false)
 	if _, _, err := e.svc.Update(t.Context(), "mem_admin",
 		protocol.ServerUpdateParams{Version: releaseTagUnderTest, When: protocol.ServerUpdateNow}); err != nil {

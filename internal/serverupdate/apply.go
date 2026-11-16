@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -292,16 +291,15 @@ func swap(ctx context.Context, p Plan, tag string, m selfupdate.Manifest) (*swap
 		}
 		return nil, errors.Join(retryable{fmt.Errorf("download failed: %w", err)}, removeRecord(p.StateDir))
 	}
-	for _, bin := range rec.Binaries {
-		if err := linkBinaries(filepath.Dir(bin)); err != nil {
-			slog.Warn("serverupdate: give the binaries their second names", "error", err)
-		}
+	if err := linkBinaries(rec.Binaries); err != nil {
+		slog.Warn("serverupdate: give the binaries their second names", "error", err)
 	}
 	return rec, nil
 }
 
-// linkBinaries is selfupdate.Link, a variable so a test can make it fail.
-var linkBinaries = selfupdate.Link
+// linkBinaries is selfupdate.LinkAll, a variable so a test can make it
+// fail.
+var linkBinaries = selfupdate.LinkAll
 
 // commitSwap moves a swap to verifying: the next start runs the new
 // binary as a trial instead of putting the previous one back.
