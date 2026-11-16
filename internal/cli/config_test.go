@@ -292,6 +292,15 @@ func TestConfigDirTakesCloudfieldNames(t *testing.T) {
 	if err := os.Remove(filepath.Join(old, "cloudfield")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(old, "Cloudfield"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Path(); err != nil || got != filepath.Join(old, "aether", "config.json") {
+		t.Fatalf("Path with a Cloudfield directory = %q, %v; want the aether directory, since only an exact name counts", got, err)
+	}
+	if err := os.Remove(filepath.Join(old, "Cloudfield")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Mkdir(filepath.Join(old, "cloudfield"), 0o700); err != nil {
 		t.Fatal(err)
 	}

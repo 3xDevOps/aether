@@ -408,27 +408,22 @@ func explicitEnvironment(profile harness.Profile, ws *domain.Workspace, secrets 
 		return nil, fmt.Errorf("scheduler: apply the workspace secrets over %s's permission setting: %w", profile.Name, err)
 	}
 	maps.Copy(env, profile.Env)
-	clearSessionTwins(env)
 	return env, nil
 }
 
-// clearSessionTwins empties the CLOUDFIELD_ name of every variable the
-// server sets in a session, so a workspace variable or an image's ENV
-// cannot stand in for one through the new name.
-func clearSessionTwins(env map[string]string) {
-	for _, name := range coordtransport.SessionEnv {
-		env[envname.New(name)] = ""
-	}
-}
-
-// createContainer creates every container the scheduler starts, with the
-// session variables' CLOUDFIELD_ names emptied.
+// createContainer creates every container the scheduler starts. It empties
+// the CLOUDFIELD_ name of every variable the server sets in a session, so
+// a workspace variable or an image's ENV cannot stand in for one through
+// the new name. It runs after a terminal's fingerprint is taken, so the
+// emptied names do not make a kept terminal look changed.
 func (s *Scheduler) createContainer(ctx context.Context, spec runtime.Spec) (runtime.ID, error) {
 	spec.Env = maps.Clone(spec.Env)
 	if spec.Env == nil {
 		spec.Env = map[string]string{}
 	}
-	clearSessionTwins(spec.Env)
+	for _, name := range coordtransport.SessionEnv {
+		spec.Env[envname.New(name)] = ""
+	}
 	return s.cfg.Runtime.Create(ctx, spec)
 }
 

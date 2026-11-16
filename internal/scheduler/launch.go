@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/codexapp"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/mirror"
@@ -847,7 +847,7 @@ func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, m
 		argv = argvs[domain.LaunchACP]
 	}
 	if harnessName == "fake" && len(argv) == 0 && !acp {
-		argv = strings.Fields(os.Getenv(fakeAgentEnv))
+		argv = strings.Fields(envname.Getenv(fakeAgentEnv))
 	}
 	if len(argv) == 0 {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)

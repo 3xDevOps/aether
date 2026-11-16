@@ -220,10 +220,22 @@ func Path() (string, error) {
 		}
 	}
 	name := "aether"
-	if info, err := os.Stat(filepath.Join(dir, "cloudfield")); err == nil && info.IsDir() {
+	if hasDir(dir, "cloudfield") {
 		name = "cloudfield"
 	}
 	return filepath.Join(dir, name, "config.json"), nil
+}
+
+// hasDir reports whether dir holds a directory named exactly name. A
+// case-insensitive volume would let Stat find "Cloudfield", the directory
+// another program may own, so the entries are compared byte for byte.
+func hasDir(dir, name string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil || !slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == name }) {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(dir, name))
+	return err == nil && info.IsDir()
 }
 
 // Dir is the directory that holds config.json, the device key and the

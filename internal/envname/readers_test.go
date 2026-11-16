@@ -19,20 +19,20 @@ import (
 // unconverted are the AETHER_ variables still read under their old name
 // alone, each with the reason.
 var unconverted = map[string]string{
-	"AETHER_DEVEXEC_CONTROL_GROUP":   "set by the runtime for one helper exec; a CLOUDFIELD_ twin inherited from an image or workspace would share the helper's state with another group",
-	"AETHER_FAKE_AGENT":              "test seam of the scheduler's tests",
-	"AETHER_RELEASE_SIGNING_KEY":     "a secret the release workflows set; no person types it",
-	"AETHER_NATIVE_HOOK_OWNER":       "set and read by the same in-process hook plugin",
-	"AETHER_MANAGED_NATIVE_WAKE":     "set by the server for its own hook plugin",
-	"AETHER_TTY":                     "test seam of install-test.sh",
-	"AETHER_UNIT_PATH":               "test seam of install-test.sh",
-	"AETHER_SYSTEM_BIN_DIR":          "test seam of install-test.sh",
-	"AETHER_SYSBOX_BASE_URL":         "test seam of install-sysbox-test.sh",
-	"AETHER_SYSBOX_DAEMON_JSON":      "test seam of install-sysbox-test.sh",
-	"AETHER_SYSBOX_MGR_DROPIN":       "test seam of install-sysbox-test.sh",
-	"AETHER_LATEST_URL":              "test seam of install-test.ps1",
-	"AETHER_API_URL":                 "test seam of install-test.ps1",
-	"AETHER_BIN@scripts/install.ps1": "saved and restored around the build install.ps1 runs, not read as a setting",
+	"AETHER_DEVEXEC_CONTROL_GROUP":                          "set by the runtime for one helper exec; a CLOUDFIELD_ twin inherited from an image or workspace would share the helper's state with another group",
+	"AETHER_BROWSER_CREATION_KEY@images/browser/server.mjs": "set by the server for the browser companion it starts",
+	"AETHER_RELEASE_SIGNING_KEY":                            "a secret the release workflows set; no person types it",
+	"AETHER_NATIVE_HOOK_OWNER":                              "set and read by the same in-process hook plugin",
+	"AETHER_MANAGED_NATIVE_WAKE":                            "set by the server for its own hook plugin",
+	"AETHER_TTY":                                            "test seam of install-test.sh",
+	"AETHER_UNIT_PATH":                                      "test seam of install-test.sh",
+	"AETHER_SYSTEM_BIN_DIR":                                 "test seam of install-test.sh",
+	"AETHER_SYSBOX_BASE_URL":                                "test seam of install-sysbox-test.sh",
+	"AETHER_SYSBOX_DAEMON_JSON":                             "test seam of install-sysbox-test.sh",
+	"AETHER_SYSBOX_MGR_DROPIN":                              "test seam of install-sysbox-test.sh",
+	"AETHER_LATEST_URL":                                     "test seam of install-test.ps1",
+	"AETHER_API_URL":                                        "test seam of install-test.ps1",
+	"AETHER_BIN@scripts/install.ps1":                        "saved and restored around the build install.ps1 runs, not read as a setting",
 }
 
 // passesOSGetenv hand os.Getenv on for names other than AETHER_ ones; they
@@ -100,7 +100,7 @@ func TestEveryReaderTakesTheNewName(t *testing.T) {
 			re = shellRead
 		case ".ps1":
 			re = psRead
-		case ".js", ".ts":
+		case ".js", ".mjs", ".ts":
 			re = jsRead
 		case ".kt":
 			re = kotlinRead
@@ -116,10 +116,11 @@ func TestEveryReaderTakesTheNewName(t *testing.T) {
 				continue
 			}
 			for _, m := range re.FindAllStringSubmatchIndex(line, -1) {
-				name := line[m[2]:m[3]]
-				if m[2] < 0 {
-					name = line[m[4]:m[5]]
+				start, end := m[2], m[3]
+				if start < 0 {
+					start, end = m[4], m[5]
 				}
+				name := line[start:end]
 				if readsBoth(line[:m[0]], name) || writes(line[m[1]:]) {
 					continue
 				}
@@ -158,7 +159,8 @@ func TestEveryReaderTakesTheNewName(t *testing.T) {
 func readsBoth(before, old string) bool {
 	twin := New(old)
 	return strings.HasSuffix(before, "${"+twin+":-") ||
-		strings.HasSuffix(before, "process.env."+twin+" || ")
+		strings.HasSuffix(before, "process.env."+twin+" || ") ||
+		strings.HasSuffix(before, "process.env."+twin+" || (")
 }
 
 // writes reports whether the text after a match assigns the variable

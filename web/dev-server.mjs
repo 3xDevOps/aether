@@ -17,7 +17,8 @@ if (!Number.isInteger(port) || port < 0 || port > 65_535) {
   throw new Error(`port must be an integer from 0 to 65535, got ${port}`)
 }
 
-const gateway = process.env.AETHER_DASHBOARD ?? 'http://127.0.0.1:8080'
+// CLOUDFIELD_DASHBOARD when set, else AETHER_DASHBOARD (internal/envname).
+const gateway = process.env.CLOUDFIELD_DASHBOARD || (process.env.AETHER_DASHBOARD ?? 'http://127.0.0.1:8080')
 const gatewayURL = new URL(gateway)
 if (gatewayURL.protocol !== 'http:' && gatewayURL.protocol !== 'https:') {
   throw new Error(`AETHER_DASHBOARD must use http or https, got ${gatewayURL.protocol}`)
