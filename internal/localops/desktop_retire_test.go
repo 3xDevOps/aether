@@ -349,7 +349,8 @@ func TestRetireLegacyDesktopRemovesNothingUnderSudo(t *testing.T) {
 }
 
 // A delete that fails after the app was moved aside names the set-aside
-// directory, keeps the Windows shortcut, and is finished at the next start.
+// directory and is finished at the next start. The shortcut already went:
+// it pointed at the app's old place.
 func TestRetireLegacyDesktopRetriesAFailedDelete(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("needs a unix account that directory permissions apply to")
@@ -371,7 +372,7 @@ func TestRetireLegacyDesktopRetriesAFailedDelete(t *testing.T) {
 		t.Fatalf("err = %v, want the set-aside directory", err)
 	}
 	mustBeGone(t, f.legacy[0])
-	mustExist(t, f.shortcut)
+	mustBeGone(t, f.shortcut)
 	asides, _ := filepath.Glob(filepath.Join(filepath.Dir(f.legacy[0]), installOldPrefix+"*", "Aether Desktop", "resources"))
 	if len(asides) != 1 {
 		t.Fatalf("set-aside copies = %q, want one", asides)
@@ -383,7 +384,6 @@ func TestRetireLegacyDesktopRetriesAFailedDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustBeGone(t, filepath.Dir(filepath.Dir(asides[0])))
-	mustBeGone(t, f.shortcut)
 	mustExist(t, f.renamedExe)
 	mustExist(t, f.renamedShortcut)
 }
@@ -412,4 +412,37 @@ func TestRetireLegacyDesktopKeepsAShortcutWithoutAnOldApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustExist(t, f.shortcut)
+}
+
+// A shortcut that could not be removed is tried again at the next start:
+// the old app's set-aside copy stays until it is gone.
+func TestRetireLegacyDesktopRetriesTheShortcut(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a unix account that directory permissions apply to")
+	}
+	renameProduct(t)
+	f := newRetireFixture(t, "windows")
+	if err := os.Chmod(f.programs, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(f.programs, 0o755) })
+	err := retireLegacyDesktop("windows", f.lookup, f.renamedExe)
+	if err == nil || !strings.Contains(err.Error(), f.shortcut) {
+		t.Fatalf("err = %v, want the shortcut", err)
+	}
+	mustBeGone(t, f.legacy[0])
+	if got := setAsideCopies(f.legacy[0]); len(got) != 1 {
+		t.Fatalf("set-aside copies = %q, want one", got)
+	}
+	if err := os.Chmod(f.programs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := retireLegacyDesktop("windows", f.lookup, f.renamedExe); err != nil {
+		t.Fatal(err)
+	}
+	mustBeGone(t, f.shortcut)
+	if got := setAsideCopies(f.legacy[0]); len(got) != 0 {
+		t.Fatalf("set-aside copies = %q, want none", got)
+	}
+	mustExist(t, f.renamedShortcut)
 }

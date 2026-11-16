@@ -291,24 +291,30 @@ func retireLegacyDesktop(goos string, lookup func() (RealUser, error), shellExe 
 	}
 	legacy := userAppPaths(goos, ru, legacyProductName)
 	var errs []error
-	retired := false
+	var asides []string
 	for _, app := range legacy {
-		if removeLeftovers(goos, app, &errs) {
-			retired = true
-		}
+		asides = append(asides, setAsideCopies(app)...)
 		resolved, ok := legacyInstall(goos, app, current, shellApp)
 		if !ok {
 			continue
 		}
-		if err := retireApp(goos, resolved); err != nil {
+		aside, err := moveAside(goos, resolved)
+		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		retired = true
+		asides = append(asides, aside)
 	}
-	if goos == "windows" && retired && len(errs) == 0 && !anyExists(legacy) {
+	if goos == "windows" && len(asides) > 0 && len(errs) == 0 && !anyExists(legacy) {
+		// The set-aside copies stay until the shortcut is gone, so the next
+		// start finds them and tries the shortcut again.
 		if err := removeLegacyShortcut(); err != nil {
-			errs = append(errs, err)
+			return err
+		}
+	}
+	for _, aside := range asides {
+		if err := os.RemoveAll(aside); err != nil {
+			errs = append(errs, fmt.Errorf("localops: remove the old app, moved to %s%s: %w", aside, removeHint(goos, aside, err), err))
 		}
 	}
 	return errors.Join(errs...)
@@ -341,12 +347,12 @@ func legacyInstall(goos, app string, current []string, shellApp string) (string,
 	return resolved, true
 }
 
-// retireApp moves app aside before deleting it. Windows refuses to rename a
-// directory whose files a running program holds open, and DesktopAppRunning
-// cannot tell there, so a running app is left whole rather than half
-// deleted. A delete that fails after the move leaves the app in a set-aside
-// directory beside it, which removeLeftovers retries at the next start.
-func retireApp(goos, app string) error {
+// moveAside renames app into a new set-aside directory beside it and
+// returns that directory, which the caller deletes. Windows refuses to
+// rename a directory whose files a running program holds open, and
+// DesktopAppRunning cannot tell there, so a running app is left whole
+// rather than half deleted.
+func moveAside(goos, app string) (string, error) {
 	aside, err := os.MkdirTemp(filepath.Dir(app), installOldPrefix+"*")
 	if err == nil {
 		err = os.Rename(app, filepath.Join(aside, filepath.Base(app)))
@@ -355,31 +361,22 @@ func retireApp(goos, app string) error {
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("localops: remove the old app %s%s: %w", app, removeHint(goos, app, err), err)
+		return "", fmt.Errorf("localops: remove the old app %s%s: %w", app, removeHint(goos, app, err), err)
 	}
-	if err := os.RemoveAll(aside); err != nil {
-		return fmt.Errorf("localops: remove the old app, moved to %s%s: %w", aside, removeHint(goos, aside, err), err)
-	}
-	return nil
+	return aside, nil
 }
 
-// removeLeftovers deletes the set-aside directories an earlier retireApp
-// could not, and reports whether there were any. It matches only those
-// holding the legacy app's own directory name: on windows the parent is
-// shared with the renamed app, whose install swap sets its own copy aside
-// under the same prefix.
-func removeLeftovers(goos, app string, errs *[]error) bool {
-	matches, err := filepath.Glob(filepath.Join(filepath.Dir(app), installOldPrefix+"*", filepath.Base(app)))
-	if err != nil {
-		return false
+// setAsideCopies is the set-aside directories of app that an earlier start
+// could not delete. It matches only those holding the legacy app's own
+// directory name: on windows the parent is shared with the renamed app,
+// whose install swap sets its own copy aside under the same prefix.
+func setAsideCopies(app string) []string {
+	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(app), installOldPrefix+"*", filepath.Base(app)))
+	asides := make([]string, len(matches))
+	for i, old := range matches {
+		asides[i] = filepath.Dir(old)
 	}
-	for _, old := range matches {
-		aside := filepath.Dir(old)
-		if err := os.RemoveAll(aside); err != nil {
-			*errs = append(*errs, fmt.Errorf("localops: remove the old app, moved to %s%s: %w", aside, removeHint(goos, aside, err), err))
-		}
-	}
-	return len(matches) > 0
+	return asides
 }
 
 func removeLegacyShortcut() error {
