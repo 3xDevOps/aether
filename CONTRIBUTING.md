@@ -550,7 +550,17 @@ GITHUB_REPOSITORY=3xDevOps/aether NIGHTLY_PLAN=/tmp/nightly-plan sh scripts/nigh
 
 Before `NIGHTLY_ENABLED` is set, a release must carry the nightly public key in
 `nightlyKeys` (`internal/selfupdate/keys.go`), and the `nightly` environment
-must exist, limited to `main`, holding the private key.
+must exist, limited to `main`, holding the private key. The `signing-key` job
+refuses a key `main` does not trust before anything is built or tagged.
+
+Only the exact value `true` turns either variable on. An organization
+variable of the same name also reaches this repository; check with
+`gh variable list --org 3xDevOps` that neither exists there.
+
+Nightly's build and Promote share the `channels` concurrency group, and
+GitHub keeps one pending run per group: a nightly build waiting behind a
+running Promote cancels a second Promote waiting there, and the other way
+round. A cancelled Promote tags and publishes nothing; dispatch it again.
 
 A workflow that moves a channel pointer (`<channel>.json` on the
 `channels` prerelease) keeps the pair it signed as the `pointer-<channel>`

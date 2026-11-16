@@ -36,6 +36,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # The job's if compares without case and also matches an
+      # organization variable; this takes only the exact value.
+      - name: Require NIGHTLY_ENABLED to be exactly true
+        env:
+          NIGHTLY_ENABLED: ${{ vars.NIGHTLY_ENABLED }}
+        run: |
+          if [ "$NIGHTLY_ENABLED" != true ]; then
+            echo "::error::NIGHTLY_ENABLED is '$NIGHTLY_ENABLED', not true; set it with gh variable set NIGHTLY_ENABLED --body true, and check gh variable list --org for one of that name"
+            exit 1
+          fi
       - name: Require main
         run: |
           if [ "$GITHUB_REF" != refs/heads/main ]; then
@@ -100,27 +110,40 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # The first job in the nightly environment, and only when there is
-  # something to build, so a quiet run deploys nothing.
+  # something to build, so a quiet run deploys nothing. It signs a probe
+  # with the key and has main's keys verify it before anything is built,
+  # tagged or pushed, so a key main does not trust fails here, not in the
+  # signer after the tag exists.
   signing-key:
     needs: plan
     if: vars.NIGHTLY_ENABLED == 'true' && needs.plan.outputs.run == 'true'
     environment: nightly
-    permissions: {}
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Require the nightly signing key
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.plan.outputs.tools }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build main's nightly-plan
+        run: go build -o "$RUNNER_TEMP/nightly-plan" ./scripts/nightly-plan
+      - name: Require a nightly key main trusts
         env:
-          KEY_SET: ${{ secrets.AETHER_NIGHTLY_SIGNING_KEY != '' }}
-        run: |
-          if [ "$KEY_SET" != true ]; then
-            echo "::error::the nightly cannot be signed; AETHER_NIGHTLY_SIGNING_KEY is not set in the nightly environment. CONTRIBUTING.md, Releases, says how an admin creates it."
-            exit 1
-          fi
+          AETHER_NIGHTLY_SIGNING_KEY: ${{ secrets.AETHER_NIGHTLY_SIGNING_KEY }}
+        run: '"$RUNNER_TEMP/nightly-plan" key-check'
 
   # Every pointer writer runs in the channels group, so no two read and
-  # replace a pointer at once. It is this job's, not the workflow's, so a
-  # pending scheduled run never cancels a pending Promote.
+  # replace a pointer at once. Groups are repository-wide, so this is
+  # promote.yml's group too: GitHub keeps one pending entry per group, and
+  # a pending entry here cancels a pending Promote and the other way round.
+  # On the job, not the workflow, a 30-minute run only joins it when it
+  # builds. CONTRIBUTING.md, Releases, gives the remedy.
   release-build:
     needs: [plan, signing-key]
     if: vars.NIGHTLY_ENABLED == 'true' && needs.plan.outputs.run == 'true'
@@ -176,6 +199,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Require NIGHTLY_PRUNE_ENABLED to be exactly true
+        env:
+          NIGHTLY_PRUNE_ENABLED: ${{ vars.NIGHTLY_PRUNE_ENABLED }}
+        run: |
+          if [ "$NIGHTLY_PRUNE_ENABLED" != true ]; then
+            echo "::error::NIGHTLY_PRUNE_ENABLED is '$NIGHTLY_PRUNE_ENABLED', not true; set it with gh variable set NIGHTLY_PRUNE_ENABLED --body true, and check gh variable list --org for one of that name"
+            exit 1
+          fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: refs/heads/main

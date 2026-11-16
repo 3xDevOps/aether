@@ -21,6 +21,13 @@
 // prints "<tag> <commit>" for each published nightly to prune: older than
 // 14 days, at or below stable.json's build, and not the newest nightly.
 //
+//	nightly-plan key-check
+//
+// signs a probe nightly manifest with the seed in AETHER_NIGHTLY_SIGNING_KEY
+// and fails unless this build's nightly keys verify it and its release keys
+// refuse a beta signed with it, so a run tags and builds nothing that its
+// signer would then fail to sign.
+//
 // -refs is the output of
 //
 //	git for-each-ref --format='%(refname:strip=2) %(objecttype) %(objectname) %(*objectname)%0a%(contents)%00' 'refs/tags/v*'
@@ -33,6 +40,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -51,6 +60,9 @@ import (
 // pruneAge is how long a nightly's release and images are kept.
 const pruneAge = 14 * 24 * time.Hour
 
+// keyEnv holds the nightly signing key, a base64 ed25519 seed.
+const keyEnv = "AETHER_NIGHTLY_SIGNING_KEY"
+
 var (
 	fullSHA   = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	nightRe   = regexp.MustCompile(`^v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))-nightly\.([1-9][0-9]*)$`)
@@ -68,7 +80,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: nightly-plan {manifests|state|prune} <flags>")
+		return errors.New("usage: nightly-plan {manifests|state|prune|key-check} <flags>")
 	}
 	switch args[0] {
 	case "manifests":
@@ -77,8 +89,10 @@ func run(args []string, out io.Writer) error {
 		return state(args[1:], out)
 	case "prune":
 		return prune(args[1:], out)
+	case "key-check":
+		return keyCheck(os.Getenv(keyEnv))
 	}
-	return fmt.Errorf("unknown subcommand %q; want manifests, state or prune", args[0])
+	return fmt.Errorf("unknown subcommand %q; want manifests, state, prune or key-check", args[0])
 }
 
 // ref is one v* tag: the commit it names and, for an annotated tag, the
@@ -499,4 +513,32 @@ func readReleases(path string) (map[string]release, error) {
 		releases[f[0]] = r
 	}
 	return releases, nil
+}
+
+// keyCheck never prints or writes the seed.
+func keyCheck(seed string) error {
+	raw, err := base64.StdEncoding.DecodeString(seed)
+	if seed == "" || err != nil || len(raw) != ed25519.SeedSize {
+		return fmt.Errorf("%s is not a base64 %d-byte ed25519 seed", keyEnv, ed25519.SeedSize)
+	}
+	key := ed25519.NewKeyFromSeed(raw)
+	probe := func(tag, channel string) error {
+		data, sig, err := selfupdate.SignManifest(selfupdate.Manifest{
+			Schema: selfupdate.ManifestSchema, Channel: channel, Build: 1, Version: tag,
+			Commit: strings.Repeat("0", 40), PublishedAt: time.Now().UTC(), StoreSchema: 1,
+			Assets: map[string]selfupdate.Asset{"probe": {SHA256: strings.Repeat("0", 64), Size: 1}},
+		}, key)
+		if err != nil {
+			return err
+		}
+		_, err = selfupdate.VerifyManifest(data, sig, tag)
+		return err
+	}
+	if probe("v0.0.0-nightly.1", selfupdate.ChannelNightly) != nil {
+		return fmt.Errorf("main does not trust %s: its public half is not in nightlyKeys (internal/selfupdate/keys.go); ship it in a release first, then turn nightlies on", keyEnv)
+	}
+	if probe("v0.0.0-beta.1", selfupdate.ChannelBeta) == nil {
+		return fmt.Errorf("%s verifies a beta manifest, so it is a release key; the nightly environment must hold only the nightly key", keyEnv)
+	}
+	return nil
 }

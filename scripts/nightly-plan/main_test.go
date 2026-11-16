@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/ed25519"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -444,5 +445,31 @@ func TestReadsTheRefsNightlyPlanShLists(t *testing.T) {
 	}
 	if fmt.Sprint(refs) != fmt.Sprint(want) {
 		t.Fatalf("readRefs = %v, want %v", refs, want)
+	}
+}
+
+func TestKeyCheck(t *testing.T) {
+	t.Cleanup(selfupdate.TrustKeysForTest(releasetest.PublicKey()))
+	t.Cleanup(selfupdate.TrustNightlyKeysForTest(releasetest.NightlyKey.Public().(ed25519.PublicKey)))
+	seed := func(k ed25519.PrivateKey) string { return base64.StdEncoding.EncodeToString(k.Seed()) }
+	untrusted := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x33}, ed25519.SeedSize))
+	if err := keyCheck(seed(releasetest.NightlyKey)); err != nil {
+		t.Fatalf("a trusted nightly key: %v", err)
+	}
+	for name, tc := range map[string]struct{ seed, want string }{
+		"untrusted":     {seed(untrusted), "its public half is not in nightlyKeys"},
+		"a release key": {seed(releasetest.Key), "so it is a release key"},
+		"empty":         {"", "is not a base64 32-byte ed25519 seed"},
+		"not a seed":    {"c2hvcnQ=", "is not a base64 32-byte ed25519 seed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := keyCheck(tc.seed)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("keyCheck: %v, want %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), tc.seed) && tc.seed != "" {
+				t.Fatal("the error prints the seed")
+			}
+		})
 	}
 }
