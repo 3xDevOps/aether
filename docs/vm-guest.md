@@ -399,7 +399,7 @@ port
 | --- | --- |
 | `Setup` | Called before `Boot` on every boot and server restart. When the checkout's top directory belongs to someone other than the session user, as when a session starts again from an image with another user, it hands every file of the checkout to that user. On a checkout's first boot it sets `aether.base`, `aether.branch`, `aether.workspace` and the origin remote, and renames `aether-prepared` to the run branch, running git as the checkout's owner so the session can keep writing everything git wrote. Then it starts the checkout's diff watch. |
 | `Watch` | Streams the checkout's diff watch, starting it if it does not run: each snapshot's `run.diff` payload, each moved HEAD, and at most one file change report a second. A snapshot or HEAD counts as delivered only once the server acknowledges it; a refusal, or no `Watch` open at all, is a history gap the watch retries, as a failed publication on the server is. |
-| `Flush` | Takes the last snapshot, returns once `Watch` delivered it, and stops the diff watch until the next `Watch`. |
+| `Flush` | Waits for a `Watch`, which the server opens again at once if it was waiting to retry one, then takes the last snapshot, returns once `Watch` delivered it, and stops the diff watch until the next `Watch`. With no `Watch` within the server's 60-second bound on the call, the snapshot is a history gap the next `Watch` retries. |
 | `Objects` | Streams a pack of what `wants` reach and no `haves` do. |
 | `Patch` | Renders the live diff. |
 | `Head` | Returns the commit HEAD names. |
