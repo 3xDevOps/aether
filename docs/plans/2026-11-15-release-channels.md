@@ -6,11 +6,10 @@ nightly at most every 4 hours. An admin promotes a nightly to beta and a
 beta to stable. One setting on the server picks the channel for the server
 and the apps that connect to it.
 
-**Status:** approved by the owner, 2026-11-15, except which channels
-apply updates by themselves ([Open questions](#open-questions)). The
-decisions dated 2026-11-14/15 are the owner's. Everything marked
-*Assumption* is this plan's choice and stands unless the owner changes
-it.
+**Status:** approved by the owner, 2026-11-15. The decisions dated
+2026-11-14/15 are the owner's; the one on applying updates was settled
+on 2026-11-16. Everything marked *Assumption* is this plan's choice and
+stands unless the owner changes it.
 
 ## Decisions (2026-11-14/15)
 
@@ -43,7 +42,7 @@ it.
 - The first stable is `v0.8.7`, promoted from a beta. Existing installs
   land on beta. New installs default to stable once it exists. Nightlies
   then start at `v0.9.0-nightly.1`.
-- A server on nightly applies updates by itself when idle
+- A server on any channel applies updates by itself when idle
   ([Applying updates](#applying-updates)). The project's own server runs
   nightly.
 - Nightly assets are pruned after 14 days, except a nightly a waiting
@@ -137,11 +136,13 @@ both get it wrong.
 
 Every manifest carries a signed `build`, a positive integer:
 
-- Each nightly takes the next build number: one above the highest of
-  the `build:` lines in the messages of the annotated `-nightly.N` tags
-  and the builds the three pointers name. Those tags are never deleted,
-  so pruning or yanking a release never frees a number. Builds only
-  increase along `main`.
+- Each nightly takes one above the highest signed build: the builds the
+  three pointers name and the verified manifests of published nightlies
+  whose tag claims a higher one. A tag a failed run left one above that
+  is resumed; any other unpublished tag above it is refused. Pointers
+  never move down and nightly tags are never deleted, so pruning or
+  yanking a release never frees a number. Builds only increase along
+  `main`.
 - A beta or stable built from a nightly's commit carries that nightly's
   build. It is the same code, so it gets the same number.
 - A hotfix on `release/X.Y` carries the build of the stable it fixes and
@@ -184,14 +185,22 @@ Every place that compares versions today moves to build order:
   cross a `store_schema`.
 - **Replayed pointer:** each install keeps the highest `(build, hotfix)` it
   has accepted from each channel's pointer, in `server-update/check.json`
-  on a server and the client's update state on a client. A pointer below
+  on a server and `update.json` beside the client's `config.json` on a
+  client. A state file that exists but cannot be read fails the check
+  and is never overwritten. A pointer below
   that mark is refused with
   `channel pointer beta.json names build 380, below build 412 seen before`
   and the check counts as failed. An old pointer an attacker replays can
-  therefore only fail checks; it cannot move an install back.
+  therefore only fail checks; it cannot move an install back. A validly
+  signed pointer with a very high build raises the mark for good; only a
+  higher build recovers it.
 - **No pointer moves down.** A pointer writer reads the current pointer
   and refuses to sign a lower build, so a lagging release listing or a
   deleted release cannot strand every install behind its high-water mark.
+  A missing pointer is an error, not a first pointer: the writer signs
+  the first one only when its caller says so (`first-pointer`). A run
+  that fails mid-upload retries, and keeps its signed pair as a workflow
+  artifact to restore from.
   Withdrawing a bad release means shipping a higher build: revert on
   `main` and "build now", or promote a newer nightly.
 - **Channel confusion:** the pointer and the manifest both sign their
@@ -206,7 +215,7 @@ Every place that compares versions today moves to build order:
 `scripts/android-version-code.sh` accepts only `alpha.N`, `beta.N` and
 `rc.N` up to 199 (`:76-88`), and `release.yml` runs it on every tag
 (`:97`), so today a nightly tag fails before anything builds. From
-`v0.9.0`, the code comes from the build number, which
+`v0.8.7`, build 1, the code comes from the build number, which
 `release-build.yml` passes to the script because the tag does not carry
 it:
 
@@ -305,7 +314,9 @@ pointer waits on a nightly. `nightly.json` never names a beta or stable:
 each was promoted from a nightly with the same build, and a hotfix's fix
 is on `main` first, so a later nightly carries it. Writers share one
 concurrency group, `channels`, with `cancel-in-progress: false`, and each
-reads the pointer it replaces first.
+reads the pointer it replaces first. GitHub keeps one pending run per
+group, so a pending nightly build and a pending Promote cancel each
+other; the cancelled one is dispatched again.
 
 ### Trusted signer
 
@@ -358,8 +369,10 @@ change it, the same rule as server updates
 (`internal/sshd/serverupdate.go:62`). Every member sees the current
 channel. A server that existed before channels gets `beta` from the
 migration. A new server reads the pointers on first boot: `stable` when
-`stable.json` exists, else `beta`. The default cannot be compiled in,
-because the last beta and the first stable are the same commit.
+`stable.json` verifies, `beta` once `stable.json` has answered 404 on two
+checks in a row. Until then it has no channel, follows beta and applies
+nothing by itself. The default cannot be compiled in, because the last
+beta and the first stable are the same commit.
 
 ### Settings → Updates
 
@@ -402,29 +415,33 @@ the host, prints the same text, and needs `--yes`. It is a flag because
 
 ### Applying updates
 
-The owner's decision: a server on nightly applies updates by itself when
-idle, "like any channel". Today no channel does: the background check
-only records the newest release (`internal/serverupdate/check.go:125`),
-and each update starts with a super admin's `server.update` `idle` or
-`now` (`internal/sshd/serverupdate.go:61`). *Assumption,* for the owner to
-confirm before pull request 3 builds it: on every channel, when the check
-finds a release on the server's channel above the running build, the
-server schedules it itself, exactly as `server.update` `idle` would, and
-it applies once no session is working. The narrower reading is that only
-a nightly server does this and beta and stable servers keep waiting for a
-super admin.
-
-Under either reading:
+Decided 2026-11-16: on every channel a server applies updates by itself
+when idle. When the check finds a release on the server's channel above
+the running build, the server schedules it itself, exactly as
+`server.update` `idle` would, and it applies once no session is working.
+One function decides which channels do this, `selfApplies` in
+`internal/serverupdate/autoupdate.go`.
 
 - `AETHER_NO_UPDATE_CHECK=1`, which already turns the check off, turns
   this off with it.
 - The server never schedules a build a super admin turned down. A
   `cancel`, an `allow_downgrade` update, and an update recorded failed
   after its 3 retries (`internal/serverupdate/apply.go:21`) each store
-  that build as declined in `server-update/check.json`. The server
-  schedules by itself only a build above the declined one, so a rollback
-  holds until a newer build ships. A super admin's own `server.update`
-  ignores the mark.
+  that build as declined in the database, as does a self-scheduled
+  update whose new binary failed its trial and rolled back, and a
+  release the server failed to schedule 3 times. A cancel or an
+  `allow_downgrade` update writes the mark first and is refused if the
+  write fails; a failed or rolled-back update writes it afterwards. A
+  cancel whose build cannot be read still cancels and says the release
+  was not declined. The server schedules by itself only a build above the
+  declined one, so a rollback holds until a newer build ships. A super
+  admin's own `server.update` ignores the mark.
+- Only a published release stamped with a build schedules by itself, and
+  only a release with a build is scheduled: a source build is never
+  replaced, and nothing changes until channel releases exist.
+- A channel change retires a pending update the new channel does not
+  accept, and `server.update` `idle` refuses such a release; `now` still
+  installs it.
 - The audit log names the server, not a member, as the actor of an update
   it scheduled.
 
@@ -475,8 +492,9 @@ deployment config for it). Its `edge-update.sh` timer pulls
 `promote-edge.yml` for a published stable release, and the host installs
 it only with that run's attestation and a passing `release-check`.
 
-- The image tags `:nightly`, `:beta` and `:stable` move with the matching
-  pointer. `:latest` keeps following GitHub's Latest
+- `:nightly` and `:beta` move when `nightly.yml` and Promote move their
+  pointer; `:stable` moves by its own dispatch. `:latest` keeps following
+  GitHub's Latest
   (`release.yml:983-987`), which becomes stable.
 - `promote-edge.yml` gains `workflow_call` and a channel input. Promote
   calls it for `:beta` and `nightly.yml` for `:nightly`. The attestation's
@@ -517,7 +535,18 @@ it only with that run's attestation and a passing `release-check`.
   image's attestation on any channel; the new image still needs one on
   the new channel.
 - `latest` stays a channel name, following stable releases with no
-  attestation, as today.
+  attestation, as today. It refuses a nightly manifest.
+- `release-check` orders by the running release's signed manifest, bound
+  to the running image digest, never by what the image reports. The
+  updater keeps each verified manifest and signature on the host, so the
+  order survives pruning.
+- `min_upgrade_from` and a manual step's `since` are tags. With a running
+  build they are ordered by the boundary tag's signed build; a boundary
+  whose manifest cannot be read holds the update, unless its tag is below
+  `v0.8.7`. They never name a nightly. A step for a change merged this
+  cycle therefore names a beta that does not exist yet, and nightly hosts
+  hold until it is published. Signing a build per boundary would remove
+  that; it is a manifest format change this plan does not make.
 - `release-check` reads the manifest's `channel` and `build` and refuses a
   channel the host's does not accept, or a lower build.
 
@@ -586,8 +615,10 @@ exactly that tag (`internal/cli/update.go:16-22`, `UpdateTarget.kt:59`),
 so pruning it would leave new and gated clients a 404. Pruning therefore
 keeps the nightly a waiting server runs: the newest nightly and every
 nightly whose build is above `stable.json`'s, which covers a server
-waiting for beta too, because beta is never below stable. It prunes
-nothing while `stable.json` cannot be read and verified. Every nightly
+waiting for beta too, because beta is never below stable. It also keeps
+a nightly whose image an Edge channel tag still carries. It prunes
+nothing while `stable.json` or `nightly.json` cannot be read and
+verified. Every nightly
 since the last stable is therefore kept, so storage grows with the time
 between stables. A server that stays on a nightly at or below
 `stable.json` for 14 days, because its update check is off or its updates
@@ -614,6 +645,7 @@ Nightly builds add the previous nightly as a second starting point.
 | `from` | a nightly tag, a beta tag, or a full commit SHA of one |
 | `to` | `beta` or `stable` |
 | `version` | optional `X.Y.Z` override, at least the current nightly base |
+| `first-pointer` | only for the migration's first stable |
 
 It resolves the new tag, `vX.Y.Z-beta.N` (next `N` for that version) or
 `vX.Y.Z`, and refuses:
@@ -632,7 +664,9 @@ It resolves the new tag, `vX.Y.Z-beta.N` (next `N` for that version) or
   as "the full suite green". The stricter choice is to also require the
   daily scheduled run that runs every job (`ci.yml:15-16`) green on that
   commit;
-- a build below the target channel's current pointer.
+- a build not above the target channel's current pointer. An equal
+  build is the same code, and promoting it again would move the pointer
+  without giving any install something to take.
 
 Its run summary states the days since the beta was cut. It then calls `release-build.yml`, which rebuilds every asset
 from that commit with the new version, runs the edge qualification and
@@ -664,14 +698,22 @@ but an admin. *Assumption.*
 ### Hotfix
 
 1. Merge the fix to `main`. It ships in the next nightly.
-2. Cut `release/0.9` from the `v0.9.0` commit if it does not exist, and
-   cherry-pick the fix in a pull request to that branch.
+2. Cut `release/0.9` from the line's promoted stable, the `v0.9.0`
+   commit, if it does not exist, and cherry-pick the fix in a pull
+   request to that branch. The 0.8 line's promoted stable is `v0.8.7`,
+   so its first hotfix is `v0.8.8` on `release/0.8`.
 3. When the branch's push CI is green, an admin pushes `v0.9.1` on its
-   head. `release.yml` accepts a stable tag on a `release/X.Y` commit cut
-   from `vX.Y.0`, and refuses every other commit off `main`.
+   head. `release.yml` accepts a stable tag on the head of a
+   `release/X.Y` branch cut from that line's promoted stable, and
+   refuses every other commit off `main`. A tag runs the tagged commit's
+   own workflow files with the release key, so the branch needs the
+   protection `main` has before anyone tags it.
 4. Beta can sit at a build above the hotfix yet below the fix's merge, and
    its pointer outranks `(build, hotfix)`. So once a nightly carries the
    fix, the admin promotes it to beta too.
+   A hotfix that moves `beta.json` does not move the Edge `:beta` image:
+   a run started by a tag cannot sign as `promote-edge.yml` on `main`,
+   which hosts pin. `:beta` follows at that Promote.
 
 `scripts/release-ci-check.sh` reads only push runs on `main` (`:31-32`), so
 it gains a `release/X.Y` mode. CI's push trigger (`ci.yml:4-5`) adds
@@ -679,22 +721,38 @@ it gains a `release/X.Y` mode. CI's push trigger (`ci.yml:4-5`) adds
 
 ## Migration
 
+Before step 1, the nightly key's public half is merged into
+`internal/selfupdate/keys.go`, so that `v0.8.7-beta.N` and `v0.8.7` carry
+it. An install without it refuses every nightly, and after step 3 only a
+hotfix, or a beta and stable promoted from a later nightly, could deliver
+it.
+
 1. Ship the channel-aware updater as `v0.8.7-beta.N`, released the old
-   way. It becomes Latest and reaches every install through
-   `/releases/latest`. Existing servers get `release_channel` `beta` from
-   its migration.
-2. Publish the first `beta.json` naming that beta, at build 0. Its
-   manifest has no `channel`; pre-channel manifests are accepted on beta.
-3. Promote it to stable `v0.8.7`. The trusted signer gives it `channel`
-   and build 1 even though its commit predates them. It becomes Latest, so
-   pre-channel installs that missed step 1 still update, and new installs
-   get stable.
-4. Turn on `nightly.yml`. The first nightly is `v0.9.0-nightly.1`, build 2.
+   way, by a tag on `main`. It becomes Latest and reaches every install
+   through `/releases/latest`. Existing servers get `release_channel`
+   `beta` from its migration. It should be the last release cut by a
+   tag on `main`. Nothing refuses a later one, but such a release has no
+   build: from step 3 no install with a build takes it, and it never
+   becomes Latest.
+2. Create the `channels` prerelease that holds the pointers. No pointer
+   is published for the pre-channel beta: until a channel's first
+   pointer verifies, installs on it read `/releases/latest`.
+3. Promote it to stable `v0.8.7`, with `first-pointer` set: this run
+   writes the first `stable.json` and `beta.json`. The trusted signer
+   gives it `channel` and build 1 even though its commit predates them.
+   It becomes Latest, so pre-channel installs that missed step 1 still
+   update, and new installs get stable. A server on `v0.8.7-beta.N` has
+   no build, so it does not install `v0.8.7` by itself: a super admin
+   updates it once, and it applies updates by itself from then on.
+4. Turn on `nightly.yml`: create the `nightly` environment with the
+   nightly key, then set the repository variable `NIGHTLY_ENABLED` to
+   `true` (`NIGHTLY_PRUNE_ENABLED` for pruning). Until then every job is
+   skipped. The first nightly is `v0.9.0-nightly.1`, build 2.
 5. Switch the project's own server to nightly.
 
 From step 3, betas and nightlies are published as prereleases.
-`reconcile_latest` keeps ordering by `versionCode`, which uses the new
-formula from `v0.9.0`.
+`reconcile_latest` orders by the manifests' `(build, hotfix)`, and by the
+tag's `versionCode` only among releases from before channels.
 
 ## Implementation pull requests
 
@@ -729,7 +787,9 @@ step 1; 5 to 7 must merge before step 3.
 8. `feat(edge)`: build order and channel in `release-check` and
    `edge-update.sh`, channel switches, the `nightly` and `beta` tags.
 9. `ci`: `nightly.yml` with "build now", pruning, and the edge-qualify
-   starting points.
+   starting points; the signer job of `release-build.yml` takes its
+   environment and key from the caller, and until then refuses a nightly
+   channel or pointer.
 10. `ci`: `release/X.Y` hotfix support in `release.yml`,
     `release-ci-check.sh` and `ci.yml`.
 11. `docs`: `CONTRIBUTING.md#releases`, `docs/install.md` (Upgrading),
@@ -737,9 +797,3 @@ step 1; 5 to 7 must merge before step 3.
     points to), `docs/security.md`.
 
 Then the migration steps, run by an admin.
-
-## Open questions
-
-- Whether "applies updates by itself when idle, like any channel" means
-  every channel or nightly only ([Applying updates](#applying-updates)).
-  Pull request 3 builds it once the owner confirms.
