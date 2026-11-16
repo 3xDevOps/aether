@@ -117,7 +117,7 @@ func (s *Service) apiDeviceStart(r *http.Request) (any, error) {
 		return edgeproto.DeviceStartResponse{
 			DeviceCode:      deviceCode,
 			UserCode:        userCode,
-			VerificationURI: s.signinOrigin + "/device",
+			VerificationURI: s.pair(r).signin + "/device",
 			ExpiresIn:       int(deviceCodeTTL.Seconds()),
 			Interval:        int(pollInterval.Seconds()),
 		}, nil
@@ -172,6 +172,7 @@ func (s *Service) apiDeviceToken(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.pair(r).deviceLogins.Add(1)
 	return edgeproto.DeviceTokenResponse{
 		Token:   token,
 		Device:  edgeproto.Device{ID: d.ID, Label: d.Label, Key: d.Key},
@@ -203,10 +204,10 @@ func (s *Service) apiServers(r *http.Request) (any, error) {
 	return out, nil
 }
 
-func (s *Service) apiEdgeInfo(*http.Request) (any, error) {
+func (s *Service) apiEdgeInfo(r *http.Request) (any, error) {
 	key := s.EdgeKey()
 	return edgeproto.EdgeInfo{
-		SigninOrigin: s.signinOrigin,
+		SigninOrigin: s.pair(r).signin,
 		Key:          key,
 		Fingerprint:  edgeproto.EdgeKeyFingerprint(key),
 		Version:      edgeproto.Version,

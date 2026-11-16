@@ -592,10 +592,11 @@ at https://<relay host>/mcp; upgrade it ...` for a server at protocol 2.
 SQLite database. Run it with a systemd unit ([Installing](#installing)) or as the
 image `ghcr.io/3xdevops/aether-edge` ([In a container](#in-a-container)). It
 answers on two host names, written `<signin-host>` and `<relay-host>` below (such
-as `auth.example.com` and `edge.example.com`). Either a reverse proxy terminates
+as `auth.example.com` and `edge.example.com`), and on two more for each extra
+[address pair](#more-than-one-address-pair). Either a reverse proxy terminates
 TLS and passes plain HTTP to a loopback port (`--proxy-listen`; the packaged unit
 expects nginx), or the edge listens on `:443` itself with Let's Encrypt
-certificates for its two names (`--listen`, the default).
+certificates for its names (`--listen`, the default).
 
 ### Requirements
 
@@ -603,7 +604,7 @@ certificates for its two names (`--listen`, the default).
   IPv4 address. The edge limits requests by client address, so no other proxy or
   load balancer may sit between clients and the edge's own proxy.
 - Outbound HTTPS to `github.com`, `api.github.com` and Let's Encrypt.
-- Two DNS names, a GitHub OAuth app, and egress bandwidth ([Egress
+- Two DNS names and a GitHub OAuth app per address pair, and egress bandwidth ([Egress
   budget](#egress-budget)).
 
 ### GitHub OAuth app
@@ -727,7 +728,7 @@ deliberately.
 
 Put the edge and the proxy on one container network, publish only the proxy's
 ports, give the proxy a fixed address and trust that address alone, never the
-network's subnet. The proxy passes both host names to `http://aether-edge:8443`:
+network's subnet. The proxy passes every host name of every pair to `http://aether-edge:8443`:
 
 ```sh
 docker volume create aether-edge-data
@@ -832,6 +833,63 @@ and names the problem, such as `no GitHub OAuth app is configured; set
 | `--openai-challenge` | `AETHER_EDGE_OPENAI_CHALLENGE` | None. OpenAI's domain verification token, served as `text/plain` at `https://<relay host>/.well-known/openai-apps-challenge`; unset answers 404 |
 | `--dev-listen` | `AETHER_EDGE_DEV_LISTEN` | None. Plain HTTP on a loopback address for local testing |
 | none | `AETHER_EDGE_GITHUB_CLIENT_SECRET` | None. The secret itself, instead of a file; setting both is refused |
+| `--origin-pairs` | `AETHER_EDGE_ORIGIN_PAIRS` | None. More origin pairs, each with its own GitHub OAuth app ([More than one address pair](#more-than-one-address-pair)) |
+
+### More than one address pair
+
+An edge can serve more than one pair of a sign-in origin and a relay origin, as
+when it moves to new host names and servers enrolled at the old ones must keep
+working. `--signin-origin` and `--relay-origin` stay the first pair, so an older
+edge image, which ignores `AETHER_EDGE_ORIGIN_PAIRS`, still serves it after a
+rollback. `AETHER_EDGE_ORIGIN_PAIRS` lists the others, comma-separated, each as
+four fields separated by spaces:
+
+```sh
+AETHER_EDGE_ORIGIN_PAIRS=https://<signin-host-2> https://<relay-host-2> <github-client-id-2> /run/credentials/aether-edge.service/github-client-secret-2
+```
+
+The fields are the sign-in origin, the relay origin, the client id of a GitHub
+OAuth app whose callback URL is `https://<signin-host-2>/signin/github/callback`,
+and a file holding that app's client secret. An OAuth app has one callback URL, so
+each sign-in origin needs its own app. Accounts are keyed by GitHub user id, so
+both apps sign a person in to the same account. Every host name of every pair
+must differ, and each needs [DNS](#dns) and, behind a proxy, its own `server`
+block. Under systemd, load the secret with a drop-in (`sudo systemctl edit
+aether-edge`):
+
+```ini
+[Service]
+LoadCredential=github-client-secret-2:/etc/aether-edge/github-client-secret-2
+```
+
+A request is served by the pair its host name belongs to: the sign-in pages,
+cookies, connector metadata, join links and the `421 Misdirected Request` answer
+to a wrong host all stay on that pair, and no pair is preferred. Sign-in cookies
+are per host, so a browser signs in on each sign-in origin separately. Device
+tokens work through every relay origin.
+
+Without a reverse proxy the edge obtains certificates for every host name of
+every pair itself. Behind one, add each pair's two host names to the proxy: a
+`server` block and a certificate each under nginx, or `|| Host(...)` terms in the
+router rule under Traefik ([`compose.yaml`](../packaging/edge/compose.yaml)).
+Probe `/healthz` and the certificate expiry on each of them
+([Monitoring](#monitoring)).
+
+A server enrolls at the relay origin it dialed. Every grant and connector
+assertion for it names that origin as issuer, whichever relay origin the client
+came in on, because the server refuses any other. Moving a server to another
+address means enrolling it there. With more than one pair, the edge's `ready`
+message lists every relay origin in `relay_origins`; a server that does not know
+the field ignores it. A server whose release does not read that list accepts
+connector tokens only for its own relay origin, so its connector works only
+through the origin it enrolled at.
+
+`/metrics` counts per address: `aether_edge_servers_by_origin{origin}` (servers
+holding a control channel by the relay origin they enrolled at),
+`aether_edge_device_logins_total{origin}` (device sign-ins by sign-in origin)
+and `aether_edge_connector_requests_total{origin,protocol}` (connector requests
+by the relay origin they came in on and the protocol version of the server they
+were for, `0` when it was not connected).
 
 ### Firewall
 
@@ -862,7 +920,7 @@ Encrypt account.
    sudo apt-get install nginx certbot python3-certbot-nginx
    ```
 
-2. Get a certificate for each host name. Port 80 must be open. The deploy hook
+2. Get a certificate for each host name, those of extra pairs too. Port 80 must be open. The deploy hook
    reloads nginx after each renewal:
 
    ```sh
@@ -944,7 +1002,7 @@ exported.
 `/healthz` (`aether-edge healthcheck`) is liveness. `/readyz` (`aether-edge
 healthcheck --ready`) answers 200 when the database answers within a second, the
 public listener serves and the edge is not stopping, and 503 otherwise. From
-outside the edge's network, probe `/healthz` on both names and the certificate
+outside the edge's network, probe `/healthz` on every host name and each one's certificate
 expiry (`openssl x509 -noout -checkend 1814400`).
 
 The edge logs to the journal (`journalctl -u aether-edge`), including client

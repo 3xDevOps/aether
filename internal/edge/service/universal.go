@@ -25,18 +25,19 @@ type serverBlock struct {
 }
 
 // registerUniversal adds the universal connector paths to mux, which
-// serves the relay origin. The edge serves the metadata and sends the
-// browser to choose a server; each server serves the rest, reached by the
-// server id its codes and tokens start with.
+// serves the relay origins. The edge serves the metadata, in the relay
+// origin the request came in on, and sends the browser to choose a
+// server; each server serves the rest, reached by the server id its codes
+// and tokens start with.
 func (s *Service) registerUniversal(mux *http.ServeMux) {
-	base := s.relayOrigin + edgeproto.PathUniversalMCP
 	mux.HandleFunc(edgeproto.PathUniversalMCP, s.universalMCP)
 	mux.HandleFunc(edgeproto.PathUniversalMCPToken, s.universalToken)
 	mux.HandleFunc(edgeproto.PathUniversalMCPAuthorize, s.universalAuthorize)
-	mux.Handle("GET "+edgeproto.PathUniversalResourceMetadata, auth.ProtectedResourceMetadataHandler(
-		edgeproto.ConnectorResourceMetadata(base)))
-	mux.HandleFunc("GET "+edgeproto.PathUniversalAuthServerMetadata, func(w http.ResponseWriter, _ *http.Request) {
-		writeNoStoreJSON(w, http.StatusOK, edgeproto.ConnectorAuthServerMetadata(base))
+	mux.HandleFunc("GET "+edgeproto.PathUniversalResourceMetadata, func(w http.ResponseWriter, r *http.Request) {
+		auth.ProtectedResourceMetadataHandler(edgeproto.ConnectorResourceMetadata(s.pair(r).relay+edgeproto.PathUniversalMCP)).ServeHTTP(w, r)
+	})
+	mux.HandleFunc("GET "+edgeproto.PathUniversalAuthServerMetadata, func(w http.ResponseWriter, r *http.Request) {
+		writeNoStoreJSON(w, http.StatusOK, edgeproto.ConnectorAuthServerMetadata(s.pair(r).relay+edgeproto.PathUniversalMCP))
 	})
 	mux.HandleFunc("GET "+edgeproto.PathOpenAIChallenge, func(w http.ResponseWriter, r *http.Request) {
 		if s.openAIChallenge == "" {
@@ -51,7 +52,7 @@ func (s *Service) registerUniversal(mux *http.ServeMux) {
 // universalMCP forwards an MCP request to the server its bearer token
 // names.
 func (s *Service) universalMCP(w http.ResponseWriter, r *http.Request) {
-	metadata := s.relayOrigin + edgeproto.PathUniversalResourceMetadata
+	metadata := s.pair(r).relay + edgeproto.PathUniversalResourceMetadata
 	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !strings.EqualFold(scheme, "Bearer") || token == "" {
 		w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata=%q`, metadata))
@@ -101,7 +102,7 @@ func (s *Service) universalToken(w http.ResponseWriter, r *http.Request) {
 		tokenFail(w, http.StatusTooManyRequests, "slow_down", fmt.Sprintf("too many token requests for server %s from your address; retry in a few seconds", id))
 		return
 	}
-	s.link.ForwardUniversal(s.guard(w), r, id, body, "")
+	s.link.ForwardUniversal(s.guard(w, r), r, id, body, "")
 }
 
 // universalAuthorize sends a browser without a chosen server to choose
@@ -110,7 +111,7 @@ func (s *Service) universalToken(w http.ResponseWriter, r *http.Request) {
 func (s *Service) universalAuthorize(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get(edgeproto.ParamServer)
 	if id == "" && r.Method == http.MethodGet {
-		http.Redirect(w, r, s.signinOrigin+edgeproto.PathMCPChoose+"?"+r.URL.RawQuery, http.StatusSeeOther)
+		http.Redirect(w, r, s.pair(r).signin+edgeproto.PathMCPChoose+"?"+r.URL.RawQuery, http.StatusSeeOther)
 		return
 	}
 	body, ok := s.link.ReadMCPBody(w, r)
@@ -134,7 +135,7 @@ func (s *Service) universalAuthorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, string(edgeproto.RefusalTooMany), edgeproto.RefusalTooMany.Status())
 		return
 	}
-	g := s.guard(w)
+	g := s.guard(w, r)
 	browser := ""
 	if c, err := r.Cookie(browserCookie); err == nil && edgeproto.ValidToken(c.Value) {
 		browser = c.Value
@@ -154,23 +155,25 @@ func (s *Service) forwardUniversal(w http.ResponseWriter, r *http.Request, id st
 	if !ok {
 		return
 	}
-	s.link.ForwardUniversal(s.guard(w), r, id, body, "")
+	s.link.ForwardUniversal(s.guard(w, r), r, id, body, "")
 }
 
-// guard limits what a server answers on the universal paths, which every
-// server shares one origin for: a Location only to this origin or a
+// guard limits what a server answers on the universal paths of r's relay
+// origin, which every server shares: a Location only to that origin or a
 // connector client, and forms only to those. It sets cookie, when set,
 // past the relay, which drops every cookie a server sets.
-func (s *Service) guard(w http.ResponseWriter) *universalGuard {
+func (s *Service) guard(w http.ResponseWriter, r *http.Request) *universalGuard {
+	relay := s.pair(r).relay
 	// The consent page's sandbox gives it an opaque origin, which 'self'
 	// may not match, so the relay origin is named.
-	formAction := "form-action " + s.relayOrigin + s.clientSources()
-	return &universalGuard{ResponseWriter: w, s: s, formAction: formAction}
+	formAction := "form-action " + relay + s.clientSources()
+	return &universalGuard{ResponseWriter: w, s: s, relay: relay, formAction: formAction}
 }
 
 type universalGuard struct {
 	http.ResponseWriter
 	s          *Service
+	relay      string
 	formAction string
 	cookie     *http.Cookie
 	wrote      bool
@@ -194,7 +197,7 @@ func (g *universalGuard) WriteHeader(code int) {
 		h.Set("Content-Security-Policy", csp+"; "+g.formAction)
 	}
 	for _, loc := range h.Values("Location") {
-		if g.s.allowedLocation(loc) {
+		if g.s.allowedLocation(g.relay, loc) {
 			continue
 		}
 		g.refused = true
@@ -203,7 +206,7 @@ func (g *universalGuard) WriteHeader(code int) {
 		h.Set("Content-Type", "text/plain; charset=utf-8")
 		g.ResponseWriter.WriteHeader(http.StatusBadGateway)
 		_, _ = fmt.Fprintf(g.ResponseWriter, "the server sent the browser to %q; on %s%s the edge sends it only to %s or to %s\n",
-			loc, g.s.relayOrigin, edgeproto.PathUniversalMCP, g.s.relayOrigin+edgeproto.PathUniversalMCPAuthorize, strings.Join(g.s.clientHosts, " or "))
+			loc, g.relay, edgeproto.PathUniversalMCP, g.relay+edgeproto.PathUniversalMCPAuthorize, strings.Join(g.s.clientHosts, " or "))
 		return
 	}
 	g.ResponseWriter.WriteHeader(code)
@@ -233,19 +236,19 @@ func (s *Service) clientSources() string {
 }
 
 // allowedLocation reports whether loc is the universal authorization
-// path on the relay origin, an https URL on a connector client's host
+// path on the relay origin relay, an https URL on a connector client's host
 // name, or Claude Code's loopback callback, http://localhost or
 // 127.0.0.1 on any port at /callback. A server's own paths on the relay
 // origin get no form-action limit, so a universal page may not send the
 // browser there.
-func (s *Service) allowedLocation(loc string) bool {
+func (s *Service) allowedLocation(relay, loc string) bool {
 	u, err := url.Parse(loc)
 	switch {
 	case err != nil || strings.ContainsAny(loc, "\\\r\n\t"):
 		return false
 	case u.User != nil:
 		return false
-	case u.Scheme == "" && u.Host == "" && !strings.HasPrefix(loc, "//"), u.Scheme+"://"+u.Host == s.relayOrigin:
+	case u.Scheme == "" && u.Host == "" && !strings.HasPrefix(loc, "//"), u.Scheme+"://"+u.Host == relay:
 		return u.Path == edgeproto.PathUniversalMCPAuthorize
 	case u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"):
 		return u.Path == "/callback"
@@ -300,7 +303,7 @@ func (s *Service) mcpChoose(w http.ResponseWriter, r *http.Request, v visitor) e
 			other = append(other, c)
 		}
 	}
-	s.renderChoose(w, &v, q, ready, other)
+	s.renderChoose(w, r, &v, q, ready, other)
 	return nil
 }
 
@@ -315,8 +318,11 @@ func chooseRequest(q url.Values) (url.Values, error) {
 }
 
 func (s *Service) offer(c *choice, account edgeproto.Account, q url.Values, now time.Time, minVersion int) error {
+	// The assertion names the origin the server enrolled at, which it
+	// checks, not the one the browser came in on.
+	issuer := s.link.Origin(c.ID)
 	switch version := s.link.Version(c.ID); {
-	case version == 0:
+	case version == 0 || issuer == "":
 		c.Reason = "not connected to this edge"
 		return nil
 	case version < minVersion:
@@ -325,7 +331,7 @@ func (s *Service) offer(c *choice, account edgeproto.Account, q url.Values, now 
 	}
 	var err error
 	c.Assertion, err = edgeproto.SignConnectorAssertion(s.key, edgeproto.ConnectorAssertion{
-		Issuer: s.relayOrigin, ServerID: c.ID, Nonce: edgeproto.NewConnID(), Account: account,
+		Issuer: issuer, ServerID: c.ID, Nonce: edgeproto.NewConnID(), Account: account,
 		ClientID: q.Get("client_id"), Challenge: q.Get("code_challenge"), RedirectURI: q.Get("redirect_uri"),
 		IssuedAt: now, ExpiresAt: now.Add(edgeproto.ConnectorAssertionTTL),
 	})
@@ -336,12 +342,13 @@ func (s *Service) offer(c *choice, account edgeproto.Account, q url.Values, now 
 }
 
 // v is nil for the reviewer account, which has no session.
-func (s *Service) renderChoose(w http.ResponseWriter, v *visitor, q url.Values, ready, other []choice) {
+func (s *Service) renderChoose(w http.ResponseWriter, r *http.Request, v *visitor, q url.Values, ready, other []choice) {
+	relay := s.pair(r).relay
 	// The server answers a bad request with a redirect to the client,
 	// which form-action also governs.
-	w.Header().Set("Content-Security-Policy", pageCSP+" "+s.relayOrigin+s.clientSources())
+	w.Header().Set("Content-Security-Policy", pageCSP+" "+relay+s.clientSources())
 	s.render(w, http.StatusOK, "choose", s.view(v, "Choose a server", chooseData{
-		Action: s.relayOrigin + edgeproto.PathUniversalMCPAuthorize, Client: redirectHost(q.Get("redirect_uri")),
+		Action: relay + edgeproto.PathUniversalMCPAuthorize, Client: redirectHost(q.Get("redirect_uri")),
 		Fields: requestFields(q), Ready: ready, Other: other,
 	}))
 }

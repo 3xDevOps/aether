@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/acme/autocert"
 )
 
 func envOf(vars map[string]string) func(string) string {
@@ -242,5 +244,63 @@ func TestEnvExampleListsEveryVariable(t *testing.T) {
 				t.Errorf("%s reads %s, which packaging/edge/aether-edge.env.example does not list", name, m[1])
 			}
 		}
+	}
+}
+
+func TestOriginPairs(t *testing.T) {
+	dir := t.TempDir()
+	secret, blank := filepath.Join(dir, "github-client-secret-2"), filepath.Join(dir, "blank")
+	if err := os.WriteFile(secret, []byte("fake-secret-2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blank, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pair := "https://auth.example.net https://edge.example.net fake-id-2 " + secret
+	o, err := parseOptions(origins, envOf(map[string]string{"AETHER_EDGE_ORIGIN_PAIRS": pair + " , https://auth3.example.net https://edge3.example.net fake-id-3 " + secret}))
+	if err != nil || len(o.morePairs) != 2 || o.signinOrigin != "https://auth.example.test" || o.relayOrigin != "https://edge.example.test" {
+		t.Fatalf("two more pairs: %+v %v", o, err)
+	}
+	if p := o.morePairs[0]; p.SigninOrigin != "https://auth.example.net" || p.RelayOrigin != "https://edge.example.net" ||
+		p.GitHub.ClientID != "fake-id-2" || p.GitHub.ClientSecret != "fake-secret-2" {
+		t.Fatalf("first more pair: %+v %+v", p, p.GitHub)
+	}
+	want := []string{"auth.example.test", "edge.example.test", "auth.example.net", "edge.example.net", "auth3.example.net", "edge3.example.net"}
+	if got := certHosts(o); !slices.Equal(got, want) {
+		t.Errorf("certificate hosts %v, want %v", got, want)
+	}
+	if err = autocert.HostWhitelist(certHosts(o)...)(t.Context(), "edge3.example.net"); err != nil {
+		t.Errorf("certificate for the third pair's relay host refused: %v", err)
+	}
+	if o, err = parseOptions(origins, envOf(nil)); err != nil || o.morePairs != nil {
+		t.Fatalf("no more pairs: %+v %v", o.morePairs, err)
+	}
+	if got := certHosts(o); !slices.Equal(got, want[:2]) {
+		t.Errorf("certificate hosts of one pair %v, want %v", got, want[:2])
+	}
+	for _, tt := range []struct{ pairs, want string }{
+		{"https://auth.example.net https://edge.example.net fake-id-2", "is not <signin origin> <relay origin> <GitHub client id> <client secret file>"},
+		{"https://auth.example.net https://edge.example.test fake-id-2 " + secret, "has the host name edge.example.test of --relay-origin"},
+		{"https://auth.example.net https://AUTH.example.net:8443 fake-id-2 " + secret, "has the host name auth.example.net of https://auth.example.net"},
+		{"http://auth.example.net https://edge.example.net fake-id-2 " + secret, "--origin-pairs must be https://host[:port]"},
+		{"https://auth.example.net https://edge.example.net fake-id-2 " + filepath.Join(dir, "missing"), "the client secret file of https://auth.example.net"},
+		{"https://auth.example.net https://edge.example.net fake-id-2 " + blank, "holds no secret"},
+		{"https://auth.example.net https://edge.example.net fake-id-2 " + secret + ",", "has an empty pair: remove the extra comma"},
+	} {
+		if _, err := parseOptions(append(slices.Clone(origins), "--origin-pairs", tt.pairs), envOf(nil)); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("--origin-pairs %q: %v, want %q", tt.pairs, err, tt.want)
+		}
+	}
+	var many []string
+	for i := range 16 {
+		many = append(many, fmt.Sprintf("https://auth%d.example.org https://edge%d.example.org fake-id %s", i, i, secret))
+	}
+	if _, err := parseOptions(append(slices.Clone(origins), "--origin-pairs", strings.Join(many, ",")), envOf(nil)); err == nil ||
+		!strings.Contains(err.Error(), "names 16 pairs, which with --signin-origin and --relay-origin make 17; an edge serves at most 16 pairs") {
+		t.Errorf("17 pairs: %v", err)
+	}
+	if _, err := parseOptions(append(slices.Clone(devOrigins), "--dev-listen", "127.0.0.1:8080", "--origin-pairs",
+		"http://127.0.0.2:8080 http://127.0.0.3:8080 fake-id-2 "+secret), envOf(nil)); err != nil {
+		t.Errorf("a second loopback pair in development mode: %v", err)
 	}
 }

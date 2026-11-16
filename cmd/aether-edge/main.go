@@ -127,7 +127,7 @@ func serve(args []string) (err error) {
 
 	svc, err := edge.New(edge.Config{
 		DataDir: o.dataDir, SigninOrigin: o.signinOrigin, RelayOrigin: o.relayOrigin,
-		GitHub: o.github, OpenAIChallenge: o.openAIChallenge, Reviewer: o.reviewer,
+		GitHub: o.github, MorePairs: o.morePairs, OpenAIChallenge: o.openAIChallenge, Reviewer: o.reviewer,
 	})
 	if err != nil {
 		return err
@@ -196,6 +196,9 @@ func serve(args []string) (err error) {
 	// edge's own listener is up.
 	go func() { errc <- serveHTTP("metrics", metrics, metricsLn) }()
 	slog.Info("aether-edge: serving", "signin", o.signinOrigin, "relay", o.relayOrigin, "metrics", metricsLn.Addr())
+	for _, p := range o.morePairs {
+		slog.Info("aether-edge: serving", "signin", p.SigninOrigin, "relay", p.RelayOrigin)
+	}
 	if o.reviewer != nil {
 		slog.Warn("aether-edge: reviewer account on", "login", o.reviewer.Login, "server", o.reviewer.ServerID,
 			"signin", o.signinOrigin+edge.PathReviewerSignin)
@@ -220,19 +223,29 @@ func serve(args []string) (err error) {
 	return errors.Join(err, web.Shutdown(shutdownCtx), metrics.Shutdown(shutdownCtx))
 }
 
-// edgeTLS obtains certificates for exactly the edge's two host names with
+// edgeTLS obtains certificates for exactly the edge's host names with
 // TLS-ALPN-01.
 func edgeTLS(o options) *tls.Config {
 	m := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		Cache:      autocert.DirCache(filepath.Join(o.dataDir, "acme")),
-		HostPolicy: autocert.HostWhitelist(host(o.signinOrigin), host(o.relayOrigin)),
+		HostPolicy: autocert.HostWhitelist(certHosts(o)...),
 		Email:      o.acmeEmail,
 		Client:     &acme.Client{DirectoryURL: o.acmeDirectory},
 	}
 	cfg := m.TLSConfig()
 	cfg.MinVersion = tls.VersionTLS12
 	return cfg
+}
+
+// certHosts are the host names the edge obtains certificates for: two per
+// origin pair.
+func certHosts(o options) []string {
+	hosts := []string{host(o.signinOrigin), host(o.relayOrigin)}
+	for _, p := range o.morePairs {
+		hosts = append(hosts, host(p.SigninOrigin), host(p.RelayOrigin))
+	}
+	return hosts
 }
 
 func serveHTTP(name string, srv *http.Server, ln net.Listener) error {

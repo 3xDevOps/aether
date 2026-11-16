@@ -4,7 +4,10 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 // Edge HTTP paths. An edge answers on two origins, which one process may
@@ -269,4 +272,20 @@ func (i EdgeInfo) Validate() error {
 		return fmt.Errorf("edgeproto: edge speaks versions %d to %d", i.MinVersion, i.Version)
 	}
 	return nil
+}
+
+// RequestHost is the host name r names, lowercase, without a port or a
+// trailing dot: the name an edge picks the origin of a request by.
+func RequestHost(r *http.Request) string {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+}
+
+// OriginHost is the host name of origin, a canonical Origin.
+func OriginHost(origin string) string {
+	u, _ := url.Parse(origin) // origin is canonical
+	return u.Hostname()
 }
