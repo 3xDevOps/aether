@@ -1,9 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
-import type { LaunchDraft } from '@/components/launch/draft'
+import { readLaunchDraft, type LaunchDraft } from '@/components/launch/draft'
+import { currentGatewayToken } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
+import { openLaunchPopout } from '@/lib/launch-popout'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
@@ -17,7 +19,7 @@ import { pickOption } from '@/test/select'
 
 vi.mock('@/lib/api', async () => {
   const { fakeApi } = await import('@/test/fixtures')
-  return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
+  return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error, currentGatewayToken: vi.fn(() => null) }
 })
 
 const claude = (over: Parameters<typeof agentInfo>[0] = {}) =>
@@ -31,12 +33,14 @@ beforeEach(() => {
   vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice], shared_with: [] })
   vi.mocked(api.accountUsage).mockResolvedValue({ account_member_id: alice.id, providers: [] })
   vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 0, defaults: {} })
+  vi.mocked(currentGatewayToken).mockReturnValue(null)
   useLaunchDefaults.setState({ result: null, error: null })
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
     activeWorkspace: workspace.id,
     paletteDialog: 'launch',
     launchDraft: null,
+    launchDraftPopout: null,
     launchDraftError: null,
     linkStatus: null,
     identityKey: null,
@@ -83,10 +87,92 @@ describe('reopening', () => {
     expect(((await screen.findAllByLabelText('Task')).at(-1) as HTMLTextAreaElement).value).toBe('')
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
   })
+
+  it('resumes the latest pop-out draft after the child window closes', async () => {
+    const saved = draft({ task: 'before pop-out edit' })
+    act(() => useStore.setState({ paletteDialog: null, launchDraft: saved, launchDraftPopout: { identityKey: null, draftID: saved.id } }))
+    render(<PaletteDialogs />)
+    expect(screen.queryByRole('button', { name: 'Resume new session draft' })).toBeNull()
+
+    act(() => useStore.setState({ launchDraft: { ...saved, task: 'latest pop-out edit' }, launchDraftPopout: null, launchDraftRevision: 1 }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resume new session draft' }))
+
+    expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('latest pop-out edit')
+  })
+
+  it('focuses the existing pop-out when New session is opened again', () => {
+    const saved = draft()
+    const popup = { closed: false, focus: vi.fn() } as unknown as WindowProxy
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    openLaunchPopout(window.location.href, saved)
+    useStore.setState({
+      launchDraft: saved,
+      launchDraftPopout: { identityKey: null, draftID: saved.id },
+      paletteDialog: 'launch',
+    })
+
+    render(<PaletteDialogs />)
+
+    expect(popup.focus).toHaveBeenCalledOnce()
+    expect(useStore.getState().paletteDialog).toBeNull()
+  })
+
+  it('keeps draft saving enabled for a different signed-in identity', async () => {
+    allowDraftStorage()
+    const saved = draft({ id: 'new-identity-draft' })
+    useStore.setState({
+      identityKey: 'server/bob',
+      paletteDialog: null,
+      launchDraft: saved,
+      launchDraftPopout: { identityKey: 'server/alice', draftID: 'alice-draft' },
+    })
+    render(<PaletteDialogs />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Resume new session draft' }))
+
+    await waitFor(() => expect(readLaunchDraft('server/bob').draft).toEqual(saved))
+  })
 })
 
 describe('saved launch draft', () => {
   const resume = () => screen.getByRole('button', { name: 'Resume new session draft' })
+
+  it('opens the current launch draft in a new window and collapses the original panel', () => {
+    const saved = draft({ task: 'keep these launch settings' })
+    useStore.setState({ launchDraft: saved })
+    const popup = {} as WindowProxy
+    vi.mocked(currentGatewayToken).mockReturnValue('gateway-token')
+    const open = vi.spyOn(window, 'open').mockReturnValue(popup)
+    render(<LaunchDialog />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open in a new window' }))
+
+    expect(open).toHaveBeenCalledOnce()
+    const target = new URL(open.mock.calls[0]![0]!)
+    expect(target.searchParams.get('new')).toBe('1')
+    expect(target.searchParams.get('popout')).toBe('1')
+    expect(target.searchParams.get('token')).toBe('gateway-token')
+    expect(JSON.parse(new URLSearchParams(target.hash.slice(1)).get('launch-draft')!)).toEqual(saved)
+    expect(useStore.getState().paletteDialog).toBeNull()
+    expect(useStore.getState().launchDraft).toEqual(saved)
+    expect(useStore.getState().launchDraftPopout).toEqual({ identityKey: null, draftID: saved.id })
+    open.mockRestore()
+  })
+
+  it('leaves draft persistence to the pop-out after handing it off', () => {
+    allowDraftStorage()
+    useStore.setState({ identityKey: 'server/alice' })
+    const saved = draft()
+    useStore.getState().setLaunchDraft(saved)
+    vi.spyOn(window, 'open').mockReturnValue({} as WindowProxy)
+    render(<LaunchDialog />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open in a new window' }))
+    const poppedOut = { ...saved, task: 'edited in the pop-out' }
+    useStore.getState().setLaunchDraft(poppedOut)
+    useStore.setState({ launchDraftError: 'storage state changed' })
+
+    expect(readLaunchDraft('server/alice').draft).toEqual(poppedOut)
+  })
 
   it('collapses on an outside click, keeps that click and restores the task and mode', async () => {
     const mainClick = vi.fn()
@@ -161,6 +247,7 @@ describe('saved launch draft', () => {
     await waitFor(() => expect(launchButton().disabled).toBe(false))
     setTask('launch once')
     fireEvent.click(launchButton())
+    expect((screen.getByRole('button', { name: 'Open in a new window' }) as HTMLButtonElement).disabled).toBe(true)
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
     await userEvent.click(resume())

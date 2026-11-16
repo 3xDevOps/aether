@@ -1042,6 +1042,8 @@ On macOS, the shell keeps the native traffic lights, centers them in the
 On an initial connection failure, `App.tsx` renders the same header without
 navigation, so the window can still move and close. A browser tab has no
 desktop bridge, so its header has neither drag regions nor window controls.
+The New session pop-out gets the same desktop window controls; in a browser,
+the browser's pop-up setting governs whether it opens.
 
 The bridge carries one more thing the SPA cannot do for itself:
 `window.aetherDesktop.chooseFolder()` opens the shell's native directory
@@ -2668,6 +2670,15 @@ shows its error and no setup button, and Launch stays disabled.
 The Task textarea grows as text is typed or pasted, up to 12rem; longer tasks
 scroll inside the field. A shared prompt grows without that cap so the whole
 prompt is visible.
+
+The desktop launch panel has **Open in a new window** beside its close control.
+It opens this same form in a separate window with the current task and launch
+choices, then collapses the original panel. **Launch** there starts one
+session, closes the pop-out and opens that session in the original dashboard.
+Closing the pop-out without launching returns its latest draft to the original
+form. Opening **New session** again while the pop-out is open focuses it. A
+refused launch keeps the pop-out open with the server's error. If the browser
+blocks the window, the original form stays open.
 
 On desktop, clicking outside the form or pressing **Escape** slides it away
 and leaves an arrow at the sidebar edge (the window edge when the sidebar is
