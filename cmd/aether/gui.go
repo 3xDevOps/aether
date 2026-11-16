@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/localgw"
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
@@ -95,7 +96,7 @@ func runGUI(args []string) error {
 	if err != nil {
 		return err
 	}
-	packaged := os.Getenv(selfupdate.PackagedEnv)
+	packaged := envname.Getenv(selfupdate.PackagedEnv)
 	gw, err := localgw.New(localgw.Config{
 		Port:    *port,
 		Backend: localgw.NewSSHBackend(cfg),
@@ -107,7 +108,7 @@ func runGUI(args []string) error {
 		// so an update applied from the dashboard can exit the process.
 		Supervised: *jsonOut,
 		// The desktop shell sets it when it quits on exit 76.
-		ShellQuitsOnHandoff: os.Getenv(localgw.ShellQuitsEnv) != "",
+		ShellQuitsOnHandoff: envname.Getenv(localgw.ShellQuitsEnv) != "",
 	})
 	if err != nil {
 		return err

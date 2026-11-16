@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/envname"
 )
 
 // ConfigDirEnv mirrors cli.ConfigDirEnv, the one variable cli.Path reads
@@ -36,6 +38,7 @@ func Isolate(t testing.TB) string {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
 	t.Setenv("AppData", filepath.Join(dir, "AppData", "Roaming"))
 	t.Setenv(ConfigDirEnv, filepath.Join(dir, "config"))
+	t.Setenv(envname.New(ConfigDirEnv), "")
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	home, err := os.UserHomeDir()

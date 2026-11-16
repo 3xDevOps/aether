@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+
+	"github.com/3xDevOps/Aether/internal/envname"
 )
 
 // resolvConfEnv names a resolv.conf the pure-Go resolver reads instead of
@@ -22,7 +24,7 @@ const resolvConfEnv = "AETHER_RESOLV_CONF"
 // useResolvConfEnv installs the resolver only when /etc/resolv.conf is
 // missing, so a host that has one keeps its own configuration.
 func useResolvConfEnv() {
-	path := os.Getenv(resolvConfEnv)
+	path := envname.Getenv(resolvConfEnv)
 	if path == "" {
 		return
 	}

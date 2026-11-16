@@ -47,7 +47,7 @@ $installer = Join-Path $PSScriptRoot 'install.ps1'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('Aether update ' + [guid]::NewGuid().ToString('N'))
 $saved = @{}
 foreach ($name in @('LOCALAPPDATA', 'AETHER_CONFIG_DIR', 'HTTPS_PROXY', 'AETHER_NO_UPDATE_CHECK', 'AETHER_BIN',
-        'AETHER_BASE_URL', 'AETHER_VERSION', 'AETHER_ROLE', 'AETHER_BIN_DIR')) {
+        'AETHER_BASE_URL', 'AETHER_VERSION', 'AETHER_ROLE', 'AETHER_BIN_DIR', 'CLOUDFIELD_BIN', 'CLOUDFIELD_BASE_URL', 'CLOUDFIELD_REPO', 'CLOUDFIELD_VERSION', 'CLOUDFIELD_ROLE', 'CLOUDFIELD_BIN_DIR', 'CLOUDFIELD_CONFIG_DIR', 'CLOUDFIELD_NO_UPDATE_CHECK')) {
     $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $releases = @()
@@ -449,7 +449,8 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
 function Invoke-Installer([string]$Port, [hashtable]$Extra) {
     $env:AETHER_BASE_URL = "http://127.0.0.1:$Port"
     $env:AETHER_NO_UPDATE_CHECK = '1'
-    foreach ($name in @('AETHER_BIN', 'AETHER_VERSION', 'AETHER_ROLE', 'AETHER_BIN_DIR')) {
+    # The CLOUDFIELD_ names win over the AETHER_ ones this script sets.
+    foreach ($name in @('AETHER_BIN', 'AETHER_VERSION', 'AETHER_ROLE', 'AETHER_BIN_DIR', 'CLOUDFIELD_BIN', 'CLOUDFIELD_BASE_URL', 'CLOUDFIELD_REPO', 'CLOUDFIELD_VERSION', 'CLOUDFIELD_ROLE', 'CLOUDFIELD_BIN_DIR', 'CLOUDFIELD_CONFIG_DIR', 'CLOUDFIELD_NO_UPDATE_CHECK')) {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
     & $installer -Version $OldVersion @Extra

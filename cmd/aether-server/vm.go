@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -148,7 +149,7 @@ func splitInstalled(files []serversetup.Pinned) (installed, missing []serversetu
 // the background, outside an update's startup check: a broker refuses to
 // start until it is in place.
 func ensureVMFiles(ctx context.Context, kernel string) error {
-	if vmHostSupported() != nil || os.Getenv(selfupdate.OptOutEnv) != "" {
+	if vmHostSupported() != nil || envname.Getenv(selfupdate.OptOutEnv) != "" {
 		return nil
 	}
 	go installOMPBroker()

@@ -19,6 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/3xDevOps/Aether/desktop"
+	"github.com/3xDevOps/Aether/internal/envname"
 )
 
 // DesktopApp is an installed desktop shell.
@@ -603,7 +604,7 @@ func removeHint(goos, path string, err error) string {
 // found only through a PATH entry outside the defaults is reported in
 // shellOnly: it works from here but may not from the application menu.
 func DesktopFindsCLI(home string) (found bool, shellOnly string) {
-	if explicit := os.Getenv("AETHER_BIN"); explicit != "" {
+	if explicit := envname.Getenv("AETHER_BIN"); explicit != "" {
 		_, err := exec.LookPath(explicit)
 		return err == nil, ""
 	}

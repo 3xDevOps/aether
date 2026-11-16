@@ -85,7 +85,7 @@ function Invoke-AetherPowerShellFile {
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    foreach ($name in @('AETHER_VERSION', 'AETHER_BIN_DIR', 'AETHER_ROLE', 'AETHER_REPO', 'AETHER_BASE_URL', 'AETHER_LATEST_URL', 'AETHER_API_URL', 'AETHER_BIN', 'AETHER_FIXTURE_LOG', 'AETHER_DESKTOP_TARGET', 'AETHER_GUI_FAIL', 'PROCESSOR_ARCHITEW6432', 'PROCESSOR_ARCHITECTURE', 'LOCALAPPDATA', 'CURL_HOME')) {
+    foreach ($name in @('AETHER_VERSION', 'AETHER_BIN_DIR', 'AETHER_ROLE', 'AETHER_REPO', 'AETHER_BASE_URL', 'AETHER_LATEST_URL', 'AETHER_API_URL', 'AETHER_BIN', 'AETHER_FIXTURE_LOG', 'AETHER_DESKTOP_TARGET', 'AETHER_GUI_FAIL', 'CLOUDFIELD_VERSION', 'CLOUDFIELD_BIN_DIR', 'CLOUDFIELD_ROLE', 'CLOUDFIELD_REPO', 'CLOUDFIELD_BASE_URL', 'CLOUDFIELD_BIN', 'PROCESSOR_ARCHITEW6432', 'PROCESSOR_ARCHITECTURE', 'LOCALAPPDATA', 'CURL_HOME')) {
         $start.EnvironmentVariables.Remove($name)
     }
     foreach ($name in $Environment.Keys) {
@@ -371,6 +371,10 @@ func main() {
     }
     fmt.Println("fixture stdout progress")
     fmt.Fprintln(os.Stderr, "fixture stderr progress")
+    if os.Getenv("CLOUDFIELD_BIN") != "" {
+        fmt.Fprintln(os.Stderr, "CLOUDFIELD_BIN reached the build")
+        os.Exit(65)
+    }
     if os.Getenv("AETHER_GUI_FAIL") != "" {
         fmt.Fprintln(os.Stderr, "fixture desktop failure")
         os.Exit(23)
@@ -587,6 +591,26 @@ func main() {
     Assert-AetherTest (Test-Path -LiteralPath (Join-Path $noneBin 'aether.exe') -PathType Leaf) 'CLI-only install did not install the CLI'
     Assert-AetherTest (-not (Test-Path -LiteralPath $noneLog)) 'CLI-only opt out invoked GUI build'
 
+    # CLOUDFIELD_X wins over AETHER_X; a blank one falls back.
+    $cloudfieldBin = Join-Path $root 'cloudfield-bin'
+    $cloudfieldLog = Join-Path $root 'cloudfield.log'
+    New-Item -ItemType Directory -Path $cloudfieldBin -Force | Out-Null
+    $result = Invoke-AetherPowerShellFile $installer @() @{
+        CLOUDFIELD_BASE_URL = ' '
+        AETHER_BASE_URL = $baseUrl
+        CLOUDFIELD_VERSION = 'v0.4.0-alpha.6'
+        AETHER_VERSION = 'v0.0.0-not-a-release'
+        CLOUDFIELD_ROLE = 'none'
+        AETHER_ROLE = 'client'
+        CLOUDFIELD_BIN_DIR = $cloudfieldBin
+        AETHER_BIN_DIR = (Join-Path $root 'aether-bin-not-used')
+        AETHER_FIXTURE_LOG = $cloudfieldLog
+    }
+    Assert-AetherEqual 0 $result.ExitCode ("CLOUDFIELD_ install failed: " + $result.Output)
+    Assert-AetherTest (Test-Path -LiteralPath (Join-Path $cloudfieldBin 'aether.exe') -PathType Leaf) 'CLOUDFIELD_BIN_DIR or CLOUDFIELD_VERSION was not used'
+    Assert-AetherTest (-not (Test-Path -LiteralPath (Join-Path $root 'aether-bin-not-used'))) 'AETHER_BIN_DIR won over CLOUDFIELD_BIN_DIR'
+    Assert-AetherTest (-not (Test-Path -LiteralPath $cloudfieldLog)) 'CLOUDFIELD_ROLE=none did not win over AETHER_ROLE=client'
+
     # A desktop failure leaves the newly installed CLI and restores AETHER_BIN.
     # Called from a script with & or dot-sourced, the installer prints the
     # error once and throws, so the caller's catch sees it.
@@ -603,6 +627,7 @@ func main() {
         $wrapper = Join-Path $root 'caller-wrapper.ps1'
         $wrapperSource = @"
 `$env:AETHER_BIN = 'caller-sentinel'
+`$env:CLOUDFIELD_BIN = 'caller-cloudfield'
 Set-Location -LiteralPath '$failureCaseLiteral'
 try {
     $operator '$installerLiteral' -Version '$version' -Role client -BinDir '.\bin'
@@ -611,7 +636,7 @@ try {
 catch {
     'caller caught: ' + `$_.Exception.Message
 }
-[IO.File]::WriteAllText('$restoreLiteral', [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process'))
+[IO.File]::WriteAllText('$restoreLiteral', [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process') + '|' + [Environment]::GetEnvironmentVariable('CLOUDFIELD_BIN', 'Process'))
 "@
         [IO.File]::WriteAllText($wrapper, $wrapperSource)
         Remove-Item -LiteralPath $restoreResult -Force -ErrorAction SilentlyContinue
@@ -626,7 +651,7 @@ catch {
         Assert-AetherTest ($result.Stderr.Contains('fixture desktop failure')) ("desktop failure output did not reach the console: " + $result.Output)
         Assert-AetherEqual 1 ([regex]::Matches($result.Stderr, 'exited with code 23').Count) ("desktop failure under {0} printed the error more than once: {1}" -f $operator, $result.Stderr)
         Assert-AetherTest (Test-Path -LiteralPath (Join-Path $failureBin 'aether.exe') -PathType Leaf) 'desktop failure lost the installed CLI'
-        Assert-AetherEqual 'caller-sentinel' ([IO.File]::ReadAllText($restoreResult)) ("installer under {0} did not restore AETHER_BIN" -f $operator)
+        Assert-AetherEqual 'caller-sentinel|caller-cloudfield' ([IO.File]::ReadAllText($restoreResult)) ("installer under {0} did not restore AETHER_BIN and CLOUDFIELD_BIN" -f $operator)
     }
 
     # Old client releases are rejected before download/install/build mutation;

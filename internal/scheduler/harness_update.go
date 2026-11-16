@@ -238,7 +238,7 @@ func (s *Scheduler) updateInContainer(ctx context.Context, spec runtime.Spec, ex
 		return "", "", err
 	}
 	defer release()
-	cid, err := s.cfg.Runtime.Create(ctx, spec)
+	cid, err := s.createContainer(ctx, spec)
 	if err != nil {
 		return "", "", err
 	}

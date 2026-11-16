@@ -24,6 +24,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/edge/relay"
 	edge "github.com/3xDevOps/Aether/internal/edge/service"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
@@ -36,12 +37,12 @@ const shutdownTimeout = 20 * time.Second
 var commands = map[string]func(args []string) error{
 	"version":     func(args []string) error { return versionCmd(args, os.Stdout) },
 	"serve":       serve,
-	"healthcheck": func(args []string) error { return healthcheck(args, os.Getenv, os.Stdout) },
-	"servers":     func(args []string) error { return servers(args, os.Getenv, os.Stdout) },
-	"accounts":    func(args []string) error { return accounts(args, os.Getenv, os.Stdout) },
-	"schema":      func(args []string) error { return schemaCmd(args, os.Getenv, os.Stdout) },
-	"backup":      func(args []string) error { return backupCmd(args, os.Getenv, os.Stdout, os.Stderr) },
-	"restore":     func(args []string) error { return restoreCmd(args, os.Getenv, os.Stdout) },
+	"healthcheck": func(args []string) error { return healthcheck(args, envname.Getenv, os.Stdout) },
+	"servers":     func(args []string) error { return servers(args, envname.Getenv, os.Stdout) },
+	"accounts":    func(args []string) error { return accounts(args, envname.Getenv, os.Stdout) },
+	"schema":      func(args []string) error { return schemaCmd(args, envname.Getenv, os.Stdout) },
+	"backup":      func(args []string) error { return backupCmd(args, envname.Getenv, os.Stdout, os.Stderr) },
+	"restore":     func(args []string) error { return restoreCmd(args, envname.Getenv, os.Stdout) },
 	"reviewer":    func(args []string) error { return reviewerCmd(args, os.Stdout) },
 	"release-check": func(args []string) error {
 		return releaseCheck(args, func(ctx context.Context, tag string) (selfupdate.Manifest, []byte, []byte, error) {
@@ -99,7 +100,7 @@ commands:
 }
 
 func serve(args []string) (err error) {
-	o, err := parseOptions(args, os.Getenv)
+	o, err := parseOptions(args, envname.Getenv)
 	if err != nil {
 		return err
 	}

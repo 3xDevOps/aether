@@ -26,12 +26,13 @@
 
 set -eu
 
-REPO="${AETHER_REPO:-3xDevOps/Aether}"
-BASE_URL="${AETHER_BASE_URL:-https://github.com/${REPO}/releases/download}"
-VERSION="${AETHER_VERSION:-}"
-BIN_DIR="${AETHER_BIN_DIR:-}"
-COMPONENTS="${AETHER_COMPONENTS:-}"
-ROLE="${AETHER_ROLE:-}"
+# CLOUDFIELD_X wins over AETHER_X when it is not empty (internal/envname).
+REPO="${CLOUDFIELD_REPO:-${AETHER_REPO:-3xDevOps/Aether}}"
+BASE_URL="${CLOUDFIELD_BASE_URL:-${AETHER_BASE_URL:-https://github.com/${REPO}/releases/download}}"
+VERSION="${CLOUDFIELD_VERSION:-${AETHER_VERSION:-}}"
+BIN_DIR="${CLOUDFIELD_BIN_DIR:-${AETHER_BIN_DIR:-}}"
+COMPONENTS="${CLOUDFIELD_COMPONENTS:-${AETHER_COMPONENTS:-}}"
+ROLE="${CLOUDFIELD_ROLE:-${AETHER_ROLE:-}}"
 
 # An explicit component choice - a flag, or AETHER_COMPONENTS - also answers
 # the role question. The platform default must not: macOS gets the client

@@ -1070,7 +1070,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	env[coordtransport.RunIDEnv] = string(run.ID)
 	env["AETHER_WORKSPACE_ID"] = string(run.WorkspaceID)
 	env["AETHER_ACCOUNT_MEMBER_ID"] = string(run.AccountMember())
-	env["AETHER_HARNESS"] = run.Harness
+	env[coordtransport.HarnessEnv] = run.Harness
 	identity := member.GitIdentity()
 	env["GIT_AUTHOR_NAME"] = identity.Name
 	env["GIT_COMMITTER_NAME"] = identity.Name

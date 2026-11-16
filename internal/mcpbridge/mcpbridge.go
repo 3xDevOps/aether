@@ -18,6 +18,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -90,7 +91,7 @@ func instructions(ctx context.Context, socket string) string {
 		return coordhooks.RoleCard(coordhooks.Guide{})
 	}
 	g := coordhooks.StatusGuide(status)
-	if os.Getenv(coordtransport.RoleCardEnv) == "1" {
+	if envname.Getenv(coordtransport.RoleCardEnv) == "1" {
 		return coordhooks.Brief(g)
 	}
 	return coordhooks.RoleCard(g)

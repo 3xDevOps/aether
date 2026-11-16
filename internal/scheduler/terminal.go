@@ -439,7 +439,7 @@ func (s *Scheduler) destroyKeptTerminalLocked(ctx context.Context, member domain
 }
 
 func (s *Scheduler) createAndStartTerminal(ctx context.Context, spec runtime.Spec) (runtime.ID, error) {
-	cid, err := s.cfg.Runtime.Create(ctx, spec)
+	cid, err := s.createContainer(ctx, spec)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: create terminal: %w", err)
 	}
