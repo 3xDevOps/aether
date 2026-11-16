@@ -53,8 +53,8 @@ jobs:
 
   # Fails before anything is built or pushed. Only a job in the release
   # environment sees its secrets; environment secrets resolve before
-  # repository secrets, so the key may live in either. docs/install.md,
-  # Protecting the signing key.
+  # repository secrets, so the key may live in either. CONTRIBUTING.md,
+  # Set up releases, and docs/security.md, Release signing.
   signing-key:
     needs: publisher-policy
     if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
