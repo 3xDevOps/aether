@@ -63,7 +63,6 @@ func raiseDeclined(ctx context.Context, st store.Store, r selfupdate.Release) (b
 	return true, nil
 }
 
-// decline is raiseDeclined under decideMu.
 func (s *Service) decline(ctx context.Context, r selfupdate.Release) error {
 	s.decideMu.Lock()
 	defer s.decideMu.Unlock()

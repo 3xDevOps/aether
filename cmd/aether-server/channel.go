@@ -88,9 +88,6 @@ func setChannel(ctx context.Context, w io.Writer, baseURL, stateDir, database, c
 	return nil
 }
 
-// channelConfirmation is the text shown before a channel change: the
-// nightly warning, or where the server and the channel are, and that a
-// server above the channel stays on its build.
 func channelConfirmation(channel string, running, target selfupdate.Release, targetErr error) string {
 	name := strings.ToUpper(channel[:1]) + channel[1:]
 	if channel == selfupdate.ChannelNightly {
@@ -117,8 +114,6 @@ Not recommended unless you are developing Aether.
 	return fmt.Sprintf("%s %s is at %s.", head, name, buildLabel(target))
 }
 
-// buildLabel reads "v0.9.0-beta.1 (build 380)", or the version alone for
-// a release from before channels.
 func buildLabel(r selfupdate.Release) string {
 	if r.Build == 0 {
 		return r.Version

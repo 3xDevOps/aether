@@ -85,8 +85,6 @@ func (s *Service) chooseChannel(ctx context.Context) (string, error) {
 	return s.cfg.Store.ChooseReleaseChannel(ctx, channel)
 }
 
-// ReadMarks reads the channel pointers' high-water marks the server keeps
-// in check.json under stateDir.
 func ReadMarks(stateDir string) (selfupdate.Marks, error) {
 	st, err := loadCheck(stateDir)
 	return st.Pointers, err
@@ -133,7 +131,6 @@ func (s *Service) describeChannel(ctx context.Context, out *protocol.ServerUpdat
 	return nil
 }
 
-// checkSoon moves the background check to now.
 func (s *Service) checkSoon() {
 	s.checkMu.Lock()
 	s.check.NextAt = s.cfg.Now()
@@ -163,10 +160,11 @@ func (s *Service) SetChannel(ctx context.Context, actor domain.MemberID, p proto
 	}
 	running := selfupdate.Running()
 	out := protocol.ServerReleaseChannelSetResult{Channel: p.Channel, Previous: previous, Running: wireRelease(running)}
-	pending, reason, err := s.untaken(ctx, p.Channel)
+	pending, reason, kept, err := s.untaken(ctx, p.Channel)
 	if err != nil {
 		return protocol.ServerReleaseChannelSetResult{}, err
 	}
+	out.Kept, out.KeptError = kept.Version, kept.Error
 	if pending != nil {
 		out.Retired = pending.Version
 	}
@@ -225,23 +223,27 @@ func retiredDetail(channel, reason string) string {
 
 // untaken is the pending update channel does not take, and why: its
 // signed manifest's channel is not one channel accepts. Nightly takes
-// every release. A manifest that cannot be read keeps the pending update;
-// Tick refuses it at its idle moment if the channel does not take it.
-func (s *Service) untaken(ctx context.Context, channel string) (*store.PendingServerUpdate, string, error) {
+// every release. A manifest that cannot be read keeps the pending update,
+// reported as kept; Tick refuses it at its idle moment if the channel
+// does not take it.
+func (s *Service) untaken(ctx context.Context, channel string) (*store.PendingServerUpdate, string, keptUpdate, error) {
 	state, err := s.cfg.Store.GetServerUpdate(ctx)
 	if err != nil || state.Pending == nil || channel == selfupdate.ChannelNightly {
-		return nil, "", err
+		return nil, "", keptUpdate{}, err
 	}
 	m, err := feed(s.cfg.Releases, s.cfg.Checker.BaseURL()).Fetch(ctx, state.Pending.Version)
 	if err != nil {
-		slog.Warn("serverupdate: keeping the pending update across a channel change", "version", state.Pending.Version, "error", err)
-		return nil, "", nil
+		return nil, "", keptUpdate{Version: state.Pending.Version, Error: err.Error()}, nil
 	}
 	if err := m.AcceptedOn(channel); err != nil {
-		return state.Pending, err.Error(), nil
+		return state.Pending, err.Error(), keptUpdate{}, nil
 	}
-	return nil, "", nil
+	return nil, "", keptUpdate{}, nil
 }
+
+// keptUpdate is a pending update a channel change kept because its
+// manifest could not be fetched to check it, and the fetch error.
+type keptUpdate struct{ Version, Error string }
 
 // checkNow runs a check for a request, waiting for a running one no
 // longer than ctx, and schedules what it found.

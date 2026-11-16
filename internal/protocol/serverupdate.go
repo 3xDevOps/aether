@@ -219,7 +219,10 @@ type ReleaseBuild struct {
 // Running is above Target, so the server stays on its build until Channel
 // reaches it. Saved is false for a dry run. Retired is the pending update
 // the change retires because the new channel does not take its release,
-// recorded as failed with the reason.
+// recorded as failed with the reason. Kept is a pending update the change
+// left in place because its manifest could not be fetched to check it,
+// and KeptError is the fetch error; the server still refuses it at its
+// idle moment if the channel does not take it.
 type ServerReleaseChannelSetResult struct {
 	Channel     string        `json:"channel"`
 	Previous    string        `json:"previous"`
@@ -229,4 +232,6 @@ type ServerReleaseChannelSetResult struct {
 	TargetError string        `json:"target_error,omitempty"`
 	Wait        bool          `json:"wait"`
 	Retired     string        `json:"retired,omitempty"`
+	Kept        string        `json:"kept,omitempty"`
+	KeptError   string        `json:"kept_error,omitempty"`
 }
