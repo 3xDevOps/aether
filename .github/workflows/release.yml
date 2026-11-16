@@ -109,11 +109,8 @@ jobs:
         run: |
           sha=$(git rev-parse "$GITHUB_REF^{commit}")
           test "$sha" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
-          if [[ $GITHUB_REF_NAME == *-nightly.* ]]; then
-            echo "::error::$GITHUB_REF_NAME is a nightly tag; only nightly.yml releases nightlies, and a pushed one is refused"
-            exit 1
-          fi
-          if [[ $GITHUB_REF_NAME != *-* && $GITHUB_REF_NAME != *.0 ]]; then
+          path=$(sh scripts/release-tag-path.sh "$GITHUB_REF_NAME")
+          if [ "$path" = hotfix ]; then
             go build -o "$RUNNER_TEMP/release-hotfix" ./scripts/release-hotfix
             RELEASE_HOTFIX="$RUNNER_TEMP/release-hotfix" sh scripts/release-hotfix.sh \
               "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$sha" >"$RUNNER_TEMP/hotfix"

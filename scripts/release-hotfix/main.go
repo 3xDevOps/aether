@@ -51,7 +51,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	z, err := strconv.Atoi(parts[3])
 	if err != nil || z > 99 {
-		return fmt.Errorf("%s would be hotfix %s, above 99", tag, parts[3])
+		return fmt.Errorf("the patch number of %s is above 99", tag)
 	}
 	line := "v" + parts[1] + "." + parts[2] + "."
 

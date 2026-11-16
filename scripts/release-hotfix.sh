@@ -7,7 +7,8 @@
 # scripts/release-hotfix command, which derives every value from the signed
 # manifests of published releases.
 #
-# The commit must be on release/X.Y, contain vX.Y.(Z-1) and differ from it.
+# The commit must be the head of release/X.Y, contain vX.Y.(Z-1) and
+# differ from it.
 # The branch must be cut from the line's base, the stable release with
 # hotfix 0 that the hotfix count of vX.Y.(Z-1) leads back to: its only
 # merge base with main is that commit, so it carries nothing from main
@@ -36,7 +37,7 @@ git fetch --quiet --no-tags origin "+refs/heads/main:refs/remotes/origin/main" \
 	"+refs/heads/$branch:refs/remotes/origin/$branch" ||
 	fail "cannot fetch main and $branch; a hotfix is tagged on $branch"
 head=$(git rev-parse --verify --quiet "refs/remotes/origin/$branch^{commit}") || fail "$branch has no commit"
-git merge-base --is-ancestor "$sha" "$head" 2>/dev/null || fail "$sha is not on $branch (head $head)"
+[ "$sha" = "$head" ] || fail "$sha is not the head of $branch ($head); tag the head, whose push CI is green"
 
 out=$("$tool" -tag "$tag" -repo "https://github.com/$repository")
 value() { printf '%s\n' "$out" | sed -n "s/^$1=//p"; }

@@ -56,6 +56,8 @@ git checkout --quiet main
 commit 'main later' >/dev/null
 git push --quiet origin main release/0.8 release/0.9 release/1.0 release/1.1
 
+# head moves release/0.9 on origin to $1.
+head() { git push --quiet --force origin "$1:refs/heads/release/0.9"; }
 run() {
 	rm -f "$STATE/tool"
 	sh "$script_dir/release-hotfix.sh" 3xDevOps/Aether "$@" >"$tmp/out" 2>"$tmp/err"
@@ -81,6 +83,7 @@ refuse() {
 }
 
 export BASE_TAG=v0.9.0 BASE="$base" PREVIOUS="$base"
+head "$fix1"
 accept 'first hotfix' v0.9.1 "$fix1"
 [ "$(cat "$tmp/out")" = "$(printf 'build=412\nhotfix=1\nbase-tag=v0.9.0\nbase-commit=%s\nprevious-commit=%s\npointer=stable\npointer-if-above=beta' "$base" "$base")" ] ||
 	{ echo "FAIL: first hotfix printed:" >&2; cat "$tmp/out" >&2; exit 1; }
@@ -89,21 +92,27 @@ accept 'first hotfix' v0.9.1 "$fix1"
 export BASE_TAG=v0.8.7
 accept 'first hotfix on a line based on v0.8.7' v0.8.8 "$fix87"
 export BASE_TAG=v0.9.0
+refuse 'commit off the branch' 'is not the head of release/0.9' v0.9.1 "$main1"
+refuse 'commit only on main after the tag' 'is not the head of release/0.9' v0.9.1 "$(git rev-parse main)"
 
+head "$fix2"
+refuse 'commit below the branch head' "$fix1 is not the head of release/0.9 ($fix2)" v0.9.1 "$fix1"
 export PREVIOUS="$fix1"
 accept 'next hotfix' v0.9.2 "$fix2"
-refuse 'hotfix on the previous commit' "is v0.9.1's commit" v0.9.2 "$fix1"
-export PREVIOUS="$fix2"
-refuse 'hotfix that does not contain the previous one' 'does not contain v0.9.1' v0.9.2 "$fix1"
 export PREVIOUS=not-a-commit
 refuse 'unparsable signed commit' "names commit 'not-a-commit'" v0.9.2 "$fix2"
 touch "$STATE/refuse"
 refuse 'release-hotfix refusal' 'v0.9.4 has no signed aether-release.json' v0.9.5 "$fix2"
 rm "$STATE/refuse"
 
+head "$fix1"
+export PREVIOUS="$fix1"
+refuse 'hotfix on the previous commit' "is v0.9.1's commit" v0.9.2 "$fix1"
+export PREVIOUS="$fix2"
+refuse 'hotfix that does not contain the previous one' 'does not contain v0.9.1' v0.9.2 "$fix1"
+
+head "$base"
 export PREVIOUS="$base"
-refuse 'commit off the branch' 'is not on release/0.9' v0.9.1 "$main1"
-refuse 'commit only on main after the tag' 'is not on release/0.9' v0.9.1 "$(git rev-parse main)"
 refuse 'the base commit itself' "is v0.9.0's commit" v0.9.1 "$base"
 export BASE_TAG=v1.0.0
 refuse 'branch cut from a later main commit' "release/1.0 is not cut from the v1.0.0 commit $base: main and $late share $main1" v1.0.1 "$late"
