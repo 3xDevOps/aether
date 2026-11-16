@@ -21,7 +21,7 @@ import { useCapability } from '@/store/hooks'
 export const CONNECTORS_SECTION_ID = 'connectors'
 
 const pollMs = 3000
-const docs = 'https://github.com/3xDevOps/Aether/blob/main/docs'
+const docs = 'https://github.com/3xDevOps/cloudfield/blob/main/docs'
 
 type App = 'chatgpt' | 'claude'
 

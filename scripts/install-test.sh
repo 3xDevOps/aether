@@ -7,6 +7,8 @@
 # Checksums are computed with the real sha256 tool rather than stubbed, so
 # the download-verify path stays exactly the one users get.
 set -eu
+# The requests asserted below are the installer's defaults.
+unset CLOUDFIELD_REPO AETHER_REPO CLOUDFIELD_BASE_URL AETHER_BASE_URL
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 tmp=$(mktemp -d)
@@ -204,7 +206,7 @@ if [ -n "$offline" ]; then
 fi
 case "$url" in
 https://github.com/*/releases/latest)
-	printf '%s' "https://github.com/3xDevOps/Aether/releases/tag/$(cat "$FIXTURES/latest")"
+	printf '%s' "https://github.com/3xDevOps/cloudfield/releases/tag/$(cat "$FIXTURES/latest")"
 	exit 0
 	;;
 https://api.github.com/repos/*/releases*)
@@ -406,7 +408,7 @@ ends_with() { [ "$(tail -n 1 "$out")" = "$1" ] || fail "last line is not: $1"; }
 question="What is this machine?"
 
 # Every run prints the quickstart pointer.
-quickstart="https://github.com/3xDevOps/Aether/blob/main/docs/quickstart.md"
+quickstart="https://github.com/3xDevOps/cloudfield/blob/main/docs/quickstart.md"
 
 # --- --role server: aether-server setup runs -----------------------------
 
@@ -938,7 +940,11 @@ printed "v0.7.0-alpha.12 is not fully published yet (no checksums.txt); installi
 installed_from v0.7.0-alpha.11 linux-amd64 aether
 installed_from v0.7.0-alpha.11 linux-amd64 aether-server
 printed "verified aether-release.json.sig for v0.7.0-alpha.11 against release key $test_pub"
-requested "https://api.github.com/repos/3xDevOps/Aether/releases?per_page=100"
+requested "https://api.github.com/repos/3xDevOps/cloudfield/releases?per_page=100"
+requested "https://github.com/3xDevOps/cloudfield/releases/latest"
+requested "https://github.com/3xDevOps/cloudfield/releases/download/v0.7.0-alpha.11/aether-linux-amd64"
+grep "/releases/" "$reqs" | grep -Ev '^https://(api\.)?github\.com/(repos/)?3xDevOps/cloudfield/releases' &&
+	fail "requested a release outside 3xDevOps/cloudfield: $(cat "$reqs")"
 grep "/releases/download/" "$reqs" | grep -v "/v0.7.0-alpha.12/checksums.txt$" | grep -vq "/v0.7.0-alpha.11/" &&
 	fail "downloaded from a second release"
 latest_install || fail "rerunning the installer failed"
@@ -1094,7 +1100,7 @@ mkdir -p "$fixtures/releases/v0.7.0-alpha.12"
 set_latest v0.7.0-alpha.12
 api v0.7.0-alpha.12:
 if latest_install; then fail "installed with no complete release"; fi
-printed "no complete release for linux/amd64 among the newest 100 releases of 3xDevOps/Aether; pass --version <tag>"
+printed "no complete release for linux/amd64 among the newest 100 releases of 3xDevOps/cloudfield; pass --version <tag>"
 untouched
 
 host "checksum mismatch on latest fails without falling back"
@@ -1310,7 +1316,7 @@ echo 403 >"$fixtures/api.status"
 printf 'x-ratelimit-limit: 60\r\nx-ratelimit-remaining: 0\r\nx-ratelimit-reset: 1792209652\r\n' >"$fixtures/api.headers"
 printf '{"message": "API rate limit exceeded for 192.0.2.1."}\n' >"$fixtures/api.json"
 if latest_install; then fail "installed through a rate limit"; fi
-printed "GitHub API rate limit exceeded (HTTP 403 from https://api.github.com/repos/3xDevOps/Aether/releases?per_page=100, x-ratelimit-remaining: 0, x-ratelimit-reset: 1792209652); pass --version <tag> to install a specific release"
+printed "GitHub API rate limit exceeded (HTTP 403 from https://api.github.com/repos/3xDevOps/cloudfield/releases?per_page=100, x-ratelimit-remaining: 0, x-ratelimit-reset: 1792209652); pass --version <tag> to install a specific release"
 untouched
 
 host "any other API error shows its status and message"
@@ -1321,7 +1327,7 @@ echo 403 >"$fixtures/api.status"
 printf 'x-ratelimit-remaining: 41\r\n' >"$fixtures/api.headers"
 printf '{\n  "message": "Repository access blocked"\n}\n' >"$fixtures/api.json"
 if latest_install; then fail "installed through an API error"; fi
-printed "GET https://api.github.com/repos/3xDevOps/Aether/releases?per_page=100: HTTP 403: Repository access blocked"
+printed "GET https://api.github.com/repos/3xDevOps/cloudfield/releases?per_page=100: HTTP 403: Repository access blocked"
 not_printed "rate limit"
 
 host "a compact API error body still shows its message"
@@ -1339,7 +1345,7 @@ make_release v0.7.0-alpha.12
 set_latest v0.7.0-alpha.12
 if STUB_OFFLINE=1 latest_install; then fail "installed while offline"; fi
 printed "curl: (6) Could not resolve host: github.com"
-printed "cannot reach https://github.com/3xDevOps/Aether/releases/latest"
+printed "cannot reach https://github.com/3xDevOps/cloudfield/releases/latest"
 not_printed "no published release"
 untouched
 
@@ -1348,7 +1354,7 @@ mkdir -p "$fixtures/releases/v0.7.0-alpha.12"
 set_latest v0.7.0-alpha.12
 if STUB_OFFLINE_API=1 latest_install; then fail "installed with the API down"; fi
 printed "curl: (6) Could not resolve host: api.github.com"
-printed "cannot reach https://api.github.com/repos/3xDevOps/Aether/releases?per_page=100"
+printed "cannot reach https://api.github.com/repos/3xDevOps/cloudfield/releases?per_page=100"
 untouched
 
 host "darwin/arm64 gets aether-darwin-arm64 and nothing else"

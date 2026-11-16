@@ -240,7 +240,7 @@ type Checker struct {
 }
 
 // NewChecker builds a checker against a GitHub repository base URL such as
-// https://github.com/3xDevOps/Aether.
+// https://github.com/3xDevOps/cloudfield.
 func NewChecker(baseURL string, ttl time.Duration) *Checker {
 	return &Checker{baseURL: baseURL, ttl: ttl, now: time.Now}
 }

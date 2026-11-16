@@ -9,7 +9,7 @@
     "url": "https://github.com/3xDevOps"
   },
   "homepage": "https://onaether.dev",
-  "repository": "https://github.com/3xDevOps/aether",
+  "repository": "https://github.com/3xDevOps/cloudfield",
   "license": "GPL-3.0",
   "keywords": ["coding agents", "claude code", "codex", "pull requests", "self-hosted"],
   "extensions": {
@@ -32,7 +32,7 @@
           "Allow or deny a permission request once, stop or close a session"
         ],
         "websiteURL": "https://onaether.dev",
-        "supportURL": "https://github.com/3xDevOps/aether/issues",
+        "supportURL": "https://github.com/3xDevOps/cloudfield/issues",
         "privacyPolicyURL": "PLACEHOLDER: hosted privacy policy covering this plugin; see docs/chatgpt-plugin.md",
         "termsOfServiceURL": "PLACEHOLDER: hosted terms of service; see docs/chatgpt-plugin.md",
         "defaultPrompt": [

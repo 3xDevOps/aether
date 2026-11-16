@@ -355,7 +355,7 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 	return nil
 }
 
-const clientInstall = "curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client"
+const clientInstall = "curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client"
 
 // A claim code names no edge, and the client falls back to the project's,
 // so a server on another edge needs --edge on both commands.

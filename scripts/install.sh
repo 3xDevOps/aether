@@ -4,8 +4,8 @@
 # beyond curl and a sha256 tool; OpenSSL 3, when present, checks the
 # release signature.
 #
-#   curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client
+#   curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client
 #
 # Flags (or the matching environment variables):
 #   --version <tag>   AETHER_VERSION      release tag; default: the newest
@@ -27,7 +27,7 @@
 set -eu
 
 # CLOUDFIELD_X wins over AETHER_X when it is not empty (internal/envname).
-REPO="${CLOUDFIELD_REPO:-${AETHER_REPO:-3xDevOps/Aether}}"
+REPO="${CLOUDFIELD_REPO:-${AETHER_REPO:-3xDevOps/cloudfield}}"
 BASE_URL="${CLOUDFIELD_BASE_URL:-${AETHER_BASE_URL:-https://github.com/${REPO}/releases/download}}"
 VERSION="${CLOUDFIELD_VERSION:-${AETHER_VERSION:-}}"
 BIN_DIR="${CLOUDFIELD_BIN_DIR:-${AETHER_BIN_DIR:-}}"

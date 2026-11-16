@@ -81,7 +81,7 @@ func TestGeneratedManifestVerifiesWithTheTrustedKey(t *testing.T) {
 		t.Fatalf("asset = %+v, want %+v", got, want)
 	}
 	if m.StoreSchema != 71 || m.Commit != "abc" ||
-		m.NotesURL != "https://github.com/3xDevOps/Aether/releases/tag/v1.3.0" {
+		m.NotesURL != "https://github.com/3xDevOps/cloudfield/releases/tag/v1.3.0" {
 		t.Fatalf("manifest = %+v", m)
 	}
 	if m.Edge == nil || !reflect.DeepEqual(selfupdate.ImageRelease{Images: m.Images, Edge: *m.Edge}, testImages()) {

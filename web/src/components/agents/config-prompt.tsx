@@ -6,7 +6,7 @@ import { configPrompt } from '@/lib/config-prompt'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
-const quickstart = 'https://github.com/3xDevOps/Aether/blob/main/docs/quickstart.md'
+const quickstart = 'https://github.com/3xDevOps/cloudfield/blob/main/docs/quickstart.md'
 
 function Quickstart({ to, children }: { to: string; children: ReactNode }) {
   return (

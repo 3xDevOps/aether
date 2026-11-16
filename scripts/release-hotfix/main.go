@@ -2,7 +2,7 @@
 // tag vX.Y.Z (Z at least 1) from the signed, published releases of the
 // repository at -repo, never from inputs:
 //
-//	release-hotfix -tag v0.9.2 -repo https://github.com/3xDevOps/Aether
+//	release-hotfix -tag v0.9.2 -repo https://github.com/3xDevOps/cloudfield
 //
 // vX.Y.(Z-1) must be a stable release with a build. Its hotfix count h
 // names the line's base, vX.Y.(Z-1-h), which must be the stable release on

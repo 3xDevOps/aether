@@ -60,7 +60,7 @@ describe('notification settings', () => {
     }
     const link = screen.queryAllByRole('link').find((a) => a.getAttribute('href')?.includes('networking.md'))
     expect(link?.getAttribute('href')).toBe(
-      anchor && `https://github.com/3xDevOps/Aether/blob/main/docs/networking.md${anchor}`,
+      anchor && `https://github.com/3xDevOps/cloudfield/blob/main/docs/networking.md${anchor}`,
     )
   })
 
@@ -153,7 +153,7 @@ describe('notification settings', () => {
       expect(screen.getByText('Reading Slack…')).toBeDefined()
       expect(await screen.findByText('sudo aether-server slack setup')).toBeDefined()
       expect(screen.getByRole('link', { name: 'Slack guide' }).getAttribute('href')).toBe(
-        'https://github.com/3xDevOps/Aether/blob/main/docs/slack.md',
+        'https://github.com/3xDevOps/cloudfield/blob/main/docs/slack.md',
       )
       expect(screen.queryByRole('button', { name: 'Link Slack' })).toBeNull()
     })

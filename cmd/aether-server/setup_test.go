@@ -800,7 +800,7 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 
 // installStep is the next step, numbered n, that installs the client.
 func installStep(n int) string {
-	return fmt.Sprintf("  %d. on your computer, install Aether if it is not there yet (Windows: docs/install.md):\n       curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client\n", n)
+	return fmt.Sprintf("  %d. on your computer, install Aether if it is not there yet (Windows: docs/install.md):\n       curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client\n", n)
 }
 
 // mcpStep is the next step, numbered n, that a server with the edge on
