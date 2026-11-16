@@ -56,6 +56,7 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
+  const [kept, setKept] = useState<{ version: string; error: string; channel: ReleaseChannel } | null>(null)
   const [checking, setChecking] = useState<ReleaseChannel | null>(null)
   const current = status?.channel
   if (!offered) return null
@@ -74,6 +75,7 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
     setError(null)
     try {
       const saved = await client.serverReleaseChannelSet(channel)
+      setKept(saved.kept ? { version: saved.kept, error: saved.kept_error ?? '', channel } : null)
       setNotice(saved.retired ? `The pending update to ${saved.retired} was cancelled: the ${label[channel]} channel does not take it.` : '')
       await readServerStatus(useStore, client)
     } catch (err) {
@@ -87,6 +89,7 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
     if (channel === current) return
     setError(null)
     setNotice('')
+    setKept(null)
     if (channel === 'nightly') {
       setAsking({ channel, kind: 'nightly' })
       return
@@ -135,6 +138,12 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
       >
         {checking && <p role="status" className="flex items-center gap-1.5 text-ui-sm text-muted"><Spinner />Checking {checking}…</p>}
         {!canSet && <div><Badge>{label[current]}</Badge></div>}
+        {kept && (
+          <div role="status" className="space-y-1 text-ui-sm text-muted">
+            <p>The pending update to {kept.version} was kept, because the server could not check whether the {label[kept.channel]} channel takes it. It is still refused at its idle moment if it does not:</p>
+            <p className="max-h-28 min-w-0 overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code leading-5 text-state-failed select-text">{kept.error}</p>
+          </div>
+        )}
         {notice && <p role="status" className="text-ui-sm text-muted">{notice}</p>}
         {error && <p role="alert" className="max-h-28 overflow-auto min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 text-state-failed select-text">{error}</p>}
       </SettingRow>

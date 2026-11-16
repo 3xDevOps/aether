@@ -2082,6 +2082,9 @@ export interface ServerReleaseChannelSet {
   wait: boolean
   /** The pending update the change retires because the new channel does not take its release. */
   retired?: string
+  /** A pending update left in place because its manifest could not be fetched to check it; `kept_error` is that error. */
+  kept?: string
+  kept_error?: string
 }
 
 /** server.sysbox.status and server.sysbox.install: whether runs can use

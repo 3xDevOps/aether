@@ -178,6 +178,21 @@ describe('release channel context', () => {
   })
 })
 
+describe('a pending update the change kept', () => {
+  it('shows why the server could not check it, unchanged', async () => {
+    seed({ channel: 'beta' })
+    const failure = 'fetch https://github.com/3xDevOps/aether/releases/download/v0.9.1-nightly.2/aether-release.json: 502 Bad Gateway'
+    const client = fakeApi({
+      serverUpdateStatus: vi.fn(async () => serverUpdateStatus({ channel: 'beta' })),
+      serverReleaseChannelSet: vi.fn(async (_c, dryRun) => dry({ wait: false, saved: !dryRun, kept: 'v0.9.1-nightly.2', kept_error: failure })),
+    })
+    render(<ReleaseChannelSection client={client} />)
+    fireEvent.click(screen.getByRole('radio', { name: 'Stable' }))
+    expect(await screen.findByText(failure)).toBeDefined()
+    expect(screen.getByText(/The pending update to v0\.9\.1-nightly\.2 was kept/)).toBeDefined()
+  })
+})
+
 describe('hotfix builds', () => {
   it('names the hotfix in the confirmation, since the same build can still be above the channel', async () => {
     seed({ channel: 'nightly' })
