@@ -378,7 +378,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
           <p className={cn(verbatim, 'text-state-failed')}>{scheduleError}</p>
         </div>
       )}
-      {status?.decline_note && <p className="text-muted">{status.decline_note}</p>}
+      {status?.decline_note && <p className="break-words text-muted [overflow-wrap:anywhere]">{status.decline_note}</p>}
     </>
   )
 
@@ -482,7 +482,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
         )}
         {failedError && <p className={cn(verbatim, 'text-state-failed')}>{failedError}</p>}
         {error && <p className={cn(verbatim, 'text-state-failed')}>{error}</p>}
-        {cancelNote && <p className="text-muted">The update was cancelled. The server may schedule it again by itself: {cancelNote}</p>}
+        {cancelNote && <p className="break-words text-muted [overflow-wrap:anywhere]">The update was cancelled. The server may schedule it again by itself: {cancelNote}</p>}
         {notes}
         {(!capable || target.state === 'failed' || target.state === 'rolled_back') && (
           <>

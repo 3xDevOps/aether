@@ -137,7 +137,7 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
         }
       >
         {notice && <p role="status" className="text-ui-sm text-muted">{notice}</p>}
-        {error && <p role="alert" className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 text-state-failed select-text">{error}</p>}
+        {error && <p role="alert" className="max-h-28 overflow-auto min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 text-state-failed select-text">{error}</p>}
       </SettingRow>
       {promotable &&
         (['beta', 'nightly'] as const).map((c) => {
@@ -145,7 +145,7 @@ export function ReleaseChannelSection({ client = api }: { client?: Api } = {}) {
           return pointer && <PromoteRow key={c} channel={c} pointer={pointer} />
         })}
       <Dialog open={asking !== null} onOpenChange={(open) => !open && setAsking(null)}>
-        <DialogContent>
+        <DialogContent className="grid-cols-[minmax(0,1fr)]">
           {asking?.kind === 'nightly' && <NightlyConfirm />}
           {asking?.kind === 'wait' && <WaitConfirm channel={asking.channel} dry={asking.dry} />}
           <DialogFooter>
@@ -214,7 +214,7 @@ function WaitConfirm({ channel, dry }: { channel: ReleaseChannel; dry?: ServerRe
   const running = dry?.running
   const runs = running && <>This server runs <Code>{running.version}</Code>{running.build > 0 && ` (${buildLabel(running.build, running.hotfix)})`}. </>
   return (
-    <DialogHeader>
+    <DialogHeader className="min-w-0">
       <DialogTitle>Switch to {lower}?</DialogTitle>
       {dry?.target ? (
         <DialogDescription>
@@ -225,7 +225,7 @@ function WaitConfirm({ channel, dry }: { channel: ReleaseChannel; dry?: ServerRe
       ) : (
         <>
           <DialogDescription>{runs}The newest {lower} release could not be read:</DialogDescription>
-          <p role="alert" className="max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 text-state-failed select-text">{dry?.target_error}</p>
+          <p role="alert" className="max-h-28 overflow-auto min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-control border border-state-failed/30 bg-state-failed/5 px-2 py-1.5 font-code text-ui-sm leading-5 text-state-failed select-text">{dry?.target_error}</p>
           <p className="text-ui text-muted">The server never installs an older build.</p>
         </>
       )}
