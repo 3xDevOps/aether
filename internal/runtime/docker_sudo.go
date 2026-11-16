@@ -45,7 +45,7 @@ func (d *Docker) ExecAttached(ctx context.Context, id ID, spec AttachedExec) (in
 	if stdin == nil {
 		stdin = []byte{}
 	}
-	return d.exec(ctx, id, cmd, spec.WorkingDir, spec.User, stdin, func(r io.Reader) error {
+	return d.execPath(ctx, id, cmd, spec.WorkingDir, spec.User, true, stdin, func(r io.Reader) error {
 		_, err := stdcopy.StdCopy(spec.Stdout, spec.Stderr, r)
 		return err
 	})

@@ -19,6 +19,19 @@ const setupOutputLimit = 16 << 10
 // container's PATH, which puts the agent-writable ~/.local/bin first.
 const RootPath = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
+// RootUser reports whether an exec user string names uid 0 as "root" or a plain
+// decimal zero such as "0" or "00"; the group half is ignored. The engine
+// accepts more spellings, so a caller that must not trust the text, as sudo
+// must not, applies RootPath unconditionally.
+func RootUser(user string) bool {
+	uid, _, _ := strings.Cut(user, ":")
+	if uid == "root" {
+		return true
+	}
+	n, err := strconv.ParseUint(uid, 10, 32)
+	return err == nil && n == 0
+}
+
 // UserScript gives uid $1 a passwd entry whose home is $2: git refuses to
 // commit and ssh and ssh-keygen refuse to run for a uid with none, and ssh
 // reads ~/.ssh from the passwd home, never $HOME. With $3 set it also lets

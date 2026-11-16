@@ -693,6 +693,14 @@ func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) 
 // exec writes a non-nil stdin to the command's input, which stays open until
 // exec returns.
 func (d *Docker) exec(ctx context.Context, id ID, cmd []string, workDir, user string, stdin []byte, read func(io.Reader) error) (int, error) {
+	return d.execPath(ctx, id, cmd, workDir, user, RootUser(user), stdin, read)
+}
+
+// execPath is exec with the secure PATH chosen by the caller. A sudo exec
+// takes it whatever its user string says: the engine parses the uid more
+// loosely than RootUser ("+0", an empty uid), so deciding from the text
+// would let a spelling of root keep the agent-writable PATH.
+func (d *Docker) execPath(ctx context.Context, id ID, cmd []string, workDir, user string, securePath bool, stdin []byte, read func(io.Reader) error) (int, error) {
 	opts := client.ExecCreateOptions{
 		Cmd:          cmd,
 		User:         user,
@@ -701,7 +709,7 @@ func (d *Docker) exec(ctx context.Context, id ID, cmd []string, workDir, user st
 		AttachStdout: true,
 		AttachStderr: true,
 	}
-	if uid, _, _ := strings.Cut(user, ":"); uid == "0" || uid == "root" {
+	if securePath {
 		opts.Env = []string{RootPath}
 	}
 	created, err := d.cli.ExecCreate(ctx, string(id), opts)
