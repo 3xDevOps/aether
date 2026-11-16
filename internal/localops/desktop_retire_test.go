@@ -534,3 +534,17 @@ func TestRetireLegacyDesktopRetriesTheShortcut(t *testing.T) {
 	mustBeGone(t, retired)
 	mustExist(t, f.renamedShortcut)
 }
+
+// An old app installed again after a removal that did not finish keeps its
+// shortcut while the earlier copy is deleted.
+func TestRetireLegacyDesktopKeepsTheShortcutOfAReinstalledApp(t *testing.T) {
+	renameProduct(t)
+	f := newRetireFixture(t, "windows")
+	retired := filepath.Join(filepath.Dir(f.legacy[0]), retiredPrefix+"Aether Desktop")
+	fakeInstall(t, "windows", retired)
+	if err := retireLegacyDesktop("windows", f.lookup, f.renamedExe); err != nil {
+		t.Fatal(err)
+	}
+	mustBeGone(t, retired)
+	f.assertLegacyKept(t)
+}

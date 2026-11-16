@@ -327,8 +327,9 @@ func retireLegacyDesktop(goos string, lookup func() (RealUser, error), shellExe 
 			}
 		}
 		// The moved app stays until the shortcut is gone, as the mark that
-		// the next start has to finish.
-		if goos == "windows" {
+		// the next start has to finish. An app installed again since keeps
+		// its shortcut.
+		if _, err := os.Lstat(app); goos == "windows" && errors.Is(err, fs.ErrNotExist) {
 			programs, err := resolveWindowsPrograms()
 			if err != nil {
 				errs = append(errs, fmt.Errorf("localops: resolve Start Menu Programs folder: %w", err))
