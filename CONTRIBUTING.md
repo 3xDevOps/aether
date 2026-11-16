@@ -367,10 +367,19 @@ Gatekeeper warn, and auto-update refuses them. Treat them as test builds.
 
 </details>
 
-The desktop and web icons and the Play feature graphic are generated from
+The desktop icons and the Play feature graphic are generated from
 `web/public/aether-mark.png`. After changing it, run
 `python3 scripts/make-icons.py` (needs `pillow` and `fonttools[woff]`) and
 commit what it writes.
+
+The dashboard's icons, favicons and logo are the Cloudfield logo set's files,
+copied unchanged from `public/cloudfield/` of `3xDevOps/aether-web`:
+`web/public/cloudfield-mark.svg`, `cloudfield-logo-small.svg` and
+`cloudfield-logo-for-light-backgrounds.svg` from the folder itself, and
+`web/public/icons/` from its `png/` folder (`icon-192.png`, `icon-512.png`,
+`maskable-*.png` as `icon-maskable-*.png`, `apple-icon-180.png` as
+`apple-touch-icon.png`, and `favicon-16.png`, `favicon-32.png`,
+`favicon-48.png`). After the set changes, copy them again under these names.
 
 The Android app's launcher and notification icons are VectorDrawables in
 `android/app/src/main/res/drawable/`, generated from the Cloudfield logo set in
