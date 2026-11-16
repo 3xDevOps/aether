@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -184,7 +185,7 @@ func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profil
 }
 
 func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, digest, bin string, cliMounts []runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
-	instructions, err := s.launchInstructions(ctx, run, profile, native)
+	instructions, err := s.launchInstructions(ctx, run, profile, native, s.createdCLI())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -312,6 +313,30 @@ func (s *Scheduler) updateTerminalCoordination(member domain.MemberID, container
 func (s *Scheduler) releaseTerminalCoordination(member domain.MemberID) {
 	s.removeTerminalSidecar(member)
 	s.collectStagedBridges()
+}
+
+// createdCLI is the command name for text read in a container this server
+// creates, which cliMounts gives both names. A VM session's mounts are
+// only its spec, not what its guest bound, so its text keeps the old name.
+func (s *Scheduler) createdCLI() string {
+	if s.sessionVMs() {
+		return coordhooks.OldCLI
+	}
+	return coordhooks.NewCLI
+}
+
+// containerCLI is the command name for text the server sends into the
+// existing container cid: the new name only where its mounts include the
+// new path, as they do in containers created since it was added.
+func (s *Scheduler) containerCLI(ctx context.Context, cid runtime.ID) string {
+	if cid == "" || s.sessionVMs() {
+		return coordhooks.OldCLI
+	}
+	info, err := s.cfg.Runtime.Inspect(ctx, cid)
+	if err != nil || !slices.Contains(info.MountTargets, coordtransport.CloudfieldCLIPath) {
+		return coordhooks.OldCLI
+	}
+	return coordhooks.NewCLI
 }
 
 func cliMounts(bin string) []runtime.Mount {

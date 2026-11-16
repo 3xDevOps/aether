@@ -41,8 +41,20 @@ The first path serves the hidden MCP entry point and the existing agent
 lifecycle hook. The other two are the agent-facing coordination CLI, which
 behaves the same at either path. Containers created before this release lack
 `/usr/local/bin/cloudfield-internal`, so the server's own commands and every
-file written into a member's home call `/usr/local/bin/aether-internal`. A
-Default or Isolated session also gets the binary at `/usr/local/bin/sudo`, the
+file written into a member's home call `/usr/local/bin/aether-internal`.
+
+The text an agent reads names `cloudfield-internal` only where the container
+has that path, and `aether-internal` everywhere else. That text is the role
+card, brief, skill, hook context, MCP instructions and wake prompts. Text the
+CLI or MCP bridge prints inside the container checks for an executable file
+at `/usr/local/bin/cloudfield-internal`. Text the server sends checks the
+container's mounts, or the mounts it is about to create. In micro VM sessions
+the server's text keeps `aether-internal`. Usage text shows the name the
+command was run by. Hook and plugin files, the turn-end report reminder, the
+team memory brief and messages the server returns as command results keep
+`aether-internal`.
+
+A Default or Isolated session also gets the binary at `/usr/local/bin/sudo`, the
 [sudo shim](security.md#sudo-in-a-default-session). The coordination directory
 and the executable mounts are constructed by Cloudfield, not requested by a
 session.

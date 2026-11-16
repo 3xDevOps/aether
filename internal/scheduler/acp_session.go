@@ -7,12 +7,15 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"strings"
 
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 var ErrACPItemNotFound = errors.New("scheduler: no such conversation item")
@@ -262,7 +265,19 @@ func (s *Scheduler) Wakeable(run domain.RunID) bool {
 	return s.IdleEnhanced(run)
 }
 
+// Wake prompts run's agent with prompt, text coord generates, naming the
+// command its container has. The turn-end report reminder keeps the old
+// name: released dashboards recognise it by its lead.
 func (s *Scheduler) Wake(ctx context.Context, run domain.RunID, prompt string) error {
+	if !strings.HasPrefix(prompt, coordhooks.ReportReminderLead) {
+		s.mu.Lock()
+		var cid runtime.ID
+		if entry := s.runs[run]; entry != nil {
+			cid = entry.containerID
+		}
+		s.mu.Unlock()
+		prompt = coordhooks.Named(prompt, s.containerCLI(ctx, cid))
+	}
 	if s.asleepStandardVM(run) {
 		// The save cut the agent's mail hook and app-server bridge; both
 		// connect again once the VM runs. The hook then takes the mail.

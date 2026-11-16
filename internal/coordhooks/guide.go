@@ -2,6 +2,7 @@ package coordhooks
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
@@ -31,6 +32,44 @@ type Guide struct {
 	Repos string
 	// Parent is the run that started this child run.
 	Parent string
+	// CLI is the name the text gives the in-container command; empty
+	// means OldCLI.
+	CLI string
+}
+
+// The in-container command's names. Both run the same binary, but only a
+// container created since NewCLI was added has it, so text names NewCLI
+// only where that is known, and every file persisted outside one container
+// keeps calling OldCLI.
+const (
+	OldCLI = "aether-internal"
+	NewCLI = "cloudfield-internal"
+)
+
+// Named is text written with OldCLI, naming cli instead. Apply it only to
+// text Cloudfield generates, never to text it quotes, such as a task or a
+// note.
+func Named(text, cli string) string {
+	if cli != NewCLI {
+		return text
+	}
+	return strings.ReplaceAll(text, OldCLI, NewCLI)
+}
+
+func (g Guide) cli() string {
+	if g.CLI == NewCLI {
+		return NewCLI
+	}
+	return OldCLI
+}
+
+// LocalCLI is the name text produced inside a container gives the command:
+// NewCLI only where path, the container's NewCLI path, is an executable file.
+func LocalCLI(path string) string {
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+		return NewCLI
+	}
+	return OldCLI
 }
 
 // SubagentRule is the one rule a subagent needs about Aether.
@@ -69,7 +108,8 @@ const (
 	neverRule  = "Never report while still working, and report only what you verified."
 )
 
-// ReportReminderLead starts ReportReminder.
+// ReportReminderLead starts ReportReminder. Released dashboards recognise
+// the reminder by it, so it names OldCLI whatever the container has.
 const ReportReminderLead = "Report your state with aether_report or aether-internal report"
 
 // ReportReminder is what Aether tells an agent of g whose turn is ending
@@ -100,9 +140,14 @@ func Brief(g Guide) string {
 	if !g.Wake {
 		waiting = "never waiting: wait for mail in your turn with aether_inbox wait_seconds; "
 	}
-	return "Cloudfield hosts this session. End every turn with exactly one aether_report (or `aether-internal report`) as your last action, new idempotency_key each turn: " +
+	// NewCLI is four bytes longer than OldCLI, so its brief is cut to fit.
+	command, never := "`aether-internal report`", "Never report while working."
+	if g.cli() == NewCLI {
+		command, never = NewCLI+" report", "Never report mid-work."
+	}
+	return "Cloudfield hosts this session. End every turn with exactly one aether_report (or " + command + ") as your last action, new idempotency_key each turn: " +
 		answered + waiting + needsInput + "blocked = a human must act; success|failure = the work you own is verified done or cannot be done. " +
-		"Never report while working. Subagents and spawned workflows never report."
+		never + " Subagents and spawned workflows never report."
 }
 
 // StatusGuide is the guide of the run behind status, read inside its
@@ -154,7 +199,7 @@ func WaitRule(g Guide) string {
 	if g.Wake {
 		return ""
 	}
-	wait := "`aether-internal inbox --wait 30`"
+	wait := Named("`aether-internal inbox --wait 30`", g.CLI)
 	if g.Background {
 		return "This Background session ends when your turn ends, so wait for subsessions, peers or mail inside your turn with " + wait + "; never report needs-input, waiting or answered."
 	}
@@ -168,7 +213,12 @@ func ReportGuide(g Guide) string {
 	if g.Wake {
 		waitingFor = " [--for agents|ci|process]"
 	}
-	fmt.Fprintf(&b, "END EVERY TURN WITH EXACTLY ONE REPORT, as your last action: aether_report (a new idempotency_key each turn), else `aether-internal report --outcome <o>%s --summary \"<one line>\"`.\n", waitingFor)
+	command := fmt.Sprintf("%s report --outcome <o>%s --summary \"<one line>\"", g.cli(), waitingFor)
+	if g.cli() == OldCLI {
+		// NewCLI's guide goes without the quotes, to fit its cap.
+		command = "`" + command + "`"
+	}
+	fmt.Fprintf(&b, "END EVERY TURN WITH EXACTLY ONE REPORT, as your last action: aether_report (a new idempotency_key each turn), else %s.\n", command)
 	b.WriteString("Write your reply as message text before the report; thinking and the summary are not your reply. Say the result only there, none after.\n")
 	for _, o := range Outcomes(g) {
 		fmt.Fprintf(&b, "- %s: %s\n", o.Name, o.Use)
@@ -180,7 +230,7 @@ func ReportGuide(g Guide) string {
 		b.WriteString("Never ask the human in prose and stop; use needs-input.\n")
 	}
 	b.WriteString(neverRule + "\n" + SubagentRule + "\n")
-	return b.String()
+	return Named(b.String(), g.CLI)
 }
 
 // RoleCard is the short rule set an Aether-hosted agent carries in its system
@@ -188,6 +238,7 @@ func ReportGuide(g Guide) string {
 // and peer messaging, for a run whose server offers neither.
 func RoleCard(g Guide) string {
 	var b strings.Builder
+	write := func(text string) { b.WriteString(Named(text, g.CLI)) }
 	switch {
 	case g.RunID != "" && g.Role != "":
 		fmt.Fprintf(&b, "You are Cloudfield session %s (role: %s). ", g.RunID, g.Role)
@@ -198,7 +249,7 @@ func RoleCard(g Guide) string {
 	default:
 		b.WriteString("You are a Cloudfield session. ")
 	}
-	b.WriteString("Before acting, run the shell command `aether-internal skill` (not a harness skill) for your live identity, capabilities, assignment and rules; `aether-internal status` or aether_status shows live state. " +
+	write("Before acting, run the shell command `aether-internal skill` (not a harness skill) for your live identity, capabilities, assignment and rules; `aether-internal status` or aether_status shows live state. " +
 		"Your own shell tool's shells never appear in the Cloudfield dashboard, and a server restart can kill background commands they started; run long-running commands (dev servers, watchers, long builds) in a Cloudfield terminal instead, which people can see and which keeps running through a restart: `aether-internal skill terminal`. " +
 		"Use only available capabilities.\n")
 	if g.Repos != "" {
@@ -207,10 +258,10 @@ func RoleCard(g Guide) string {
 	}
 	if g.Parent != "" {
 		fmt.Fprintf(&b, "Session %s started you as its subsession: do the task yourself; subsessions go one level deep, so you cannot start subsessions. "+
-			"Ask it with `aether-internal ask --to %s` before asking the user; your final report reaches it. If you sit idle or waiting for over an hour, it is told and may wake you or stop you.\n", g.Parent, g.Parent)
+			"Ask it with `%s ask --to %s` before asking the user; your final report reaches it. If you sit idle or waiting for over an hour, it is told and may wake you or stop you.\n", g.Parent, g.cli(), g.Parent)
 	}
 	if g.Parent == "" && !g.Background {
-		b.WriteString("The majority of straightforward tasks can be done in one session: split parallel or bulky parts across your own subagents or workflows. " +
+		write("The majority of straightforward tasks can be done in one session: split parallel or bulky parts across your own subagents or workflows. " +
 			"They share your checkout, start in seconds, and their results land in your working tree. " +
 			"A subsession (`aether-internal subsession start`) is a separate session with its own container, branch and setup time; its report wakes you. " +
 			"Reserve it for a large, independent stream of work that needs its own branch or pull request, would run for hours, or needs another agent, model, or harness. " +
@@ -218,7 +269,7 @@ func RoleCard(g Guide) string {
 	}
 	if g.Role != "" {
 		b.WriteString(ReportGuide(g))
-		b.WriteString(PeerRule + "\n" + ReceiptRule + "\n" + UntrustedRule + "\n" + MemoryLine + "\n")
+		write(PeerRule + "\n" + ReceiptRule + "\n" + UntrustedRule + "\n" + MemoryLine + "\n")
 	}
 	return strings.TrimSuffix(b.String(), "\n")
 }

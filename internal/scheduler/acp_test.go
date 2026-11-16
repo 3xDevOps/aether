@@ -1489,7 +1489,7 @@ func TestEnhancedRunSendsInstructionsAsSystemPromptWhenTheAgentTakesOne(t *testi
 	wire := &rt.all()[0].wire
 	meta, mcpEnv := wire.sessionNew(t)
 	system, _ := meta["systemPrompt"].(map[string]any)
-	if got := system["append"]; got != e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true}) || got == "" {
+	if got := system["append"]; got != e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true, CLI: coordhooks.NewCLI}) || got == "" {
 		t.Fatalf("session/new systemPrompt.append %q, want the session instructions", got)
 	}
 	if mcpEnv[coordtransport.RoleCardEnv] != "1" {
@@ -1512,7 +1512,7 @@ func TestEnhancedRunAppendsInstructionsToTheTaskWithoutASystemPromptRoute(t *tes
 		t.Fatalf("session/new _meta %+v, MCP env %v; want no system prompt and the bridge sending the card", meta, mcpEnv)
 	}
 	prompts := wire.prompts(t)
-	if want := withInstructions("say pong", e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})); len(prompts) != 1 || !slices.Equal(textOf(prompts[0]), []string{want}) {
+	if want := withInstructions("say pong", e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true, CLI: coordhooks.NewCLI})); len(prompts) != 1 || !slices.Equal(textOf(prompts[0]), []string{want}) {
 		t.Fatalf("prompts %+v, want the task with the instructions", prompts)
 	}
 }
@@ -1533,7 +1533,7 @@ func TestEnhancedTasklessRunDeliversInstructionsWithTheFirstMessageOnly(t *testi
 	if len(prompts) != 2 {
 		t.Fatalf("prompts %+v, want two", prompts)
 	}
-	if want := []string{"first", "\n\n" + e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"first", "\n\n" + e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true, CLI: coordhooks.NewCLI})}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("first prompt %q, want the message and the instructions", textOf(prompts[0]))
 	}
 	if got := textOf(prompts[1]); !slices.Equal(got, []string{"second"}) {
@@ -1559,7 +1559,7 @@ func TestEnhancedTasklessRunDeliversInstructionsWithTheFirstMailPrompt(t *testin
 	if len(prompts) != 2 {
 		t.Fatalf("prompts %+v, want two", prompts)
 	}
-	if want := []string{"inbox hint", "\n\n" + e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"inbox hint", "\n\n" + e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true, CLI: coordhooks.NewCLI})}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("mail prompt %q, want the hint and the instructions", textOf(prompts[0]))
 	}
 	if got := textOf(prompts[1]); !slices.Equal(got, []string{"second"}) {
@@ -1597,7 +1597,7 @@ func TestEnhancedTasklessRunKeepsInstructionsAcrossARestartBeforeAnyTurn(t *test
 	if len(prompts) != 1 {
 		t.Fatalf("prompts %+v, want one", prompts)
 	}
-	if want := []string{"first", "\n\n" + s2.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"first", "\n\n" + s2.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true, CLI: coordhooks.NewCLI})}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("first prompt %q, want the message and the instructions", textOf(prompts[0]))
 	}
 }
@@ -1639,7 +1639,7 @@ func TestEnhancedTasklessRunKeepsInstructionsAcrossARestartAfterOnlyRefusedPromp
 	if len(prompts) != 1 {
 		t.Fatalf("prompts %+v, want one", prompts)
 	}
-	if want := []string{"second", "\n\n" + s2.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"second", "\n\n" + s2.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true, CLI: coordhooks.NewCLI})}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("first answered prompt %q, want the message and the instructions", textOf(prompts[0]))
 	}
 }
@@ -1666,7 +1666,7 @@ func TestEnhancedTasklessRunKeepsInstructionsWhenTheFirstMessageIsDropped(t *tes
 	waitFor(t, "the instructions given back", func() bool {
 		e.sched.acp.mu.Lock()
 		defer e.sched.acp.mu.Unlock()
-		return e.sched.acp.runs[run.ID].instructions == e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})
+		return e.sched.acp.runs[run.ID].instructions == e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true, CLI: coordhooks.NewCLI})
 	})
 }
 
@@ -1694,7 +1694,7 @@ func TestEnhancedTasklessRunAppendsInstructionsOnceToConcurrentPrompts(t *testin
 	waitFor(t, "the turns to finish", func() bool { return e.sched.IdleEnhanced(run.ID) && assistantSaidNow(e, run.ID, "pong") })
 	count := 0
 	for _, prompt := range rt.all()[0].wire.prompts(t) {
-		if slices.Contains(textOf(prompt), "\n\n"+e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})) {
+		if slices.Contains(textOf(prompt), "\n\n"+e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true, CLI: coordhooks.NewCLI})) {
 			count++
 		}
 	}
@@ -1711,7 +1711,7 @@ func TestEnhancedTasklessRunGetsInstructionsBackFromABusyWake(t *testing.T) {
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
 	sess := e.sched.acp.session(run.ID)
 	instructions, settle := e.sched.acp.claimInstructions(run.ID, sess)
-	if instructions != e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true}) {
+	if instructions != e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true, CLI: coordhooks.NewCLI}) {
 		t.Fatalf("claimed %q, want the session instructions", instructions)
 	}
 	if again, _ := e.sched.acp.claimInstructions(run.ID, sess); again != "" {

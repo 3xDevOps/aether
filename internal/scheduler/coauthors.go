@@ -45,7 +45,7 @@ func (s *Scheduler) runInstructions(g coordhooks.Guide) string {
 	if !c.enabled {
 		g.Role = ""
 	}
-	return coordhooks.RoleCard(g) + "\n\n" + coAuthorInstruction
+	return coordhooks.RoleCard(g) + "\n\n" + coordhooks.Named(coAuthorInstruction, g.CLI)
 }
 
 // briefedInstructions are the run instructions followed by the team memory
@@ -72,10 +72,10 @@ func (s *Scheduler) briefedInstructions(ctx context.Context, g coordhooks.Guide,
 }
 
 // runGuide is what a run's role card depends on: background marks a
-// headless run and wake a launch that Aether resumes when mail arrives while
-// it is idle.
-func (s *Scheduler) runGuide(ctx context.Context, run domain.RunID, background, wake bool) coordhooks.Guide {
-	g := coordhooks.Guide{RunID: string(run), Background: background, Wake: wake && !background}
+// headless run, wake a launch that Aether resumes when mail arrives while it
+// is idle, and cli the command name its container has.
+func (s *Scheduler) runGuide(ctx context.Context, run domain.RunID, background, wake bool, cli string) coordhooks.Guide {
+	g := coordhooks.Guide{RunID: string(run), Background: background, Wake: wake && !background, CLI: cli}
 	var r *domain.Run
 	if run != "" {
 		r, _ = s.cfg.Store.GetRun(ctx, run)
@@ -95,11 +95,11 @@ func (s *Scheduler) runGuide(ctx context.Context, run domain.RunID, background, 
 // its system prompt, or none for a profile that has no place for them. A
 // member's own developer_instructions, which the launch's setting would
 // replace, come first.
-func (s *Scheduler) launchInstructions(ctx context.Context, run *domain.Run, profile harness.Profile, native harness.NativeLaunch) (string, error) {
+func (s *Scheduler) launchInstructions(ctx context.Context, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, cli string) (string, error) {
 	if !profile.CarriesInstructions() {
 		return "", nil
 	}
-	text, err := s.briefedInstructions(ctx, s.runGuide(ctx, run.ID, run.Mode == domain.LaunchHeadless, native.IdleWake), run.Extras, run.WorkspaceID, run.MemberID)
+	text, err := s.briefedInstructions(ctx, s.runGuide(ctx, run.ID, run.Mode == domain.LaunchHeadless, native.IdleWake, cli), run.Extras, run.WorkspaceID, run.MemberID)
 	if err != nil {
 		return "", err
 	}

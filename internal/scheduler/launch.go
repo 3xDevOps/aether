@@ -862,7 +862,7 @@ func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, m
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harnessName)
 	}
 	if task != "" && !profile.CarriesInstructions() {
-		instructions, ierr := s.briefedInstructions(ctx, s.runGuide(ctx, "", mode == domain.LaunchHeadless, false), extras, workspace, member)
+		instructions, ierr := s.briefedInstructions(ctx, s.runGuide(ctx, "", mode == domain.LaunchHeadless, false, s.createdCLI()), extras, workspace, member)
 		if ierr != nil {
 			return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", ierr)
 		}

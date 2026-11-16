@@ -41,7 +41,14 @@ type Config struct {
 	// In and Out are the MCP stdio streams; nil means os.Stdin/os.Stdout.
 	In  io.ReadCloser
 	Out io.WriteCloser
+	// CLI is the name the text gives the in-container command; empty means
+	// the one this container has.
+	CLI string
 }
+
+// newCLIPath is where a container created since the command got its new
+// name has it; tests point it elsewhere.
+var newCLIPath = coordtransport.CloudfieldCLIPath
 
 // Run serves MCP until the client disconnects or ctx is done.
 func Run(ctx context.Context, cfg Config) error {
@@ -54,6 +61,9 @@ func Run(ctx context.Context, cfg Config) error {
 	if cfg.In == nil {
 		cfg.In = os.Stdin
 	}
+	if cfg.CLI == "" {
+		cfg.CLI = coordhooks.LocalCLI(newCLIPath)
+	}
 	if cfg.Out == nil {
 		cfg.Out = nopCloser{os.Stdout}
 	}
@@ -61,12 +71,12 @@ func Run(ctx context.Context, cfg Config) error {
 	g := newGate()
 	var opts *mcp.ServerOptions
 	if !cfg.Assistant {
-		opts = &mcp.ServerOptions{Instructions: instructions(ctx, cfg.Socket)}
+		opts = &mcp.ServerOptions{Instructions: instructions(ctx, cfg.Socket, cfg.CLI)}
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: version.String()}, opts)
 	if cfg.Assistant {
 		registerAssistantTools(srv, cfg.Socket)
-	} else if err := registerTools(srv, cfg.Socket, g); err != nil {
+	} else if err := registerTools(srv, cfg.Socket, g, cfg.CLI); err != nil {
 		return err
 	} else {
 		registerChildTools(ctx, srv, cfg.Socket)
@@ -83,14 +93,15 @@ func Run(ctx context.Context, cfg Config) error {
 // instructions are the run's role card, or only its standalone reporting
 // rules when the agent's system prompt already carries the card. Without a
 // status answer they claim no reporting rules.
-func instructions(ctx context.Context, socket string) string {
+func instructions(ctx context.Context, socket, cli string) string {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	var status protocol.CoordStatusResult
 	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &status); err != nil {
-		return coordhooks.RoleCard(coordhooks.Guide{})
+		return coordhooks.RoleCard(coordhooks.Guide{CLI: cli})
 	}
 	g := coordhooks.StatusGuide(status)
+	g.CLI = cli
 	if envname.Getenv(coordtransport.RoleCardEnv) == "1" {
 		return coordhooks.Brief(g)
 	}

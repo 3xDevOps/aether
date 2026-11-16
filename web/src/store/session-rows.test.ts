@@ -107,6 +107,14 @@ describe('session rows from the item log', () => {
       { kind: 'steps', steps: [{ kind: 'tool' }, { kind: 'thought', text: 'report it' }, { kind: 'tool', entry: { id: '1:r' } }] },
       { kind: 'assistant', text: 'Built.', outcome: { tone: 'done' } },
     ])
+    const renamed = turnRows(turnOf([
+      item('turn_start', 1),
+      say(1, 'user', 'go'),
+      say(1, 'assistant', 'Built.'),
+      tool(1, 'r', 'execute', '/usr/local/bin/cloudfield-internal report --outcome answered --summary "Built"', 'completed'),
+      end,
+    ]))
+    expect(renamed).toMatchObject([{ kind: 'user' }, { kind: 'steps', steps: [{ kind: 'tool', entry: { id: '1:r' } }] }, { kind: 'assistant', text: 'Built.', outcome: { tone: 'done' } }])
   })
 
   it('starts a segment at each message from a person, each with its own block', () => {
