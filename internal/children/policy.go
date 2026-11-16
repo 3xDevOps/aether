@@ -52,6 +52,10 @@ func (s *Service) resolve(ctx context.Context, parentID domain.RunID) (*policy, 
 		p.refusal = "a Background session exits when its turn ends, before a subsession's result can reach it; start the parent in Standard or Enhanced mode"
 	case p.parentOf != "":
 		p.refusal = fmt.Sprintf("session %s is itself a subsession of %s, and subsessions go one level deep; do the work yourself or message %s", parent.ID, p.parentOf, p.parentOf)
+	case parent.HomeMember() != parent.MemberID:
+		// A handed-off session still runs the launcher's agent on the launcher's
+		// home; a subsession would mount the new owner's home under that agent.
+		p.refusal = "this session was handed to you and still runs the previous owner's agent on their home; launch a new session of your own to use subsessions"
 	case s.cfg.Runs.WakeRefusal(parent.Harness, parent.Mode) != nil:
 		p.refusal = s.cfg.Runs.WakeRefusal(parent.Harness, parent.Mode).Error()
 	case parent.Children == domain.ChildrenOff:

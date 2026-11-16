@@ -556,8 +556,8 @@ func TestSubsessionsRunOnTheParentsOrASharedAccount(t *testing.T) {
 	if err := h.db.CreateRun(h.ctx, handed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.start(handed.ID, protocol.ChildStartParams{Harness: "claude", Task: "after a handoff"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "Ada is not signed in to claude") {
-		t.Fatalf("same agent under a session handed to Ada = %v, want Ada's own account, not the launcher's", err)
+	if _, err := h.start(handed.ID, protocol.ChildStartParams{Harness: "claude", Task: "after a handoff"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "handed to you") {
+		t.Fatalf("subsession from a handed session = %v, want it refused", err)
 	}
 }
 
@@ -1067,5 +1067,23 @@ func TestEndNoticeSavedWithAnOlderBodyCounts(t *testing.T) {
 	}
 	if !c.EndNotified {
 		t.Fatal("an end notice saved under the same key with an older body is retried forever")
+	}
+}
+
+func TestHandedSessionCannotStartSubsessionUntilRelaunch(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.bob.ID, protocol.ChildSettingsParams{Enabled: on()})
+	// A session launched by Bob and handed to Bob's own account (home == owner)
+	// may start a subsession.
+	own := h.run(h.bob.ID, domain.LaunchACP, "own session")
+	h.mustStart(own.ID, protocol.ChildStartParams{Harness: "codex", Task: "fine"})
+	// A session whose home member differs from its current owner (a handoff)
+	// must refuse subsessions until the new owner launches a session of their own.
+	handed := &domain.Run{WorkspaceID: h.ws.ID, MemberID: h.bob.ID, HomeMemberID: h.ada.ID, Task: "handed", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
+	if err := h.db.CreateRun(h.ctx, handed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.start(handed.ID, protocol.ChildStartParams{Harness: "codex", Task: "nope"}); code(err) != protocol.CodeDenied || !strings.Contains(err.Error(), "handed to you") {
+		t.Fatalf("subsession from a handed session = %v, want it refused", err)
 	}
 }

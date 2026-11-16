@@ -782,7 +782,9 @@ subsession only for a large, independent stream of work that needs its own
 branch or pull request, would run for hours, or needs another agent, model, or
 harness, and whenever you ask for subsessions. A subsession of the parent's
 agent starts on the parent's account, so a session you launched on an account shared with you delegates on it too;
-any other agent, or a session handed to you, starts on your own account. The
+any other agent starts on your own account. A session handed to you refuses
+subsessions, because it still runs the previous owner's agent on their home;
+launch a session of your own to use them. The
 agent can pick your account or any account shared with you whose owner reaches
 the session's workspaces instead. The subsession appears under its parent in the
 dashboard, with its purpose, agent, model, account and state, and you open,
