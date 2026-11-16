@@ -51,10 +51,15 @@ The header shows the Cloudfield logo at 32px tall:
 `web/public/cloudfield-logo-small.svg`, the c and single-line letters, in the
 dark theme, and `cloudfield-logo-for-light-backgrounds.svg`, the c and
 three-line letters, in the light one; the set has no light single-line file.
+Where the navigation's destinations do not all fit beside the 162px logo, the
+32px `cloudfield-favicon.svg` tile replaces it, and the navigation still counts
+90px, the old brand's width, when it decides what fits, so it collapses at the
+same widths as before and the spare space falls at the row's empty right end.
 The launch splash shows `cloudfield-mark.svg` at `clamp(150px, 22vw, 260px)`
-wide above the wordmark, lowercase `cloudfield` in `--font-pixel` at its
-original `clamp(32px, 4vw, 48px)` size and `0.12em` letter spacing; other
-headings stay Saira.
+wide, with no glow, above the wordmark: lowercase `cloudfield` in
+`--font-pixel`, in the logo's Cream `#f7f0e4`, at its original
+`clamp(32px, 4vw, 48px)` size and `0.12em` letter spacing; other headings stay
+Saira.
 
 The type scale, in `web/src/index.css`:
 
@@ -745,7 +750,8 @@ layers, stepped starfield and coloured stars, satellites and shooting stars,
 `launch-status-pulse`: the original 1.8s `ease-in-out` loop from opacity 1
 to 0.4 and back, not the shared `state-pulse`. The splash's original
 palette and keyframes stay scoped to `launch-splash` in `web/src/index.css`;
-do not restyle them to match the workbench. Reduced motion skips the splash
+do not restyle them to match the workbench. Only the logo follows the
+Cloudfield set: its mark, and the wordmark in the set's Cream. Reduced motion skips the splash
 entirely, and its CSS stops animation if the preference changes while it is
 visible. [Launch splash](dashboard-frontend.md#launch-splash) defines the
 session and startup timing.

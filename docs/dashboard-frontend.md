@@ -189,8 +189,8 @@ copied unchanged from `public/cloudfield/png/` in the website repository
 `3xDevOps/aether-web`: `icon-*.png` and `apple-touch-icon.png` are the square,
 full-bleed icon, `icon-maskable-*.png` keep the mark inside the 80% safe zone,
 and `favicon-16.png`, `favicon-32.png` and `favicon-48.png` are the small
-drawings the layout links as `rel="icon"`. The header logo, the splash mark and
-the session overview's mask are the set's SVG files from
+drawings the layout links as `rel="icon"`. The header logo and tile, the splash
+mark and the session overview's mask are the set's SVG files from
 `public/cloudfield/`, in `web/public/`. `python3 scripts/make-icons.py` draws
 only the desktop app's icons and the Play feature graphic, from
 `web/public/aether-mark.png`. The Android app's icons come from
@@ -495,7 +495,8 @@ contribute to that group's count. Relationships come from the session snapshot's
 ### App header
 
 `top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
-Its first row shows the Cloudfield logo on the left, then **Board**,
+Its first row shows the Cloudfield logo on the left, or the 32px favicon tile when
+the destinations do not all fit beside the logo, then **Board**,
 **Activity**, **Insights**, **Memory**, **Files**, **Environment**, **Agents** and
 **Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
 styling and current-page selection. A `ResizeObserver` measures the row and
@@ -1088,9 +1089,10 @@ exists: a shell built by an older `aether gui build` lacks them.
 ### Launch splash
 
 `App.tsx` mounts `src/components/launch-splash.tsx` over the shell at desktop
-startup. It intentionally preserves the original animated night sky, logo
-and pixel wordmark, not the workbench's visual language
-([Styles](styles.md#session-state-and-motion)).
+startup. It intentionally preserves the original animated night sky and pixel
+wordmark, not the workbench's visual language
+([Styles](styles.md#session-state-and-motion)); its logo is the Cloudfield
+mark with no glow, and the wordmark is in the set's Cream.
 
 The splash requires `window.aetherDesktop` and plays once per desktop window,
 recorded by `aether.launchSplashShown` in `sessionStorage`. Browser tabs,
