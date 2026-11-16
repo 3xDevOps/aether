@@ -266,7 +266,8 @@ func (e *Engine) RemoveWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID)
 
 // updateHook is installed as hooks/update in every workspace bare repo. Run
 // branches are server-owned artifacts: a client push may create or
-// fast-forward refs/heads/aether/run-* but never rewrite one. Deletions are
+// fast-forward refs/heads/aether/run-* or refs/heads/cloudfield/run-* but
+// never rewrite one. Deletions are
 // refused wholesale by receive.denyDeletes (transport.go). Update hooks only
 // fire under receive-pack, so PublishRunBranch's direct fetch into the bare
 // repo rewrites run branches unimpeded.
@@ -284,7 +285,7 @@ if [ -n "$mirrorbase" ] && [ "$refname" = "$mirrorbase" ]; then
 	echo "aether: rejected write to protected ref $refname: this mirrored base is owned by the upstream; use the configured upstream to update it" >&2
 	exit 1
 fi
-case "$refname" in refs/heads/aether/run-*) ;; *) exit 0 ;; esac
+case "$refname" in refs/heads/aether/run-* | refs/heads/cloudfield/run-*) ;; *) exit 0 ;; esac
 zero="0000000000000000000000000000000000000000"
 [ "$oldrev" = "$zero" ] && exit 0 # branch creation is allowed
 [ "$newrev" = "$zero" ] && exit 0 # deletion: receive.denyDeletes decides

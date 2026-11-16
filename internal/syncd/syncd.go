@@ -1,9 +1,9 @@
 // Package syncd is the local git sync daemon: a pure SSH client that
 // follows the server's event stream and mirrors server-owned run branches
-// (aether/run-*) into the local clone's remote-tracking namespace as they
-// move, pushes local base-branch updates up on a poll, and reconnects with
-// exponential backoff. It only ever moves refs - the working tree is never
-// touched.
+// (aether/run-* and cloudfield/run-*) into the local clone's
+// remote-tracking namespace as they move, pushes local base-branch updates
+// up on a poll, and reconnects with exponential backoff. It only ever moves
+// refs - the working tree is never touched.
 package syncd
 
 import (
