@@ -474,7 +474,7 @@ horizontal wire into each subsession row
 with nothing left for a person leaves the list: one that reported success
 (**Finished: reported to its parent**) or ended `completed`, `merged` or
 `abandoned`, such as one its parent stopped. Its parent's last nested line
-counts them (**3 finished**) and lists them in place until **Hide finished**,
+counts them (**3 finished**, outside the chevron's count) and lists them in place until **Hide finished**,
 for this browser session only; the one that is open lists there regardless.
 The parent's count and its Details (**Subsessions**) still include them. One that failed, was interrupted or
 needs you stays listed, and a finished one returns while it works again. The

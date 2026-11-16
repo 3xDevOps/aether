@@ -226,7 +226,7 @@ function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; ex
 function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) {
   const settled = tree.settled ?? []
   const below = tree.children.length + settled.length
-  const foldable = tree.children.filter((child) => group !== 'needs-you' || !child.needsYou).length + settled.length
+  const foldable = tree.children.filter((child) => group !== 'needs-you' || !child.needsYou).length
   const [expanded, setExpanded] = useState(below > 0)
   const [settledShown, setSettledShown] = useState(false)
   const touched = useRef(false)
@@ -239,7 +239,7 @@ function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) 
   }, [below])
 
   const shown = expanded ? tree.children : tree.children.filter((child) => child.needsYou)
-  const finished = expanded ? settled : []
+  const finished = expanded || foldable === 0 ? settled : []
   const openID = useStore((s) => settled.find((row) => isRunRoute(s.route, row.run.id))?.run.id)
   return (
     <>
@@ -263,7 +263,8 @@ function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) 
           ))}
           {finished.length > 0 && (
             <li className={cn(connectors, 'flex h-7 items-center coarse:h-11')}>
-              <Button variant="quiet" size="sm" className="ml-2 text-ui-sm" aria-expanded={settledShown} onClick={() => setSettledShown(!settledShown)}>
+              <Button variant="quiet" size="sm" className="ml-1 gap-1 text-ui-sm" aria-expanded={settledShown} onClick={() => setSettledShown(!settledShown)}>
+                <ChevronRight className={cn(chevronTurn, settledShown && 'rotate-90')} />
                 {settledShown ? 'Hide finished' : `${finished.length} finished`}
               </Button>
             </li>

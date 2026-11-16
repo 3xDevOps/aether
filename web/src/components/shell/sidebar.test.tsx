@@ -279,7 +279,7 @@ describe('run rows', () => {
     expect(runList().queryByText('reported check')).toBeNull()
     expect(runList().getByRole('button', { name: '2 finished' })).toBeDefined()
 
-    fireEvent.click(runList().getByRole('button', { name: 'Collapse 3 subsessions' }))
+    fireEvent.click(runList().getByRole('button', { name: 'Collapse 1 subsession' }))
     expect(runList().queryByRole('button', { name: '2 finished' })).toBeNull()
     expect(runList().queryByText('failed check')).toBeNull()
   })
