@@ -25,6 +25,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordcli"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/guest/helper"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -288,13 +289,13 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 		"serve the dashboard over HTTPS on this host's tailnet addresses at this port (0 = off; 443 makes it https://<magicdns-name>/)")
 	o.standardImage = fs.String("standard-image", server.DefaultStandardImage,
 		"published standard environment image recommended at workspace creation")
-	browserImage := os.Getenv("AETHER_BROWSER_IMAGE")
+	browserImage := envname.Getenv("AETHER_BROWSER_IMAGE")
 	if browserImage == "" {
 		browserImage = server.DefaultBrowserImage
 	}
 	o.browserImage = fs.String("browser-image", browserImage,
 		"versioned browser companion image or digest (AETHER_BROWSER_IMAGE; never untagged or latest)")
-	o.agentDefinitions = fs.String("agent-definitions", os.Getenv("AETHER_AGENT_DEFINITIONS"),
+	o.agentDefinitions = fs.String("agent-definitions", envname.Getenv("AETHER_AGENT_DEFINITIONS"),
 		`JSON object of administrator-owned agent definitions (AETHER_AGENT_DEFINITIONS)`)
 	o.tailnetAutoJoin = fs.Bool("tailnet-auto-join", false, "register unknown tailnet identities as approved members instead of pending")
 	o.tailnetRequireKey = fs.Bool("tailnet-require-key", false, "additionally require pubkey verification on tailnet connections")

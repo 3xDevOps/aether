@@ -2,11 +2,11 @@ package coordhooks
 
 import (
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -108,8 +108,8 @@ func Brief(g Guide) string {
 // StatusGuide is the guide of the run behind status, read inside its
 // container.
 func StatusGuide(status protocol.CoordStatusResult) Guide {
-	g := Guide{RunID: status.RunID, Parent: status.ParentRunID, Background: os.Getenv(coordtransport.BackgroundEnv) == "1"}
-	g.Wake = !g.Background && !status.Protected && (os.Getenv(coordtransport.EnhancedEnv) == "1" || os.Getenv(coordtransport.WakeEnv) == "1")
+	g := Guide{RunID: status.RunID, Parent: status.ParentRunID, Background: envname.Getenv(coordtransport.BackgroundEnv) == "1"}
+	g.Wake = !g.Background && !status.Protected && (envname.Getenv(coordtransport.EnhancedEnv) == "1" || envname.Getenv(coordtransport.WakeEnv) == "1")
 	switch {
 	case !slices.Contains(status.Capabilities, protocol.MethodCoordReport):
 	case g.Background:

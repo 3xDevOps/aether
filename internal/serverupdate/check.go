@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -98,7 +99,7 @@ const refreshEvery = time.Minute
 // with no release version has nothing to compare, so on the default feed
 // it never dials, and neither does a process with the opt-out set.
 func (s *Service) checks() bool {
-	if os.Getenv(selfupdate.OptOutEnv) != "" {
+	if envname.Getenv(selfupdate.OptOutEnv) != "" {
 		return false
 	}
 	return s.cfg.Releases != nil || version.Version != "dev"

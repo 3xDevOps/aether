@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -406,7 +407,7 @@ func nextCommand(nonce string, argv []string, env map[string]string) []byte {
 	if len(argv) == 0 {
 		return []byte(b.String())
 	}
-	b.WriteString("unset " + coordtransport.EnhancedEnv + "\n")
+	b.WriteString("unset " + coordtransport.EnhancedEnv + " " + envname.New(coordtransport.EnhancedEnv) + "\n")
 	for _, key := range slices.Sorted(maps.Keys(env)) {
 		b.WriteString("export " + key + "=" + shellquote.QuoteAlways(env[key]) + "\n")
 	}

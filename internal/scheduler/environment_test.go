@@ -13,6 +13,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -413,6 +414,56 @@ func TestWriteFileInRefusesAnythingButARegularFile(t *testing.T) {
 		}
 		if got, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(got) != "{}" {
 			t.Fatalf("%s = %q, %v; want {}", name, got, err)
+		}
+	}
+}
+
+// A workspace variable or an image's ENV under the CLOUDFIELD_ name of a
+// variable the server sets must not reach that variable's readers, which
+// take the CLOUDFIELD_ name first.
+func TestSessionVariablesCannotBeSetThroughTheirCloudfieldNames(t *testing.T) {
+	variables := map[string]string{}
+	for _, name := range coordtransport.SessionEnv {
+		variables[envname.New(name)] = "workspace"
+	}
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Runtime: newFakeRuntime()}}
+	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{Variables: variables}}
+	plan, err := s.BuildEnvironmentPlan(t.Context(), nil, ws, &domain.Member{ID: "member"}, harness.Profile{}, EnvironmentPurposeRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.createContainer(t.Context(), runtime.Spec{Name: "n", Image: "standard:latest", Command: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := s.cfg.Runtime.(*fakeRuntime).containers[id].spec.Env
+	for _, name := range coordtransport.SessionEnv {
+		twin := envname.New(name)
+		if v, ok := plan.Env[twin]; !ok || v != "" {
+			t.Errorf("plan %s = %q (set %v), want it set empty", twin, v, ok)
+		}
+		if v, ok := created[twin]; !ok || v != "" {
+			t.Errorf("created container %s = %q (set %v), want it set empty so an image's ENV cannot supply it", twin, v, ok)
+		}
+	}
+}
+
+// Every container the scheduler makes goes through createContainer.
+func TestContainersAreCreatedThroughCreateContainer(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(data), "s.cfg.Runtime.Create("); n > 0 && (f != "environment.go" || n != 1) {
+			t.Errorf("%s calls s.cfg.Runtime.Create directly; use s.createContainer", f)
 		}
 	}
 }

@@ -681,7 +681,7 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	if err != nil {
 		return nil, err
 	}
-	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, limits))
+	cid, err := s.createContainer(ctx, s.containerSpec(run, actor, argv, plan, limits))
 	if err != nil {
 		return nil, fmt.Errorf("create container: %w", err)
 	}

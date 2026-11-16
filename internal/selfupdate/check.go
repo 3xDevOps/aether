@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -294,14 +295,14 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 		CanSelfUpdate: true,
 		CheckedAt:     c.now(),
 	}
-	if packaged := os.Getenv(PackagedEnv); packaged != "" {
+	if packaged := envname.Getenv(PackagedEnv); packaged != "" {
 		out.Packaged, out.CanSelfUpdate = packaged, false
 	}
 	var err error
 	switch {
 	case version.Version == devVersion:
 		out.Dev = true
-	case os.Getenv(OptOutEnv) != "":
+	case envname.Getenv(OptOutEnv) != "":
 		out.Disabled = true
 	default:
 		var m Manifest

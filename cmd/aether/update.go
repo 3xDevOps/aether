@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/shellquote"
@@ -66,7 +67,7 @@ func runUpdate(args []string) error {
 	if *check {
 		return reportCheck(ctx, *jsonOut)
 	}
-	if app := os.Getenv(selfupdate.PackagedEnv); app != "" {
+	if app := envname.Getenv(selfupdate.PackagedEnv); app != "" {
 		return fmt.Errorf("this aether is part of the %s, which installs its updates; update the %s instead", app, app)
 	}
 

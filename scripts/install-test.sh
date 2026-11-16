@@ -526,6 +526,32 @@ AETHER_ROLE=client sh "$script" >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether gui build"
 not_ran "aether-server setup"
 
+# --- CLOUDFIELD_X wins over AETHER_X; an empty one falls back -------------
+
+reset "CLOUDFIELD_ROLE=client"
+CLOUDFIELD_ROLE=client sh "$script" >"$out" 2>&1 || fail "installer exited non-zero"
+ran "aether gui build"
+not_ran "aether-server setup"
+
+reset "CLOUDFIELD_ROLE=client over AETHER_ROLE=server"
+CLOUDFIELD_ROLE=client AETHER_ROLE=server sh "$script" >"$out" 2>&1 || fail "installer exited non-zero"
+ran "aether gui build"
+not_ran "aether-server setup"
+
+reset "empty CLOUDFIELD_ROLE"
+CLOUDFIELD_ROLE= AETHER_ROLE=client sh "$script" >"$out" 2>&1 || fail "installer exited non-zero"
+ran "aether gui build"
+not_ran "aether-server setup"
+
+reset "CLOUDFIELD_VERSION, CLOUDFIELD_BIN_DIR and CLOUDFIELD_COMPONENTS"
+CLOUDFIELD_VERSION=v0.0.0-test AETHER_VERSION=v9.9.9-missing \
+	CLOUDFIELD_BIN_DIR="$bindir" AETHER_BIN_DIR="$tmp/not-here" \
+	CLOUDFIELD_COMPONENTS=client AETHER_COMPONENTS=server \
+	sh "$script" --role none >"$out" 2>&1 || fail "installer exited non-zero"
+[ -x "$bindir/aether" ] || fail "CLOUDFIELD_BIN_DIR or CLOUDFIELD_VERSION was not used"
+[ ! -e "$bindir/aether-server" ] || fail "CLOUDFIELD_COMPONENTS=client installed the server"
+[ ! -e "$tmp/not-here" ] || fail "AETHER_BIN_DIR won over CLOUDFIELD_BIN_DIR"
+
 # --- --client implies the client role ------------------------------------
 
 reset "--client"

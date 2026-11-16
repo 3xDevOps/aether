@@ -15,6 +15,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/jsonc"
 	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/pelletier/go-toml/v2"
@@ -94,10 +95,10 @@ func writeHookInstallation(out io.Writer) error {
 // writeHookSummary reports only the inbox integration for this run's harness,
 // named by AETHER_HARNESS; the full matrix stays behind skill --hooks.
 func writeHookSummary(out io.Writer) error {
-	harness := os.Getenv("AETHER_HARNESS")
+	harness := envname.Getenv(coordtransport.HarnessEnv)
 	home, homeErr := os.UserHomeDir()
 	cwd, cwdErr := os.Getwd()
-	if (harness == "" && os.Getenv(coordtransport.EnhancedEnv) != "1") || homeErr != nil || cwdErr != nil {
+	if (harness == "" && envname.Getenv(coordtransport.EnhancedEnv) != "1") || homeErr != nil || cwdErr != nil {
 		_, err := io.WriteString(out, "Inbox hooks: aether-internal skill --hooks checks and installs them for your harness.\n")
 		return err
 	}
@@ -105,10 +106,10 @@ func writeHookSummary(out io.Writer) error {
 }
 
 func managedHooksLine(harness string, in hookInstallInputs) string {
-	if in.env(coordtransport.EnhancedEnv) == "1" {
+	if envname.Get(in.env, coordtransport.EnhancedEnv) == "1" {
 		return "Inbox hooks: not used in Enhanced sessions; Aether hands this session its mail as a prompt. Do not install them.\n"
 	}
-	if harness == "" || in.env(coordtransport.ManagedHooksEnv) != "1" {
+	if harness == "" || envname.Get(in.env, coordtransport.ManagedHooksEnv) != "1" {
 		return ""
 	}
 	if harness == "codex" {
@@ -205,12 +206,12 @@ func hookInstallationPlans(in hookInstallInputs) []hookInstallPlan {
 }
 
 func writeHookInstallationWithInputs(out io.Writer, in hookInstallInputs) error {
-	if in.env(coordtransport.EnhancedEnv) == "1" {
-		_, err := io.WriteString(out, "\n"+managedHooksLine(in.env("AETHER_HARNESS"), in))
+	if envname.Get(in.env, coordtransport.EnhancedEnv) == "1" {
+		_, err := io.WriteString(out, "\n"+managedHooksLine(envname.Get(in.env, coordtransport.HarnessEnv), in))
 		return err
 	}
 	var text strings.Builder
-	text.WriteString(managedHooksLine(in.env("AETHER_HARNESS"), in))
+	text.WriteString(managedHooksLine(envname.Get(in.env, coordtransport.HarnessEnv), in))
 	text.WriteString("\nHook installation (read-only): configured means matching files on disk, NOT loaded, trusted or executed. Install only your current harness; no process-tree guessing.\n")
 	text.WriteString("Bounded check: fixed user/current-directory project paths, regular files <=256 KiB; no ancestor/package scan or config execution. Explicit CLI paths, runtime flags, trust and managed layers may change results.\n")
 	text.WriteString("JSON install: export below, then create the destination only if absent; otherwise append only missing hooks.EVENT entries to their arrays, preserving unrelated keys, schema version and hooks. Resolve version conflicts; avoid duplicate user/project installs.\n")

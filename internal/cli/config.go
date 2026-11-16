@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/3xDevOps/Aether/internal/envname"
 )
 
 // Config is the local linked-server configuration written by `aether link`.
@@ -206,16 +208,22 @@ const ConfigDirEnv = "AETHER_CONFIG_DIR"
 // Path is the linked-server config file: $AETHER_CONFIG_DIR/aether/config.json
 // when that variable is set, otherwise ~/.config/aether/config.json on
 // Linux, ~/Library/Application Support/aether/config.json on macOS, and
-// %AppData%\aether\config.json on Windows.
+// %AppData%\aether\config.json on Windows. A cloudfield directory beside
+// aether is used instead when it exists. Neither is ever moved, because an
+// older CLI on the same machine reads only aether.
 func Path() (string, error) {
-	dir := os.Getenv(ConfigDirEnv)
+	dir := envname.Getenv(ConfigDirEnv)
 	if dir == "" {
 		var err error
 		if dir, err = os.UserConfigDir(); err != nil {
 			return "", fmt.Errorf("cli: config dir: %w", err)
 		}
 	}
-	return filepath.Join(dir, "aether", "config.json"), nil
+	name := "aether"
+	if info, err := os.Stat(filepath.Join(dir, "cloudfield")); err == nil && info.IsDir() {
+		name = "cloudfield"
+	}
+	return filepath.Join(dir, name, "config.json"), nil
 }
 
 // Dir is the directory that holds config.json, the device key and the

@@ -17,6 +17,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -71,7 +72,7 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	}
 	harness, event := args[0], args[1]
 	claudeWaiter := harness == "claude" && event == "wake"
-	if os.Getenv(coordtransport.EnhancedEnv) == "1" {
+	if envname.Getenv(coordtransport.EnhancedEnv) == "1" {
 		if event == "wake" && !claudeWaiter {
 			return ExitUsage, errors.New("hook wake: this is an enhanced session, whose agent Aether wakes with a prompt; stop this receiver")
 		}
@@ -80,7 +81,7 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	if event == "wake" && !claudeWaiter {
 		return hookWake(ctx, cfg)
 	}
-	if harness == "claude" && event == "Stop" && os.Getenv(coordtransport.ManagedHooksEnv) == "1" {
+	if harness == "claude" && event == "Stop" && envname.Getenv(coordtransport.ManagedHooksEnv) == "1" {
 		return ExitOK, nil
 	}
 	if _, err := os.Stat(cfg.Socket); errors.Is(err, fs.ErrNotExist) {
@@ -160,7 +161,7 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		defer writeHookNotices(path, announced)
 	}
 	text := hookContext(notices, stopping)
-	if starting && os.Getenv(coordtransport.RoleCardEnv) != "1" {
+	if starting && envname.Getenv(coordtransport.RoleCardEnv) != "1" {
 		card := coordhooks.RoleCard(coordhooks.StatusGuide(status))
 		if brief := sessionMemoryBrief(ctx, cfg.Socket, status); brief != "" {
 			card += "\n" + brief

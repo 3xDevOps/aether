@@ -856,11 +856,16 @@ function Invoke-AetherGuiBuild {
     param([Parameter(Mandatory = $true)][string] $CliPath)
     $hadAetherBin = Test-Path -LiteralPath 'Env:AETHER_BIN'
     $oldAetherBin = [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process')
+    # The CLI reads CLOUDFIELD_BIN ahead of AETHER_BIN, so it is hidden for
+    # the build.
+    $hadCloudfieldBin = Test-Path -LiteralPath 'Env:CLOUDFIELD_BIN'
+    $oldCloudfieldBin = [Environment]::GetEnvironmentVariable('CLOUDFIELD_BIN', 'Process')
     $previousExit = Get-Variable LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     $oldEap = $ErrorActionPreference
     $rerun = "& '{0}' gui build" -f $CliPath.Replace("'", "''")
     try {
         [Environment]::SetEnvironmentVariable('AETHER_BIN', $CliPath, 'Process')
+        Remove-Item -LiteralPath 'Env:CLOUDFIELD_BIN' -Force -ErrorAction SilentlyContinue
         # npm and electron-builder write progress to stderr; under Windows
         # PowerShell 5.1 that must not become an installer error.
         $ErrorActionPreference = 'Continue'
@@ -877,6 +882,9 @@ function Invoke-AetherGuiBuild {
         }
         else {
             Remove-Item -LiteralPath 'Env:AETHER_BIN' -Force -ErrorAction SilentlyContinue
+        }
+        if ($hadCloudfieldBin) {
+            [Environment]::SetEnvironmentVariable('CLOUDFIELD_BIN', $oldCloudfieldBin, 'Process')
         }
         if ($null -ne $previousExit) {
             $global:LASTEXITCODE = $previousExit
@@ -1006,6 +1014,16 @@ function Warn-AetherShadowing {
     }
 }
 
+# CLOUDFIELD_<Name> when it is not blank, else AETHER_<Name> (internal/envname).
+function Get-AetherEnv {
+    param([Parameter(Mandatory = $true)][string] $Name)
+    $value = [Environment]::GetEnvironmentVariable("CLOUDFIELD_$Name", 'Process')
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [Environment]::GetEnvironmentVariable("AETHER_$Name", 'Process')
+    }
+    return $value
+}
+
 function Invoke-AetherInstall {
     param(
         [AllowNull()][string] $RequestedVersion,
@@ -1024,9 +1042,9 @@ function Invoke-AetherInstall {
     $script:AetherCurl = Join-Path ([Environment]::GetEnvironmentVariable('SystemRoot', 'Process')) 'System32\curl.exe'
     if (-not (Test-Path -LiteralPath $script:AetherCurl -PathType Leaf)) { $script:AetherCurl = $null }
     $architecture = Get-AetherNativeArchitecture
-    $repo = [Environment]::GetEnvironmentVariable('AETHER_REPO', 'Process')
+    $repo = Get-AetherEnv 'REPO'
     if ([string]::IsNullOrWhiteSpace($repo)) { $repo = '3xDevOps/Aether' }
-    $baseUrl = [Environment]::GetEnvironmentVariable('AETHER_BASE_URL', 'Process')
+    $baseUrl = Get-AetherEnv 'BASE_URL'
     if ([string]::IsNullOrWhiteSpace($baseUrl)) { $baseUrl = 'https://github.com/{0}/releases/download' -f $repo }
     $baseUrl = $baseUrl.TrimEnd('/')
     $latestUrl = [Environment]::GetEnvironmentVariable('AETHER_LATEST_URL', 'Process')
@@ -1037,7 +1055,7 @@ function Invoke-AetherInstall {
 
     $role = $RequestedRole
     if ([string]::IsNullOrWhiteSpace($role)) {
-        $role = [Environment]::GetEnvironmentVariable('AETHER_ROLE', 'Process')
+        $role = Get-AetherEnv 'ROLE'
     }
     if ([string]::IsNullOrWhiteSpace($role)) { $role = 'client' }
     $role = $role.Trim().ToLowerInvariant()
@@ -1047,7 +1065,7 @@ function Invoke-AetherInstall {
 
     $version = $RequestedVersion
     if ([string]::IsNullOrWhiteSpace($version)) {
-        $version = [Environment]::GetEnvironmentVariable('AETHER_VERSION', 'Process')
+        $version = Get-AetherEnv 'VERSION'
     }
     $pinned = -not [string]::IsNullOrWhiteSpace($version)
     if ($pinned) {
@@ -1068,7 +1086,7 @@ function Invoke-AetherInstall {
     $localAppData = Get-AetherAbsolutePath $localAppData
     $binDir = $RequestedBinDir
     if ([string]::IsNullOrWhiteSpace($binDir)) {
-        $binDir = [Environment]::GetEnvironmentVariable('AETHER_BIN_DIR', 'Process')
+        $binDir = Get-AetherEnv 'BIN_DIR'
     }
     if ([string]::IsNullOrWhiteSpace($binDir)) {
         $binDir = Join-Path $localAppData 'Programs\Aether'

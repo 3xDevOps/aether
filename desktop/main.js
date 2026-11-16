@@ -27,6 +27,8 @@ const zoom = require('./zoom')
 // Older shells only carried the package version.
 const manifest = require('./package.json')
 const shellVersion = manifest.aetherCliVersion || manifest.version
+// CLOUDFIELD_BIN when set, else AETHER_BIN (internal/envname).
+const explicitBin = process.env.CLOUDFIELD_BIN || process.env.AETHER_BIN
 // A damaged binding file is reported through fatal() once the app is ready,
 // not as Electron's uncaught-exception dialog at load.
 let installedBy = ''
@@ -101,11 +103,10 @@ function main() {
   }
 
   function locateAether() {
-    const explicit = process.env.AETHER_BIN
-    if (explicit) {
+    if (explicitBin) {
       try {
-        fs.accessSync(explicit, fs.constants.X_OK)
-        return explicit
+        fs.accessSync(explicitBin, fs.constants.X_OK)
+        return explicitBin
       } catch {
         return '' // an explicit path that does not work is an error, not a fallback
       }
@@ -155,7 +156,7 @@ function main() {
     if (!bin) {
       fatal(
         'aether CLI not found',
-        installedBy && !process.env.AETHER_BIN
+        installedBy && !explicitBin
           ? `The CLI that installed this app is no longer executable at ${installedBy}.\n\n` +
             'Restore it or set AETHER_BIN to the intended binary.'
           : 'The desktop app needs the aether CLI installed.\n\n' +

@@ -207,7 +207,7 @@ func (s *Scheduler) createAssistantContainer(ctx context.Context, member domain.
 	if err != nil {
 		return "", err
 	}
-	cid, err := s.cfg.Runtime.Create(ctx, spec)
+	cid, err := s.createContainer(ctx, spec)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: create the assistant container: %w", err)
 	}
@@ -314,7 +314,7 @@ func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID
 	if err = s.applyRunOwnership(nil, &domain.Run{}, member, mounts, user); err != nil {
 		return fmt.Errorf("scheduler: hand the assistant's install to its user: %w", err)
 	}
-	cid, err := s.cfg.Runtime.Create(ctx, runtime.Spec{
+	cid, err := s.createContainer(ctx, runtime.Spec{
 		Name:             "aether-assistant-install-" + string(member),
 		Image:            s.cfg.StandardImage,
 		Env:              map[string]string{"HOME": "/tmp", "PATH": assistantPath},

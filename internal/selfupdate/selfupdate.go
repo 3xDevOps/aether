@@ -20,6 +20,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/envname"
 )
 
 // Repo is the GitHub repository releases are published from.
@@ -262,7 +264,7 @@ func (s *Staged) commitChecked() error {
 // running one. It is best-effort: a file stays while a process still runs
 // from it, and the next start tries again.
 func RemoveOld() {
-	if runtime.GOOS != "windows" || os.Getenv(keepOldEnv) != "" {
+	if runtime.GOOS != "windows" || envname.Getenv(keepOldEnv) != "" {
 		return
 	}
 	self, err := os.Executable()
