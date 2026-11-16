@@ -40,7 +40,7 @@ time.
 ## Build from source
 
 ```sh
-git clone https://github.com/3xDevOps/Aether
+git clone https://github.com/3xDevOps/cloudfield
 cd Aether
 make build
 ```
@@ -316,7 +316,7 @@ release. Without a copy, no release can open that database. Replace
 ```sh
 sudo systemctl stop aether-server
 sudo rm -rf /var/lib/aether && sudo cp -a <backup-dir> /var/lib/aether
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh \
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh \
   | sh -s -- --server --role none --version <tag>
 sudo systemctl start aether-server
 ```
@@ -497,7 +497,7 @@ only the push session. From a `main` checkout with `gh` and
 
 ```sh
 git tag -a v0.8.7-beta.1 -m v0.8.7-beta.1 <commit>
-sh scripts/release-ci-check.sh 3xDevOps/aether "$(git rev-parse 'v0.8.7-beta.1^{commit}')" &&
+sh scripts/release-ci-check.sh 3xDevOps/cloudfield "$(git rev-parse 'v0.8.7-beta.1^{commit}')" &&
 git push origin v0.8.7-beta.1
 ```
 
@@ -597,16 +597,16 @@ delete, and deletes nothing (`gh` needs the `read:packages` scope):
 
 ```sh
 go build -o /tmp/nightly-plan ./scripts/nightly-plan
-GITHUB_REPOSITORY=3xDevOps/aether NIGHTLY_PLAN=/tmp/nightly-plan sh scripts/nightly-prune.sh --dry-run
+GITHUB_REPOSITORY=3xDevOps/cloudfield NIGHTLY_PLAN=/tmp/nightly-plan sh scripts/nightly-prune.sh --dry-run
 ```
 
 Switch builds on and off with the repository variables:
 
 ```sh
-gh variable set NIGHTLY_ENABLED --body true --repo 3xDevOps/aether          # builds
-gh variable set NIGHTLY_PRUNE_ENABLED --body true --repo 3xDevOps/aether    # pruning too, after a dry run looks right
-gh variable delete NIGHTLY_PRUNE_ENABLED --repo 3xDevOps/aether             # stops pruning only
-gh variable delete NIGHTLY_ENABLED --repo 3xDevOps/aether                   # stops everything, pruning included
+gh variable set NIGHTLY_ENABLED --body true --repo 3xDevOps/cloudfield          # builds
+gh variable set NIGHTLY_PRUNE_ENABLED --body true --repo 3xDevOps/cloudfield    # pruning too, after a dry run looks right
+gh variable delete NIGHTLY_PRUNE_ENABLED --repo 3xDevOps/cloudfield             # stops pruning only
+gh variable delete NIGHTLY_ENABLED --repo 3xDevOps/cloudfield                   # stops everything, pruning included
 ```
 
 A run already in progress finishes. Only the exact value `true` turns either
@@ -645,7 +645,7 @@ before pushing:
 
 ```sh
 git tag -a v0.9.1 -m v0.9.1 origin/release/0.9
-sh scripts/release-ci-check.sh --branch release/0.9 3xDevOps/aether "$(git rev-parse 'v0.9.1^{commit}')" &&
+sh scripts/release-ci-check.sh --branch release/0.9 3xDevOps/cloudfield "$(git rev-parse 'v0.9.1^{commit}')" &&
 git push origin v0.9.1
 ```
 
@@ -685,7 +685,7 @@ Before the first hotfix, a repository admin sets up three protections:
    branches:
 
    ```sh
-   gh api -X POST repos/3xDevOps/aether/rulesets --input - <<'JSON'
+   gh api -X POST repos/3xDevOps/cloudfield/rulesets --input - <<'JSON'
    {"name": "Release branches", "target": "branch", "enforcement": "active",
     "conditions": {"ref_name": {"include": ["refs/heads/release/*"], "exclude": []}},
     "bypass_actors": [{"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}],
@@ -704,7 +704,7 @@ Before the first hotfix, a repository admin sets up three protections:
    create, move or delete them:
 
    ```sh
-   gh api -X POST repos/3xDevOps/aether/rulesets --input - <<'JSON'
+   gh api -X POST repos/3xDevOps/cloudfield/rulesets --input - <<'JSON'
    {"name": "Release tags", "target": "tag", "enforcement": "active",
     "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
     "bypass_actors": [{"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"},
@@ -724,7 +724,7 @@ Releases need these admin steps. Do them in order; nothing below publishes,
 tags or prunes until a step says so. Each of 1 to 5 is one-time.
 
 1. **No stray variables.** `gh variable list --org 3xDevOps` and `gh variable
-   list --repo 3xDevOps/aether` must show no `NIGHTLY_ENABLED` or
+   list --repo 3xDevOps/cloudfield` must show no `NIGHTLY_ENABLED` or
    `NIGHTLY_PRUNE_ENABLED`. `nightly.yml` is on `main`, so an organization
    variable set to `true` would start nightly runs as soon as the pointers
    exist, and the first run would create an unprotected `nightly` environment.
@@ -733,7 +733,7 @@ tags or prunes until a step says so. Each of 1 to 5 is one-time.
    the branch `main` (Promote runs on `main`), and add the maintainers who
    release as **Required reviewers**. Put `AETHER_RELEASE_SIGNING_KEY` here
    and delete any repository secret of that name. Check what exists with
-   `gh api repos/3xDevOps/aether/environments/release`: a null
+   `gh api repos/3xDevOps/cloudfield/environments/release`: a null
    `deployment_branch_policy` means any branch or tag may use the key. The
    Android job reads `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`,
    `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` as repository secrets;

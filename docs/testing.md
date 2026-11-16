@@ -690,7 +690,7 @@ without Docker instead. Some specs need more:
 | --- | --- |
 | `onboarding-github`, and `native`, `git-card` and `github` in `remote-development-git/` | The real standard image: `docker build -f images/standard/Dockerfile -t aether-standard:ci .`, or another build named by `AETHER_E2E_STANDARD_IMAGE` |
 | `development-browser/*` | The browser companion image ([below](#the-browser-companion)) and `node:22.14.0-alpine3.21` |
-| `remote-development-git/import.spec.ts` | Network access to `AETHER_E2E_GIT_SOURCE_URL` (default `https://github.com/3xDevOps/Aether.git`) |
+| `remote-development-git/import.spec.ts` | Network access to `AETHER_E2E_GIT_SOURCE_URL` (default `https://github.com/3xDevOps/cloudfield.git`) |
 | `remote-development-git/github.spec.ts` | Opt-in: `AETHER_E2E_GITHUB_PUBLISH=1`, `AETHER_E2E_GITHUB_TOKEN`, `AETHER_E2E_GITHUB_BASE_REPOSITORY` (a public `owner/name`), `AETHER_E2E_GITHUB_HEAD_REPOSITORY` (your writable fork); `AETHER_E2E_GITHUB_BASE_BRANCH` defaults to `main` |
 
 `github.spec.ts` opens, comments on and closes a real pull request upstream.

@@ -29,7 +29,7 @@ Cloudfield is self-hosted. Three parties handle connector data:
 | OpenAI (ChatGPT) or Anthropic (Claude), whichever app you connect | Sends tool calls and receives tool results inside your conversation, under its own privacy policy |
 
 Contact for this policy: [team@onaether.dev]. Issues:
-<https://github.com/3xDevOps/Aether/issues>.
+<https://github.com/3xDevOps/cloudfield/issues>.
 
 ## What the connector receives from ChatGPT or Claude
 

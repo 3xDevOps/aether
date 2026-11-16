@@ -142,7 +142,7 @@ session would hold the memory of its busiest moment.
 On Linux or macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh
 ```
 
 The script needs `curl`, and `sha256sum` or `shasum`. It downloads the
@@ -172,7 +172,7 @@ in `/usr/local/bin` that would run first.
   macOS or with `--client`, it names the install that needs no `sudo`:
 
   ```sh
-  curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client --role none --bin-dir "$HOME/.local/bin"
+  curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client --role none --bin-dir "$HOME/.local/bin"
   ```
 
   Otherwise it says that installing `aether-server` needs root, passwordless
@@ -212,7 +212,7 @@ In Windows PowerShell 5.1 or PowerShell 7, download the installer, review it,
 then run it:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 
@@ -277,7 +277,7 @@ as a software developer, and open an issue with the detection name.
 
 ## Manual install
 
-Every [release](https://github.com/3xDevOps/Aether/releases) publishes
+Every [release](https://github.com/3xDevOps/cloudfield/releases) publishes
 `checksums.txt` and these assets, where `<arch>` is `amd64` or `arm64`: the
 CLI as `aether-linux-<arch>`, `aether-darwin-<arch>` and
 `aether-windows-<arch>.exe`; `aether-server-linux-<arch>`;
@@ -358,7 +358,7 @@ Google Play yet; every release carries `aether-android.apk`. What it stores and
 sends is in [privacy.md](privacy.md), its licences in [notices.md](notices.md).
 
 1. On the phone, download `aether-android.apk` from the
-   [latest release](https://github.com/3xDevOps/Aether/releases/latest).
+   [latest release](https://github.com/3xDevOps/cloudfield/releases/latest).
 2. When Android asks, allow your browser to install apps, then open the file.
 3. Choose how the app reaches your server: **Aether Edge** or **Tailscale**.
 
@@ -694,7 +694,7 @@ session:
 
 ```
 aether-server v0.8.7-beta.12 -> v0.8.7-beta.13
-https://github.com/3xDevOps/Aether/releases/tag/v0.8.7-beta.13
+https://github.com/3xDevOps/cloudfield/releases/tag/v0.8.7-beta.13
 checking and downloading the release ... done in 4.12s
 stopping aether-server; sessions keep running ... done in 2.31s
 copying the 9.1 GB database to /var/lib/aether/server-update/aether.db.pre-update so a failed start can roll back ... done in 21.43s

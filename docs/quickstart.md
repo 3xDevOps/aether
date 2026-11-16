@@ -28,7 +28,7 @@ at step 5.
 Run the install script on the server, then on your computer (Linux or macOS):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh
 ```
 
 At the `role` prompt, answer `server` on the server. It installs
@@ -42,7 +42,7 @@ On Windows, download and review the PowerShell installer, then run it. It
 installs the CLI and the desktop app without administrator rights:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 
@@ -90,7 +90,7 @@ next:
   1. start the server on this machine:
        sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
   2. on your computer, install Aether if it is not there yet (Windows: docs/install.md):
-       curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client
+       curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client
   3. on your computer: in the Aether app's Connect step choose Aether relay, sign in
      with GitHub and paste the claim link above; in a terminal:
        aether login
@@ -134,7 +134,7 @@ To drive setup from an agent over ssh, with no terminal on the server (`sudo`
 there must not ask for a password), run the steps non-interactively:
 
 ```sh
-ssh <user>@<server> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --role none'
+ssh <user>@<server> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --role none'
 ssh <user>@<server> 'sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>'
 ssh <user>@<server> 'sudo systemctl daemon-reload && sudo systemctl enable --now aether-server'
 ssh <user>@<server> "timeout 300 sh -c 'until sudo aether-server edge status >/dev/null; do sleep 5; done'"
