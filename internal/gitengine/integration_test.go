@@ -1602,7 +1602,7 @@ func assertSessionBranchProtected(t *testing.T, e *Engine, url func(domain.Works
 	}
 }
 
-func TestServerStartUpgradesHookOfExistingRepo(t *testing.T) {
+func TestInitWorkspaceRepoRewritesOlderHook(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{ReposDir: filepath.Join(dir, "repos"), CheckoutsDir: filepath.Join(dir, "checkouts")}
 	before, err := New(cfg)
@@ -1626,7 +1626,7 @@ func TestServerStartUpgradesHookOfExistingRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Server.Run calls InitWorkspaceRepo for every workspace at start.
+	// A fresh engine stands in for a restarted server.
 	after, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
