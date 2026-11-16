@@ -574,8 +574,9 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Qualify an edge upgrade
-        # A nightly also upgrades from the previous nightly.
-        run: sudo env "PATH=$PATH" "HOME=$HOME" "EDGE_QUALIFY_CHANNEL=$CHANNEL" make test-edge-upgrade
+        # A nightly also upgrades from the previous nightly; a release
+        # skips a channel whose pointer is above its build and hotfix.
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "EDGE_QUALIFY_CHANNEL=$CHANNEL" "EDGE_QUALIFY_BUILD=$BUILD" "EDGE_QUALIFY_HOTFIX=$HOTFIX" make test-edge-upgrade
 
   release-binaries:
     needs: release-inputs

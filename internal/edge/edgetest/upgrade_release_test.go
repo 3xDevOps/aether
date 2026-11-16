@@ -11,7 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,28 +19,36 @@ import (
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
-// start is a release hosts upgrade from, with the build its image records.
-type start struct {
-	tag   string
-	build int
-}
-
 // startingPoints are the releases stable.json and beta.json name, and for
-// a nightly build the one nightly.json names: the upgrades hosts on each
-// channel take. Before any pointer exists it is the previous tag on HEAD's
-// history, as before channels.
+// a nightly build the one nightly.json names, as far as the release under
+// test (EDGE_QUALIFY_BUILD and EDGE_QUALIFY_HOTFIX) is not below them:
+// the upgrades hosts on each channel take. Without any it is the previous
+// tag on HEAD's history, as before channels.
 func startingPoints(t *testing.T, root, channel string) []start {
 	channels := []string{selfupdate.ChannelStable, selfupdate.ChannelBeta}
 	if channel == selfupdate.ChannelNightly {
 		channels = append(channels, selfupdate.ChannelNightly)
 	}
-	var starts []start
+	var pointers []selfupdate.Pointer
 	for _, ch := range channels {
-		p, ok := fetchPointer(t, ch)
-		if ok && !slices.ContainsFunc(starts, func(s start) bool { return s.tag == p.Tag }) {
-			starts = append(starts, start{p.Tag, p.Build})
+		if p, ok := fetchPointer(t, ch); ok {
+			pointers = append(pointers, p)
 		}
 	}
+	var ours selfupdate.Mark
+	for _, v := range []struct {
+		name string
+		n    *int
+	}{{"EDGE_QUALIFY_BUILD", &ours.Build}, {"EDGE_QUALIFY_HOTFIX", &ours.Hotfix}} {
+		if s := os.Getenv(v.name); s != "" {
+			n, err := strconv.Atoi(s)
+			if err != nil || n < 0 {
+				t.Fatalf("%s=%q is not a non-negative integer", v.name, s)
+			}
+			*v.n = n
+		}
+	}
+	starts := chooseStarts(pointers, ours)
 	if len(starts) == 0 {
 		starts = []start{{tag: strings.TrimSpace(mustOutput(t, "git", "-C", root, "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "HEAD^"))}}
 	}
