@@ -233,7 +233,7 @@ func (s *Scheduler) connectGitHubLocked(ctx context.Context, member domain.Membe
 	}
 	if !listsSigningKey(listed, fingerprint) {
 		return domain.GitHubConnection{}, fmt.Errorf(
-			"github: gh ssh-key list on the account does not include the signing key Aether generated for this member (%s); this is not about your own GitHub keys", fingerprint)
+			"github: gh ssh-key list on the account does not include the signing key Cloudfield generated for this member (%s); this is not about your own GitHub keys", fingerprint)
 	}
 	return domain.GitHubConnection{Login: entry.Login, SigningKey: pub, Fingerprint: fingerprint}, nil
 }

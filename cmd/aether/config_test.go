@@ -226,7 +226,7 @@ func TestConfigPushUploadsChosenPathsAndLeavesOutWhatTheServerWould(t *testing.T
 	}
 
 	localLeftOut := []string{
-		".aether-profile-ignore: Aether profile ignore file\n",
+		".aether-profile-ignore: Cloudfield profile ignore file\n",
 		".credentials.json: credential\n",
 		".env: credential\n",
 		"big.bin: 68157440 bytes is over the 64 MiB upload limit; copy it onto the server from aether terminal\n",

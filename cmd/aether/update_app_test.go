@@ -71,7 +71,7 @@ func TestRebuildDesktopAppSamplesTheRunningAppBeforeTheSwap(t *testing.T) {
 	if _, err := os.Stat(swapped); err != nil {
 		t.Fatalf("the build never ran: %v", err)
 	}
-	if !strings.Contains(out.String(), "restart the Aether app to use the new version") {
+	if !strings.Contains(out.String(), "restart the Cloudfield app to use the new version") {
 		t.Fatalf("output = %q, want the restart line", out.String())
 	}
 }
@@ -84,7 +84,7 @@ func TestRebuildDesktopAppSaysNothingAboutAnAppThatWasNotRunning(t *testing.T) {
 	if err := rebuildDesktopAppTo("/usr/local/bin/aether", &out); err != nil {
 		t.Fatalf("rebuildDesktopAppTo: %v", err)
 	}
-	if strings.Contains(out.String(), "restart the Aether app") {
+	if strings.Contains(out.String(), "restart the Cloudfield app") {
 		t.Fatalf("output = %q, want no restart line", out.String())
 	}
 }
@@ -105,7 +105,7 @@ func TestRebuildDesktopAppReportsAFailedBuild(t *testing.T) {
 	if !strings.Contains(err.Error(), "rerun it with:") {
 		t.Fatalf("err = %v, want the rerun command", err)
 	}
-	if strings.Contains(out.String(), "restart the Aether app") {
+	if strings.Contains(out.String(), "restart the Cloudfield app") {
 		t.Fatalf("output = %q, want no restart line after a failed build", out.String())
 	}
 }
@@ -125,7 +125,7 @@ func TestRebuildDesktopAppSeesEitherInstalledAppRunning(t *testing.T) {
 	if !strings.Contains(out.String(), "rebuilding the desktop app at "+renamed) {
 		t.Fatalf("output = %q, want the renamed app rebuilt", out.String())
 	}
-	if !strings.Contains(out.String(), "restart the Aether app to use the new version") {
+	if !strings.Contains(out.String(), "restart the Cloudfield app to use the new version") {
 		t.Fatalf("output = %q, want the restart line for the running legacy app", out.String())
 	}
 }

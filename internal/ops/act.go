@@ -122,7 +122,7 @@ func switchRunMode(ctx context.Context, c calls, in modeInput) (string, any, err
 		var perr *protocol.Error
 		if errors.As(err, &perr) && strings.Contains(perr.Message, "holds the session's control") {
 			return "", nil, &protocol.Error{Code: perr.Code, Data: perr.Data,
-				Message: perr.Message + "; this tool holds no control, so ask that member to release it, or switch in the Aether dashboard"}
+				Message: perr.Message + "; this tool holds no control, so ask that member to release it, or switch in the Cloudfield dashboard"}
 		}
 		return "", nil, err
 	}

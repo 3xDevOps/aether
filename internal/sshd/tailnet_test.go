@@ -282,7 +282,7 @@ func TestTailnetTaggedNodeRequiresKey(t *testing.T) {
 		_ = c.Close()
 		t.Fatal("tagged node connected with an unregistered key")
 	}
-	if !strings.Contains(banner.String(), "no Aether member for this key") {
+	if !strings.Contains(banner.String(), "no Cloudfield member for this key") {
 		t.Errorf("banner = %q, want the unknown-key rejection", banner.String())
 	}
 }
@@ -367,7 +367,7 @@ func TestKeyBootstrapAdminOnFreshServer(t *testing.T) {
 		_ = c.Close()
 		t.Fatal("second unknown key accepted after bootstrap")
 	}
-	if !strings.Contains(banner.String(), "no Aether member for this key") {
+	if !strings.Contains(banner.String(), "no Cloudfield member for this key") {
 		t.Errorf("banner = %q, want the unknown-key rejection", banner.String())
 	}
 }

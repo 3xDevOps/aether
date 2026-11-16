@@ -78,7 +78,7 @@ func printConnectors(w io.Writer, list protocol.ConnectorListResult, code *proto
 		connectorURL = code.URL
 	}
 	if connectorURL != "" && connectorURL == list.UniversalURL {
-		_, _ = fmt.Fprintf(w, "Install Aether from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:\n  URL   %s\n", connectorURL)
+		_, _ = fmt.Fprintf(w, "Install Cloudfield from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:\n  URL   %s\n", connectorURL)
 	} else {
 		_, _ = fmt.Fprintf(w, "Add this server to ChatGPT or Claude as a custom connector:\n  URL   %s\n", connectorURL)
 	}

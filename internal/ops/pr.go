@@ -58,7 +58,7 @@ func prCreate(ctx context.Context, c calls, in prCreateInput) (string, any, erro
 			map[string]any{"run_id": in.RunID, "pr": prOf(pr), "created": false, "url": l.run(in.RunID), "untrusted": map[string]any{"title": clip(pr.Title, maxReport)}}, nil
 	}
 	if status.Expected == nil || status.Target == nil {
-		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("session %s's checkout gave no branch and target to open a pull request from; open it in the Aether dashboard", in.RunID)}
+		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("session %s's checkout gave no branch and target to open a pull request from; open it in the Cloudfield dashboard", in.RunID)}
 	}
 	if in.ExpectedHead != "" && !strings.HasPrefix(status.Expected.Head, in.ExpectedHead) {
 		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("session %s's branch %s moved to %s since %s; review aether_session_changes again",

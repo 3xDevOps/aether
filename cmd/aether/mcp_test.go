@@ -40,7 +40,7 @@ Remove one: aether mcp revoke <id>
 To use the one URL https://edge.onaether.dev/mcp instead, link a GitHub account: aether member link --github <login>
 `},
 		{"signing in replaces the code", protocol.ConnectorListResult{Connectors: connectors, URL: universal, UniversalURL: universal, SignIn: true}, nil,
-			`Install Aether from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
+			`Install Cloudfield from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
   URL   https://edge.onaether.dev/mcp
   No code: on the page that opens, sign in to the edge with GitHub, pick this server and select Allow
 Connected:
@@ -52,7 +52,7 @@ Remove one: aether mcp revoke <id>
 `},
 		{"at the edge's other relay address", protocol.ConnectorListResult{Connectors: []protocol.Connector{connectors[1], other}, URL: universal,
 			UniversalURL: universal, UniversalURLs: []string{universal, otherUniversal}, SignIn: true}, nil,
-			`Install Aether from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
+			`Install Cloudfield from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:
   URL   https://edge.onaether.dev/mcp
   No code: on the page that opens, sign in to the edge with GitHub, pick this server and select Allow
 Connected:

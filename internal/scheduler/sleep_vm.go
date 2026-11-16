@@ -24,11 +24,11 @@ type woke struct {
 func (w woke) notice() string {
 	switch {
 	case w.restored:
-		return "Aether had saved this idle session to disk and restored it. Its processes, terminals and conversation carry on where they were; connections to outside the session may have dropped while it slept."
+		return "Cloudfield had saved this idle session to disk and restored it. Its processes, terminals and conversation carry on where they were; connections to outside the session may have dropped while it slept."
 	case w.restoreErr != nil:
-		return "Aether could not restore this idle session's saved state, so it started the session again from its disk. Processes and terminals that were running were stopped; the conversation, files and checkout are kept. The restore failed: " + w.restoreErr.Error()
+		return "Cloudfield could not restore this idle session's saved state, so it started the session again from its disk. Processes and terminals that were running were stopped; the conversation, files and checkout are kept. The restore failed: " + w.restoreErr.Error()
 	}
-	return "Aether had stopped this idle session's container. Processes and terminals that were running were stopped; the conversation, files and checkout are kept."
+	return "Cloudfield had stopped this idle session's container. Processes and terminals that were running were stopped; the conversation, files and checkout are kept."
 }
 
 // saver is the runtime's SaveRuntime when it can save cid, which a session

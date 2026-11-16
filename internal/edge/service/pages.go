@@ -215,7 +215,7 @@ func (s *Service) joinPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	relay := s.pair(r).relay
-	s.render(w, http.StatusOK, "join", s.view(nil, "Join an Aether server", struct {
+	s.render(w, http.StatusOK, "join", s.view(nil, "Join a Cloudfield server", struct {
 		App  template.URL
 		Link string
 	}{

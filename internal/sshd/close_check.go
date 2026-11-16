@@ -170,7 +170,7 @@ func (s *Server) workWarnings(ctx context.Context, run *domain.Run, outcome doma
 			open = open || primary
 			observed := pr.ObservedAt.UTC().Format(time.RFC3339)
 			out = append(out, protocol.CloseWarning{Kind: protocol.CloseWarningPullRequest, URL: pr.URL, Number: pr.Number, ObservedAt: observed,
-				Detail: fmt.Sprintf("Pull request %s#%d was %s, not merged, when Aether last checked %s", pr.Repository, pr.Number, pr.State, observed)})
+				Detail: fmt.Sprintf("Pull request %s#%d was %s, not merged, when Cloudfield last checked %s", pr.Repository, pr.Number, pr.State, observed)})
 		}
 	}
 	if outcome != domain.RunMerged && run.Status != domain.RunMerged && run.LastCommit != "" && run.LastCommit != run.BaseCommit && !open && !merged {

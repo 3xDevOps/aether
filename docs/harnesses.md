@@ -540,7 +540,7 @@ Updates skip OpenCode, agents you defined, shipped names an administrator
 overrides, agents installed in the image, and an account owner's installation
 that a recipient's session borrows. A `codex`, `pi`, `copilot` or `gemini` in
 `~/.local/bin` that `npm` did not install is not updated and reports, for
-example, `codex in ~/.local/bin was not installed with npm, so Aether cannot
+example, `codex in ~/.local/bin was not installed with npm, so Cloudfield cannot
 update it`.
 
 Cloudfield does not roll an update back. To turn updates off for the whole

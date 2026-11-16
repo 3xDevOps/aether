@@ -306,7 +306,7 @@ func configPolicyReason(root protocol.ConfigRoot, rel string) string {
 	case profilesvc.DeniedBasename(rel, root.CredentialNames):
 		return "credential"
 	case rel == ".aether-profile-ignore":
-		return "Aether profile ignore file"
+		return "Cloudfield profile ignore file"
 	case profilesvc.Ignored(root.RuntimeIgnores, rel):
 		return "runtime or history path"
 	}

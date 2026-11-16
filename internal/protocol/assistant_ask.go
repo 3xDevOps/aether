@@ -34,7 +34,7 @@ const (
 
 // AssistantAskWaitingInAether is the card text of a card a connector may
 // not decide.
-const AssistantAskWaitingInAether = "Waiting for your approval in Aether"
+const AssistantAskWaitingInAether = "Waiting for your approval in Cloudfield"
 
 type AssistantAskCard struct {
 	CardID string `json:"card_id"`

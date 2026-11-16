@@ -102,7 +102,7 @@ func TestUpdateChannelOnTheHost(t *testing.T) {
 	_ = f.Close()
 
 	out.Reset()
-	if err = setChannel(t.Context(), &out, rel.URL, stateDir, database, selfupdate.ChannelNightly, false); err == nil || !strings.HasPrefix(out.String(), "Switch to nightly builds?\n\nNot recommended unless you are developing Aether.") {
+	if err = setChannel(t.Context(), &out, rel.URL, stateDir, database, selfupdate.ChannelNightly, false); err == nil || !strings.HasPrefix(out.String(), "Switch to nightly builds?\n\nNot recommended unless you are developing Cloudfield.") {
 		t.Fatalf("nightly: %v, printed %q", err, out.String())
 	}
 }

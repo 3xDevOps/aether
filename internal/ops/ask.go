@@ -22,8 +22,8 @@ type decideCardInput struct {
 // Deciding a card is its own tool, so a host's "always allow" for asking
 // never also allows approvals.
 var askOps = []Op{
-	opOf("aether_ask_assistant", "Ask the Aether assistant", ScopeWrite, false, "",
-		"Use this when the user asks their Aether assistant; each call costs it a turn, so read with other tools. "+
+	opOf("aether_ask_assistant", "Ask the Cloudfield assistant", ScopeWrite, false, "",
+		"Use this when the user asks their Cloudfield assistant; each call costs it a turn, so read with other tools. "+
 			"Pass prompt, or turn_id to poll."+untrustedRule, ask).
 		hints(true, true).calling(protocol.MethodAssistantAsk),
 	opOf("aether_decide_assistant_card", "Decide assistant card", ScopeWrite, false, "",

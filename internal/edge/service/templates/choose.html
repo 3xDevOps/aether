@@ -1,5 +1,5 @@
 {{define "choose"}}{{template "top" .}}
-<p>Choose the Aether server to connect to <strong>{{.Data.Client}}</strong>. The connector acts as you on it, with your role there; the server's own page then names you and asks what it may do.</p>
+<p>Choose the Cloudfield server to connect to <strong>{{.Data.Client}}</strong>. The connector acts as you on it, with your role there; the server's own page then names you and asks what it may do.</p>
 {{if .Data.Ready}}<ul class="choices">
 {{range .Data.Ready}}<li><form method="post" action="{{$.Data.Action}}">
 {{range $.Data.Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">

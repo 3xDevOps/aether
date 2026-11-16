@@ -93,9 +93,9 @@ func channelConfirmation(channel string, running, target selfupdate.Release, tar
 	if channel == selfupdate.ChannelNightly {
 		return `Switch to nightly builds?
 
-Not recommended unless you are developing Aether.
+Not recommended unless you are developing Cloudfield.
 
-- Nightly builds come from Aether's main branch. Breaking changes
+- Nightly builds come from Cloudfield's main branch. Breaking changes
   arrive as soon as they merge.
 - A nightly build may contain security issues that a later build fixes.
 - You cannot go back right away. This server stays on its nightly build

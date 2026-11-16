@@ -157,7 +157,7 @@ func TestACardInQuietHoursWaitsForTheDigestAndLeavesItOnceDecided(t *testing.T) 
 	if err := h.svc.sendDigest(h.ctx, h.ada.ID); err != nil {
 		t.Fatal(err)
 	}
-	phone.expect(t, notification{Title: "Aether · 1 to approve", Body: "Overnight: Assistant asks for approval: Launch codex in web  [Approve]", Notice: true})
+	phone.expect(t, notification{Title: "Cloudfield · 1 to approve", Body: "Overnight: Assistant asks for approval: Launch codex in web  [Approve]", Notice: true})
 }
 
 func TestDecidingACardThatASummaryTookOverUpdatesTheSummary(t *testing.T) {

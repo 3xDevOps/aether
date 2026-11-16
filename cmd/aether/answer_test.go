@@ -27,7 +27,7 @@ func TestAnswerAllowsAPermissionOnlyOnce(t *testing.T) {
 	respond := &fakeReply{result: protocol.RunInputRespondResult{Status: protocol.RunInputRespondAnswered}}
 	c, _ := answerControl(t, []protocol.AttentionItem{permissionItem()}, respond)
 	var out bytes.Buffer
-	if err := answer(c, &out, nil, "r1", "req-1", "always-1", nil); err == nil || err.Error() != "option always-1 is not allow once or reject once, and aether answer never answers for always: pick one of allow-1, reject-1, or decide it in the Aether dashboard" {
+	if err := answer(c, &out, nil, "r1", "req-1", "always-1", nil); err == nil || err.Error() != "option always-1 is not allow once or reject once, and aether answer never answers for always: pick one of allow-1, reject-1, or decide it in the Cloudfield dashboard" {
 		t.Fatalf("answer with an always option = %v, want a refusal naming the once options", err)
 	}
 	if respond.params() != nil {

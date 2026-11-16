@@ -308,7 +308,7 @@ A digest is one push, written by the server without a model. It replaces the
 previous digest on your devices and opens the dashboard:
 
 ```text
-Aether · 2 need you · 1 failed · 3 done
+Cloudfield · 2 need you · 1 failed · 3 done
 api  Fix login test: run the migration?  [Answer]
 api  Launch docs session: Permission requested  [Answer]
 web  Bump deps: Failed: checks failed (lint)  [Open]

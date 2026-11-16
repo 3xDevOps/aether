@@ -107,13 +107,13 @@ func writeHookSummary(out io.Writer) error {
 
 func managedHooksLine(harness string, in hookInstallInputs) string {
 	if envname.Get(in.env, coordtransport.EnhancedEnv) == "1" {
-		return "Inbox hooks: not used in Enhanced sessions; Aether hands this session its mail as a prompt. Do not install them.\n"
+		return "Inbox hooks: not used in Enhanced sessions; Cloudfield hands this session its mail as a prompt. Do not install them.\n"
 	}
 	if harness == "" || envname.Get(in.env, coordtransport.ManagedHooksEnv) != "1" {
 		return ""
 	}
 	if harness == "codex" {
-		return "Inbox (codex): Aether hands this session its mail through Codex's app-server; do not install hooks. Remove any manual copy in ~/.codex/hooks.json; it would announce mail twice.\n"
+		return "Inbox (codex): Cloudfield hands this session its mail through Codex's app-server; do not install hooks. Remove any manual copy in ~/.codex/hooks.json; it would announce mail twice.\n"
 	}
 	return "Inbox hooks (" + harness + "): loaded by this session's launch; do not install a manual copy.\n"
 }

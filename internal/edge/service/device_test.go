@@ -365,7 +365,7 @@ func TestJoinPage(t *testing.T) {
 	resp, page := b.get(t, "/join/"+server+"/inv-7k2m9q4xbd")
 	app := "aether://join?edge=" + url.QueryEscape(testRelay) + "&amp;server=" + server + "&amp;invitation=inv-7k2m9q4xbd"
 	for _, want := range []string{
-		"Join an Aether server",
+		"Join a Cloudfield server",
 		`href="` + app + `"`,
 		`value="` + testRelay + "/join/" + server + `/inv-7k2m9q4xbd"`,
 		`<script src="/join.js">`,
