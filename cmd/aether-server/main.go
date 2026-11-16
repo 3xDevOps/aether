@@ -54,7 +54,7 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == vm.MonitorCommand {
 		exitOn(vm.Monitor(os.Args[2:]))
 	}
-	if filepath.Base(os.Args[0]) == "aether-internal" {
+	if name := filepath.Base(os.Args[0]); name == "aether-internal" || name == "cloudfield-internal" {
 		os.Exit(coordcli.Main(os.Args[1:]))
 	}
 	if len(os.Args) < 2 {

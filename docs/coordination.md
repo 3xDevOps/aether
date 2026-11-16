@@ -28,16 +28,20 @@ Inside a container, the session directory appears at `/run/aether`. Only
 `coord3.sock` is served. A socket from an older wire version is not rebound;
 affected sessions must be reopened with the current server.
 
-The server also mounts one verified, read-only staged binary at both of these
+The server also mounts one verified, read-only staged binary at each of these
 paths:
 
 ```
 /opt/aether/aether-server
 /usr/local/bin/aether-internal
+/usr/local/bin/cloudfield-internal
 ```
 
 The first path serves the hidden MCP entry point and the existing agent
-lifecycle hook. The second path is the agent-facing coordination CLI. A
+lifecycle hook. The other two are the agent-facing coordination CLI, which
+behaves the same at either path. Containers created before this release lack
+`/usr/local/bin/cloudfield-internal`, so the server's own commands and every
+file written into a member's home call `/usr/local/bin/aether-internal`. A
 Default or Isolated session also gets the binary at `/usr/local/bin/sudo`, the
 [sudo shim](security.md#sudo-in-a-default-session). The coordination directory
 and the executable mounts are constructed by Aether, not requested by a session.
@@ -48,7 +52,7 @@ session. `aether-internal` has no socket, session identity, login, or credential
 option and always uses `/run/aether/coord3.sock`.
 
 Caller-supplied mounts are validated before these mounts are appended. A caller mount may not target or nest under `/run/aether`, `/opt/aether`,
-`/usr/local/bin/aether-internal` or `/usr/local/bin/sudo`, so a credential
+`/usr/local/bin/aether-internal`, `/usr/local/bin/cloudfield-internal` or `/usr/local/bin/sudo`, so a credential
 home, profile, or worktree cannot shadow the socket or an executable. The server fails closed if it
 cannot stage and verify its binary: managed-container creation or launch is
 refused rather than proceeding without the canonical CLI or bridge. It hashes

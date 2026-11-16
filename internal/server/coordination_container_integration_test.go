@@ -160,6 +160,21 @@ func TestIntegrationCoordinationCLIFromShellHarnesses(t *testing.T) {
 	if !mountsOK {
 		return
 	}
+	for _, run := range []protocol.Run{runA, runB} {
+		live, err := srv.srv.sched.ResolveLiveRun(ctx, domain.RunID(run.ID), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, stderr, err := docker.Exec(ctx, live.ContainerID, []string{coordtransport.CloudfieldCLIPath, "status"}, live.Workdir)
+		var envelope struct {
+			OK     bool                       `json:"ok"`
+			Result protocol.CoordStatusResult `json:"result"`
+		}
+		if decodeErr := json.Unmarshal([]byte(stdout), &envelope); err != nil || code != 0 || decodeErr != nil ||
+			!envelope.OK || envelope.Result.RunID != run.ID {
+			t.Fatalf("cloudfield-internal status in run %s: exit=%d err=%v stdout=%s stderr=%s decode=%v", run.ID, code, err, stdout, stderr, decodeErr)
+		}
+	}
 	digest := fileDigest(t, e.serverBinary)
 	for _, att := range []*attachConn{attA, attB} {
 		att.waitOutput(t, "cli-no-auto-mcp:")
@@ -222,7 +237,7 @@ func TestIntegrationCoordinationCLIFromShellHarnesses(t *testing.T) {
 	}
 }
 
-// assertRealizedMounts reads the three coordination binds back off the live
+// assertRealizedMounts reads the four coordination binds back off the live
 // container. The bridge source must be the staged copy of the very binary
 // the server was told to stage, named by its own content hash.
 func (e *coordEnv) assertRealizedMounts(ctx context.Context, t *testing.T, cli *client.Client, run, user string) bool {
@@ -233,9 +248,10 @@ func (e *coordEnv) assertRealizedMounts(ctx context.Context, t *testing.T, cli *
 	}
 	staged := filepath.Join(e.dataDir, "runtime", "bin", "aether-server-"+fileDigest(t, e.serverBinary))
 	want := map[string]string{
-		coordtransport.BinaryPath: resolved(t, staged),
-		coordtransport.CLIPath:    resolved(t, staged),
-		coordtransport.MountDir:   resolved(t, e.coordDir(run)),
+		coordtransport.BinaryPath:        resolved(t, staged),
+		coordtransport.CLIPath:           resolved(t, staged),
+		coordtransport.CloudfieldCLIPath: resolved(t, staged),
+		coordtransport.MountDir:          resolved(t, e.coordDir(run)),
 	}
 	realized := make(map[string]container.MountPoint, len(insp.Container.Mounts))
 	for _, m := range insp.Container.Mounts {

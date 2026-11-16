@@ -171,11 +171,9 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 	if err != nil {
 		return runtime.Spec{}, fmt.Errorf("scheduler: stage the assistant's server binary: %w", err)
 	}
-	coord := []runtime.Mount{
-		{HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true},
-		{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
-		{HostPath: sock, ContainerPath: coordtransport.AssistantMountDir, ReadOnly: true},
-	}
+	coord := append(cliMounts(bin),
+		runtime.Mount{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
+		runtime.Mount{HostPath: sock, ContainerPath: coordtransport.AssistantMountDir, ReadOnly: true})
 	if err := checkCoordinationMounts(coord); err != nil {
 		return runtime.Spec{}, err
 	}

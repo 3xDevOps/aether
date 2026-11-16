@@ -7,11 +7,12 @@ and manually elsewhere. The canonical agent interface is the
 container and can load a version-matched skill on demand. The bridge does not mirror the whole `aether-internal` surface.
 
 When coordination assets are available, the server stages verified executable
-bytes read-only at the two in-container paths used by the existing surfaces:
+bytes read-only at the in-container paths used by the existing surfaces:
 
 ```
-/opt/aether/aether-server         optional MCP entry point and lifecycle hook
-/usr/local/bin/aether-internal    canonical agent-facing coordination CLI
+/opt/aether/aether-server             optional MCP entry point and lifecycle hook
+/usr/local/bin/aether-internal        canonical agent-facing coordination CLI
+/usr/local/bin/cloudfield-internal    the same CLI; containers created before this release lack it
 ```
 
 The session coordination directory carries the session socket and related server

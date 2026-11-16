@@ -389,7 +389,7 @@ func (e *coordEnv) assertRegistered(t *testing.T, run protocol.Run) {
 	if slices.Contains(c.spec.Command, "--mcp-config") {
 		t.Errorf("run %s received obsolete automatic MCP config: %v", run.ID, c.spec.Command)
 	}
-	for _, target := range []string{coordtransport.MountDir, coordtransport.BinaryPath, coordtransport.CLIPath} {
+	for _, target := range []string{coordtransport.MountDir, coordtransport.BinaryPath, coordtransport.CLIPath, coordtransport.CloudfieldCLIPath} {
 		m, ok := c.mount(target)
 		if !ok || !m.ReadOnly {
 			t.Fatalf("run %s has no read-only mount at %s: %+v", run.ID, target, c.spec.Mounts)

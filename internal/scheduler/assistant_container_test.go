@@ -81,7 +81,7 @@ func TestAssistantContainerMountsNothingFromTheMemberHome(t *testing.T) {
 		if strings.HasPrefix(m.HostPath, e.cfg.Homes.Root()) {
 			t.Errorf("mounts %s from the member homes at %s", m.HostPath, m.ContainerPath)
 		}
-		if m.ContainerPath == coordtransport.BinaryPath || m.ContainerPath == coordtransport.CLIPath {
+		if m.ContainerPath == coordtransport.BinaryPath || m.ContainerPath == coordtransport.CLIPath || m.ContainerPath == coordtransport.CloudfieldCLIPath {
 			if !m.ReadOnly {
 				t.Errorf("server binary mounted writable")
 			}
