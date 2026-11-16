@@ -71,6 +71,11 @@ echo "release-build.yml refs/heads/main promote.yml@refs/heads/main 7" >"$STATE/
 run qualify || fail "a Promote-built release: $(cat "$tmp/out")"
 grep -qx 'edge-qualify succeeded in https://github.com/3xDevOps/Aether/actions/runs/7' "$tmp/out" || fail "evidence: $(cat "$tmp/out")"
 
+# A nightly: release-build.yml from main, in a nightly.yml run.
+reset
+echo "release-build.yml refs/heads/main nightly.yml@refs/heads/main 7" >"$STATE/identity"
+run qualify || fail "a nightly.yml-built release: $(cat "$tmp/out")"
+
 # A pushed tag, from release-build.yml or, before the split, release.yml.
 for signer in release-build.yml release.yml; do
 	reset

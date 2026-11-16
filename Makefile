@@ -253,7 +253,7 @@ test-e2e: build
 # tree (docs/testing.md, "Edge upgrade qualification"). It needs root,
 # Docker with Compose and buildx, jq, curl, and git history with tags.
 test-edge-upgrade:
-	go test -count=1 -timeout=17m -tags edgeupgrade -run '^TestEdgeUpgrade$$' -v ./internal/edge/edgetest/
+	go test -count=1 -timeout=25m -tags edgeupgrade -run '^TestEdgeUpgrade$$' -v ./internal/edge/edgetest/
 
 # The shell scripts in scripts/ have hermetic tests of their own: every
 # external command they call is stubbed, so nothing here touches the network,
@@ -267,8 +267,11 @@ test-scripts:
 	sh scripts/publish-release-test.sh
 	sh scripts/publish-pointer-test.sh
 	sh scripts/promote-plan-test.sh
+	sh scripts/nightly-plan-test.sh
+	sh scripts/nightly-prune-test.sh
 	sh scripts/create-release-tag-test.sh
 	sh scripts/edge-attestation-test.sh
+	sh scripts/edge-channel-takes-test.sh
 	sh scripts/require-admin-test.sh
 	sh scripts/release-ci-check-test.sh
 	sh scripts/release-hotfix-test.sh

@@ -2,7 +2,9 @@ name: Release build
 
 # Builds, signs and publishes one release. The build jobs check out the
 # released commit and see no signing key; only the release job holds the
-# key, and it runs main's tools on the build jobs' artifacts as data.
+# key, and it runs main's tools on the build jobs' artifacts as data. A
+# nightly is signed in the nightly environment with the nightly key, every
+# other release in the release environment with the release key.
 on:
   workflow_call:
     inputs:
@@ -53,6 +55,14 @@ on:
         description: The pointer channels have never had a pointer, and this run publishes their first; only for that migration step
         type: boolean
         default: false
+      signing-environment:
+        description: >-
+          Environment of the signing job and the key it signs with: release
+          (AETHER_RELEASE_SIGNING_KEY) for beta, stable and pre-channel
+          releases, nightly (AETHER_NIGHTLY_SIGNING_KEY) for nightlies and
+          nightly.json only
+        type: string
+        default: release
       promoted:
         description: >-
           promote.yml is rebuilding a released commit under a new tag: the
@@ -70,6 +80,8 @@ on:
         value: ${{ jobs.release.outputs.pointer-if-above-names-release }}
     secrets:
       AETHER_RELEASE_SIGNING_KEY:
+        required: false
+      AETHER_NIGHTLY_SIGNING_KEY:
         required: false
       ANDROID_KEYSTORE_B64:
         required: false
@@ -96,6 +108,7 @@ env:
   POINTER: ${{ inputs.pointer }}
   POINTER_IF_ABOVE: ${{ inputs.pointer-if-above }}
   PROMOTED: ${{ inputs.promoted }}
+  SIGNING_ENVIRONMENT: ${{ inputs.signing-environment }}
 
 jobs:
   # Every other job needs this one, so no input reaches a build, a tag or
@@ -142,12 +155,18 @@ jobs:
           read -ra if_above <<<"$POINTER_IF_ABOVE"
           [ "$(printf '%s\n' "$POINTER" "${if_above[@]}" | grep -c .)" = "$(printf '%s\n' "$POINTER" "${if_above[@]}" | grep . | sort -u | wc -l)" ] ||
             fail "pointer '$POINTER' and pointer-if-above '$POINTER_IF_ABOVE' name a channel twice"
-          if [ "$CHANNEL" = nightly ] || [ "$POINTER" = nightly ] || [[ " $POINTER_IF_ABOVE " == *" nightly "* ]]; then
-            fail "this workflow signs with the release key, which never signs a nightly; nightly releases and nightly.json wait for the nightly environment and key that nightly.yml adds (release channels plan, pull request 9)"
-          fi
+          # The release key never signs a nightly, and the nightly key signs
+          # nothing else.
+          case $SIGNING_ENVIRONMENT:$CHANNEL in
+          nightly:nightly) ;;
+          nightly:*) fail "the nightly environment and key sign only a nightly release, not a ${CHANNEL:-pre-channel} one" ;;
+          release:nightly) fail "a nightly release is signed in the nightly environment with the nightly key, not with the release key" ;;
+          release:*) ;;
+          *) fail "signing environment $SIGNING_ENVIRONMENT is not release or nightly" ;;
+          esac
           for pointer in "$POINTER" "${if_above[@]}"; do
             case $pointer:$CHANNEL in
-            :* | stable:stable | beta:beta | beta:stable) ;;
+            :* | stable:stable | beta:beta | beta:stable | nightly:nightly) ;;
             *) fail "a ${CHANNEL:-pre-channel} release cannot be named by $pointer.json" ;;
             esac
           done
@@ -532,8 +551,9 @@ jobs:
             echo "::warning title=aether-edge is not public::$image cannot be read anonymously: $(printf '%s' "$out" | tail -n 1). A repository administrator must open https://github.com/orgs/3xDevOps/packages/container/package/aether-edge, choose Package settings, set Danger Zone > Change visibility to Public, and, if the package page does not show 3xDevOps/aether as its repository, use Connect repository to link it."
           fi
 
-  # make test-edge-upgrade on this commit: the previous release, then
-  # scripts/edge-update.sh through failed and migrating builds of it, in
+  # make test-edge-upgrade on this commit: from the releases the channel
+  # pointers name, then scripts/edge-update.sh through failed and
+  # migrating builds of it, in
   # real containers and without a registry outside the runner.
   # promote-edge.yml refuses to promote a release whose run has no
   # successful job of this name.
@@ -542,7 +562,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -554,7 +574,9 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Qualify an edge upgrade
-        run: sudo env "PATH=$PATH" "HOME=$HOME" make test-edge-upgrade
+        # A nightly also upgrades from the previous nightly; a release
+        # skips a channel whose pointer is above its build and hotfix.
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "EDGE_QUALIFY_CHANNEL=$CHANNEL" "EDGE_QUALIFY_BUILD=$BUILD" "EDGE_QUALIFY_HOTFIX=$HOTFIX" make test-edge-upgrade
 
   release-binaries:
     needs: release-inputs
@@ -979,7 +1001,7 @@ jobs:
   # see a release without its assets.
   release:
     needs: [release-inputs, release-values, release-binaries, kernel, desktop-windows, windows-defender, android, browser-manifest, edge-manifest, edge-qualify, standard-manifest]
-    environment: release
+    environment: ${{ inputs.signing-environment }}
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -987,6 +1009,25 @@ jobs:
     outputs:
       pointer-if-above-names-release: ${{ steps.if-above.outputs.names }}
     steps:
+      # release-manifest and release-pointer read the key from
+      # AETHER_RELEASE_SIGNING_KEY; the sign and pointer steps set it to this
+      # run's key, which must be the only signing key in reach.
+      - name: Require exactly the ${{ inputs.signing-environment }} signing key
+        env:
+          RELEASE_KEY_SET: ${{ secrets.AETHER_RELEASE_SIGNING_KEY != '' }}
+          NIGHTLY_KEY_SET: ${{ secrets.AETHER_NIGHTLY_SIGNING_KEY != '' }}
+        run: |
+          case $SIGNING_ENVIRONMENT:$RELEASE_KEY_SET:$NIGHTLY_KEY_SET in
+          nightly:false:true | release:true:false) ;;
+          nightly:*)
+            echo "::error::a nightly run needs AETHER_NIGHTLY_SIGNING_KEY in the nightly environment and must not see AETHER_RELEASE_SIGNING_KEY (release key set: $RELEASE_KEY_SET, nightly key set: $NIGHTLY_KEY_SET)"
+            exit 1
+            ;;
+          *)
+            echo "::error::a release run needs AETHER_RELEASE_SIGNING_KEY and must not see AETHER_NIGHTLY_SIGNING_KEY (release key set: $RELEASE_KEY_SET, nightly key set: $NIGHTLY_KEY_SET)"
+            exit 1
+            ;;
+          esac
       - name: Require the tools commit to be on main
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1091,7 +1132,7 @@ jobs:
       # Only now, so a run that fails earlier leaves no tag; a re-run finds
       # the tag it created and goes on.
       - name: Create the release tag
-        if: inputs.promoted
+        if: inputs.promoted || inputs.channel == 'nightly'
         env:
           GH_TOKEN: ${{ github.token }}
         run: sh scripts/create-release-tag.sh "$TAG" "$COMMIT" "$BUILD"
@@ -1112,7 +1153,7 @@ jobs:
       - name: Write checksums and sign the manifest
         working-directory: ${{ runner.temp }}/dist
         env:
-          AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
+          AETHER_RELEASE_SIGNING_KEY: ${{ inputs.signing-environment == 'nightly' && secrets.AETHER_NIGHTLY_SIGNING_KEY || secrets.AETHER_RELEASE_SIGNING_KEY }}
           STORE_SCHEMA: ${{ needs.release-values.outputs.store-schema }}
         run: |
           assets=(*)
@@ -1137,7 +1178,7 @@ jobs:
         if: inputs.pointer != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
+          AETHER_RELEASE_SIGNING_KEY: ${{ inputs.signing-environment == 'nightly' && secrets.AETHER_NIGHTLY_SIGNING_KEY || secrets.AETHER_RELEASE_SIGNING_KEY }}
           RELEASE_POINTER: ${{ runner.temp }}/release-pointer
           FIRST_POINTER: ${{ inputs.first-pointer }}
         run: |
@@ -1158,7 +1199,7 @@ jobs:
         if: inputs.pointer-if-above != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
+          AETHER_RELEASE_SIGNING_KEY: ${{ inputs.signing-environment == 'nightly' && secrets.AETHER_NIGHTLY_SIGNING_KEY || secrets.AETHER_RELEASE_SIGNING_KEY }}
           RELEASE_POINTER: ${{ runner.temp }}/release-pointer
           FIRST_POINTER: ${{ inputs.first-pointer }}
         run: |

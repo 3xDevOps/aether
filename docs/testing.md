@@ -581,38 +581,49 @@ edge-go-version-test: images/edge/Dockerfile builds with golang:1.26.8, but go.m
 ## Edge upgrade qualification
 
 `TestEdgeUpgrade` updates real edge containers with
-[`scripts/edge-update.sh`](../scripts/edge-update.sh), from the previous
-release to builds of this tree. It needs root (the data directory belongs to
-uid 65532), Docker with Compose and buildx, `jq`, `curl`, Go, and git history
-with tags:
+[`scripts/edge-update.sh`](../scripts/edge-update.sh), from the releases
+edge hosts run to builds of this tree. It needs root (the data directory
+belongs to uid 65532), Docker with Compose and buildx, `jq`, `curl`, Go,
+network access to github.com, and git history with tags:
 
 ```sh
 sudo env "PATH=$PATH" "HOME=$HOME" make test-edge-upgrade
 ```
 
-It builds the edge image five times into a local registry: the previous
-release (`git describe --tags HEAD^`, in a `git worktree`), this tree as
-`v99.0.0-qualify.1`, and three builds of this tree with an extra migration:
-one that fails, one that raises the compatibility floor and then fails, and
-one that succeeds. The edge runs from `packaging/edge/compose.yaml` behind
-nginx, real servers enroll and are claimed, and then it checks that:
+It starts from each release the signed `stable.json` and `beta.json`
+pointers name, and with `EDGE_QUALIFY_CHANNEL=nightly`, which
+`release-build.yml` sets for a nightly, also from the one `nightly.json`
+names. While no pointer exists it starts from the previous tag
+(`git describe --tags HEAD^`). Each starting release is built in a
+`git worktree` into a local registry, runs from
+`packaging/edge/compose.yaml` behind nginx, has real servers enroll and be
+claimed, and is updated to this tree as `v99.0.1`. From the first starting
+point the test goes on through three more builds of this tree with an extra
+migration: one that fails, one that raises the compatibility floor and then
+fails, and one that succeeds. It checks that:
 
 1. `aether-edge-update` refuses an image it cannot read a version from.
 2. A failing migration is rolled back without a restore and skipped next
    time.
 3. A failure after a raised floor restores the pre-update backup.
 4. A good migration applies, with a backup from the edge and the updater.
-5. A server of the previous release still enrolls and relays.
+5. A server of the starting release still enrolls and relays.
 6. `aether-edge-update --rollback` returns to the old binary.
 
 After each step the edge must keep its key and its accounts, and each owner
 must reach their server. Stub `cosign` and `docker` commands from
-`internal/edge/edgetest/testdata/upgrade/` answer the release signature
-checks from the digests the test built, because a production binary trusts
-only the release keys built into it.
+`internal/edge/edgetest/testdata/upgrade/` answer the promotion checks, and
+the release-check of a starting release, whose binary trusts only the
+release keys built into it. This tree's builds are stable releases at
+build 9000001 and up that also trust a test key. Their own release-check
+verifies the manifests the test signs with it, which the fake GitHub
+serves. From step 3 on, the fake answers 404 for the running release's
+manifest, so the updater orders by the copy it kept.
 
 It refuses to start while a container named `aether-edge` exists, removes
-everything it creates, and takes about two minutes with warm caches. CI runs
+everything it creates, and takes about two and a half minutes with warm
+caches, plus about a minute for each further starting point; this tree's
+builds are made once for all of them. CI runs
 it in `edge-image.yml` in the merge queue and on `main`, and in
 `release-build.yml` before a release publishes.
 

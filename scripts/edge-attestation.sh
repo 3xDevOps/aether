@@ -3,8 +3,9 @@
 # for release $3, and with "qualify" finds the run that built that release
 # and requires its edge-qualify job to have succeeded.
 #
-# release-build.yml signs a release Promote built with source ref
-# refs/heads/main, from a promote.yml run, and a pushed tag with
+# release-build.yml signs a release Promote or nightly.yml built with
+# source ref refs/heads/main, from a promote.yml or nightly.yml run, and a
+# pushed tag with
 # refs/tags/<tag>, from a release.yml run. release.yml itself signed the
 # releases from before release-build.yml. The run comes from the verified
 # certificate, so no other run of either workflow can stand in for it.
@@ -28,10 +29,10 @@ fail() {
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
-# Each line: the signer workflow, the source ref, and the workflow that
-# must have started the run.
+# Each line: the signer workflow, the source ref, and the workflows, comma
+# separated, one of which must have started the run.
 cat >"$tmp/identities" <<EOF
-release-build.yml refs/heads/main $workflows/promote.yml@refs/heads/main
+release-build.yml refs/heads/main $workflows/promote.yml@refs/heads/main,$workflows/nightly.yml@refs/heads/main
 release-build.yml refs/tags/$tag $workflows/release.yml@refs/tags/$tag
 release.yml refs/tags/$tag $workflows/release.yml@refs/tags/$tag
 EOF
@@ -52,10 +53,11 @@ done
 [ -n "$verified" ] || fail "$ref has no attestation from release-build.yml or release.yml for $tag: $(cat "$tmp/err")"
 [ "$mode" = qualify ] || exit 0
 
-runs=$(jq -r --arg caller "$verified" '[.[].verificationResult.signature.certificate
-	| select((.buildConfigURI | ascii_downcase) == ($caller | ascii_downcase))
+runs=$(jq -r --arg callers "$verified" '($callers | ascii_downcase | split(",")) as $allowed
+	| [.[].verificationResult.signature.certificate
+	| select(.buildConfigURI | ascii_downcase | IN($allowed[]))
 	| .runInvocationURI | capture("/actions/runs/(?<id>[0-9]+)(/|$)").id] | unique | .[]' "$tmp/verified.json")
-[ -n "$runs" ] || fail "the attestation of $ref was not made by a run of ${verified%@*}, so no run qualified $tag"
+[ -n "$runs" ] || fail "the attestation of $ref was not made by a run of $verified, so no run qualified $tag"
 
 for id in $runs; do
 	run=$(gh api "repos/$repo/actions/runs/$id")
