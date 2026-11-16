@@ -54,6 +54,13 @@ type release struct {
 func (w world) resolve(t *testing.T, src release, args ...string) (map[string]string, error) {
 	t.Helper()
 	t.Cleanup(selfupdate.TrustKeysForTest(releasetest.PublicKey()))
+	for i, a := range args {
+		if a == "-trust-nightly" {
+			t.Cleanup(selfupdate.TrustNightlyKeysForTest(releasetest.NightlyKey.Public().(ed25519.PublicKey)))
+			args = append(args[:i:i], args[i+1:]...)
+			break
+		}
+	}
 	dir := t.TempDir()
 	var tags strings.Builder
 	for tag, commit := range w.tags {
@@ -161,6 +168,8 @@ func TestRefusesAPromotion(t *testing.T) {
 	moved.tags["v0.9.0-nightly.12"] = otherCommit
 	highBeta := baseWorld()
 	highBeta.pointers["beta"] = 420
+	equalBeta := baseWorld()
+	equalBeta.pointers["beta"] = 412
 	noBeta := baseWorld()
 	delete(noBeta.pointers, "beta")
 	released := baseWorld()
@@ -192,7 +201,9 @@ func TestRefusesAPromotion(t *testing.T) {
 		{"a version below the nightly base", baseWorld(), nightly12, []string{"-to", "beta", "-version", "0.8.9"}, "below the current nightly base 0.9.0"},
 		{"a malformed version", baseWorld(), nightly12, []string{"-to", "beta", "-version", "1.0"}, "not X.Y.Z"},
 		{"a failed Promote's tag on another commit", orphan, nightly12, []string{"-to", "beta"}, "has no published release"},
-		{"a build below the channel's pointer", highBeta, nightly12, []string{"-to", "beta"}, "below it, and a channel never moves down"},
+		{"a build below the channel's pointer", highBeta, nightly12, []string{"-to", "beta"}, "not above it, and a channel only moves up"},
+		{"a build equal to the channel's pointer", equalBeta, nightly12, []string{"-to", "beta"}, "beta.json names v0.0.1 at build 412; build 412 is not above it"},
+		{"a nightly key signing a beta", baseWorld(), nightlyKeyBeta, []string{"-to", "stable", "-trust-nightly"}, "signed by a nightly key but its channel is \"beta\""},
 		{"a channel without a pointer", noBeta, nightly12, []string{"-to", "beta"}, "first-pointer"},
 		{"a stable already released", released, beta2, []string{"-to", "stable", "-version", "0.9.0"}, "below the current nightly base 0.10.0"},
 		{"first-pointer from a channel release", baseWorld(), beta2, []string{"-to", "stable", "-first-pointer"}, "only for promoting the pre-channel"},

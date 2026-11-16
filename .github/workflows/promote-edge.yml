@@ -163,7 +163,18 @@ jobs:
           mkdir "$RUNNER_TEMP/kept"
           "$RUNNER_TEMP/aether-edge" release-check --tag "$TAG" --digest "$DIGEST" --from "$TAG" --from-digest "$DIGEST" \
             --channel "$CHANNEL" --keep-manifests "$RUNNER_TEMP/kept" --json >/dev/null
-          echo "channel=$(jq -r '.channel // ""' "$RUNNER_TEMP/kept/$TAG.json")" >> "$GITHUB_OUTPUT"
+          channel=$(jq -r '.channel // ""' "$RUNNER_TEMP/kept/$TAG.json")
+          # Whatever the tag carries now, even nothing: stable takes a stable
+          # or, until the first channel stable, a release from before
+          # channels; beta takes anything but a nightly.
+          case $CHANNEL:$channel in
+          stable:stable | stable: | beta:beta | beta:stable | beta:) ;;
+          *)
+            echo "::error::$TAG is a ${channel:-pre-channel} release, which aether-edge:$CHANNEL does not take"
+            exit 1
+            ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
       - name: Require a 24-hour soak
         if: env.CHANNEL == 'stable'
         env:

@@ -265,7 +265,7 @@ func newTag(to, version, commit string, tags map[string]string, published map[st
 	return "", fmt.Errorf("%s is already released; pass a higher version", last)
 }
 
-// checkPointers refuses a release below the target channel's pointer and,
+// checkPointers refuses a release not above the target channel's pointer and,
 // for the migration's first stable, any pointer that already exists.
 func checkPointers(dir string, p plan) error {
 	present := func(name string) bool {
@@ -294,8 +294,10 @@ func checkPointers(dir string, p plan) error {
 	if err != nil {
 		return fmt.Errorf("the current %s does not verify: %w", name, err)
 	}
-	if p.build < cur.Build || p.build == cur.Build && p.hotfix < cur.Hotfix {
-		return fmt.Errorf("%s names %s at %s; %s is below it, and a channel never moves down",
+	// Strictly above: at an equal build the pointer would move to a
+	// relabel that the edge image tag, ordered the same way, refuses.
+	if p.build < cur.Build || p.build == cur.Build && p.hotfix <= cur.Hotfix {
+		return fmt.Errorf("%s names %s at %s; %s is not above it, and a channel only moves up",
 			name, cur.Tag, cur.Mark(), selfupdate.Mark{Build: p.build, Hotfix: p.hotfix})
 	}
 	return nil
