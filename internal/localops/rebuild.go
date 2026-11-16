@@ -1,6 +1,7 @@
 package localops
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -69,17 +70,24 @@ func InstalledDesktopApp(goos string, ru RealUser) (string, bool) {
 // first. A machine can hold an app under the legacy product name beside one
 // under this build's.
 func InstalledDesktopApps(goos string, ru RealUser) []string {
+	var apps []string
+	for _, name := range productNames() {
+		for _, candidate := range userAppPaths(goos, ru, name) {
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				apps = append(apps, candidate)
+			}
+		}
+	}
+	return apps
+}
+
+// userAppPaths is desktopAppPaths for one product name and ru's account.
+func userAppPaths(goos string, ru RealUser, name string) []string {
 	xdg := os.Getenv("XDG_DATA_HOME")
 	if ru.ViaSudo {
 		xdg = ""
 	}
-	var apps []string
-	for _, candidate := range desktopAppPaths(goos, ru.Home, xdg, os.Getenv("LOCALAPPDATA")) {
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			apps = append(apps, candidate)
-		}
-	}
-	return apps
+	return appPathsNamed(goos, name, ru.Home, xdg, os.Getenv("LOCALAPPDATA"))
 }
 
 // desktopAppPaths lists the candidate install locations for goos, most
@@ -97,25 +105,32 @@ func InstalledDesktopApps(goos string, ru RealUser) []string {
 func desktopAppPaths(goos, home, xdgData, localAppData string) []string {
 	var paths []string
 	for _, name := range productNames() {
-		switch goos {
-		case "linux":
-			// A relative XDG_DATA_HOME is invalid per the spec and treated
-			// as unset, the same way desktopLayout treats it.
-			if strings.HasPrefix(xdgData, "/") {
-				paths = append(paths, path.Join(xdgData, linuxAppDir(name), "desktop"))
-			}
-			paths = append(paths, path.Join(home, ".local", "share", linuxAppDir(name), "desktop"))
-		case "darwin":
-			paths = append(paths,
-				path.Join(macSystemApplications, darwinBundle(name)),
-				path.Join(home, "Applications", darwinBundle(name)))
-		case "windows":
-			if filepath.IsAbs(localAppData) {
-				paths = append(paths, filepath.Join(localAppData, "Programs", windowsAppDir(name)))
-			}
-		}
+		paths = append(paths, appPathsNamed(goos, name, home, xdgData, localAppData)...)
 	}
 	return paths
+}
+
+func appPathsNamed(goos, name, home, xdgData, localAppData string) []string {
+	switch goos {
+	case "linux":
+		var paths []string
+		// A relative XDG_DATA_HOME is invalid per the spec and treated as
+		// unset, the same way desktopLayout treats it.
+		if strings.HasPrefix(xdgData, "/") {
+			paths = append(paths, path.Join(xdgData, linuxAppDir(name), "desktop"))
+		}
+		return append(paths, path.Join(home, ".local", "share", linuxAppDir(name), "desktop"))
+	case "darwin":
+		return []string{
+			path.Join(macSystemApplications, darwinBundle(name)),
+			path.Join(home, "Applications", darwinBundle(name)),
+		}
+	case "windows":
+		if filepath.IsAbs(localAppData) {
+			return []string{filepath.Join(localAppData, "Programs", windowsAppDir(name))}
+		}
+	}
+	return nil
 }
 
 // RebuildAppArgv is the command that rebuilds the installed desktop app.
@@ -238,4 +253,113 @@ func pgrepMatches(pattern string) bool {
 	// pgrep prints the pids it found; this caller wants the exit status.
 	_, err := exec.Command("pgrep", "-f", pattern).Output()
 	return err == nil
+}
+
+// ShellExeEnv is set by the desktop shell to its own executable when it
+// starts `aether gui`. Shells built before it existed leave it unset.
+const ShellExeEnv = "AETHER_SHELL_EXE"
+
+// RetireLegacyDesktop removes the app installed under the legacy product
+// name once an app under this build's name has started: shellExe must be
+// the executable of an install of this build's name, so a development
+// `electron .`, a legacy shell or an unset shellExe removes nothing. A
+// legacy location is removed only when it is a real directory (not a
+// symlink) holding the app's executable, the app is not running, and it
+// neither holds nor sits inside the running app. The data directory lives
+// elsewhere and is never touched. On windows the legacy Start Menu
+// shortcut goes once no legacy app is left; on linux the renamed app's
+// launcher already replaced the legacy one.
+func RetireLegacyDesktop(goos string, ru RealUser, shellExe string) error {
+	if productName == legacyProductName || shellExe == "" {
+		return nil
+	}
+	shell, err := filepath.EvalSymlinks(shellExe)
+	if err != nil {
+		return nil
+	}
+	shellApp := ""
+	for _, app := range userAppPaths(goos, ru, productName) {
+		if sameFile(DesktopAppExe(goos, app), shell) {
+			shellApp, _ = filepath.EvalSymlinks(app)
+			break
+		}
+	}
+	if shellApp == "" {
+		return nil
+	}
+	legacy := userAppPaths(goos, ru, legacyProductName)
+	var errs []error
+	for _, app := range legacy {
+		if !legacyInstall(goos, app, shellApp) {
+			continue
+		}
+		if err := os.RemoveAll(app); err != nil {
+			errs = append(errs, fmt.Errorf("localops: remove the old app %s%s: %w", app, removeHint(goos, app, err), err))
+		}
+	}
+	if goos == "windows" && len(errs) == 0 && !anyExists(legacy) {
+		if err := removeLegacyShortcut(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func legacyInstall(goos, app, shellApp string) bool {
+	info, err := os.Lstat(app)
+	if err != nil || !info.Mode().IsDir() {
+		return false
+	}
+	exe, err := os.Lstat(DesktopAppExe(goos, app))
+	if err != nil || !exe.Mode().IsRegular() {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(app)
+	if err != nil || sameFile(resolved, shellApp) || within(goos, resolved, shellApp) || within(goos, shellApp, resolved) {
+		return false
+	}
+	return !DesktopAppRunning(goos, app)
+}
+
+func removeLegacyShortcut() error {
+	programs, err := resolveWindowsPrograms()
+	if err != nil {
+		return fmt.Errorf("localops: resolve Start Menu Programs folder: %w", err)
+	}
+	link := filepath.Join(programs, legacyProductName+".lnk")
+	if info, err := os.Lstat(link); err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	if err := os.Remove(link); err != nil {
+		return fmt.Errorf("localops: remove the old Start Menu shortcut %s: %w", link, err)
+	}
+	return nil
+}
+
+func sameFile(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	return err == nil && os.SameFile(ai, bi)
+}
+
+// within reports whether p is inside dir. darwin and windows file systems
+// ignore case by default.
+func within(goos, dir, p string) bool {
+	if goos != "linux" {
+		dir, p = strings.ToLower(dir), strings.ToLower(p)
+	}
+	rel, err := filepath.Rel(dir, p)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func anyExists(paths []string) bool {
+	for _, p := range paths {
+		if _, err := os.Lstat(p); err == nil {
+			return true
+		}
+	}
+	return false
 }

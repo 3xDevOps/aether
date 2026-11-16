@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localgw"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
@@ -119,6 +121,7 @@ func runGUI(args []string) error {
 		}
 		fmt.Println(string(line))
 		_ = os.Stdout.Sync()
+		retireLegacyDesktop(os.Getenv(localops.ShellExeEnv))
 	} else {
 		fmt.Println(url)
 		if !*urlOnly {
@@ -142,6 +145,23 @@ func runGUI(args []string) error {
 		os.Exit(code)
 	}
 	return nil
+}
+
+// retireLegacyDesktop removes the app installed under the old product name
+// once the shell at shellExe, an install under the new one, has started. A
+// failure goes to stderr, because stdout is the shell's protocol, and the
+// next start tries again.
+func retireLegacyDesktop(shellExe string) {
+	if shellExe == "" {
+		return
+	}
+	ru, err := localops.LookupRealUser()
+	if err == nil {
+		err = localops.RetireLegacyDesktop(runtime.GOOS, ru, shellExe)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "aether gui: %v\n", err)
+	}
 }
 
 // nudgeUpdate prints one line naming the command when a newer release
