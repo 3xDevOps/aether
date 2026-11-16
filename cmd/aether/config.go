@@ -229,12 +229,14 @@ func configTreeAt(c *protocol.Client, out io.Writer, root protocol.ConfigRoot, r
 	}
 	for _, entry := range result.Entries {
 		if entry.Kind != "dir" {
-			_, _ = fmt.Fprintf(out, "file\t%d\t%s%s\n", entry.Size, prefix, entry.Name)
+			_, _ = fmt.Fprintf(out, "file\t%d\t%s%s\n", entry.Size, prefix, printable(entry.Name))
 			continue
 		}
-		_, _ = fmt.Fprintf(out, "dir\t%s%s\n", prefix, entry.Name)
+		_, _ = fmt.Fprintf(out, "dir\t%s%s\n", prefix, printable(entry.Name))
 		if recursive {
-			if err := configTreeAt(c, out, root, path.Join(rel, entry.Name), prefix+entry.Name+"/", true); err != nil {
+			// The server receives the raw name; only the printed prefix is
+			// neutralized so an agent-written file name cannot drive the terminal.
+			if err := configTreeAt(c, out, root, path.Join(rel, entry.Name), prefix+printable(entry.Name)+"/", true); err != nil {
 				return err
 			}
 		}
