@@ -14,7 +14,8 @@ import (
 // TestUpdateWithNothingToInstallLinks runs this binary installed as
 // aether, the layout an updater from before the second names leaves:
 // `aether update` that finds it is already on the release still creates
-// cloudfield beside it, and says how when it may not.
+// cloudfield beside it, and says nothing where it may not, since it would
+// say it again on every run.
 func TestUpdateWithNothingToInstallLinks(t *testing.T) {
 	if argv := os.Getenv("AETHER_CLI_TEST_ARGV"); argv != "" {
 		os.Args = strings.Split(argv, "\x1f")
@@ -61,16 +62,14 @@ func TestUpdateWithNothingToInstallLinks(t *testing.T) {
 	if err = os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	out := update()
-	want := "run: sudo ln -s aether " + filepath.Join(dir, "cloudfield") + "\n"
-	if strings.Count(out, "ln -s") != 1 || !strings.Contains(out, want) {
-		t.Fatalf("update in a directory it may not write printed:\n%s\nwant the one line %q", out, want)
+	if out := update(); strings.Contains(out, "warning") || strings.Contains(out, "ln -s") {
+		t.Fatalf("update with nothing to install in a directory it may not write printed:\n%s", out)
 	}
 
 	if err = os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if out = update(); strings.Contains(out, "warning") {
+	if out := update(); strings.Contains(out, "warning") {
 		t.Fatalf("update printed a warning:\n%s", out)
 	}
 	if got, err := os.Readlink(filepath.Join(dir, "cloudfield")); err != nil || got != "aether" {

@@ -134,6 +134,9 @@ func runUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err = selfupdate.Link(filepath.Dir(replaced[0])); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
+	}
 	if len(replaced) > 1 {
 		fmt.Printf("aether-server on disk is now %s; the running server keeps its old version until you restart it: sudo systemctl restart aether-server\n", *tag)
 		if offerSysbox(ctx, "/etc/os-release", dockerRuntimes) {
@@ -390,10 +393,9 @@ func reportBinary() error {
 	warnShadowed(os.Stderr, self)
 	// An update from a release that predates the second names leaves only
 	// the real files; an update that finds nothing to install completes
-	// the layout.
-	if err := selfupdate.Link(filepath.Dir(self)); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
-	}
+	// the layout. Only a run that installs says what it could not create,
+	// so a directory this user may not write does not repeat it each time.
+	_ = selfupdate.Link(filepath.Dir(self))
 	return nil
 }
 

@@ -22,11 +22,6 @@ var newNames = []struct{ bin, link string }{
 	{"aether-server", "cloudfield-server"},
 }
 
-// windowsShim is the text of cloudfield.cmd: a per-user Windows install
-// cannot create symlinks, so the second name is a batch file that runs
-// target beside it with the same arguments and exits with its status.
-func windowsShim(target string) string { return "@\"%~dp0" + target + "\" %*\r\n" }
-
 // Beside returns the file named name in self's directory with its
 // symlinks resolved, and false when there is none. An update replaces the
 // file at that path, so a link stays a link and its target is what changes.
@@ -36,11 +31,12 @@ func Beside(self, name string) (string, bool) {
 }
 
 // Link gives each binary in dir its second name: a relative symlink
-// beside it, or cloudfield.cmd on Windows. A name that is already ours is
-// left alone, and so is one that holds anything else - another program, a
-// regular file, a link to another file or to nothing - which is never
-// replaced. The error names every link this user may not create with the
-// one command that creates them.
+// beside it, or on Windows, where a per-user install cannot create
+// symlinks, a cloudfield.cmd that runs aether.exe beside it. A name that
+// is already ours is kept, and one that holds anything else - another
+// program, a regular file, a link to another file or to nothing - is left
+// as it is and is no error. The error names every link this user may not
+// create with the one command that creates them.
 func Link(dir string) error {
 	var cmds []string
 	var errs []error
@@ -56,12 +52,16 @@ func Link(dir string) error {
 		if runtime.GOOS == "windows" {
 			err = writeShim(dir, bin, link)
 		} else {
-			err = Symlink(dir, bin, link)
+			_, err = Symlink(dir, bin, link)
 		}
 		switch {
 		case err == nil, errors.Is(err, ErrNameTaken):
 		case errors.Is(err, fs.ErrPermission) && runtime.GOOS != "windows":
-			cmds = append(cmds, lnCommand(dir, bin, link))
+			cmd := "ln -s " + shellquote.Quote(bin) + " " + shellquote.Quote(filepath.Join(dir, link))
+			if os.Geteuid() != 0 {
+				cmd = "sudo " + cmd
+			}
+			cmds = append(cmds, cmd)
 			errs = append(errs, err)
 		default:
 			errs = append(errs, err)
@@ -74,42 +74,24 @@ func Link(dir string) error {
 	return err
 }
 
-// secondName is where Link puts the second name of the binary at path,
-// empty for a binary that has none.
-func secondName(path string) string {
-	for _, n := range newNames {
-		if filepath.Base(path) == n.bin {
-			return filepath.Join(filepath.Dir(path), n.link)
-		}
-	}
-	return ""
-}
-
-func lnCommand(dir, target, link string) string {
-	cmd := "ln -s " + shellquote.Quote(target) + " " + shellquote.Quote(filepath.Join(dir, link))
-	if os.Geteuid() != 0 {
-		cmd = "sudo " + cmd
-	}
-	return cmd
-}
-
 // ErrNameTaken is a second name that already holds something other than
 // a link to its binary.
 var ErrNameTaken = errors.New("the name is taken by something else; left as it is")
 
 // Symlink makes name in dir a relative symlink to target in dir when
-// nothing is at name. A link that already resolves to target is kept, and
-// anything else at name is ErrNameTaken: it is never replaced.
-func Symlink(dir, target, name string) error {
+// nothing is at name, and reports whether it did. A link that already
+// resolves to target is kept, and anything else at name is ErrNameTaken:
+// it is never replaced.
+func Symlink(dir, target, name string) (bool, error) {
 	path := filepath.Join(dir, name)
 	err := os.Symlink(target, path)
 	if err == nil || !errors.Is(err, fs.ErrExist) {
-		return err
+		return err == nil, err
 	}
 	if linksTo(path, filepath.Join(dir, target)) {
-		return nil
+		return false, nil
 	}
-	return fmt.Errorf("%s: %w", path, ErrNameTaken)
+	return false, fmt.Errorf("%s: %w", path, ErrNameTaken)
 }
 
 func linksTo(path, target string) bool {
@@ -125,27 +107,40 @@ func linksTo(path, target string) bool {
 	return err == nil && os.SameFile(got, want)
 }
 
-// writeShim writes windowsShim(target) at name in dir when nothing is
-// there. A file with exactly that text is ours and kept.
+// writeShim puts a batch file at name in dir that runs target beside it
+// with the same arguments and exits with its status, when nothing is
+// there. The file is written beside it and hard-linked into place, which
+// never replaces anything and never leaves a partial file at name. A file
+// with exactly that text is ours and kept; anything else, even an empty
+// file, is ErrNameTaken.
 func writeShim(dir, target, name string) error {
 	path := filepath.Join(dir, name)
-	shim := windowsShim(target)
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if errors.Is(err, fs.ErrExist) {
-		if got, rerr := os.ReadFile(path); rerr == nil && bytes.Equal(got, []byte(shim)) {
-			return nil
-		}
+	shim := []byte("@\"%~dp0" + target + "\" %*\r\n")
+	got, err := os.ReadFile(path)
+	switch {
+	case err == nil && bytes.Equal(got, shim):
+		return nil
+	case err == nil:
 		return fmt.Errorf("%s: %w", path, ErrNameTaken)
+	case !errors.Is(err, fs.ErrNotExist):
+		return err
 	}
+	tmp, err := os.CreateTemp(dir, "."+name+".*")
 	if err != nil {
 		return err
 	}
-	_, err = f.WriteString(shim)
-	if cerr := f.Close(); err == nil {
+	_, err = tmp.Write(shim)
+	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
-	if err != nil {
-		return errors.Join(fmt.Errorf("write %s: %w", path, err), os.Remove(path))
+	if err == nil {
+		err = os.Link(tmp.Name(), path)
+		if errors.Is(err, fs.ErrExist) {
+			err = fmt.Errorf("%s: %w", path, ErrNameTaken)
+		}
 	}
-	return nil
+	if rerr := os.Remove(tmp.Name()); err == nil {
+		err = rerr
+	}
+	return err
 }

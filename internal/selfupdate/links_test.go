@@ -111,7 +111,7 @@ func TestLinkNeverReplacesWhatHoldsTheName(t *testing.T) {
 			if err = Link(dir); err != nil {
 				t.Fatalf("Link: %v", err)
 			}
-			if err = Symlink(dir, "aether", "cloudfield"); !errors.Is(err, ErrNameTaken) {
+			if _, err = Symlink(dir, "aether", "cloudfield"); !errors.Is(err, ErrNameTaken) {
 				t.Fatalf("Symlink = %v, want ErrNameTaken", err)
 			}
 			after, err := os.Lstat(path)
@@ -133,8 +133,8 @@ func TestLinkKeepsAnAbsoluteLinkToTheBinary(t *testing.T) {
 	if err := os.Symlink(abs, filepath.Join(dir, "cloudfield")); err != nil {
 		t.Fatal(err)
 	}
-	if err := Symlink(dir, "aether", "cloudfield"); err != nil {
-		t.Fatalf("Symlink over our own absolute link: %v", err)
+	if created, err := Symlink(dir, "aether", "cloudfield"); err != nil || created {
+		t.Fatalf("Symlink over our own absolute link = %v, %v; want it kept", created, err)
 	}
 	if got, _ := os.Readlink(filepath.Join(dir, "cloudfield")); got != abs {
 		t.Fatalf("link = %q, want it kept at %q", got, abs)
@@ -177,6 +177,17 @@ func TestWindowsShimRunsAetherBesideIt(t *testing.T) {
 		t.Fatalf("writeShim over its own shim: %v", err)
 	}
 
+	if leftovers, _ := filepath.Glob(filepath.Join(dir, ".cloudfield.cmd.*")); len(leftovers) != 0 {
+		t.Fatalf("temp files left behind: %v", leftovers)
+	}
+	empty := filepath.Join(dir, "empty.cmd")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeShim(dir, "aether.exe", "empty.cmd"); !errors.Is(err, ErrNameTaken) {
+		t.Fatalf("writeShim over an empty file = %v, want ErrNameTaken", err)
+	}
+
 	other := filepath.Join(dir, "other.cmd")
 	if err := os.WriteFile(other, []byte("@echo someone else's\r\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -192,7 +203,8 @@ func TestWindowsShimRunsAetherBesideIt(t *testing.T) {
 // TestUpdateFromEitherNameWritesTheRealFiles starts the update from the
 // old name and from the new one, on a host whose links an earlier run
 // made and on one an older updater left without them: the release lands
-// in the real files, never in a link, and the links exist afterwards.
+// in the real files, never in a link, and the Link every caller runs
+// after it completes the layout.
 func TestUpdateFromEitherNameWritesTheRealFiles(t *testing.T) {
 	skipOnWindows(t)
 	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
@@ -224,6 +236,9 @@ func TestUpdateFromEitherNameWritesTheRealFiles(t *testing.T) {
 			if strings.Join(replaced, " ") != strings.Join(want, " ") {
 				t.Fatalf("update from %s replaced %v, want %v", start, replaced, want)
 			}
+			if err = Link(dir); err != nil {
+				t.Fatal(err)
+			}
 			assertLayout(t, dir, "new")
 		}
 	}
@@ -254,5 +269,42 @@ func TestUpdateKeepsACompanionThatIsALink(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, "cloudfield")); string(got) != "new cli" {
 		t.Fatalf("cloudfield = %q, want the release", got)
+	}
+}
+
+func TestSymlinkReportsWhetherItCreated(t *testing.T) {
+	skipOnWindows(t)
+	dir := t.TempDir()
+	writeBinaries(t, dir, "bin", "aether")
+	for _, want := range []bool{true, false} {
+		if created, err := Symlink(dir, "aether", "cloudfield"); err != nil || created != want {
+			t.Fatalf("Symlink = %v, %v; want created %v", created, err, want)
+		}
+	}
+}
+
+// TestUpdateProbesTheDirectoryALinkedCompanionResolvesTo is a companion
+// linked into a directory this user may not write: the update stops
+// before downloading, with the command that can.
+func TestUpdateProbesTheDirectoryALinkedCompanionResolvesTo(t *testing.T) {
+	skipOnWindows(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root writes any directory")
+	}
+	_, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{})
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	writeBinaries(t, dir, "old", "aether")
+	writeBinaries(t, elsewhere, "old", "aether-server")
+	if err := os.Symlink(filepath.Join(elsewhere, "aether-server"), filepath.Join(dir, "aether-server")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(elsewhere, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(elsewhere, 0o755) })
+
+	_, err := UpdateBinaries(t.Context(), srv.URL, "v1.3.0", filepath.Join(dir, "aether"), "aether", "aether-server")
+	if !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), elsewhere+" is not writable by this user; re-run as `sudo aether update`") {
+		t.Fatalf("UpdateBinaries = %v, want the unwritable directory and the sudo command", err)
 	}
 }

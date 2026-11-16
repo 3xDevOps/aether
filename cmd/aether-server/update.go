@@ -185,18 +185,18 @@ func installVMFiles(ctx context.Context, self string, serveArgs []string) error 
 
 // linkSecondNamesAndReload gives the binaries beside self and the unit
 // their second names when they are missing, whether or not an update
-// follows, and reloads systemd when it does not resolve the unit's yet.
-// The update goes ahead whatever this finds; each problem is a warning.
+// follows, and reloads systemd when it does not resolve the unit link it
+// just made. The update goes ahead whatever this finds; each problem is a
+// warning.
 func linkSecondNamesAndReload(self string) {
 	if err := selfupdate.Link(filepath.Dir(self)); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
 	}
-	unitDir := filepath.Dir(serversetup.UnitPath)
-	if err := (serverupdate.Host{UnitDir: unitDir}).LinkUnit(); err != nil {
+	created, err := (serverupdate.Host{UnitDir: filepath.Dir(serversetup.UnitPath)}).LinkUnit()
+	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
-		return
 	}
-	if _, err := os.Lstat(filepath.Join(unitDir, serverupdate.UnitAlias)); err != nil || unitAliasResolved() {
+	if !created || unitAliasResolved() {
 		return
 	}
 	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {

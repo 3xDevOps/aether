@@ -557,17 +557,18 @@ func linkSecondNames(host serverupdate.Host) {
 	if err != nil {
 		slog.Warn("could not give the binaries their second names", "error", err)
 	}
-	if err = host.LinkUnit(); err != nil {
+	created, err := host.LinkUnit()
+	if err != nil {
 		slog.Warn("could not give the systemd unit its second name", "error", err)
 	}
-	if host.UnitDir != "" {
+	if created {
 		go warnIfAliasUnresolved()
 	}
 }
 
 // warnIfAliasUnresolved names the reload that makes systemd resolve the
-// unit's second name. The server never reloads systemd itself: a
-// daemon-reload has host-wide effects.
+// unit's second name, once, at the start that created it. The server never
+// reloads systemd itself: a daemon-reload has host-wide effects.
 func warnIfAliasUnresolved() {
 	if !unitAliasResolved() {
 		slog.Warn("systemd does not resolve " + serverupdate.UnitAlias + " to " + serversetup.ServiceName +

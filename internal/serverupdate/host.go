@@ -1,6 +1,7 @@
 package serverupdate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -49,17 +50,23 @@ type Host struct {
 const UnitAlias = "cloudfield-server.service"
 
 // LinkUnit makes UnitAlias in UnitDir a link to the server's unit file
-// when the unit file is there and nothing holds the name. It never reloads
-// systemd: a daemon-reload acts on every unit of the host.
-func (h Host) LinkUnit() error {
+// when the unit file is there and nothing holds the name, and reports
+// whether it did. A name held by anything else is left as it is and is no
+// error. It never reloads systemd: a daemon-reload acts on every unit of
+// the host.
+func (h Host) LinkUnit() (bool, error) {
 	if h.UnitDir == "" {
-		return nil
+		return false, nil
 	}
 	unit := filepath.Base(serversetup.UnitPath)
 	if _, err := os.Stat(filepath.Join(h.UnitDir, unit)); err != nil {
-		return nil
+		return false, nil
 	}
-	return selfupdate.Symlink(h.UnitDir, unit, UnitAlias)
+	created, err := selfupdate.Symlink(h.UnitDir, unit, UnitAlias)
+	if errors.Is(err, selfupdate.ErrNameTaken) {
+		return false, nil
+	}
+	return created, err
 }
 
 // complete reports whether every hook is set. A partially filled Host is

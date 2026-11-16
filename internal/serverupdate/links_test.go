@@ -86,8 +86,8 @@ func TestTrialRollbackKeepsTheLinks(t *testing.T) {
 	if err := selfupdate.Link(e.dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := (Host{UnitDir: units}).LinkUnit(); err != nil {
-		t.Fatal(err)
+	if created, err := (Host{UnitDir: units}).LinkUnit(); err != nil || !created {
+		t.Fatalf("LinkUnit = %v, %v; want it created", created, err)
 	}
 	e.write(t, swapRecord{Boots: maxTrialBoots})
 	if _, err := Boot(e.state, e.host); err == nil {
@@ -107,8 +107,8 @@ func TestLinkUnitLeavesAnythingElseAtTheName(t *testing.T) {
 	if err := os.WriteFile(alias, []byte("someone else's unit"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := (Host{UnitDir: units}).LinkUnit(); !errors.Is(err, selfupdate.ErrNameTaken) {
-		t.Fatalf("LinkUnit = %v, want ErrNameTaken", err)
+	if created, err := (Host{UnitDir: units}).LinkUnit(); err != nil || created {
+		t.Fatalf("LinkUnit = %v, %v; want the taken name left without an error", created, err)
 	}
 	if got, _ := os.ReadFile(alias); string(got) != "someone else's unit" {
 		t.Fatalf("%s was replaced: %q", alias, got)
@@ -117,10 +117,29 @@ func TestLinkUnitLeavesAnythingElseAtTheName(t *testing.T) {
 
 func TestLinkUnitWithoutTheUnitLinksNothing(t *testing.T) {
 	units := t.TempDir()
-	if err := (Host{UnitDir: units}).LinkUnit(); err != nil {
-		t.Fatal(err)
+	if created, err := (Host{UnitDir: units}).LinkUnit(); err != nil || created {
+		t.Fatalf("LinkUnit = %v, %v", created, err)
 	}
 	if _, err := os.Lstat(filepath.Join(units, UnitAlias)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("%s without the unit: %v", UnitAlias, err)
+	}
+}
+
+// TestALinkThatCannotBeMadeNeverFailsTheUpdate is a filesystem that
+// refuses the links: the update is applied all the same.
+func TestALinkThatCannotBeMadeNeverFailsTheUpdate(t *testing.T) {
+	old := linkBinaries
+	t.Cleanup(func() { linkBinaries = old })
+	linkBinaries = func(string) error { return errors.New("symlink: operation not supported") }
+	e := newEnv(t, false)
+	if _, _, err := e.svc.Update(t.Context(), "mem_admin",
+		protocol.ServerUpdateParams{Version: releaseTagUnderTest, When: protocol.ServerUpdateNow}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if got := e.read(t, e.self); got != newServerBinary {
+		t.Fatalf("aether-server = %q, want the release", got)
+	}
+	if rec, err := loadRecord(e.state); err != nil || rec.Phase != recordVerifying {
+		t.Fatalf("swap record = %+v, %v; want the update applied", rec, err)
 	}
 }

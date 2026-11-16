@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/macinstall"
@@ -104,7 +103,8 @@ func hasACL(p string) bool {
 // Linux server host - with tag's release assets from baseURL, returning
 // the paths it replaced in order. It prints nothing: callers report. It
 // never asks for privileges: a binary this user cannot write is refused
-// with the sudo command to run.
+// with the sudo command to run. It creates no second names: the caller
+// runs Link, whose failure must never fail the update.
 func Update(ctx context.Context, baseURL, tag string) ([]string, error) {
 	return update(ctx, baseURL, tag, nil)
 }
@@ -181,9 +181,18 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 	}
 	targets := []struct{ asset, dst string }{{primary + suffix, self}}
 	for _, name := range companions {
-		if path, ok := Beside(self, name); ok {
-			targets = append(targets, struct{ asset, dst string }{name + suffix, path})
+		path, ok := Beside(self, name)
+		if !ok {
+			continue
 		}
+		// A companion that is a link may resolve outside dir, which the
+		// check above did not cover.
+		if d := filepath.Dir(path); !authorize && d != dir {
+			if err := CheckWritable(d); err != nil {
+				return nil, err
+			}
+		}
+		targets = append(targets, struct{ asset, dst string }{name + suffix, path})
 	}
 
 	m, merr := fetchManifest(ctx, baseURL, tag)
@@ -224,22 +233,7 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 		}
 		replaced = append(replaced, s.Path())
 	}
-	for _, d := range dirsOf(replaced) {
-		if err := Link(d); err != nil {
-			return replaced, fmt.Errorf("replaced %s but %w", strings.Join(replaced, ", "), err)
-		}
-	}
 	return replaced, nil
-}
-
-func dirsOf(paths []string) []string {
-	var dirs []string
-	for _, p := range paths {
-		if d := filepath.Dir(p); !slices.Contains(dirs, d) {
-			dirs = append(dirs, d)
-		}
-	}
-	return dirs
 }
 
 // installWithAuthorization has root copy the staged file over its
@@ -252,7 +246,13 @@ func (s *Staged) installWithAuthorization(ctx context.Context, admin adminInstal
 	prompt := fmt.Sprintf("Aether wants to replace %s with aether %s. "+
 		"macOS shows this request as osascript, the tool Aether asks through. "+
 		"Aether never sees your password.", s.dst, tag)
-	err := admin(ctx, macinstall.Request{Src: s.tmp, Dst: s.dst, SHA256: s.sum, Link: secondName(s.dst)}, prompt)
+	req := macinstall.Request{Src: s.tmp, Dst: s.dst, SHA256: s.sum}
+	for _, n := range newNames {
+		if filepath.Base(s.dst) == n.bin {
+			req.Link = filepath.Join(filepath.Dir(s.dst), n.link)
+		}
+	}
+	err := admin(ctx, req, prompt)
 	switch {
 	case err == nil:
 		return verifyInstalled(s.dst, s.sum)
