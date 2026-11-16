@@ -91,7 +91,7 @@ Custom MCP servers are added on the web only, at chatgpt.com
 
 1. Open [ChatGPT Plugins](https://chatgpt.com/plugins).
 2. Select the plus button, then **Add custom MCP server**.
-3. Name it `Cloudfield`, paste the URL from `aether mcp` as the server URL, and
+3. Name it `Aether`, paste the URL from `aether mcp` as the server URL, and
    choose **OAuth**.
 4. Select **Create as a plugin**, then install it.
 5. On the [universal URL](#the-universal-url), the edge's page opens: sign in
@@ -110,7 +110,7 @@ On claude.ai
 ([Anthropic: add a custom connector](https://claude.com/docs/connectors/custom/add-unlisted)):
 
 1. Free, Pro and Max: open **Customize → Connectors**, select **Add custom
-   connector**, name it `Cloudfield`, paste the URL from `aether mcp`, leave
+   connector**, name it `Aether`, paste the URL from `aether mcp`, leave
    **Advanced settings** empty and select **Add**. Free allows one custom
    connector.
 2. Team and Enterprise: an Owner opens **Organization settings → Connectors**,
@@ -176,7 +176,7 @@ starts a new connection: add Cloudfield again in the app with the universal URL.
 Settings revokes the old connector once a new one from the same client, such as
 ChatGPT or Claude, connects at the universal URL and calls Cloudfield. If none
 calls within 10 minutes, it leaves the old one and says so. Remove the old
-Cloudfield connector in ChatGPT or Claude yourself. From a terminal, connect again at the
+Aether connector in ChatGPT or Claude yourself. From a terminal, connect again at the
 universal URL, then run `aether mcp revoke <old id>`.
 
 ### Self-hosted and custom edges

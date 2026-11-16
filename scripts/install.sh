@@ -866,7 +866,7 @@ next_step() {
 link_steps() {
 	printf '  %s\n' "$1"
 	next_step "aether link $2" "on a tailnet: the server's tailnet name"
-	next_step "aether login" "otherwise, sign in to the edge, Aether's relay"
+	next_step "aether login" "otherwise, sign in to the edge, Cloudfield's relay"
 	next_step "aether link --claim <code>" "with the claim link server setup printed"
 	next_step "aether link '<invite link>'" "or with an invite link from an admin"
 }

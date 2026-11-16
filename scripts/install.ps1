@@ -1179,7 +1179,7 @@ function Invoke-AetherInstall {
             Write-Host '  open Aether from the Start menu, or link from a new terminal:'
         }
         Write-Host '  aether link <server-host>      # on a tailnet: the server''s tailnet name'
-        Write-Host '  aether login                   # otherwise, sign in to the edge, Aether''s relay'
+        Write-Host '  aether login                   # otherwise, sign in to the edge, Cloudfield''s relay'
         Write-Host '  aether link --claim <code>     # with the claim link server setup printed'
         Write-Host '  aether link ''<invite link>''    # or with an invite link from an admin'
         Write-AetherStatus 'done:' Green ('Aether {0} installed in {1}' -f $release.Tag, (Format-AetherSeconds $total))
