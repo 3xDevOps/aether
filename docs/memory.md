@@ -121,7 +121,8 @@ aether: rpc error -32001: memory.pin: permission denied: note-z7c6ep47d5 is a me
 - When a session reports `success` or `failure`, the server writes an `outcome`
   note with the first line of the summary as its title and the session's changed
   files. A later report from the same session rewrites the note and clears its
-  pin.
+  pin. No note is written while the session's owner is a
+  viewer, as with `memory.add`.
 
 It is scanned for secrets first. A note that contains one is stored with
 `(withheld: gitleaks rule <rule> at <line:col>)` as its text.

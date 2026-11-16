@@ -494,7 +494,8 @@ it and when. Notes reach the store three ways:
 - When a session's agent reports success or failure, the server writes one
   outcome note for that session: the report's summary and next action, with the
   files and HEAD commit of the session's latest snapshot. A later report
-  rewrites it and clears its pin.
+  rewrites it and clears its pin. Nothing is written while the session's
+  owner is a viewer.
 
 Every member of the server, viewers included, can read every note, and
 every session in the workspace can search them. The first line of each pinned
