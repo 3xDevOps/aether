@@ -19,14 +19,14 @@ private val LOOPBACK_V4 = Regex("^127\\.\\d+\\.\\d+\\.\\d+$")
 private val LOOPBACK_V6 = Regex("^\\[::1]$|^\\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}]$")
 private val EDGE_ORIGIN = Regex("^(https?)://(\\[[0-9a-f:]+]|[^:/?#\\[\\]@]+)(?::(\\d+))?$")
 
-// cloudfield:// is the product's new name for the same links. Nothing emits
-// it yet, and the link handed to the dashboard is always spelled aether://,
-// which every dashboard version accepts.
+// Every aether:// link below may also be spelled cloudfield://. A link handed
+// to the dashboard is spelled aether://, the only scheme its join and claim
+// parsers accept.
 private val LINK_SCHEMES = listOf("aether", "cloudfield")
 
 /**
- * The dashboard URL an `aether://run/<id>` or `cloudfield://run/<id>` link
- * opens in Tailscale mode, or null when the link is not one.
+ * The dashboard URL an `aether://run/<id>` link opens in Tailscale mode, or
+ * null when the link is not one.
  *
  * `base` is a dashboard URL from [dashboardUrl], so it always ends in `/` and
  * carries no query of its own.
