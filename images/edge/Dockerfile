@@ -2,7 +2,8 @@
 # The aether-edge image: docs/edge.md, "In a container". Build it from the
 # repository root:
 #
-#   docker build -f images/edge/Dockerfile --build-arg VERSION=<tag> --build-arg COMMIT=<sha> .
+#   docker build -f images/edge/Dockerfile --build-arg VERSION=<tag> --build-arg COMMIT=<sha> \
+#     --build-arg RELEASE_BUILD=<build> --build-arg RELEASE_HOTFIX=<hotfix> .
 #
 # Dockerfile.dockerignore beside this file limits the context to the Go
 # module, so nothing else in a working tree reaches the builder.
@@ -14,16 +15,22 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
 ARG COMMIT=unknown
+ARG RELEASE_BUILD=0
+ARG RELEASE_HOTFIX=0
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY cmd/aether-edge cmd/aether-edge
 COPY internal internal
-# The same stamping as the Makefile, which filters both values the same way.
+# The same stamping as the Makefile, which filters the version and commit
+# the same way and, like this, refuses a build or hotfix that is not digits.
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     version=$(printf '%s' "$VERSION" | tr -cd 'A-Za-z0-9.+_-') && \
     commit=$(printf '%s' "$COMMIT" | tr -cd 'A-Za-z0-9') && \
+    for n in "$RELEASE_BUILD" "$RELEASE_HOTFIX"; do \
+      case "$n" in ''|*[!0-9]*) echo "RELEASE_BUILD and RELEASE_HOTFIX must be non-negative integers, got '$RELEASE_BUILD' and '$RELEASE_HOTFIX'" >&2; exit 1 ;; esac; \
+    done && \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
-      -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=${version:-dev} -X github.com/3xDevOps/Aether/internal/version.Commit=${commit:-unknown}" \
+      -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=${version:-dev} -X github.com/3xDevOps/Aether/internal/version.Commit=${commit:-unknown} -X github.com/3xDevOps/Aether/internal/version.Build=$RELEASE_BUILD -X github.com/3xDevOps/Aether/internal/version.Hotfix=$RELEASE_HOTFIX" \
       -o /out/aether-edge ./cmd/aether-edge && \
     mkdir -p /out/state && mkdir -m 0700 /out/state/aether-edge
 

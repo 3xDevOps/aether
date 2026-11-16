@@ -251,7 +251,7 @@ describe('insights page', () => {
     const time = await screen.findByRole('region', { name: 'Time' })
     expect(within(time).getByText('21m')).toBeDefined()
     expect(within(time).getByText('1h 8m')).toBeDefined()
-    expect(within(time).getByText(/measured for 6 of 9 sessions; Aether records this from Oct 12, 2026 on\./)).toBeDefined()
+    expect(within(time).getByText(/measured for 6 of 9 sessions; Cloudfield records this from Oct 12, 2026 on\./)).toBeDefined()
   })
 
   it('shows the server error and retries', async () => {

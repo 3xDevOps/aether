@@ -14,13 +14,13 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/shellquote"
-	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // ClientBanner is the SSH banner of every Aether client. The server reads
-// the version from it to refuse a client older than its release.
-func ClientBanner() string { return "SSH-2.0-Aether " + version.Version }
+// the version and build from it to refuse a client older than its release.
+func ClientBanner() string { return "SSH-2.0-Aether " + selfupdate.BannerVersion(selfupdate.Running()) }
 
 const (
 	dialTimeout     = 10 * time.Second

@@ -110,7 +110,7 @@ func TestConnectorScopesGateEachMethod(t *testing.T) {
 		{"write scope cannot switch mode", connector(write), protocol.MethodRunModeSwitch, run, "run.mode.switch needs the control scope"},
 		{"write scope cannot hand off", connector(write), protocol.MethodRunHandoff, run, "run.handoff needs the control scope"},
 		{"unlisted method", connector(all), protocol.MethodMemberRole, json.RawMessage(`{}`),
-			"member.role: ChatGPT connector con-test cannot call this method; no connector can, so use the Aether app or the aether CLI"},
+			"member.role: ChatGPT connector con-test cannot call this method; no connector can, so use the Cloudfield app or the aether CLI"},
 		{"dashboard is unscoped", e.srv.Local(e.member.ID), protocol.MethodMemberList, nil, ""},
 		{"dashboard stops", e.srv.Local(e.member.ID), protocol.MethodRunKill, run, ""},
 		{"assistant is unscoped", e.srv.AssistantLocal(e.member.ID), protocol.MethodRunKill, run, ""},

@@ -127,7 +127,7 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{
 			Severity:    "warning",
 			Title:       "Steered message stopped",
-			Description: "The agent started a turn of its own for this message instead of adding it to the running turn, so Aether cancelled that turn. The agent has the message; send a new prompt to continue.",
+			Description: "The agent started a turn of its own for this message instead of adding it to the running turn, so Cloudfield cancelled that turn. The agent has the message; send a new prompt to continue.",
 		}})
 		s.mu.Unlock()
 		return Receipt{}, errors.Join(fmt.Errorf("acphost: %s: the agent answered startedNewTurn despite idleBehavior promptRequired; its turn was cancelled", methodSteering), cancelErr)
@@ -373,7 +373,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 	switch {
 	case lost:
 		reason = "interrupted"
-		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "Aether's server restarted and the agent's keeper no longer had the turn's prompt in flight."}})
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "Cloudfield's server restarted and the agent's keeper no longer had the turn's prompt in flight."}})
 	case err != nil && (s.conn.closed() || s.conn.inputBroken()):
 		reason = "interrupted"
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: err.Error()}})
@@ -381,7 +381,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 		// The agent answered its input closing; a restore must resume the
 		// turn, not take it as cancelled or failed.
 		reason = "interrupted"
-		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "Aether closed the agent connection before the turn finished."}})
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "Cloudfield closed the agent connection before the turn finished."}})
 	case err != nil:
 		reason, failed = "error", err
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Prompt failed", Description: err.Error()}})

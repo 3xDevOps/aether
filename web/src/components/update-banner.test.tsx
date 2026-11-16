@@ -236,6 +236,86 @@ describe('the server update banner', () => {
     ).toBeTruthy()
   })
 
+  test('a server above its channel says it stays on its build, not that it is up to date or behind', async () => {
+    const waiting = serverUpdateStatus({
+      server_version: 'v0.9.0-nightly.12',
+      server_build: 412,
+      channel: 'beta',
+      latest: 'v0.9.0-beta.1',
+      latest_version: 'v0.9.0-beta.1',
+      latest_build: 380,
+      channel_wait: true,
+    })
+    for (const self of [alice, bob]) {
+      const client = seedServer({ self, status: waiting })
+      const view = render(<UpdateHost client={client} />)
+      expect(await screen.findByText('The server stays on v0.9.0-nightly.12 (build 412) until the beta channel reaches it.')).toBeTruthy()
+      expect(screen.getByText('The beta channel is at v0.9.0-beta.1 (build 380). The server never installs an older build.')).toBeTruthy()
+      expect(screen.queryByText(/is up to date/)).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+      view.unmount()
+    }
+  })
+
+  test('the wait row names the hotfix on either side', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({
+        server_version: 'v0.9.1', server_build: 412, server_hotfix: 1, channel: 'beta',
+        latest: 'v0.9.0', latest_version: 'v0.9.0', latest_build: 412, channel_wait: true,
+      }),
+    })
+    render(<UpdateHost client={client} />)
+    expect(await screen.findByText('The server stays on v0.9.1 (build 412 hotfix 1) until the beta channel reaches it.')).toBeTruthy()
+    expect(screen.getByText('The beta channel is at v0.9.0 (build 412). The server never installs an older build.')).toBeTruthy()
+  })
+
+  test('an update the server scheduled itself is not attributed to a member', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({
+        update_available: true,
+        pending: { version: 'v1.3.0', requested_by: 'server', requested_at: '2026-08-14T10:06:00Z', by_server: true },
+      }),
+    })
+    render(<UpdateHost client={client} />)
+    expect(await screen.findByText('Scheduled by the server, applies when no session is active.')).toBeTruthy()
+  })
+
+  test('shows why the server could not schedule an update itself, and the decline note, unchanged', async () => {
+    const reason = 'preflight: release v1.3.0 needs store schema 120, this database is at 121'
+    const client = seedServer({
+      status: serverUpdateStatus({ update_available: true, schedule_error: reason, decline_note: 'the cancelled build could not be recorded: disk full' }),
+    })
+    render(<UpdateHost client={client} />)
+    expect(await screen.findByText(reason)).toBeTruthy()
+    expect(screen.getByText('The server could not schedule it by itself:')).toBeTruthy()
+    expect(screen.getByText('The server could not record the cancelled build as declined, so it may schedule it again:')).toBeTruthy()
+    expect(screen.getByText('the cancelled build could not be recorded: disk full')).toBeTruthy()
+  })
+
+  test('a cancel that could not record the build as declined says so', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({ update_available: true, pending: { version: 'v1.3.0', requested_by: alice.id, requested_at: '2026-08-14T10:06:00Z' } }),
+    })
+    client.serverUpdate = vi.fn(async () => ({ status: 'cancelled' as const, not_declined: 'store: database is locked' }))
+    render(<UpdateHost client={client} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText('The update was cancelled. The server could not record the cancelled build as declined, so it may schedule it again:')).toBeTruthy()
+    expect(screen.getByText('store: database is locked')).toBeTruthy()
+  })
+
+  test('a cancel the server refuses shows its error as returned', async () => {
+    const refusal = 'server.update: v1.3.0 is applying now and can no longer be cancelled'
+    const client = seedServer({
+      status: serverUpdateStatus({ update_available: true, pending: { version: 'v1.3.0', requested_by: alice.id, requested_at: '2026-08-14T10:06:00Z' } }),
+    })
+    client.serverUpdate = vi.fn(async () => {
+      throw new Error(refusal)
+    })
+    render(<UpdateHost client={client} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText(refusal)).toBeTruthy()
+  })
+
   test('Update when idle schedules, and the banner then offers Cancel', async () => {
     const client = seedServer()
     render(<UpdateHost client={client} />)
@@ -549,7 +629,7 @@ describe('the desktop app rebuild notice', () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.3' }
     seed()
     const same = render(<UpdateHost client={fakeApi()} />)
-    await screen.findByText('Aether v1.3.0 is available.')
+    await screen.findByText('Cloudfield v1.3.0 is available.')
     expect(screen.queryByText(notice)).toBeNull()
     same.unmount()
 
@@ -557,7 +637,7 @@ describe('the desktop app rebuild notice', () => {
     shellWindow.aetherDesktop = { platform: 'linux', shellVersion: '1.2.0' }
     seed({ capabilities: caps({ version: undefined }) })
     render(<UpdateHost client={fakeApi()} />)
-    await screen.findByText('Aether v1.3.0 is available.')
+    await screen.findByText('Cloudfield v1.3.0 is available.')
     expect(screen.queryByText(notice)).toBeNull()
   })
 
@@ -576,7 +656,7 @@ describe('the desktop app rebuild notice', () => {
       shellWindow.aetherDesktop = { platform: 'linux', shellVersion }
       seed({ capabilities: caps({ version: cliVersion }) })
       const view = render(<UpdateHost client={fakeApi()} />)
-      await screen.findByText('Aether v1.3.0 is available.')
+      await screen.findByText('Cloudfield v1.3.0 is available.')
       expect(screen.queryByText(notice) !== null).toBe(stale)
       view.unmount()
     }
@@ -621,12 +701,12 @@ describe('the CLI release re-check', () => {
     seed()
     render(<UpdateHost client={client} />)
     await settle()
-    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.3.0 is available.')).toBeTruthy()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   // Coming back to a window fires both events. One return is one read: a
@@ -662,7 +742,7 @@ describe('the CLI release re-check', () => {
       window.dispatchEvent(new Event('focus'))
       await vi.advanceTimersByTimeAsync(200)
     })
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   test('reads nothing while the window is hidden', async () => {
@@ -677,7 +757,7 @@ describe('the CLI release re-check', () => {
       document.dispatchEvent(new Event('visibilitychange'))
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD * 4)
     })
-    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.3.0 is available.')).toBeTruthy()
   })
 
   // A failed re-check is recorded verbatim, but the banner it already drew
@@ -700,14 +780,14 @@ describe('the CLI release re-check', () => {
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
     expect(useStore.getState().clientCheckError).toBe('dial github.com: no route to host')
-    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
-    expect(screen.queryByText('Could not check for a new Aether release.')).toBeNull()
+    expect(screen.getByText('Cloudfield v1.3.0 is available.')).toBeTruthy()
+    expect(screen.queryByText('Could not check for a new Cloudfield release.')).toBeNull()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
     expect(useStore.getState().clientCheckError).toBeNull()
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   // Dismissal is keyed by version, so the next release is not silenced by
@@ -718,12 +798,12 @@ describe('the CLI release re-check', () => {
     seed({ dismissedUpdates: { cli: 'v1.3.0', server: '', shell: '' } })
     render(<UpdateHost client={client} />)
     await settle()
-    expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
+    expect(screen.queryByText('Cloudfield v1.3.0 is available.')).toBeNull()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
-    expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.4.0 is available.')).toBeTruthy()
   })
 
   // The re-checks must not bypass the gateway's cache: every open tab
@@ -738,7 +818,7 @@ describe('the CLI release re-check', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(RECHECK_PERIOD * 3)
     })
-    expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
+    expect(screen.getByText('Cloudfield v1.3.0 is available.')).toBeTruthy()
   })
 
   test('stops reading once the banners are gone', async () => {

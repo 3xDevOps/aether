@@ -24,7 +24,7 @@ test('a turn with no progress reads Possibly stalled with its last progress, and
 
   await page.goto(`${alice.url}&run=${run.id}`)
   const log = page.getByRole('log', { name: 'Chat' })
-  const runs = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+  const runs = page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' })
   const header = page.locator('[data-slot="pane-header"]')
   const callout = page.locator('[data-slot="callout"]').filter({ hasText: 'Possibly stalled' })
   const box = page.getByRole('combobox', { name: 'Message the agent' })

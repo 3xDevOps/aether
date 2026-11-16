@@ -74,7 +74,7 @@ function seed() {
 }
 
 async function chooseRelay() {
-  fireEvent.click(await screen.findByRole('radio', { name: 'Aether relay' }))
+  fireEvent.click(await screen.findByRole('radio', { name: 'Cloudfield relay' }))
 }
 
 afterEach(() => {
@@ -118,7 +118,7 @@ describe('onboarding link through an edge', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Link' }))
 
     expect(await screen.findByRole('region', { name: 'Join' })).toBeDefined()
-    expect(screen.getByRole('radio', { name: 'Aether relay' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('radio', { name: 'Cloudfield relay' }).getAttribute('aria-checked')).toBe('true')
     expect(client.localLinkApply).not.toHaveBeenCalled()
   })
 

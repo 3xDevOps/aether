@@ -1,0 +1,209 @@
+name: Promote
+
+# An admin promotes a published nightly to beta, or a published beta to
+# stable. release-build.yml rebuilds that commit under the new tag, signs
+# it with the release key, publishes it and moves the channel pointers;
+# aether-edge:beta then moves with beta.json through promote-edge.yml.
+run-name: Promote ${{ inputs.from }} to ${{ inputs.to }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: Published nightly tag (to beta) or beta tag (to stable), or a full commit SHA of one
+        required: true
+        type: string
+      to:
+        description: Channel to promote to
+        required: true
+        type: choice
+        options: [beta, stable]
+      version:
+        description: X.Y.Z for the new tag instead of the source's, at least the current nightly base; empty keeps the source's
+        required: false
+        type: string
+        default: ''
+      first-pointer:
+        description: Only for the migration's first stable, v0.8.7 from the pre-channel v0.8.7-beta.N, which writes the first stable.json and beta.json
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+# Every pointer writer runs in this group, so no two read and replace a
+# pointer at once. Never cancelled: a cancelled signer can leave a tag
+# without its release.
+concurrency:
+  group: channels
+  cancel-in-progress: false
+
+jobs:
+  promote-policy:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require main
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::Promote runs only from refs/heads/main, not $GITHUB_REF"
+            exit 1
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - name: Require an admin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
+
+  # The first job in the release environment. Nothing before it tags,
+  # publishes or pushes, so a run the environment refuses changes nothing.
+  signing-key:
+    needs: promote-policy
+    environment: release
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the release signing key
+        env:
+          KEY_SET: ${{ secrets.AETHER_RELEASE_SIGNING_KEY != '' }}
+        run: |
+          if [ "$KEY_SET" != true ]; then
+            echo "::error::the release manifest cannot be signed; AETHER_RELEASE_SIGNING_KEY is set neither in the release environment nor as a repository secret. Set it (see Release signing in docs/security.md), then rerun this promotion."
+            exit 1
+          fi
+
+  promote-plan:
+    needs: signing-key
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      commit: ${{ steps.plan.outputs.commit }}
+      channel: ${{ steps.plan.outputs.channel }}
+      build: ${{ steps.plan.outputs.build }}
+      hotfix: ${{ steps.plan.outputs.hotfix }}
+      pointer: ${{ steps.plan.outputs.pointer }}
+      pointer-if-above: ${{ steps.plan.outputs.pointer-if-above }}
+      first-pointer: ${{ steps.plan.outputs.first-pointer }}
+      tools: ${{ steps.plan.outputs.tools }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      # Re-running failed jobs skips promote-policy, and this job resolves
+      # the tag and tools afresh, so whoever re-runs it must be an admin too.
+      - name: Require an admin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build main's promote-plan
+        run: go build -o "$RUNNER_TEMP/promote-plan" ./scripts/promote-plan
+      - name: Resolve the source and the new tag
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROMOTE_PLAN: ${{ runner.temp }}/promote-plan
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+          VERSION: ${{ inputs.version }}
+          FIRST_POINTER: ${{ inputs.first-pointer }}
+        run: |
+          sh scripts/promote-plan.sh > "$RUNNER_TEMP/plan"
+          cat "$RUNNER_TEMP/plan" >> "$GITHUB_OUTPUT"
+          echo "tools=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Require green push CI for the exact commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.plan.outputs.commit }}
+        # On its own line: a failed check inside echo's arguments would not
+        # fail the step.
+        run: |
+          url=$(sh scripts/release-ci-check.sh "$GITHUB_REPOSITORY" "$COMMIT")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: Summarize
+        env:
+          TO: ${{ inputs.to }}
+          SOURCE: ${{ steps.plan.outputs.source }}
+          PUBLISHED_AT: ${{ steps.plan.outputs.source-published-at }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          COMMIT: ${{ steps.plan.outputs.commit }}
+          BUILD: ${{ steps.plan.outputs.build }}
+          CI: ${{ steps.ci.outputs.url }}
+        run: |
+          {
+            echo "### Promote $SOURCE to $TO as $TAG"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Commit | \`$COMMIT\` |"
+            echo "| Build | $BUILD |"
+            echo "| Push CI | $CI |"
+            echo "| Actor | $GITHUB_ACTOR (run started by $GITHUB_TRIGGERING_ACTOR) |"
+            if [ "$TO" = stable ]; then
+              echo "| Beta cut | $(( ($(date +%s) - $(date -d "$PUBLISHED_AT" +%s)) / 86400 )) days ago ($PUBLISHED_AT); a reminder, nothing enforces a minimum |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release-build:
+    needs: promote-plan
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/release-build.yml
+    with:
+      tag: ${{ needs.promote-plan.outputs.tag }}
+      commit: ${{ needs.promote-plan.outputs.commit }}
+      tools-commit: ${{ needs.promote-plan.outputs.tools }}
+      channel: ${{ needs.promote-plan.outputs.channel }}
+      build: ${{ fromJSON(needs.promote-plan.outputs.build) }}
+      hotfix: ${{ fromJSON(needs.promote-plan.outputs.hotfix) }}
+      pointer: ${{ needs.promote-plan.outputs.pointer }}
+      pointer-if-above: ${{ needs.promote-plan.outputs.pointer-if-above }}
+      first-pointer: ${{ needs.promote-plan.outputs.first-pointer == 'true' }}
+      promoted: true
+    secrets:
+      AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
+      ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+  # aether-edge:beta moves with beta.json: for a beta, and for a stable
+  # that moved beta.json because it was above it.
+  edge-beta:
+    needs: [promote-plan, release-build]
+    if: ${{ inputs.to == 'beta' || needs.release-build.outputs.pointer-if-above-names-release == 'true' }}
+    permissions:
+      contents: read
+      actions: read
+      attestations: write
+      id-token: write
+      artifact-metadata: write
+      packages: write
+    uses: ./.github/workflows/promote-edge.yml
+    with:
+      tag: ${{ needs.promote-plan.outputs.tag }}
+      digest: ${{ needs.release-build.outputs.edge-digest }}
+      channel: beta

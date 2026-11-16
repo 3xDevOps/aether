@@ -707,6 +707,9 @@ func (s *Scheduler) removeSidecar(run domain.RunID) {
 	s.removeScratch(string(run))
 	s.removeAccountConfig(run)
 	s.removeVMDatabases(run)
+	if s.ompFront != nil {
+		s.ompFront.Close(string(run))
+	}
 }
 
 const stoppedByParentReason = "stopped by parent session "

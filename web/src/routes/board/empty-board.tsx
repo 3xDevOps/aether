@@ -28,7 +28,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
   const ask = caps.hasMethod('assistant.status') && canLaunch({ cap: caps, role }) && (
     <Button variant="secondary" onClick={() => useStore.getState().setAssistantOpen(true)}>
       <Sparkles />
-      Ask Aether
+      Ask Cloudfield
     </Button>
   )
   const withAsk = (primary: React.ReactNode) => (

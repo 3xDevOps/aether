@@ -117,6 +117,8 @@ import type {
   ServerEdge,
   ServerEdgeClaimCode,
   ServerInfo,
+  ReleaseChannel,
+  ServerReleaseChannelSet,
   ServerUpdateResult,
   ServerUpdateStatus,
   RunLimits,
@@ -783,6 +785,9 @@ export const api = {
    * in flight. Any member may read it; only an admin may call server.update. */
   serverUpdateStatus: (refresh?: boolean) =>
     call<ServerUpdateStatus>('server.update_status', refresh ? { refresh } : {}),
+  /** Super admin: with `dryRun`, what moving to `channel` would do, saving nothing. */
+  serverReleaseChannelSet: (channel: ReleaseChannel, dryRun = false) =>
+    call<ServerReleaseChannelSet>('server.release_channel_set', { channel, ...(dryRun ? { dry_run: true } : {}) }),
   /** Asks the server to update itself to the latest release now, at the
    * next idle moment, or to cancel the pending one. */
   serverUpdate: (when: ServerUpdateWhen) =>

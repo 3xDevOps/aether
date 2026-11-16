@@ -97,8 +97,20 @@ func TestFetchManifestNamesAnUnsignedTag(t *testing.T) {
 	f.unsigned = true
 	_, err := fetchManifest(t.Context(), srv.URL, "v0.7.0")
 	if err == nil || !strings.Contains(err.Error(), "release v0.7.0 has no signed aether-release.json") ||
-		!strings.Contains(err.Error(), "predates signed releases") {
+		!strings.Contains(err.Error(), "predates signed releases") || !errors.Is(err, ErrUnsigned) {
 		t.Fatalf("err = %v, want it to name v0.7.0 as unsigned", err)
+	}
+}
+
+func TestFetchSignedManifestReturnsTheBytesItVerified(t *testing.T) {
+	_, srv := newFakeRelease(t, "v1.3.0", testAssets)
+	m, data, sig, err := FetchSignedManifestFrom(t.Context(), srv.URL, "v1.3.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := VerifyManifest(data, sig, "v1.3.0")
+	if err != nil || again.Version != m.Version || again.Commit != m.Commit {
+		t.Fatalf("the returned bytes verify as %+v, %v; want %s", again, err, m.Version)
 	}
 }
 
@@ -120,8 +132,8 @@ func TestDownloadsRefuseARedirectOffHTTPS(t *testing.T) {
 	defer func() { retryDelays = nil }()
 
 	_, err := fetchManifest(t.Context(), secure.URL, "v1.3.0")
-	if !errors.Is(err, errInsecureRedirect) {
-		t.Fatalf("err = %v, want the redirect refused", err)
+	if !errors.Is(err, errInsecureRedirect) || errors.Is(err, ErrUnsigned) {
+		t.Fatalf("err = %v, want the redirect refused, and not as an unsigned release", err)
 	}
 	if n := hits.Load(); n != 1 {
 		t.Fatalf("dialed %d times; a refused redirect is not retried", n)

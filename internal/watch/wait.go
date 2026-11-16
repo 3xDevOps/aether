@@ -283,7 +283,7 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait, inline bool)
 	}
 	if readErr != nil {
 		r = waitReading{done: true, state: protocol.WaitError, outcome: "unreadable", observation: "unreadable",
-			summary: "Aether cannot read the target", detail: strings.TrimPrefix(readErr.Error(), errWaitUnreadable.Error()+": "),
+			summary: "Cloudfield cannot read the target", detail: strings.TrimPrefix(readErr.Error(), errWaitUnreadable.Error()+": "),
 			observed: r.observed, link: r.link}
 		w.Error, w.ErrorAt = readErr.Error(), &now
 	} else if !expired {

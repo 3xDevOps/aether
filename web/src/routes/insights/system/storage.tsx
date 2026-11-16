@@ -40,7 +40,7 @@ function categories(disk: DiskUsage): { name: string; bytes?: number }[] {
 function BarList({ items }: { items: { name: string; bytes?: number }[] }) {
   const max = Math.max(1, ...items.map((i) => i.bytes ?? 0))
   return (
-    <ul aria-label="Aether data" className="flex min-w-0 flex-col gap-1">
+    <ul aria-label="Cloudfield data" className="flex min-w-0 flex-col gap-1">
       {items.map((item) => (
         <li key={item.name} className="relative flex h-7 min-w-0 items-center justify-between gap-3 px-2 text-ui-sm">
           <span aria-hidden className="absolute inset-y-0 left-0 rounded-control bg-series-1 opacity-25" style={{ width: `${((item.bytes ?? 0) / max) * 100}%` }} />
@@ -80,7 +80,7 @@ function Docker({ docker }: { docker: DiskUsage['docker'] }) {
         ]}
       />
       <p className="text-ui-sm text-muted">
-        These figures cover the whole Docker daemon, including workloads outside Aether; bind-backed homes count under Aether homes. Reclaimable is Docker's own unused classification, not
+        These figures cover the whole Docker daemon, including workloads outside Cloudfield; bind-backed homes count under Cloudfield homes. Reclaimable is Docker's own unused classification, not
         permission to delete saved images.{' '}
         {docker.shared_filesystem === undefined
           ? 'Whether Docker shares the data filesystem is unknown.'
@@ -192,10 +192,10 @@ export function StorageSection() {
             <ProgressBar role="meter" aria-label="Disk used" value={disk.used_bytes} max={disk.total_bytes} fillClassName="bg-icon-faint" />
           )}
         </div>
-        <Block title="Aether data">
+        <Block title="Cloudfield data">
           <BarList items={categories(disk)} />
           <p className="text-ui-sm text-muted">
-            Snapshots {known(disk.snapshot_bytes)} (included in worktrees).{disk.vm_state_bytes ? ` Saved memory of sleeping VMs ${formatBytes(disk.vm_state_bytes)} (included in VMs).` : ''} These categories attribute Aether data, not the whole filesystem or guaranteed reclaimable space. Session and terminal pools
+            Snapshots {known(disk.snapshot_bytes)} (included in worktrees).{disk.vm_state_bytes ? ` Saved memory of sleeping VMs ${formatBytes(disk.vm_state_bytes)} (included in VMs).` : ''} These categories attribute Cloudfield data, not the whole filesystem or guaranteed reclaimable space. Session and terminal pools
             belong to the launching member. Automatic cleanup protects active, retained and uncertain owners.
           </p>
           {disk.warnings && disk.warnings.length > 0 && (

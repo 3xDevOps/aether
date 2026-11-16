@@ -57,7 +57,7 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 	if len(lines) != 5 || !strings.HasPrefix(code, id+"-") || lines[2] != "  aether login --edge https://edge.example" ||
 		!strings.HasPrefix(lines[0], "claim link: aether://claim?edge=https%3A%2F%2Fedge.example&server="+id+"#"+strings.TrimPrefix(code, id+"-")+" (valid for 30 min, until ") ||
 		!strings.HasSuffix(lines[0], " "+zone+", 5 attempts)") ||
-		lines[1] != "on your computer, paste it into the Aether app: Connect, Aether relay; in a terminal:" {
+		lines[1] != "on your computer, paste it into the Cloudfield app: Connect, Cloudfield relay; in a terminal:" {
 		t.Errorf("claim-code output:\n%s", out.String())
 	}
 	out.Reset()

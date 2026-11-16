@@ -56,7 +56,7 @@ describe('system tab', () => {
 
     expect(screen.getByText('Showing 7 sessions in Other sessions')).toBeDefined()
     expect(rows()).toHaveLength(7)
-    expect(screen.queryByText('Aether server, Docker and host processes')).toBeNull()
+    expect(screen.queryByText('Cloudfield server, Docker and host processes')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Show all' }))
     expect(rows()).toHaveLength(9)

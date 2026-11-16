@@ -52,7 +52,7 @@ private val CARD_ID = Regex("^[A-Za-z0-9_-]{1,128}$")
 private val RUN_ID = Regex("^[0-9a-z-]{10,32}$")
 private val WORKSPACE_ID = Regex("^[0-9A-Za-z_-]{1,64}$")
 
-private const val FALLBACK_TITLE = "Aether"
+private const val FALLBACK_TITLE = "Cloudfield"
 private const val FALLBACK_BODY = "A session needs you."
 private const val FALLBACK_TAG = "aether"
 

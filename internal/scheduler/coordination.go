@@ -125,15 +125,15 @@ func (s *Scheduler) coordinationMounts(ctx context.Context, entry *supervised, r
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("stage coordination CLI: %w", err)
 	}
-	cliMount := runtime.Mount{HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true}
+	cli := cliMounts(bin)
 	if run == nil {
-		mounts := []runtime.Mount{cliMount}
+		mounts := cli
 		if err := checkCoordinationMounts(mounts); err != nil {
 			return nil, nil, nil, err
 		}
 		return mounts, nil, nil, nil
 	}
-	return s.provisionCoordination(ctx, c, entry, run, profile, native, digest, bin, cliMount)
+	return s.provisionCoordination(ctx, c, entry, run, profile, native, digest, bin, cli)
 }
 
 type coordinationLaunch struct {
@@ -183,7 +183,7 @@ func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profil
 	return l, nil
 }
 
-func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, digest, bin string, cliMount runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
+func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, digest, bin string, cliMounts []runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
 	instructions, err := s.launchInstructions(ctx, run, profile, native)
 	if err != nil {
 		return nil, nil, nil, err
@@ -209,12 +209,12 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 			}
 		}
 	}()
-	cliMount.Kind = runtime.MountServerBinary
-	mounts = []runtime.Mount{
-		{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true, Kind: runtime.MountServerBinary},
-		cliMount,
-		{HostPath: dir, ContainerPath: coordtransport.MountDir, ReadOnly: true},
+	mounts = []runtime.Mount{{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true, Kind: runtime.MountServerBinary}}
+	for _, m := range cliMounts {
+		m.Kind = runtime.MountServerBinary
+		mounts = append(mounts, m)
 	}
+	mounts = append(mounts, runtime.Mount{HostPath: dir, ContainerPath: coordtransport.MountDir, ReadOnly: true})
 	if run.Permission != domain.PermissionRoot {
 		mounts = append(mounts, runtime.Mount{HostPath: bin, ContainerPath: coordtransport.SudoPath, ReadOnly: true, Kind: runtime.MountServerBinary})
 	}
@@ -288,9 +288,7 @@ func (s *Scheduler) terminalCoordinationMount(member domain.MemberID) ([]runtime
 	if err != nil {
 		return nil, fmt.Errorf("stage terminal coordination CLI: %w", err)
 	}
-	mounts := []runtime.Mount{{
-		HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true,
-	}}
+	mounts := cliMounts(bin)
 	if err := checkCoordinationMounts(mounts); err != nil {
 		return nil, err
 	}
@@ -316,14 +314,21 @@ func (s *Scheduler) releaseTerminalCoordination(member domain.MemberID) {
 	s.collectStagedBridges()
 }
 
+func cliMounts(bin string) []runtime.Mount {
+	return []runtime.Mount{
+		{HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true},
+		{HostPath: bin, ContainerPath: coordtransport.CloudfieldCLIPath, ReadOnly: true},
+	}
+}
+
 // checkCoordinationMounts is the source-side half of mount validation for
 // the two Aether surfaces: both sources must exist, resolve without
 // surprises, and be the kind of object the container expects, and each is
 // pinned to what it resolved to so no symlink can be swapped between the
 // check and container creation.
 //
-// It is the whole check these two need. The target side is two constants
-// that runtime.ValidateMounts reserves against every caller mount (see the
+// It is the whole check these two need. The target side is constants that
+// runtime.ValidateMounts reserves against every caller mount (see the
 // note at the top of this file), and the sources are built by the server
 // under <data>, never named by a client or an agent.
 func checkCoordinationMounts(mounts []runtime.Mount) error {

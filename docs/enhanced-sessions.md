@@ -1,11 +1,11 @@
 # Enhanced sessions
 
 A session normally shows the agent's own terminal UI. This is **Standard** mode. In
-**Enhanced** mode, Aether drives the agent over the Agent Client Protocol (ACP),
-a JSON protocol on the agent's stdin and stdout. The dashboard then shows the
-agent's messages, tool calls, diffs and permission prompts as native controls
-in a **Chat** view, instead of a terminal. Read [Agents](harnesses.md) first
-to install and sign in to an agent. Other terms are in the
+**Enhanced** mode, Cloudfield drives the agent over the Agent Client Protocol
+(ACP), a JSON protocol on the agent's stdin and stdout. The dashboard then shows
+the agent's messages, tool calls, diffs and permission prompts as native
+controls in a **Chat** view, instead of a terminal. Read [Agents](harnesses.md)
+first to install and sign in to an agent. Other terms are in the
 [glossary](README.md#concepts).
 
 ## Which agents
@@ -83,7 +83,7 @@ which fails the turn with its own error, for example `Claude Code 2.1.287
 does not support this model; version 2.1.290 or newer is required. Run
 'claude update'`. A model you
 pick later from the composer menu becomes the session's recorded model and survives a
-reopen, a server restart and a switch to Standard. A model id Aether cannot
+reopen, a server restart and a switch to Standard. A model id Cloudfield cannot
 store (whitespace, a leading `-`, or over 128 bytes) shows a **Model not
 recorded** notice.
 
@@ -329,7 +329,7 @@ Enhanced agent is not running`. The log records no notice for an adoption.
 A stopped server detaches cleanly. A killed one can, rarely, record twice the
 agent output it logged in the instant before it died. A server killed
 after it recorded a new turn but before the turn's prompt reached the keeper
-ends that turn with **Turn interrupted**: `Aether's server restarted before
+ends that turn with **Turn interrupted**: `Cloudfield's server restarted before
 this turn's prompt reached the agent. Send it again.`
 
 The server cannot reattach when the keeper or the agent exited, when the agent
@@ -357,7 +357,7 @@ whose container a server without keepers created runs its adapter without
 one, and every restart restores its conversation as above until the container
 is recreated. **Reopen**, **Retry Enhanced**, Pause and resume reuse the
 container; a new session, or an account switch at a usage limit, gets a new
-container with a keeper. When a new keeper fails to start and Aether cannot
+container with a keeper. When a new keeper fails to start and Cloudfield cannot
 stop it, the session fails with **Enhanced agent failed** and `the keeper that
 failed to start could not be stopped`, instead of running the adapter without
 a keeper beside one the keeper may have started. Rolling the server back to a build without keepers
@@ -367,14 +367,14 @@ Restoration depends on the agent's own saved conversation and login. Check the
 checkout before you retry interrupted work.
 
 Claude's adapter keeps running when its Claude Code process dies, but drops the
-conversation and answers every later prompt with `Session not found`. Aether shows
+conversation and answers every later prompt with `Session not found`. Cloudfield shows
 that prompt's **Prompt failed** notice, then **Agent conversation lost**, and
 restores the conversation in a fresh adapter as above. Send the failed message
-again. If the agent loses the conversation again within 5 minutes, Aether stops the
+again. If the agent loses the conversation again within 5 minutes, Cloudfield stops the
 adapter and the session parks with
 `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`.
 
-If the agent refuses a turn with `Authentication required`, Aether shows
+If the agent refuses a turn with `Authentication required`, Cloudfield shows
 **Sign-in refused**, or **Agent signed out** when the login file cannot sign
 the agent in, restarts the adapter in the same container so it reads the
 account's login again, and restores the conversation. Agent mail is offered
@@ -384,7 +384,7 @@ agent's error followed by what to do, one of:
 
 ```text
 enhanced turn failed: ... Authentication required ...; Ada's Claude Code login is signed out. Sign in, then send the message again: dashboard Agents page, or aether agent login claude
-enhanced turn failed: ... Authentication required ...; Aether restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: dashboard Agents page, or aether agent login claude
+enhanced turn failed: ... Authentication required ...; Cloudfield restarted the agent to reread Ada's login: send the message again. Refused again? Sign in: dashboard Agents page, or aether agent login claude
 enhanced turn failed: ... Authentication required ...; a restart did not help. Start a new session, or if Ada's Claude Code login is signed out, sign in: dashboard Agents page, or aether agent login claude
 ```
 
@@ -396,18 +396,18 @@ is stale, which a new session's sandbox does not share, or the login is
 signed out. The owner named is the owner of the account the session runs on.
 A refusal after the login file changed restarts the agent once more inside
 those 5 minutes, so a message sent after signing in reaches an agent that has
-read the new login. A session Aether does not restart the agent of (a
+read the new login. A session Cloudfield does not restart the agent of (a
 Background one, or one whose agent reported an outcome) ends its reason with
 `<owner>'s <agent> login may be signed out. Sign in: ...`, and so does a
 session whose agent refuses to open its conversation. See
 [harnesses.md](harnesses.md#when-a-login-is-signed-out) for where else a
 signed-out login shows.
 
-Each time it starts or restarts an adapter, Aether checks that your home still
-belongs to the session's user with owner `rwx`. A root command in any of your
-sessions can change that and lock every agent on the home out of its login
-and its `~/.local/bin`. Aether gives the home back and shows **Home restored**
-with the owner and mode it found
+Each time it starts or restarts an adapter, Cloudfield checks that your home
+still belongs to the session's user with owner `rwx`. A root command in any of
+your sessions can change that and lock every agent on the home out of its login
+and its `~/.local/bin`. Cloudfield gives the home back and shows **Home
+restored** with the owner and mode it found
 ([security.md](security.md#permission-tiers)). An agent that stays
 connected and is never refused gets no restore, so its tools keep failing:
 run `sudo chown "$(id -u):$(id -g)" "$HOME" && sudo chmod u+rwx "$HOME"` in

@@ -37,8 +37,12 @@ type vmWatch struct {
 	finished chan struct{}
 	// lastChange is the server's time of the VM's last file change report.
 	lastChange atomic.Int64
-	// flushing lifts the rate limit for the last snapshot stop asks for.
+	// flushing lifts the rate limit for the last snapshot stop asks for, and
+	// holds the loop's retry delay at vmWatchRetryMin.
 	flushing atomic.Bool
+	// wake ends the loop's retry backoff, as the VM's flush waits for this
+	// watch to deliver the last snapshot.
+	wake chan struct{}
 
 	// loop-goroutine state
 	lastTree string
@@ -97,7 +101,7 @@ func (e *Engine) startVMWatch(ctx context.Context, workspace domain.WorkspaceID,
 	_, gapErr := os.Stat(filepath.Join(store, "history-gap"))
 	watchCtx, cancel := context.WithCancel(context.Background())
 	w := &vmWatch{
-		e: e, run: run, meta: meta, ctx: watchCtx, cancel: cancel, finished: make(chan struct{}),
+		e: e, run: run, meta: meta, ctx: watchCtx, cancel: cancel, finished: make(chan struct{}), wake: make(chan struct{}, 1),
 		lastTree: lastTree, historyGap: !errors.Is(gapErr, os.ErrNotExist),
 		tokens: vmWatchBurst, tokensAt: time.Now(),
 	}
@@ -126,6 +130,10 @@ func (w *vmWatch) changedAt() (time.Time, bool) {
 func (w *vmWatch) stop(final bool) {
 	if final {
 		w.flushing.Store(true)
+		select {
+		case w.wake <- struct{}{}:
+		default:
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*snapshotTimeout)
 		g, err := w.e.vmGit(ctx, w.run)
 		if err == nil {
@@ -148,7 +156,7 @@ func (w *vmWatch) loop() {
 		if w.ctx.Err() != nil {
 			return
 		}
-		if heard {
+		if heard || w.flushing.Load() {
 			delay = vmWatchRetryMin
 		}
 		if now := time.Now(); now.Sub(w.lastWarn) >= diffWarnInterval {
@@ -158,6 +166,7 @@ func (w *vmWatch) loop() {
 		select {
 		case <-w.ctx.Done():
 			return
+		case <-w.wake:
 		case <-time.After(delay):
 		}
 		delay = min(2*delay, vmWatchRetryMax)

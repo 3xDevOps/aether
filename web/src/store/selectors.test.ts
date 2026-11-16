@@ -6,6 +6,7 @@ import {
   needsYouByWorkspace,
   runGroups,
   sidebarGroups,
+  withoutSettled,
   type RunsInput,
 } from '@/store/selectors'
 import {
@@ -123,14 +124,15 @@ describe('sidebarGroups', () => {
     ])
   })
 
-  it('lists every child run beneath its parent, not only those that need the viewer', () => {
+  it('lists every unfinished child run beneath its parent, not only those that need the viewer', () => {
     const groups = sidebarGroups(input([
       record({ id: 'parent' }),
       record({ id: 'c1', parent_run_id: 'parent', created_at: '2026-08-14T10:00:00Z' }),
-      record({ id: 'c2', parent_run_id: 'parent', status: 'completed', created_at: '2026-08-14T11:00:00Z' }),
+      record({ id: 'c2', parent_run_id: 'parent', state: 'waiting', created_at: '2026-08-14T11:00:00Z' }),
     ]))
     expect(ids(groups[0].runs)).toEqual(['parent'])
     expect(ids(groups[0].runs[0].children)).toEqual(['c1', 'c2'])
+    expect(groups[0].runs[0].settled).toEqual([])
   })
 
   it('keeps every visible child run beneath its parent without inflating Needs you', () => {
@@ -145,7 +147,8 @@ describe('sidebarGroups', () => {
 
     expect(groups.map((group) => [group.key, group.count])).toEqual([['needs-you', 1]])
     expect(ids(groups[0].runs)).toEqual(['run_parent'])
-    expect(ids(groups[0].runs[0].children)).toEqual(['blocked', 'done', 'working'])
+    expect(ids(groups[0].runs[0].children)).toEqual(['blocked', 'working'])
+    expect(ids(groups[0].runs[0].settled ?? [])).toEqual(['done'])
   })
 
   it('applies Mine to child runs', () => {
@@ -244,6 +247,27 @@ describe('a subsession outcome is for its parent only', () => {
     const needs = groups.find((group) => group.key === 'needs-you')
     expect(needs?.count).toBe(1)
     expect(ids(needs?.runs ?? [])).toEqual(['lead'])
+  })
+
+  it('leaves a finished subsession out of the list until it works again, and keeps one that failed or asks', () => {
+    const stoppedByParent = record({ id: 'stopped', parent_run_id: 'lead', status: 'completed', reason: 'stopped by parent session lead' })
+    const cut = record({ id: 'cut', parent_run_id: 'lead', status: 'interrupted' })
+    const family = [parent('waiting-agents'), done, stoppedByParent, broke, cut, asks]
+    const [tree] = sidebarGroups(input(family)).flatMap((group) => group.runs)
+    expect(ids(tree.children).sort()).toEqual(['asks', 'broke', 'cut'])
+    expect(ids(tree.settled ?? []).sort()).toEqual(['done', 'stopped'])
+    expect(tree.childRuns?.members).toHaveLength(5)
+    expect(ids(withoutSettled(listedRuns(workspace.id, input(family).ctx))).sort()).toEqual(['asks', 'broke', 'cut', 'lead'])
+
+    const again = { ...done, status: 'running' as const, state: 'working' as const, review: undefined }
+    const [woken] = sidebarGroups(input([parent('waiting-agents'), again])).flatMap((group) => group.runs)
+    expect(ids(woken.children)).toEqual(['done'])
+  })
+
+  it('keeps a finished subsession listed when its parent is not, or when it has sessions of its own', () => {
+    expect(ids(withoutSettled(listedRuns(workspace.id, input([done]).ctx)))).toEqual(['done'])
+    const leaf = record({ id: 'leaf', parent_run_id: 'done' })
+    expect(ids(withoutSettled(listedRuns(workspace.id, input([parent('waiting'), done, leaf]).ctx))).sort()).toEqual(['done', 'lead', 'leaf'])
   })
 
   it('treats a detached subsession as a session of its own', () => {

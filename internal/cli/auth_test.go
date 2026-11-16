@@ -123,7 +123,7 @@ func TestAuthFailureExplainsWhatWasTried(t *testing.T) {
 	testhome.WriteSSHKey(t, filepath.Join(home, ".ssh", "id_rsa"), testhome.RSAKey(t), "")
 	addr, done := serveOnce(t, &ssh.ServerConfig{
 		PublicKeyCallback: func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error) {
-			return nil, &ssh.BannerError{Err: errors.New("unknown key"), Message: "no Aether member for this key\n"}
+			return nil, &ssh.BannerError{Err: errors.New("unknown key"), Message: "no Cloudfield member for this key\n"}
 		},
 	})
 
@@ -137,7 +137,7 @@ func TestAuthFailureExplainsWhatWasTried(t *testing.T) {
 		"id_ed25519: passphrase protected; unlock it with: ssh-add",
 		"id_ecdsa: not found",
 		"id_rsa: offered",
-		"server said: no Aether member for this key",
+		"server said: no Cloudfield member for this key",
 		"--key <private-key>",
 	} {
 		if !strings.Contains(err.Error(), want) {

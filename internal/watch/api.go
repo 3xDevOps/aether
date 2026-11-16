@@ -60,7 +60,7 @@ func (s *Service) normalize(kind string, conditions []string) ([]string, error) 
 	for _, c := range conditions {
 		switch {
 		case c == "deployed":
-			return nil, invalid("Aether has no deploy signal, so it cannot watch for %q; watch finished or pr_merged instead", c)
+			return nil, invalid("Cloudfield has no deploy signal, so it cannot watch for %q; watch finished or pr_merged instead", c)
 		case !slices.Contains(set.all, c):
 			return nil, invalid("condition %q does not apply to a %s; use %s", c, kind, strings.Join(set.all, ", "))
 		case s.pr == nil && (kind == protocol.WatchTargetPR || c == protocol.WatchPRMerged || c == protocol.WatchCI):

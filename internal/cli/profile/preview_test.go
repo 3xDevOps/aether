@@ -651,7 +651,7 @@ func TestInventoryCodexSessionsIgnored(t *testing.T) {
 		t.Fatalf("ignored = %+v, want the sessions archive reported once", ignored)
 	}
 	if !strings.Contains(ignored[0].Detail, "skipped by default") {
-		t.Errorf("detail does not say the default is Aether's: %q", ignored[0].Detail)
+		t.Errorf("detail does not say the default is Cloudfield's: %q", ignored[0].Detail)
 	}
 	// The user's own ignore file still has the last word.
 	mustWrite(t, filepath.Join(root, IgnoreFileName), "!sessions/\n")

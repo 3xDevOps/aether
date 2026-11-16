@@ -283,7 +283,7 @@ describe('team refresh and summary', () => {
       await refreshTeam(useStore, client)
     })
 
-    const detail = screen.getByRole('list', { name: 'Aether data' }).textContent
+    const detail = screen.getByRole('list', { name: 'Cloudfield data' }).textContent
     expect(detail).toContain('Worktrees256 MB')
     expect(detail).toContain('Transcripts128 MB')
     expect(detail).toContain('Database64 MB')
@@ -302,13 +302,13 @@ describe('team refresh and summary', () => {
     client.disk = vi.fn(async () => current)
     seed({ info: { ...serverInfo, disk: { ...stale, repo_bytes: undefined } } })
     render(<StorageSection />)
-    expect(screen.getByRole('list', { name: 'Aether data' }).textContent).not.toContain('Repositories')
+    expect(screen.getByRole('list', { name: 'Cloudfield data' }).textContent).not.toContain('Repositories')
 
     await act(async () => {
       await refreshTeam(useStore, client)
     })
 
-    expect(screen.getByRole('list', { name: 'Aether data' }).textContent).toContain('Repositories512 MB')
+    expect(screen.getByRole('list', { name: 'Cloudfield data' }).textContent).toContain('Repositories512 MB')
     expect(useStore.getState().info?.disk).toEqual(current)
 
     const failure = new Error('disk RPC unavailable')

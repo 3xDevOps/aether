@@ -22,9 +22,11 @@ import kotlin.random.Random
 private const val CHECK_TIMEOUT_SECONDS = 30L
 
 /**
- * The banner that says a newer Aether release is out, in either mode. The
- * bundled CLI's `update --check --json` decides that, so the release lookup
- * and version ordering are the desktop's. Its button opens Google Play or
+ * The banner that says a newer Aether release is out, in either mode.
+ * Connected through the gateway, the server's release from its
+ * `update.check` decides that, as the update gate does. Otherwise the
+ * bundled CLI's `update --check --json` does, so the release lookup and
+ * version ordering are the desktop's. Its button opens Google Play or
  * the release APK in the browser; this app downloads and installs nothing.
  * Once the last answer is a day old, a failed check shows as one line.
  */
@@ -33,6 +35,8 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private var facts: InstallFacts? = null
     private var check: Future<*>? = null
+    private var checkUrl: String? = null
+    private var via = VIA_CLI
     private var destroyed = false
     private var shown = ""
 
@@ -66,10 +70,17 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
         }
     }
 
-    fun resume() {
+    /**
+     * [gatewayUrl] is the running gateway's handshake URL. [awaitGateway]
+     * says one is on its way, so no check is made before it is up.
+     */
+    fun resume(gatewayUrl: String?, awaitGateway: Boolean) {
+        via = if (gatewayUrl != null) VIA_GATEWAY else VIA_CLI
         val stored = activity.storedUpdate()
         render(stored)
-        if (check?.isDone == false) return
+        // A running check for another gateway must not swallow this one.
+        if (check?.isDone == false && checkUrl == gatewayUrl) return
+        checkUrl = gatewayUrl
         val context = activity.applicationContext
         check =
             executor.submit {
@@ -79,8 +90,9 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
                     facts = read
                     render(activity.storedUpdate())
                 }
-                if (checkDue(System.currentTimeMillis(), stored, read.updatedAt)) {
-                    val run = runCheck(context)
+                if (awaitGateway && gatewayUrl == null) return@submit
+                if (checkDue(System.currentTimeMillis(), stored, read.updatedAt, via)) {
+                    val run = gatewayUrl?.let(::gatewayCheck) ?: runCheck(context)
                     main.post {
                         if (destroyed) return@post
                         val next = recordCheck(activity, run, read.updatedAt)
@@ -99,7 +111,7 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
     private fun render(stored: StoredUpdate) {
         val read = facts
         val now = System.currentTimeMillis()
-        val found = read?.let { noticeFor(stored, it.source, now, it.updatedAt) }
+        val found = read?.let { noticeFor(stored, it.source, now, it.updatedAt, via) }
         val failure = checkFailure(stored, now)
         if (read == null || (found == null && failure == null)) {
             banner.visibility = View.GONE
@@ -123,7 +135,21 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
 }
 
 /** What one run of `aether update --check --json` printed: the check line, else why there is none. */
-class CheckRun(val line: String?, val error: String)
+class CheckRun(val line: String?, val error: String, val via: String = VIA_CLI)
+
+/**
+ * The check of the server the gateway at [handshakeUrl] connects to, or
+ * null when that is not a gateway URL. Blocks; never call it on the main
+ * thread.
+ */
+fun gatewayCheck(handshakeUrl: String): CheckRun? {
+    val call = gatewayCall(handshakeUrl, "update.check") ?: return null
+    return try {
+        serverReleaseCheck(postGateway(call, "{}"))
+    } catch (e: IOException) {
+        CheckRun(null, e.message ?: e.toString(), VIA_GATEWAY)
+    }
+}
 
 /**
  * Stores [run] as the latest check and returns what was stored. Main
@@ -138,6 +164,7 @@ fun recordCheck(context: Context, run: CheckRun, appUpdatedAt: Long): StoredUpda
             run.error,
             appUpdatedAt,
             Random.nextDouble(-CHECK_JITTER, CHECK_JITTER),
+            run.via,
         )
     context.storeUpdate(next)
     return next

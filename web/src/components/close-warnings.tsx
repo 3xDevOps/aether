@@ -113,7 +113,7 @@ function Lines({ warnings, run, onLeave, all, subsessionsLead = 'Closes with it:
 
 function PullRequests({ prs }: { prs: CloseWarning[] }) {
   const oldest = prs.map((pr) => pr.observed_at).filter((at) => at !== undefined).sort()[0]
-  const checked = oldest ? <>when Aether last checked <RelativeTime at={oldest} /></> : 'when Aether last checked'
+  const checked = oldest ? <>when Cloudfield last checked <RelativeTime at={oldest} /></> : 'when Cloudfield last checked'
   const links = prs.map((pr, i) => (
     <span key={pr.url}>
       {i > 0 && ', '}

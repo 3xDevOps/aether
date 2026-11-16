@@ -4,8 +4,8 @@
 # beyond curl and a sha256 tool; OpenSSL 3, when present, checks the
 # release signature.
 #
-#   curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client
+#   curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client
 #
 # Flags (or the matching environment variables):
 #   --version <tag>   AETHER_VERSION      release tag; default: the newest
@@ -26,12 +26,13 @@
 
 set -eu
 
-REPO="${AETHER_REPO:-3xDevOps/Aether}"
-BASE_URL="${AETHER_BASE_URL:-https://github.com/${REPO}/releases/download}"
-VERSION="${AETHER_VERSION:-}"
-BIN_DIR="${AETHER_BIN_DIR:-}"
-COMPONENTS="${AETHER_COMPONENTS:-}"
-ROLE="${AETHER_ROLE:-}"
+# CLOUDFIELD_X wins over AETHER_X when it is not empty (internal/envname).
+REPO="${CLOUDFIELD_REPO:-${AETHER_REPO:-3xDevOps/cloudfield}}"
+BASE_URL="${CLOUDFIELD_BASE_URL:-${AETHER_BASE_URL:-https://github.com/${REPO}/releases/download}}"
+VERSION="${CLOUDFIELD_VERSION:-${AETHER_VERSION:-}}"
+BIN_DIR="${CLOUDFIELD_BIN_DIR:-${AETHER_BIN_DIR:-}}"
+COMPONENTS="${CLOUDFIELD_COMPONENTS:-${AETHER_COMPONENTS:-}}"
+ROLE="${CLOUDFIELD_ROLE:-${AETHER_ROLE:-}}"
 
 # An explicit component choice - a flag, or AETHER_COMPONENTS - also answers
 # the role question. The platform default must not: macOS gets the client
@@ -865,7 +866,7 @@ next_step() {
 link_steps() {
 	printf '  %s\n' "$1"
 	next_step "aether link $2" "on a tailnet: the server's tailnet name"
-	next_step "aether login" "otherwise, sign in to the edge, Aether's relay"
+	next_step "aether login" "otherwise, sign in to the edge, Cloudfield's relay"
 	next_step "aether link --claim <code>" "with the claim link server setup printed"
 	next_step "aether link '<invite link>'" "or with an invite link from an admin"
 }

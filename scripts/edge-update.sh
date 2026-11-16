@@ -18,7 +18,9 @@ image=ghcr.io/3xdevops/aether-edge
 service=aether-edge
 backups=/var/lib/aether-edge/backups
 promotion_type=https://github.com/3xDevOps/aether/edge-promotion/v1
-promoter=https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main
+# promote-edge.yml on main, in the repository under its old name or its
+# current one.
+promoter='^https://github\.com/3xDevOps/(aether|cloudfield)/\.github/workflows/promote-edge\.yml@refs/heads/main$'
 
 say() {
 	printf 'edge-update: %s\n' "$*" >&2
@@ -31,8 +33,8 @@ die() {
 
 usage() {
 	cat >&2 <<'EOF'
-usage: aether-edge-update [--check] [--channel <tag>] [--manual-steps-done]
-       aether-edge-update --rollback [--restore-backup]
+usage: aether-edge-update [--check] [--channel nightly|beta|stable|latest] [--manual-steps-done]
+       aether-edge-update --rollback [--restore-backup] [--drop-origin-pairs]
        aether-edge-update --recover
 EOF
 	exit 2
@@ -41,6 +43,7 @@ EOF
 mode=update
 manual_steps_done=0
 restore_backup=0
+drop_pairs=0
 channel_flag=""
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -49,6 +52,7 @@ while [ $# -gt 0 ]; do
 	--recover) mode=recover ;;
 	--manual-steps-done) manual_steps_done=1 ;;
 	--restore-backup) restore_backup=1 ;;
+	--drop-origin-pairs) drop_pairs=1 ;;
 	--channel)
 		[ $# -ge 2 ] || usage
 		channel_flag="$2"
@@ -58,30 +62,45 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
-[ "$restore_backup" = 0 ] || [ "$mode" = rollback ] || usage
+[ "$restore_backup$drop_pairs" = 00 ] || [ "$mode" = rollback ] || usage
 
-config="${AETHER_EDGE_UPDATE_CONFIG:-/etc/aether-edge-update.env}"
+# Prints the name in effect of setting EDGE_$1: CLOUDFIELD_EDGE_$1 when it
+# is not empty, else AETHER_EDGE_$1. Messages name it, so an operator
+# changes the variable that counts.
+setting() {
+	eval "[ -n \"\${CLOUDFIELD_EDGE_$1:-}\" ]" && echo "CLOUDFIELD_EDGE_$1" || echo "AETHER_EDGE_$1"
+}
+
+# CLOUDFIELD_X wins over AETHER_X when it is not empty.
+config="${CLOUDFIELD_EDGE_UPDATE_CONFIG:-${AETHER_EDGE_UPDATE_CONFIG:-/etc/aether-edge-update.env}}"
 # shellcheck disable=SC1090 # the operator's settings
 [ ! -f "$config" ] || . "$config"
-channel="${channel_flag:-${AETHER_EDGE_UPDATE_CHANNEL:-stable}}"
-state_dir="${AETHER_EDGE_UPDATE_STATE:-/var/lib/aether-edge-update}"
-compose_dir="${AETHER_EDGE_UPDATE_COMPOSE_DIR:-/opt/aether-edge}"
-digest_file="${AETHER_EDGE_UPDATE_DIGEST_FILE:-$compose_dir/.env}"
-relay_url="${AETHER_EDGE_UPDATE_RELAY_URL:-}"
-tolerance="${AETHER_EDGE_UPDATE_SERVER_TOLERANCE:-10%}"
-server_wait="${AETHER_EDGE_UPDATE_SERVER_WAIT:-120}"
-public_wait="${AETHER_EDGE_UPDATE_PUBLIC_WAIT:-300}"
+channel="${channel_flag:-${CLOUDFIELD_EDGE_UPDATE_CHANNEL:-${AETHER_EDGE_UPDATE_CHANNEL:-stable}}}"
+case "$channel" in
+nightly | beta | stable | latest) ;;
+*) die "the channel is nightly, beta, stable or latest, got '$channel'; set $(setting UPDATE_CHANNEL) in $config or pass --channel" ;;
+esac
+state_dir="${CLOUDFIELD_EDGE_UPDATE_STATE:-${AETHER_EDGE_UPDATE_STATE:-/var/lib/aether-edge-update}}"
+releases="$state_dir/releases"
+compose_dir="${CLOUDFIELD_EDGE_UPDATE_COMPOSE_DIR:-${AETHER_EDGE_UPDATE_COMPOSE_DIR:-/opt/aether-edge}}"
+digest_file="${CLOUDFIELD_EDGE_UPDATE_DIGEST_FILE:-${AETHER_EDGE_UPDATE_DIGEST_FILE:-$compose_dir/.env}}"
+relay_url="${CLOUDFIELD_EDGE_UPDATE_RELAY_URL:-${AETHER_EDGE_UPDATE_RELAY_URL:-}}"
+tolerance="${CLOUDFIELD_EDGE_UPDATE_SERVER_TOLERANCE:-${AETHER_EDGE_UPDATE_SERVER_TOLERANCE:-10%}}"
+server_wait="${CLOUDFIELD_EDGE_UPDATE_SERVER_WAIT:-${AETHER_EDGE_UPDATE_SERVER_WAIT:-120}}"
+public_wait="${CLOUDFIELD_EDGE_UPDATE_PUBLIC_WAIT:-${AETHER_EDGE_UPDATE_PUBLIC_WAIT:-300}}"
 
 for n in "$server_wait" "$public_wait" "${tolerance%\%}"; do
 	case "$n" in
-	'' | *[!0-9]*) die "AETHER_EDGE_UPDATE_SERVER_WAIT and AETHER_EDGE_UPDATE_PUBLIC_WAIT take whole seconds and AETHER_EDGE_UPDATE_SERVER_TOLERANCE a count or a percentage such as 10%; got '$server_wait', '$public_wait' and '$tolerance'" ;;
+	'' | *[!0-9]*) die "$(setting UPDATE_SERVER_WAIT) and $(setting UPDATE_PUBLIC_WAIT) take whole seconds and $(setting UPDATE_SERVER_TOLERANCE) a count or a percentage such as 10%; got '$server_wait', '$public_wait' and '$tolerance'" ;;
 	esac
 done
-[ -n "$relay_url" ] || die "AETHER_EDGE_UPDATE_RELAY_URL is not set; set it in $config to the edge's relay origin, such as https://edge.example.com"
+[ -n "$relay_url" ] || die "$(setting UPDATE_RELAY_URL) is not set; set it in $config to the edge's relay origin, such as https://edge.example.com"
 
 command -v jq >/dev/null || die "jq not found; install it (docs/edge.md, \"Installing the updater\")"
 
-# Exits 0 when release $1 sorts before $2 by SemVer precedence.
+# Exits 0 when release $1 sorts before $2 by SemVer precedence. Only a
+# running image from before release channels orders this way; every other
+# order comes from its release-check.
 version_lt() {
 	awk -v a="$1" -v b="$2" '
 	function ident(x, y,   xn, yn) {
@@ -188,7 +207,7 @@ run_on_data() {
 bootstrap() {
 	to="${new:-sha256:<digest>}"
 	say "$image@$1 predates aether-edge version --json, release-check, backup and schema, which this updater runs from the running image. Upgrade once by hand (docs/edge.md, \"First upgrade\"), in $compose_dir:"
-	say "  1. verify $to: cosign verify-attestation --new-bundle-format --type $promotion_type --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity $promoter $image@$to"
+	say "  1. verify $to: cosign verify-attestation --new-bundle-format --type $promotion_type --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '$promoter' $image@$to"
 	say "  2. back up: docker compose stop $service && cp -a data data.pre-update"
 	say "  3. pin it: set AETHER_EDGE_DIGEST=$to in $digest_file"
 	say "  4. docker compose up -d --wait $service"
@@ -205,22 +224,64 @@ version_json() {
 }
 
 # Exits 0 when promote-edge.yml on main attested digest $1 as release $2
-# on the channel. The workflow file run from any other ref signs with
-# another identity, which cosign refuses.
+# on one of the channels $3, a JSON array. The workflow file run from any
+# other ref or repository signs with another identity, which cosign refuses.
 verify_promotion() {
 	atts="$(cosign verify-attestation --new-bundle-format --type "$promotion_type" \
 		--certificate-oidc-issuer https://token.actions.githubusercontent.com \
-		--certificate-identity "$promoter" \
+		--certificate-identity-regexp "$promoter" \
 		"$image@$1")" || return 1
-	printf '%s\n' "$atts" | jq -e --arg c "$channel" --arg t "$2" --arg d "$1" \
-		'.payload | @base64d | fromjson | .predicate | select(.channel == $c and .tag == $t and .digest == $d)' >/dev/null && return 0
-	say "no promotion attestation of $1 names channel $channel and release $2"
+	printf '%s\n' "$atts" | jq -e --argjson cs "$3" --arg t "$2" --arg d "$1" \
+		'.payload | @base64d | fromjson | .predicate | select(.channel as $c | any($cs[]; . == $c)) | select(.tag == $t and .digest == $d)' >/dev/null && return 0
+	say "no promotion attestation of $1 names release $2 on $(printf '%s\n' "$3" | jq -r 'join(" or ")')"
 	return 1
 }
 
+# Exits 0 when version --json $1 has no build: the image predates release
+# channels, and its release-check takes only --tag, --digest and --from.
+predates_channels() {
+	printf '%s\n' "$1" | jq -e '.build == null and .hotfix == null' >/dev/null
+}
+
+# Exits 0 when $1 is a release tag that is safe in a file name.
+release_tag() {
+	case "$1" in
+	'' | .* | *[!A-Za-z0-9.+_-]*) return 1 ;;
+	esac
+}
+
+# Runs release-check from image $1, release $4, whose version --json is
+# $5, for release $2 as digest $3. It refuses a release this host's
+# channel does not take or that is not newer by the build numbers both
+# signed manifests carry. It keeps each manifest it verified in $releases,
+# which the container's user writes through a mount, and reads $4's from
+# there when it is kept: GitHub may prune a release the edge still runs. A
+# kept copy that no longer verifies is named, to be deleted.
+release_check() {
+	if predates_channels "$5"; then
+		docker run --rm "$image@$1" release-check --tag "$2" --digest "$3" --from "$4" --json
+		return
+	fi
+	if ! release_tag "$4"; then
+		say "$image@$1 reports version '$4', which is not a release tag"
+		return 1
+	fi
+	kept=""
+	[ ! -f "$releases/$4.json" ] || [ ! -f "$releases/$4.json.sig" ] || kept="--from-manifest=/run/aether-edge-update/releases/$4.json"
+	docker run --rm -v "$releases:/run/aether-edge-update/releases" "$image@$1" release-check \
+		--tag "$2" --digest "$3" --from "$4" --json --channel "$channel" --from-digest "$1" \
+		--keep-manifests /run/aether-edge-update/releases ${kept:+"$kept"} 2>"$state_dir/release-check.err" && rc=0 || rc=$?
+	cat "$state_dir/release-check.err" >&2
+	if [ -n "$kept" ] && grep -q '^aether-edge: the running release: saved ' "$state_dir/release-check.err"; then
+		say "the kept signed manifest of the running $4 does not verify; delete $releases/$4.json and $releases/$4.json.sig, and the next run downloads them again"
+	fi
+	return "$rc"
+}
+
 # Verifies the running digest $1 as an update verifies a new one, so that
-# --check vets a digest pinned by hand before its first start. Sets
-# from_json.
+# --check vets a digest pinned by hand before its first start, except that
+# a promotion on any channel will do: a host that changed channel runs a
+# release promoted on the old one. Sets from_json.
 verify_running() {
 	docker pull --quiet "$image@$1" >/dev/null || die "docker pull $image@$1 failed"
 	v="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image@$1")" ||
@@ -229,13 +290,13 @@ verify_running() {
 	if [ "$channel" = latest ]; then
 		say "latest is not a promoted channel; only the running image's own release-check vouches for $v ($1)"
 	else
-		verify_promotion "$1" "$v" ||
-			die "the running $v ($1) has no valid promotion attestation on $channel from promote-edge.yml on main; do not run it"
+		verify_promotion "$1" "$v" '["nightly","beta","stable"]' ||
+			die "the running $v ($1) has no valid promotion attestation from promote-edge.yml on main; do not run it"
 	fi
 	from_json="$(version_json "$1")" || exit 1
 	got="$(printf '%s\n' "$from_json" | jq -r .version)"
 	[ "$got" = "$v" ] || die "$image@$1 reports version $got but is labelled $v"
-	docker run --rm "$image@$1" release-check --tag "$v" --digest "$1" --from "$v" --json >/dev/null ||
+	release_check "$1" "$v" "$1" "$v" "$from_json" >/dev/null ||
 		die "release-check refused the running $v ($1); do not run it"
 	say "verified the running $v ($1)"
 }
@@ -510,16 +571,18 @@ update() {
 	[ -n "$new_version" ] || die "$image@$new has no org.opencontainers.image.version label"
 	[ -n "$from_json" ] || from_json="$(version_json "$cur")" || exit 1
 	cur_version="$(printf '%s\n' "$from_json" | jq -r .version)"
-	version_lt "$cur_version" "$new_version" ||
-		die "refusing $new_version ($new) on $channel: not newer than the running $cur_version"
+	if predates_channels "$from_json"; then
+		version_lt "$cur_version" "$new_version" ||
+			die "refusing $new_version ($new) on $channel: not newer than the running $cur_version"
+	fi
 	if [ "$channel" = latest ]; then
 		say "latest is not a promoted channel; trusting the release signature alone"
 	else
-		verify_promotion "$new" "$new_version" ||
+		verify_promotion "$new" "$new_version" "[\"$channel\"]" ||
 			die "$new_version ($new) on $channel has no valid promotion attestation from promote-edge.yml on main; nothing changed"
 	fi
 
-	report="$(docker run --rm "$image@$cur" release-check --tag "$new_version" --digest "$new" --from "$cur_version" --json)" && rc=0 || rc=$?
+	report="$(release_check "$cur" "$new_version" "$new" "$cur_version" "$from_json")" && rc=0 || rc=$?
 	case "$rc" in
 	0) ;;
 	2) bootstrap "$cur" ;;
@@ -559,6 +622,10 @@ update() {
 	to_json="$(docker run --rm --network none "$image@$new" version --json)" || die "aether-edge version --json failed in $image@$new"
 	got="$(printf '%s\n' "$to_json" | jq -r .version)"
 	[ "$got" = "$new_version" ] || die "$image@$new reports version $got but is labelled $new_version"
+	if ! predates_channels "$from_json" &&
+		! { release_tag "$new_version" && [ -f "$releases/$new_version.json" ] && [ -f "$releases/$new_version.json.sig" ]; }; then
+		die "release-check kept no signed manifest of $new_version in $releases, which orders updates once GitHub prunes it; nothing changed, and the next run retries"
+	fi
 	printf '%s\n' "$from_json" >"$state_dir/from.json"
 	printf '%s\n' "$to_json" >"$state_dir/to.json"
 
@@ -579,9 +646,31 @@ refuse_restore() {
 	die "$prev_version cannot run the database $cur_version migrated, so this rollback restores $prev_backup, taken $(date -u -d "@$taken" +%Y-%m-%dT%H:%M:%SZ), $((($(date +%s) - taken) / 86400)) days ago. Every account, device, sign-in and server change since then is lost. Run aether-edge-update --rollback --restore-backup to roll back anyway; nothing changed"
 }
 
+# Prints the name of the setting in the edge's Compose service environment
+# that lists address pairs beyond the first, CLOUDFIELD_EDGE_ORIGIN_PAIRS
+# or AETHER_EDGE_ORIGIN_PAIRS, or nothing when neither is set.
+origin_pairs() {
+	cfg="$(compose config --format json)" || die "docker compose config failed in $compose_dir; nothing changed"
+	printf '%s\n' "$cfg" | jq -r --arg s "$service" '.services[$s].environment // {}
+		| if (.CLOUDFIELD_EDGE_ORIGIN_PAIRS // "") != "" then "CLOUDFIELD_EDGE_ORIGIN_PAIRS"
+		elif (.AETHER_EDGE_ORIGIN_PAIRS // "") != "" then "AETHER_EDGE_ORIGIN_PAIRS" else "" end'
+}
+
+# Exits 0 when image $1 speaks edge protocol 6 or later: it is from the
+# first release that serves more than one address pair, or a later one.
+serves_pairs() {
+	docker run --rm --network none "$image@$1" version --json | jq -e '.protocol.version >= 6' >/dev/null 2>&1
+}
+
 rollback() {
 	[ -s "$state_dir/previous" ] || die "no previous release recorded in $state_dir/previous"
 	read -r prev_digest prev_version prev_backup <"$state_dir/previous"
+	if [ "$drop_pairs" = 0 ]; then
+		pairs="$(origin_pairs)" || exit 1
+		if [ -n "$pairs" ] && ! serves_pairs "$prev_digest"; then
+			die "$service lists more address pairs in $pairs, and $prev_version ($prev_digest) reports no edge protocol 6 or later in version --json, so it serves only the first pair and every server enrolled at another loses the edge. Remove $pairs from $compose_dir first, or run aether-edge-update --rollback --drop-origin-pairs to roll back anyway; nothing changed"
+		fi
+	fi
 	cur="$(current_digest)"
 	cur_json="$(version_json "$cur")" || exit 1
 	cur_version="$(printf '%s\n' "$cur_json" | jq -r .version)"
@@ -622,6 +711,10 @@ if ! flock -n 9; then
 	[ "$mode" != rollback ] && [ "$manual_steps_done" = 0 ] || exit 1
 	exit 0
 fi
+mkdir -p "$releases"
+chmod 0755 "$releases"
+chown 65532:65532 "$releases" ||
+	die "chown 65532:65532 $releases failed; the edge's user, uid 65532, must write the signed manifests release-check keeps there"
 cd "$compose_dir"
 
 state=idle kind=update from_digest="" from_version="" to_digest="" to_version=""

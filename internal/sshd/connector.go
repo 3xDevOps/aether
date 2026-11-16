@@ -333,6 +333,11 @@ func (s *Server) connectorList(ctx context.Context, member domain.MemberID, _ js
 	universal := s.UniversalConnectorURL()
 	out := protocol.ConnectorListResult{Connectors: make([]protocol.Connector, 0, len(list)), URL: connectorURL, UniversalURL: universal,
 		SignIn: universal != "" && connectorURL == universal && s.cfg.EdgeAccess == edgeproto.PolicyAccount}
+	if edge := s.currentEdgeOwner(); universal != "" && edge != nil {
+		for _, o := range edge.RelayOrigins() {
+			out.UniversalURLs = append(out.UniversalURLs, o+edgeproto.PathUniversalMCP)
+		}
+	}
 	for _, c := range list {
 		out.Connectors = append(out.Connectors, connectorToWire(c))
 	}

@@ -215,8 +215,8 @@ func (s *Service) reviewerSignin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if c.Reason == "" {
-		s.renderChoose(w, nil, q, []choice{c}, nil)
+		s.renderChoose(w, r, nil, q, []choice{c}, nil)
 	} else {
-		s.renderChoose(w, nil, q, nil, []choice{c})
+		s.renderChoose(w, r, nil, q, nil, []choice{c})
 	}
 }

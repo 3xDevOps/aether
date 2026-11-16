@@ -24,12 +24,31 @@ type ServerUpdateStore interface {
 	// earlier one. A nil pending clears it (cancel, or an attempt that
 	// finished).
 	SetPendingServerUpdate(ctx context.Context, pending *PendingServerUpdate) error
+	// SchedulePendingServerUpdate records pending only while none is
+	// pending, reporting whether it did, so it never replaces an update a
+	// member scheduled.
+	SchedulePendingServerUpdate(ctx context.Context, pending PendingServerUpdate) (bool, error)
 	// SetLastServerUpdate records the outcome of an attempt and clears the
 	// pending row in the same write, so a finished attempt can never be
 	// retried by the next idle tick.
 	SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) error
 	// SchemaVersion is the highest migration applied to this database.
 	SchemaVersion(ctx context.Context) (int, error)
+	// RaiseDeclinedServerUpdate records declined as the build the server
+	// no longer schedules by itself, unless a higher build is declined
+	// already: the mark only rises, in one statement.
+	RaiseDeclinedServerUpdate(ctx context.Context, declined DeclinedServerUpdate) error
+	// RetirePendingServerUpdate records last and clears the pending row
+	// only while it is still pending, reporting whether it was.
+	RetirePendingServerUpdate(ctx context.Context, pending PendingServerUpdate, last ServerUpdateAttempt) (bool, error)
+	// ReleaseChannel is the release channel the server follows, "" while
+	// a new server has not chosen one.
+	ReleaseChannel(ctx context.Context) (string, error)
+	// SetReleaseChannel saves the release channel.
+	SetReleaseChannel(ctx context.Context, channel string) error
+	// ChooseReleaseChannel saves channel only while none is chosen, and
+	// returns the channel in effect, so a choice made meanwhile stands.
+	ChooseReleaseChannel(ctx context.Context, channel string) (string, error)
 }
 
 // Outcome values of ServerUpdateAttempt.
@@ -43,10 +62,20 @@ const (
 	ServerUpdateRolledBack = "rolled_back"
 )
 
-// ServerUpdate is the whole state. Both fields are nil when unset.
+// ServerUpdate is the whole state. Each field is nil when unset.
 type ServerUpdate struct {
-	Pending *PendingServerUpdate
-	Last    *ServerUpdateAttempt
+	Pending  *PendingServerUpdate
+	Last     *ServerUpdateAttempt
+	Declined *DeclinedServerUpdate
+}
+
+// DeclinedServerUpdate is the build the server no longer schedules by
+// itself: a super admin cancelled it or rolled back from it, or it
+// failed. Build is always positive.
+type DeclinedServerUpdate struct {
+	Version string
+	Build   int
+	Hotfix  int
 }
 
 // PendingServerUpdate is one update waiting for an idle server.
@@ -73,12 +102,15 @@ func (d *DB) GetServerUpdate(ctx context.Context) (ServerUpdate, error) {
 		lastVersion, outcome string
 		detail               string
 		lastAt               int64
+		declined             DeclinedServerUpdate
 	)
 	err := d.db.QueryRowContext(ctx,
 		`SELECT pending_version, pending_requested_by, pending_requested_at,
-		        last_version, last_outcome, last_detail, last_at
+		        last_version, last_outcome, last_detail, last_at,
+		        declined_version, declined_build, declined_hotfix
 		 FROM server_update_state WHERE id = 1`,
-	).Scan(&pendingVersion, &pendingBy, &pendingAt, &lastVersion, &outcome, &detail, &lastAt)
+	).Scan(&pendingVersion, &pendingBy, &pendingAt, &lastVersion, &outcome, &detail, &lastAt,
+		&declined.Version, &declined.Build, &declined.Hotfix)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ServerUpdate{}, nil
 	}
@@ -91,6 +123,9 @@ func (d *DB) GetServerUpdate(ctx context.Context) (ServerUpdate, error) {
 			RequestedBy: domain.MemberID(pendingBy),
 			RequestedAt: decodeTime(pendingAt),
 		}
+	}
+	if declined.Version != "" {
+		out.Declined = &declined
 	}
 	if outcome != "" {
 		out.Last = &ServerUpdateAttempt{
@@ -133,6 +168,78 @@ func (d *DB) SetPendingServerUpdate(ctx context.Context, pending *PendingServerU
 	return nil
 }
 
+func (d *DB) RaiseDeclinedServerUpdate(ctx context.Context, declined DeclinedServerUpdate) error {
+	if declined.Version == "" || declined.Build < 1 {
+		return errors.New("store: declined server update requires a version and a build")
+	}
+	_, err := d.db.ExecContext(ctx,
+		`INSERT INTO server_update_state (id, declined_version, declined_build, declined_hotfix)
+		 VALUES (1, ?, ?, ?)
+		 ON CONFLICT (id) DO UPDATE SET
+		   declined_version = excluded.declined_version,
+		   declined_build = excluded.declined_build,
+		   declined_hotfix = excluded.declined_hotfix
+		 WHERE declined_build < excluded.declined_build
+		    OR declined_build = excluded.declined_build AND declined_hotfix <= excluded.declined_hotfix`,
+		declined.Version, declined.Build, declined.Hotfix)
+	if err != nil {
+		return fmt.Errorf("store: write declined server update: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) RetirePendingServerUpdate(ctx context.Context, pending PendingServerUpdate, last ServerUpdateAttempt) (bool, error) {
+	at, err := encodeTime(pending.RequestedAt)
+	if err != nil {
+		return false, fmt.Errorf("store: retire server update: %w", err)
+	}
+	stamp, err := encodeTime(last.At)
+	if err != nil {
+		return false, fmt.Errorf("store: retire server update: %w", err)
+	}
+	res, err := d.db.ExecContext(ctx,
+		`UPDATE server_update_state SET
+		   last_version = ?, last_outcome = ?, last_detail = ?, last_at = ?,
+		   pending_version = '', pending_requested_by = '', pending_requested_at = 0
+		 WHERE id = 1 AND pending_version = ? AND pending_requested_by = ? AND pending_requested_at = ?`,
+		last.Version, last.Outcome, last.Detail, stamp, pending.Version, string(pending.RequestedBy), at)
+	if err != nil {
+		return false, fmt.Errorf("store: retire server update: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: retire server update: %w", err)
+	}
+	return n == 1, nil
+}
+
+func (d *DB) SchedulePendingServerUpdate(ctx context.Context, pending PendingServerUpdate) (bool, error) {
+	if pending.Version == "" {
+		return false, errors.New("store: pending server update requires a version")
+	}
+	stamp, err := encodeTime(pending.RequestedAt)
+	if err != nil {
+		return false, fmt.Errorf("store: pending server update: %w", err)
+	}
+	res, err := d.db.ExecContext(ctx,
+		`INSERT INTO server_update_state (id, pending_version, pending_requested_by, pending_requested_at)
+		 VALUES (1, ?, ?, ?)
+		 ON CONFLICT (id) DO UPDATE SET
+		   pending_version = excluded.pending_version,
+		   pending_requested_by = excluded.pending_requested_by,
+		   pending_requested_at = excluded.pending_requested_at
+		 WHERE pending_version = ''`,
+		pending.Version, string(pending.RequestedBy), stamp)
+	if err != nil {
+		return false, fmt.Errorf("store: schedule server update: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: schedule server update: %w", err)
+	}
+	return n == 1, nil
+}
+
 func (d *DB) SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) error {
 	if last.Outcome == "" {
 		return errors.New("store: server update attempt requires an outcome")
@@ -157,6 +264,116 @@ func (d *DB) SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) 
 		return fmt.Errorf("store: write server update attempt: %w", err)
 	}
 	return nil
+}
+
+func (d *DB) ReleaseChannel(ctx context.Context) (string, error) {
+	return readReleaseChannel(ctx, d.db)
+}
+
+func (d *DB) SetReleaseChannel(ctx context.Context, channel string) error {
+	return writeReleaseChannel(ctx, d.db, channel, false)
+}
+
+func (d *DB) ChooseReleaseChannel(ctx context.Context, channel string) (string, error) {
+	if err := writeReleaseChannel(ctx, d.db, channel, true); err != nil {
+		return "", err
+	}
+	return d.ReleaseChannel(ctx)
+}
+
+func readReleaseChannel(ctx context.Context, db *sql.DB) (string, error) {
+	var channel string
+	err := db.QueryRowContext(ctx, `SELECT release_channel FROM server_update_state WHERE id = 1`).Scan(&channel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: read release channel: %w", err)
+	}
+	return channel, nil
+}
+
+// writeReleaseChannel saves channel, or with unset only while none is
+// chosen.
+func writeReleaseChannel(ctx context.Context, db *sql.DB, channel string, unset bool) error {
+	if channel == "" {
+		return errors.New("store: release channel requires a channel")
+	}
+	query := `INSERT INTO server_update_state (id, release_channel) VALUES (1, ?)
+		 ON CONFLICT (id) DO UPDATE SET release_channel = excluded.release_channel`
+	if unset {
+		query += ` WHERE release_channel = ''`
+	}
+	if _, err := db.ExecContext(ctx, query, channel); err != nil {
+		return fmt.Errorf("store: write release channel: %w", err)
+	}
+	return nil
+}
+
+// releaseChannelSchema is the migration that adds release_channel.
+const releaseChannelSchema = 113
+
+// ChannelFile is the release channel of a database opened without
+// migrating it, for `aether-server update` on the host while the server
+// runs; the server reads a change at its next release check.
+type ChannelFile struct {
+	path string
+	db   *sql.DB
+}
+
+// OpenChannelFile opens the release channel of the database at path. A
+// database from before release channels reads as beta, which its
+// migration gives it, and cannot be changed until the server has
+// migrated it.
+func OpenChannelFile(path string) (*ChannelFile, error) {
+	schema, err := ReadSchemaVersion(path)
+	if err != nil {
+		return nil, err
+	}
+	f := &ChannelFile{path: path}
+	if schema < releaseChannelSchema {
+		return f, nil
+	}
+	if f.db, err = sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=busy_timeout(5000)"); err != nil {
+		return nil, fmt.Errorf("store: open %s: %w", path, err)
+	}
+	return f, nil
+}
+
+func (f *ChannelFile) ReleaseChannel(ctx context.Context) (string, error) {
+	if f.db == nil {
+		return "beta", nil
+	}
+	return readReleaseChannel(ctx, f.db)
+}
+
+func (f *ChannelFile) SetReleaseChannel(ctx context.Context, channel string) error {
+	if f.db == nil {
+		return f.predates()
+	}
+	return writeReleaseChannel(ctx, f.db, channel, false)
+}
+
+func (f *ChannelFile) ChooseReleaseChannel(ctx context.Context, channel string) (string, error) {
+	if f.db == nil {
+		return f.ReleaseChannel(ctx)
+	}
+	if err := writeReleaseChannel(ctx, f.db, channel, true); err != nil {
+		return "", err
+	}
+	return f.ReleaseChannel(ctx)
+}
+
+func (f *ChannelFile) predates() error {
+	return fmt.Errorf("store: the database at %s is at a schema from before release channels (below %d); restart aether-server onto this release first", f.path, releaseChannelSchema)
+}
+
+// Close closes the database.
+func (f *ChannelFile) Close() error {
+	if f.db == nil {
+		return nil
+	}
+	return f.db.Close()
 }
 
 func (d *DB) SchemaVersion(ctx context.Context) (int, error) {

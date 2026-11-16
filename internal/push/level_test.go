@@ -85,7 +85,7 @@ func TestTheDigestHasAFixedShape(t *testing.T) {
 		{Kind: KindMerged, Title: "acme/web#42: Add a test", Body: "PR #42 merged on GitHub"},
 	}
 	title, body := digestText(items, digestLines)
-	if want := "Aether · 2 need you · 1 failed · 3 done · 1 merged"; title != want {
+	if want := "Cloudfield · 2 need you · 1 failed · 3 done · 1 merged"; title != want {
 		t.Errorf("title = %q, want %q", title, want)
 	}
 	want := `api  Fix login test: asks "run the migration?"  [Answer]
@@ -115,7 +115,7 @@ func TestADigestOfLongNamesStillFitsOnePush(t *testing.T) {
 	if err != nil || len(payload) > maxPayload {
 		t.Fatalf("digest is %d octets, %v; want at most %d", len(payload), err, maxPayload)
 	}
-	if !strings.Contains(string(payload), "Aether · 7 done") {
+	if !strings.Contains(string(payload), "Cloudfield · 7 done") {
 		t.Fatalf("digest %s lost its counts", payload)
 	}
 }

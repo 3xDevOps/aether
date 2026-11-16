@@ -854,6 +854,8 @@ func (f *fakeRuns) StopTerminal(_ context.Context, member domain.MemberID) error
 	return f.terminalStopErr
 }
 
+func (f *fakeRuns) ForgetOMPAccount(context.Context, domain.MemberID) {}
+
 func (f *fakeRuns) WithStoppedTerminal(ctx context.Context, member domain.MemberID, afterStop func() error) error {
 	if err := f.StopTerminal(ctx, member); err != nil {
 		return err

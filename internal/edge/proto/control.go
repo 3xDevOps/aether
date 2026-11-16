@@ -71,12 +71,20 @@ func (h Hello) PublicKey() (ssh.PublicKey, error) {
 }
 
 // Ready (edge to server) confirms enrollment. EdgeKey is the key grants are
-// signed with; the server pins it.
+// signed with; the server pins it. RelayOrigins, sent only by an edge that
+// serves more than one relay origin, lists every one of them, the origin
+// the server enrolled at among them. A server that does not know the
+// member ignores it.
 type Ready struct {
-	ServerID string            `json:"server_id"`
-	State    string            `json:"state"`
-	EdgeKey  ed25519.PublicKey `json:"edge_key"`
+	ServerID     string            `json:"server_id"`
+	State        string            `json:"state"`
+	EdgeKey      ed25519.PublicKey `json:"edge_key"`
+	RelayOrigins []string          `json:"relay_origins,omitempty"`
 }
+
+// MaxRelayOrigins bounds the relay origins an edge serves, and the
+// entries of Ready.RelayOrigins a server keeps.
+const MaxRelayOrigins = 16
 
 // Open (edge to server) asks the server to attach a data socket for one
 // client connection, with Ticket as the bearer token of the data socket
@@ -240,6 +248,20 @@ func (m Ready) validate() error {
 	return nil
 }
 
+// usableOrigins keeps the canonical origins of list, MaxRelayOrigins at
+// most. A list the server cannot use never refuses the ready it came in:
+// a later edge may send more origins, or forms this build does not
+// accept.
+func usableOrigins(list []string) []string {
+	var out []string
+	for _, o := range list {
+		if c, err := Origin(o); err == nil && c == o && len(out) < MaxRelayOrigins {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
 func (m Open) validate() error {
 	switch {
 	case !ValidConnID(m.ConnID):
@@ -379,7 +401,13 @@ func DecodeControl(data []byte) (Message, error) {
 	case "hello":
 		return decodeAs[Hello](data)
 	case "ready":
-		return decodeAs[Ready](data)
+		m, err := decodeAs[Ready](data)
+		if err != nil {
+			return nil, err
+		}
+		r := m.(Ready)
+		r.RelayOrigins = usableOrigins(r.RelayOrigins)
+		return r, nil
 	case "open":
 		return decodeAs[Open](data)
 	case "open_result":

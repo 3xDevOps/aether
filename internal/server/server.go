@@ -33,6 +33,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/ompbroker"
 	"github.com/3xDevOps/Aether/internal/preference"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -43,6 +44,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/servergw"
+	"github.com/3xDevOps/Aether/internal/serversetup"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/signing"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -325,6 +327,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 
 	s.rt = cfg.Runtime
 	var vmCheckouts *gitengine.VM
+	var ompBrokers *ompbroker.Manager
 	if s.rt == nil {
 		if s.docker, err = runtime.NewDocker(runtime.WithContainerRuntime(cfg.ContainerRuntime)); err != nil {
 			return nil, err
@@ -349,6 +352,17 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 				return nil, vmErr
 			}
 			s.rt, vmCheckouts = vms, &gitengine.VM{Disks: images, Guest: vms.Git}
+			uid, gid, userErr := serversetup.EnsureSystemUser(ctx, serversetup.OMPBrokerUser)
+			if userErr != nil {
+				slog.Warn("server: no user for omp's auth broker; omp in session VMs cannot sign in", "error", userErr)
+			}
+			ompBrokers = ompbroker.NewManager(ompbroker.Config{
+				Binary: serversetup.OMPBroker.Path, Dir: filepath.Join(cfg.DataDir, "omp-broker"),
+				DataDir: cfg.DataDir, Units: vm.SystemdUnits{}, Unbind: vm.Unbind, UID: uid, GID: gid,
+				Bind: func(target, base, subpath string, onDiskUID, onDiskGID int) error {
+					return vm.BindBeneath(target, base, subpath, vm.IDMap{OnDiskUID: onDiskUID, OnDiskGID: onDiskGID, ShownUID: uid, ShownGID: gid})
+				},
+			})
 		default:
 			return nil, fmt.Errorf("server: session-runtime %q: use %s or %s", cfg.SessionRuntime, SessionRuntimeDocker, SessionRuntimeVM)
 		}
@@ -455,6 +469,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		StateDir:       filepath.Join(cfg.DataDir, "scheduler"),
 		DataDir:        cfg.DataDir,
 		Homes:          homes,
+		OMPBrokers:     ompBrokers,
 		Signing:        s.signing,
 		Memory:         mem,
 		RemoveAll:      removeAgentFiles,

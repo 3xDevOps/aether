@@ -11,12 +11,13 @@ import (
 )
 
 // RelayConfig is the configuration of the relay that serves beside s: the
-// relay origin and signing key, with s as the relay's directory and egress
+// relay origins and signing key, with s as the relay's directory and egress
 // store. budget is the monthly egress budget in bytes, 0 for none.
 func (s *Service) RelayConfig(budget int64) relay.Config {
 	d := relayDirectory{s}
 	return relay.Config{
-		Origin:       s.relayOrigin,
+		Origin:       s.pairs[0].relay,
+		MoreOrigins:  s.moreRelayOrigins(),
 		EdgeKey:      s.key,
 		Directory:    d,
 		Egress:       d,

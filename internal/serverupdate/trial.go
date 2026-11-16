@@ -16,6 +16,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -48,6 +49,8 @@ type swapRecord struct {
 	Phase       string `json:"phase"`
 	FromVersion string `json:"from_version"`
 	ToVersion   string `json:"to_version"`
+	ToBuild     int    `json:"to_build,omitempty"`
+	ToHotfix    int    `json:"to_hotfix,omitempty"`
 	RequestedBy string `json:"requested_by,omitempty"`
 	// Binaries are the replaced files, the server first; each previous
 	// file sits beside it as <path>.prev.
@@ -90,49 +93,7 @@ func saveRecord(dir string, rec *swapRecord) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(recordPath(dir), data)
-}
-
-// writeFileAtomic replaces path so a crash leaves either the old or the
-// new content, never a torn file.
-func writeFileAtomic(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("serverupdate: create %s: %w", filepath.Dir(path), err)
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
-	if err != nil {
-		return fmt.Errorf("serverupdate: write %s: %w", path, err)
-	}
-	defer os.Remove(tmp.Name()) //nolint:errcheck // gone after the rename
-	if _, err = tmp.Write(data); err == nil {
-		err = tmp.Sync()
-	}
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Rename(tmp.Name(), path)
-	}
-	if err == nil {
-		err = syncDir(filepath.Dir(path))
-	}
-	if err != nil {
-		return fmt.Errorf("serverupdate: write %s: %w", path, err)
-	}
-	return nil
-}
-
-// syncDir makes a rename in dir survive a power loss.
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	err = d.Sync()
-	if cerr := d.Close(); err == nil {
-		err = cerr
-	}
-	return err
+	return selfupdate.WriteFileAtomic(recordPath(dir), data)
 }
 
 // keepPrevious links each binary to <path>.prev before it is replaced, so
@@ -469,6 +430,13 @@ func (t *Trial) Commit(ctx context.Context, st store.Store, bus events.Bus) erro
 	}
 	if err != nil {
 		return err
+	}
+	// An update the server scheduled itself that rolled back is declined,
+	// so the next check does not schedule it again.
+	if outcome == store.ServerUpdateRolledBack && domain.MemberID(rec.RequestedBy) == ServerActor {
+		if _, err = raiseDeclined(ctx, st, selfupdate.Release{Version: rec.ToVersion, Build: rec.ToBuild, Hotfix: rec.ToHotfix}); err != nil {
+			return err
+		}
 	}
 	publish(ctx, st, bus, events.ServerUpdatePayload{
 		Phase: phase, Version: rec.ToVersion, FromVersion: rec.FromVersion,

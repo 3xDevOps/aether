@@ -188,7 +188,7 @@ function SavedLaunchDefaults({ client }: { client: Api }) {
       {clearing && (
         <Confirm
           title="Clear your saved defaults?"
-          description="The launch dialog on every device goes back to Aether's own defaults until a launch saves new ones."
+          description="The launch dialog on every device goes back to Cloudfield's own defaults until a launch saves new ones."
           action="Clear"
           pending="Clearing…"
           onConfirm={() => saveLaunchDefaults(() => null, client)}

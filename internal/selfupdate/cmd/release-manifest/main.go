@@ -5,6 +5,10 @@
 //	  -store-schema "$(go run ./internal/store/cmd/schema-version)" \
 //	  -images images.json -out <dir> <asset>...
 //
+// A release on a channel adds -channel, -build and, for a hotfix, -hotfix.
+// The manifest is refused unless they agree with the tag the way an updater
+// checks them; without them it describes a release from before channels.
+//
 // It takes the store schema as a flag and the image digests and edge
 // section as a file written by internal/edge/cmd/release-edge, rather than
 // importing the stores, so the process holding the signing key links
@@ -25,6 +29,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
@@ -46,12 +52,23 @@ func run(args []string) error {
 	commit := fs.String("commit", "", "full commit the release was built from")
 	storeSchema := fs.Int("store-schema", 0, "store schema version the release migrates to")
 	images := fs.String("images", "", "JSON file of the release's image digests and edge section")
+	channel := fs.String("channel", "", "release channel the tag is published on: nightly, beta or stable")
+	build := fs.String("build", "0", "signed build number that orders the release; required with -channel")
+	hotfix := fs.String("hotfix", "0", "hotfixes on top of the stable release with the same build")
 	out := fs.String("out", "", "directory to write "+selfupdate.ManifestName+" and its signature into")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *tag == "" || *commit == "" || *storeSchema <= 0 || *images == "" || *out == "" || fs.NArg() == 0 {
-		return errors.New("usage: release-manifest -version <tag> -commit <sha> -store-schema <n> -images <file> -out <dir> <asset> [<asset>]")
+		return errors.New("usage: release-manifest -version <tag> -commit <sha> -store-schema <n> [-channel <c> -build <n> [-hotfix <n>]] -images <file> -out <dir> <asset> [<asset>]")
+	}
+	buildN, err := count("-build", *build, maxBuild)
+	if err != nil {
+		return err
+	}
+	hotfixN, err := count("-hotfix", *hotfix, maxHotfix)
+	if err != nil {
+		return err
 	}
 	img, err := readImages(*images)
 	if err != nil {
@@ -61,7 +78,8 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	data, sig, err := generate(*tag, *commit, *storeSchema, img, fs.Args(), key, time.Now().UTC())
+	order := selfupdate.Release{Version: *tag, Channel: *channel, Build: buildN, Hotfix: hotfixN}
+	data, sig, err := generate(order, *commit, *storeSchema, img, fs.Args(), key, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -69,6 +87,28 @@ func run(args []string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(*out, selfupdate.SignatureName), sig, 0o644)
+}
+
+// The ceilings keep 100000000 + build * 100 + hotfix, the release's Android
+// versionCode (scripts/android-version-code.sh), under Android's 2100000000.
+const (
+	maxBuild  = 19999999
+	maxHotfix = 99
+)
+
+var decimal = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+
+// count parses a decimal number without sign, prefix or leading zero, which
+// flag.Int would read as octal or hex.
+func count(name, s string, max int) (int, error) {
+	if !decimal.MatchString(s) {
+		return 0, fmt.Errorf("%s %q is not a decimal number from 0 to %d", name, s, max)
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n > max {
+		return 0, fmt.Errorf("%s %s is above %d", name, s, max)
+	}
+	return n, nil
 }
 
 func readImages(path string) (selfupdate.ImageRelease, error) {
@@ -98,13 +138,18 @@ func signingKey(seed string) (ed25519.PrivateKey, error) {
 
 // generate hashes every asset, signs the manifest, and verifies the result
 // the way an updater will, so a seed that does not match a key this build
-// trusts fails here rather than on every client.
-func generate(tag, commit string, storeSchema int, img selfupdate.ImageRelease, assets []string, key ed25519.PrivateKey, now time.Time) (data, sig []byte, err error) {
+// trusts, or channel fields an updater refuses, fail here rather than on
+// every client.
+func generate(order selfupdate.Release, commit string, storeSchema int, img selfupdate.ImageRelease, assets []string, key ed25519.PrivateKey, now time.Time) (data, sig []byte, err error) {
+	tag := order.Version
 	if err = img.Validate(tag); err != nil {
 		return nil, nil, err
 	}
 	m := selfupdate.Manifest{
 		Schema:      selfupdate.ManifestSchema,
+		Channel:     order.Channel,
+		Build:       order.Build,
+		Hotfix:      order.Hotfix,
 		Version:     tag,
 		Commit:      commit,
 		PublishedAt: now,

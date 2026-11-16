@@ -14,10 +14,12 @@ import (
 const (
 	reservedRunPath = "/run/aether"
 	reservedOptPath = "/opt/aether"
-	// reservedCLIPath and reservedSudoPath are file targets rather than
-	// prefixes: only the server-staged executable owns these locations.
-	reservedCLIPath  = "/usr/local/bin/aether-internal"
-	reservedSudoPath = "/usr/local/bin/sudo"
+	// reservedCLIPath, reservedCloudfieldCLIPath and reservedSudoPath are
+	// file targets rather than prefixes: only the server-staged executable
+	// owns these locations.
+	reservedCLIPath           = "/usr/local/bin/aether-internal"
+	reservedCloudfieldCLIPath = "/usr/local/bin/cloudfield-internal"
+	reservedSudoPath          = "/usr/local/bin/sudo"
 )
 
 // dockerSocketPaths are the host spellings of the Docker control socket.
@@ -51,7 +53,7 @@ type MountPolicy struct {
 // files, subpath mounts whose subpath is not a clean local path or whose
 // base is not a directory, duplicate targets, nested targets except the
 // approved child-after-parent pairs (never beneath a subpath mount), targets under the reserved /run/aether, /opt/aether,
-// /usr/local/bin/aether-internal and /usr/local/bin/sudo surfaces, root targets, collisions with the
+// /usr/local/bin/aether-internal, /usr/local/bin/cloudfield-internal and /usr/local/bin/sudo surfaces, root targets, collisions with the
 // worktree bind on either side, and read-only sources containing another
 // mount's source (Docker's per-bind read-only flag is not recursive and no
 // recursive fallback is used).
@@ -86,6 +88,9 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 	targets := make([]string, len(mounts))
 	sources := make([]string, len(mounts))
 	for i, m := range mounts {
+		if m.Kind == MountSeed {
+			continue
+		}
 		target := path.Clean(m.ContainerPath)
 		if !path.IsAbs(target) {
 			return fmt.Errorf("runtime: mount %d: target %q must be absolute", i, m.ContainerPath)
@@ -93,7 +98,7 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 		if target == "/" {
 			return fmt.Errorf("runtime: mount %d: target must not be the container root", i)
 		}
-		for _, reserved := range []string{reservedRunPath, reservedOptPath, reservedCLIPath, reservedSudoPath} {
+		for _, reserved := range []string{reservedRunPath, reservedOptPath, reservedCLIPath, reservedCloudfieldCLIPath, reservedSudoPath} {
 			if target == reserved || underSlash(target, reserved) {
 				return fmt.Errorf("runtime: mount %d: target %q is reserved for aether", i, target)
 			}
@@ -157,10 +162,15 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 		}
 
 		for j := range i {
+			if mounts[j].Kind == MountSeed {
+				continue
+			}
 			if targets[j] == target {
 				return fmt.Errorf("runtime: mounts %d and %d: duplicate target %q", j, i, target)
 			}
-			if underSlash(target, targets[j]) {
+			// Only a session VM has state mounts, and its helper binds a home
+			// mount over one in order, as it binds every mount.
+			if underSlash(target, targets[j]) && mounts[j].Kind != MountState {
 				if policy.AllowedNestings[target] != targets[j] {
 					return fmt.Errorf("runtime: mount %d: target %q nests under mount %d target %q without approval", i, target, j, targets[j])
 				}
@@ -171,7 +181,9 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 					return fmt.Errorf("runtime: mount %d: target %q nests under mount %d whose source %q is not a directory", i, target, j, mounts[j].HostPath)
 				}
 			}
-			if underSlash(targets[j], target) {
+			// A session VM's state mount covers a shared login mounted
+			// before it, once the guest has copied that login in.
+			if underSlash(targets[j], target) && m.Kind != MountState {
 				return fmt.Errorf("runtime: mount %d: target %q contains mount %d target %q; a nested mount must be ordered after its parent", i, target, j, targets[j])
 			}
 			if mounts[j].ReadOnly && withinHost(mounted, sources[j]) && mounted != sources[j] {

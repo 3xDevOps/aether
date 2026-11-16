@@ -12,10 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +39,11 @@ type Config struct {
 	RelayOrigin  string
 	// GitHub is the OAuth app people sign in with. It is required.
 	GitHub *OAuthApp
+	// MorePairs are further origin pairs the edge serves beside
+	// SigninOrigin and RelayOrigin, each with its own OAuth app. A
+	// request is served by the pair its host name belongs to, and no
+	// pair is preferred.
+	MorePairs []Pair
 	// Clock is time.Now when nil.
 	Clock func() time.Time
 	// OpenAIChallenge is the token the relay origin serves at
@@ -66,6 +69,59 @@ type OAuthApp struct {
 	APIURL       string
 }
 
+// Pair is a sign-in origin and a relay origin the edge serves together,
+// with the OAuth app whose callback is on the sign-in origin.
+type Pair struct {
+	SigninOrigin string
+	RelayOrigin  string
+	GitHub       *OAuthApp
+}
+
+// pair is a Pair as the Service serves it.
+type pair struct {
+	signin, relay         string
+	signinHost, relayHost string
+	oauth                 oauth2.Config
+	githubAPI             string
+	// deviceLogins counts device tokens issued on the sign-in origin.
+	deviceLogins atomic.Uint64
+}
+
+type pairKey struct{}
+
+// pair is the pair Handler picked for r, or the first for a request
+// handed to a handler directly.
+func (s *Service) pair(r *http.Request) *pair {
+	if p, ok := r.Context().Value(pairKey{}).(*pair); ok {
+		return p
+	}
+	return s.pairs[0]
+}
+
+// newPair checks p; noApp is the error for a pair without an OAuth app.
+func newPair(p Pair, noApp string) (*pair, error) {
+	signin, err := edgeproto.Origin(p.SigninOrigin)
+	if err != nil {
+		return nil, fmt.Errorf("edge: sign-in origin: %w", err)
+	}
+	relay, err := edgeproto.Origin(p.RelayOrigin)
+	if err != nil {
+		return nil, fmt.Errorf("edge: relay origin: %w", err)
+	}
+	signinHost, relayHost := edgeproto.OriginHost(signin), edgeproto.OriginHost(relay)
+	if signinHost == relayHost {
+		return nil, fmt.Errorf("edge: the sign-in origin %s and the relay origin %s must have different host names", signin, relay)
+	}
+	if p.GitHub == nil {
+		return nil, errors.New(noApp)
+	}
+	return &pair{
+		signin: signin, relay: relay, signinHost: signinHost, relayHost: relayHost,
+		oauth:     githubConfig(*p.GitHub, signin),
+		githubAPI: strings.TrimSuffix(withDefault(p.GitHub.APIURL, "https://api.github.com"), "/"),
+	}, nil
+}
+
 // ServerLink is what the Service needs from the relay's live control
 // channels. *relay.Relay implements it.
 type ServerLink interface {
@@ -87,6 +143,9 @@ type ServerLink interface {
 	// Version is the protocol version negotiated with the claimed server
 	// serverID, 0 when it holds no control channel.
 	Version(serverID string) int
+	// Origin is the relay origin the claimed server serverID enrolled
+	// at, "" when it holds no control channel.
+	Origin(serverID string) string
 	// ReadMCPBody reads a connector request's body, or answers the
 	// request and returns false.
 	ReadMCPBody(w http.ResponseWriter, r *http.Request) ([]byte, bool)
@@ -98,20 +157,17 @@ type ServerLink interface {
 
 // Service is the edge's sign-in service.
 type Service struct {
-	signinOrigin string
-	relayOrigin  string
-	// signinHost and relayHost are the origins' host names, which pick
-	// the origin a request is for.
-	signinHost string
-	relayHost  string
-	now        func() time.Time
-	store      *edgestore.Store
-	key        ed25519.PrivateKey
-	link       ServerLink
-	oauth      oauth2.Config
-	githubAPI  string
-	pages      *template.Template
-	client     *http.Client
+	// pairs are the origin pairs served, the one Config names first.
+	// byHost holds each by the host names of both its origins, which
+	// pick the pair and the origin a request is for.
+	pairs  []*pair
+	byHost map[string]*pair
+	now    func() time.Time
+	store  *edgestore.Store
+	key    ed25519.PrivateKey
+	link   ServerLink
+	pages  *template.Template
+	client *http.Client
 	// githubErrors counts calls to GitHub that failed.
 	githubErrors    atomic.Uint64
 	openAIChallenge string
@@ -147,17 +203,24 @@ type Service struct {
 // New opens the edge's store and signing key in cfg.DataDir, creating both
 // on first start.
 func New(cfg Config) (*Service, error) {
-	signin, err := edgeproto.Origin(cfg.SigninOrigin)
-	if err != nil {
-		return nil, fmt.Errorf("edge: sign-in origin: %w", err)
-	}
-	relayOrigin, err := edgeproto.Origin(cfg.RelayOrigin)
-	if err != nil {
-		return nil, fmt.Errorf("edge: relay origin: %w", err)
-	}
-	signinHost, relayHost := hostname(signin), hostname(relayOrigin)
-	if signinHost == relayHost {
-		return nil, fmt.Errorf("edge: the sign-in origin %s and the relay origin %s must have different host names", signin, relayOrigin)
+	var pairs []*pair
+	byHost := map[string]*pair{}
+	for i, cp := range append([]Pair{{cfg.SigninOrigin, cfg.RelayOrigin, cfg.GitHub}}, cfg.MorePairs...) {
+		noApp := "edge: no GitHub OAuth app is configured; set --github-client-id and its client secret"
+		if i > 0 {
+			noApp = "edge: no GitHub OAuth app is configured for " + cp.SigninOrigin
+		}
+		p, err := newPair(cp, noApp)
+		if err != nil {
+			return nil, err
+		}
+		for _, host := range []string{p.signinHost, p.relayHost} {
+			if other := byHost[host]; other != nil {
+				return nil, fmt.Errorf("edge: the origin pairs %s %s and %s %s share the host name %s", other.signin, other.relay, p.signin, p.relay, host)
+			}
+			byHost[host] = p
+		}
+		pairs = append(pairs, p)
 	}
 	if cfg.DataDir == "" {
 		return nil, errors.New("edge: data directory is required")
@@ -167,14 +230,12 @@ func New(cfg Config) (*Service, error) {
 		now = time.Now
 	}
 	s := &Service{
-		signinOrigin: signin,
-		relayOrigin:  relayOrigin,
-		signinHost:   signinHost,
-		relayHost:    relayHost,
-		now:          now,
-		client:       &http.Client{Timeout: providerTimeout},
-		signinLimit:  newAddrLimiter(20, 6*time.Second, now),
-		startLimit:   newAddrLimiter(10, 30*time.Second, now),
+		pairs:       pairs,
+		byHost:      byHost,
+		now:         now,
+		client:      &http.Client{Timeout: providerTimeout},
+		signinLimit: newAddrLimiter(20, 6*time.Second, now),
+		startLimit:  newAddrLimiter(10, 30*time.Second, now),
 		// Four polls a second: twenty sign-ins at once behind one address.
 		pollLimit:         newAddrLimiter(30, 250*time.Millisecond, now),
 		codeLimit:         newAddrLimiter(10, 6*time.Second, now),
@@ -193,11 +254,7 @@ func New(cfg Config) (*Service, error) {
 	if s.clientHosts == nil {
 		s.clientHosts = []string{"chatgpt.com", "claude.ai"}
 	}
-	if cfg.GitHub == nil {
-		return nil, errors.New("edge: no GitHub OAuth app is configured; set --github-client-id and its client secret")
-	}
-	s.oauth = githubConfig(*cfg.GitHub, signin)
-	s.githubAPI = strings.TrimSuffix(withDefault(cfg.GitHub.APIURL, "https://api.github.com"), "/")
+	var err error
 	if s.pages, err = parsePages(); err != nil {
 		return nil, err
 	}
@@ -227,20 +284,23 @@ func (s *Service) Ping(ctx context.Context) error { return s.store.Ping(ctx) }
 // GitHubErrors counts calls to GitHub that failed since the edge started.
 func (s *Service) GitHubErrors() uint64 { return s.githubErrors.Load() }
 
-// hostname is origin's host name, lowercase, without a port.
-func hostname(origin string) string {
-	u, _ := url.Parse(origin) // origin is canonical
-	return u.Hostname()
+// DeviceLogins counts, by sign-in origin, device tokens issued since the
+// edge started.
+func (s *Service) DeviceLogins() map[string]uint64 {
+	out := make(map[string]uint64, len(s.pairs))
+	for _, p := range s.pairs {
+		out[p.signin] = p.deviceLogins.Load()
+	}
+	return out
 }
 
-// requestHost is the host name a request names, lowercase, without a
-// port.
-func requestHost(r *http.Request) string {
-	host := r.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+// moreRelayOrigins are the relay origins of Config.MorePairs.
+func (s *Service) moreRelayOrigins() []string {
+	var out []string
+	for _, p := range s.pairs[1:] {
+		out = append(out, p.relay)
 	}
-	return strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	return out
 }
 
 // Handler serves both origins, picked by the request's host name: on the
@@ -307,29 +367,43 @@ func (s *Service) Handler() http.Handler {
 			_, _ = w.Write([]byte("ok\n"))
 			return
 		}
-		switch host := requestHost(r); host {
-		case s.signinHost:
+		host := edgeproto.RequestHost(r)
+		p := s.byHost[host]
+		if p == nil {
+			http.Error(w, fmt.Sprintf("this edge serves %s, not the host %q", s.originList(), host), http.StatusMisdirectedRequest)
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), pairKey{}, p))
+		if host == p.signinHost {
 			if routes(relay, r) {
-				misdirected(w, r, s.relayOrigin)
+				misdirected(w, r, p.relay)
 				return
 			}
 			signin.ServeHTTP(w, r)
-		case s.relayHost:
-			switch {
-			case routes(relay, r):
-				relay.ServeHTTP(w, r)
-			case routes(join, r):
-				joinPages.ServeHTTP(w, r)
-			case routes(api, r) || routes(pages, r):
-				misdirected(w, r, s.signinOrigin)
-			default:
-				http.NotFound(w, r)
-			}
+			return
+		}
+		switch {
+		case routes(relay, r):
+			relay.ServeHTTP(w, r)
+		case routes(join, r):
+			joinPages.ServeHTTP(w, r)
+		case routes(api, r) || routes(pages, r):
+			misdirected(w, r, p.signin)
 		default:
-			http.Error(w, fmt.Sprintf("this edge serves %s and %s, not the host %q", s.signinOrigin, s.relayOrigin, host),
-				http.StatusMisdirectedRequest)
+			http.NotFound(w, r)
 		}
 	})
+}
+
+// originList names every origin the edge serves: "a and b", or
+// "a, b, c and d".
+func (s *Service) originList() string {
+	var origins []string
+	for _, p := range s.pairs {
+		origins = append(origins, p.signin, p.relay)
+	}
+	last := len(origins) - 1
+	return strings.Join(origins[:last], ", ") + " and " + origins[last]
 }
 
 // misdirected refuses a request made on the wrong one of the edge's

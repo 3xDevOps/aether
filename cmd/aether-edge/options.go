@@ -40,6 +40,9 @@ type options struct {
 	acmeDirectory  string
 	egressBudget   int64
 	github         *edge.OAuthApp
+	// morePairs are the origin pairs --origin-pairs names, served beside
+	// --signin-origin and --relay-origin.
+	morePairs []edge.Pair
 	// openAIChallenge is OpenAI's domain verification token for the
 	// relay host, served at edgeproto.PathOpenAIChallenge.
 	openAIChallenge string
@@ -91,6 +94,10 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 	githubID := fs.String("github-client-id", env("AETHER_EDGE_GITHUB_CLIENT_ID", ""), "GitHub OAuth app client id")
 	githubSecretFile := fs.String("github-client-secret-file", env("AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE", ""),
 		"file holding the GitHub client secret, instead of AETHER_EDGE_GITHUB_CLIENT_SECRET")
+	morePairs := fs.String("origin-pairs", env("AETHER_EDGE_ORIGIN_PAIRS", ""),
+		"more origin pairs to serve beside --signin-origin and --relay-origin, comma-separated. Each is four fields separated by spaces: "+
+			"<signin origin> <relay origin> <GitHub client id> <file holding that OAuth app's client secret>. "+
+			"A request is served by the pair its host name belongs to; every host name of every pair differs")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -135,19 +142,18 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 		if origin.value == "" {
 			return options{}, fmt.Errorf("%s must be %shost[:port], not \"\"; set it or %s", origin.flag, scheme, origin.env)
 		}
-		if !strings.HasPrefix(origin.value, scheme) {
-			if scheme == "http://" {
-				return options{}, fmt.Errorf("--dev-listen serves plain HTTP, so %s must be http://<loopback host>:<port>, not %q", origin.flag, origin.value)
-			}
-			return options{}, fmt.Errorf("%s must be https://host[:port], not %q; for a local plain-HTTP edge use --dev-listen", origin.flag, origin.value)
-		}
-		if _, err = edgeproto.Origin(origin.value); err != nil {
-			return options{}, fmt.Errorf("%s: %w", origin.flag, err)
+		if err = checkOrigin(origin.flag, origin.value, scheme); err != nil {
+			return options{}, err
 		}
 	}
 	if host(o.signinOrigin) == host(o.relayOrigin) {
 		return options{}, fmt.Errorf("--signin-origin %s and --relay-origin %s must name different hosts, such as auth.example.com and edge.example.com",
 			o.signinOrigin, o.relayOrigin)
+	}
+	if *morePairs != "" {
+		if o.morePairs, err = parseOriginPairs(*morePairs, scheme, o.signinOrigin, o.relayOrigin); err != nil {
+			return options{}, err
+		}
 	}
 	if *reviewerFile != "" {
 		if o.reviewer, err = edge.LoadReviewerAccount(*reviewerFile); err != nil {
@@ -158,6 +164,61 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 		return options{}, err
 	}
 	return o, nil
+}
+
+// checkOrigin checks that value, the origin flagName names, is an origin
+// of scheme.
+func checkOrigin(flagName, value, scheme string) error {
+	if !strings.HasPrefix(value, scheme) {
+		if scheme == "http://" {
+			return fmt.Errorf("--dev-listen serves plain HTTP, so %s must be http://<loopback host>:<port>, not %q", flagName, value)
+		}
+		return fmt.Errorf("%s must be https://host[:port], not %q; for a local plain-HTTP edge use --dev-listen", flagName, value)
+	}
+	if _, err := edgeproto.Origin(value); err != nil {
+		return fmt.Errorf("%s: %w", flagName, err)
+	}
+	return nil
+}
+
+// parseOriginPairs parses --origin-pairs. Every host name of every pair,
+// signin's and relay's among them, must differ.
+func parseOriginPairs(list, scheme, signin, relay string) ([]edge.Pair, error) {
+	hosts := map[string]string{host(signin): "--signin-origin", host(relay): "--relay-origin"}
+	var pairs []edge.Pair
+	for entry := range strings.SplitSeq(list, ",") {
+		fields := strings.Fields(entry)
+		if len(fields) == 0 {
+			return nil, fmt.Errorf("--origin-pairs %q has an empty pair: remove the extra comma", list)
+		}
+		if len(fields) != 4 {
+			return nil, fmt.Errorf("--origin-pairs: %q is not <signin origin> <relay origin> <GitHub client id> <client secret file>", strings.TrimSpace(entry))
+		}
+		for _, origin := range fields[:2] {
+			if err := checkOrigin("--origin-pairs", origin, scheme); err != nil {
+				return nil, err
+			}
+			h := host(origin)
+			if other, ok := hosts[h]; ok {
+				return nil, fmt.Errorf("--origin-pairs: %s has the host name %s of %s; each origin of each pair needs its own host name", origin, h, other)
+			}
+			hosts[h] = origin
+		}
+		secret, err := readSecretFile(fields[3])
+		if err != nil {
+			return nil, fmt.Errorf("--origin-pairs: the client secret file of %s: %w", fields[0], err)
+		}
+		if secret == "" {
+			return nil, fmt.Errorf("--origin-pairs: %s, the client secret file of %s, holds no secret", fields[3], fields[0])
+		}
+		pairs = append(pairs, edge.Pair{SigninOrigin: fields[0], RelayOrigin: fields[1],
+			GitHub: &edge.OAuthApp{ClientID: fields[2], ClientSecret: secret}})
+	}
+	if len(pairs)+1 > edgeproto.MaxRelayOrigins {
+		return nil, fmt.Errorf("--origin-pairs names %d pairs, which with --signin-origin and --relay-origin make %d; an edge serves at most %d pairs",
+			len(pairs), len(pairs)+1, edgeproto.MaxRelayOrigins)
+	}
+	return pairs, nil
 }
 
 // host is the lowercase host name of a valid origin.

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -240,6 +241,9 @@ func bind(root string, m guest.Mount) error {
 		if err := createLike(root, m.Source, m.Target); err != nil {
 			return err
 		}
+		if err := seed(root, m); err != nil {
+			return err
+		}
 	case guest.VolumeHelper:
 		return bindSelf(m.Target)
 	}
@@ -369,4 +373,80 @@ func overlay(lower int, st *unix.Stat_t, m guest.Mount) error {
 	}
 	options := fmt.Sprintf("lowerdir=/proc/self/fd/%d,upperdir=/proc/self/fd/%d,workdir=/proc/self/fd/%d", lower, layers[0], layers[1])
 	return unix.Mount("overlay", m.Target, "overlay", unix.MS_NOSUID|unix.MS_NODEV, options)
+}
+
+// seed copies each of m's seed files from what m.Target shows now, the
+// member's home, into m.Source beneath the volume, as their owner, and
+// removes a copy whose file the home no longer has.
+func seed(root string, m guest.Mount) error {
+	if len(m.Seed) == 0 {
+		return nil
+	}
+	volume, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = volume.Close() }()
+	for _, f := range m.Seed {
+		dst := filepath.Join(m.Source, f)
+		src, err := os.Open(filepath.Join(m.Target, f))
+		if errors.Is(err, fs.ErrNotExist) {
+			if rmErr := volume.Remove(dst); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+				return fmt.Errorf("seed %s: %w", f, rmErr)
+			}
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("seed %s: %w", f, err)
+		}
+		err = copySeed(volume, src, dst)
+		_ = src.Close()
+		if err != nil {
+			return fmt.Errorf("seed %s: %w", f, err)
+		}
+	}
+	return nil
+}
+
+func copySeed(volume *os.Root, src *os.File, dst string) error {
+	info, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("not a regular file")
+	}
+	st := info.Sys().(*syscall.Stat_t)
+	if err = mkdirOwned(volume, filepath.Dir(dst), int(st.Uid), int(st.Gid)); err != nil {
+		return err
+	}
+	out, err := volume.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err = io.Copy(out, src); err == nil {
+		err = out.Chown(int(st.Uid), int(st.Gid))
+	}
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// mkdirOwned creates each missing directory of dir beneath volume, owned
+// like the seed file it holds.
+func mkdirOwned(volume *os.Root, dir string, uid, gid int) error {
+	if dir == "." {
+		return nil
+	}
+	if _, err := volume.Lstat(dir); err == nil || !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := mkdirOwned(volume, filepath.Dir(dir), uid, gid); err != nil {
+		return err
+	}
+	if err := volume.Mkdir(dir, 0o700); err != nil {
+		return err
+	}
+	return volume.Lchown(dir, uid, gid)
 }

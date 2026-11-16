@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -35,6 +34,11 @@ func (s *Service) Tick(ctx context.Context) {
 	if state.Pending == nil {
 		return
 	}
+	// With release checks off the server applies nothing it scheduled
+	// itself; a member's update still applies.
+	if state.Pending.RequestedBy == ServerActor && !s.checks() {
+		return
+	}
 	// A pending update can only be scheduled by a capable server, but the
 	// row outlives the process: an install moved to unprivileged mode
 	// between the schedule and the restart leaves one that can never
@@ -49,7 +53,7 @@ func (s *Service) Tick(ctx context.Context) {
 	}
 	restart, err := s.apply(ctx, *state.Pending, false, true)
 	if err != nil {
-		if !errors.Is(err, ErrBusy) && !errors.Is(err, ErrHeld) && !errors.Is(err, errBecameBusy) {
+		if !errors.Is(err, ErrBusy) && !errors.Is(err, ErrHeld) && !errors.Is(err, errBecameBusy) && !errors.Is(err, errNoLongerPending) {
 			slog.Error("serverupdate: scheduled update failed", "version", state.Pending.Version, "error", err)
 		}
 		return
@@ -117,8 +121,14 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	}
 	// A downgrade is applied by hand, now, so one cut short is not left
 	// pending for an idle moment.
-	if !scheduled && !allowDowngrade {
-		if err = s.cfg.Store.SetPendingServerUpdate(ctx, &pending); err != nil {
+	if !scheduled {
+		s.decideMu.Lock()
+		if !allowDowngrade {
+			err = s.cfg.Store.SetPendingServerUpdate(ctx, &pending)
+		}
+		s.setCommitted()
+		s.decideMu.Unlock()
+		if err != nil {
 			s.release()
 			return nil, err
 		}
@@ -126,6 +136,13 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdatePreflight, pending.Version, "")
 	plan := s.plan(pending)
 	m, err := preflight(ctx, plan, pending.Version, allowDowngrade)
+	if err == nil && scheduled && !s.stillPending(ctx, pending) {
+		s.release()
+		return nil, errNoLongerPending
+	}
+	if err == nil && scheduled {
+		err = s.stillTaken(ctx, pending, m)
+	}
 	if err != nil {
 		return nil, s.failOrRetry(ctx, pending, scheduled, err)
 	}
@@ -139,16 +156,30 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 		return nil, s.failOrRetry(ctx, pending, scheduled, err)
 	}
 	slog.Info("serverupdate: binaries replaced", "version", pending.Version, "paths", rec.Binaries)
+	if _, err := s.cfg.Host.LinkUnit(); err != nil {
+		slog.Warn("serverupdate: link the unit's second name", "error", err)
+	}
 	if scheduled && !s.busyNow(ctx).Idle() {
 		if err := unswap(s.cfg.StateDir, rec); err != nil {
-			return nil, s.fail(ctx, pending, fmt.Errorf("a session started during the download, and undoing the swap failed: %w", err))
+			return nil, s.undoFailed(ctx, pending, fmt.Errorf("a session started during the download, and undoing the swap failed: %w", err))
 		}
 		s.release()
-		s.publish(ctx, pending.RequestedBy, events.ServerUpdateScheduled, pending.Version, errBecameBusy.Error())
+		if s.stillPending(ctx, pending) {
+			s.publish(ctx, pending.RequestedBy, events.ServerUpdateScheduled, pending.Version, errBecameBusy.Error())
+		}
 		return nil, errBecameBusy
 	}
-	if err := s.cfg.Store.SetPendingServerUpdate(ctx, nil); err != nil {
-		slog.Warn("serverupdate: clear the applied pending update", "error", err)
+	if !s.takePending(ctx, pending, scheduled) {
+		if err := unswap(s.cfg.StateDir, rec); err != nil {
+			return nil, s.undoFailed(ctx, pending, fmt.Errorf("the update was cancelled or replaced during the download, and undoing the swap failed: %w", err))
+		}
+		s.release()
+		return nil, errNoLongerPending
+	}
+	// Until here the record says swapping, so a crash before the update
+	// was committed puts the previous binaries back at the next start.
+	if err := commitSwap(s.cfg.StateDir, rec); err != nil {
+		return nil, s.fail(ctx, pending, err)
 	}
 	// The restart runs after the RPC response has been written, by which
 	// point the request context may be on its way out; the restarting
@@ -156,6 +187,10 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	restartCtx := context.WithoutCancel(ctx)
 	return func() { s.restart(restartCtx, pending, rec) }, nil
 }
+
+// errNoLongerPending is a scheduled update cancelled or replaced during
+// its preflight or download.
+var errNoLongerPending = errors.New("the scheduled update was cancelled or replaced before it applied")
 
 // errBecameBusy is a scheduled update undone because the server stopped
 // being idle while the release downloaded.
@@ -184,6 +219,11 @@ func (s *Service) failOrRetry(ctx context.Context, pending store.PendingServerUp
 			return err
 		}
 	}
+	if scheduled && !errors.Is(err, errNotTaken) {
+		if derr := s.decline(ctx, s.resolve(ctx, pending.Version)); derr != nil {
+			slog.Error("serverupdate: a failed scheduled update stays eligible", "version", pending.Version, "error", derr)
+		}
+	}
 	return s.fail(ctx, pending, err)
 }
 
@@ -194,8 +234,15 @@ func ensureSettled(dir string) error {
 	if err != nil {
 		return err
 	}
-	if last != nil && last.Phase == recordVerifying {
+	switch {
+	case last != nil && last.Phase == recordVerifying:
 		return fmt.Errorf("%w: %s is still verifying its first start (%s); retry once it has started",
+			ErrBusy, last.ToVersion, recordPath(dir))
+	case last != nil && last.Phase == recordSwapping:
+		// A swap whose undo failed: its .prev files are the binaries to
+		// put back, which a new swap would overwrite. The next start of
+		// aether-server rolls it back.
+		return fmt.Errorf("%w: the update to %s was not undone (%s); restart aether-server, which puts the previous binaries back, then retry",
 			ErrBusy, last.ToVersion, recordPath(dir))
 	}
 	return nil
@@ -211,11 +258,13 @@ func swap(ctx context.Context, p Plan, tag string, m selfupdate.Manifest) (*swap
 		Phase:       recordSwapping,
 		FromVersion: version.Version,
 		ToVersion:   tag,
+		ToBuild:     m.Build,
+		ToHotfix:    m.Hotfix,
 		RequestedBy: p.RequestedBy,
 		Binaries:    []string{p.Self},
 		At:          p.Now().UTC(),
 	}
-	if sibling := filepath.Join(filepath.Dir(p.Self), "aether"); fileExists(sibling) {
+	if sibling, ok := selfupdate.Beside(p.Self, "aether"); ok {
 		rec.Binaries = append(rec.Binaries, sibling)
 	}
 	schema, err := p.Schema(ctx)
@@ -242,11 +291,43 @@ func swap(ctx context.Context, p Plan, tag string, m selfupdate.Manifest) (*swap
 		}
 		return nil, errors.Join(retryable{fmt.Errorf("download failed: %w", err)}, removeRecord(p.StateDir))
 	}
-	rec.Phase = recordVerifying
-	if err := saveRecord(p.StateDir, rec); err != nil {
-		return nil, errors.Join(err, unswap(p.StateDir, rec))
+	if err := linkBinaries(rec.Binaries); err != nil {
+		slog.Warn("serverupdate: give the binaries their second names", "error", err)
 	}
 	return rec, nil
+}
+
+// linkBinaries is selfupdate.LinkAll, a variable so a test can make it
+// fail.
+var linkBinaries = selfupdate.LinkAll
+
+// commitSwap moves a swap to verifying: the next start runs the new
+// binary as a trial instead of putting the previous one back.
+func commitSwap(dir string, rec *swapRecord) error {
+	rec.Phase = recordVerifying
+	if err := saveRecord(dir, rec); err != nil {
+		return errors.Join(err, unswap(dir, rec))
+	}
+	return nil
+}
+
+// undoFailed reports a swap that could not be undone. Its record still
+// says swapping, so the next start puts the previous binaries back rather
+// than running the release as a trial. The pending row is retired only
+// while it is still this update's, so a member's replacement stays.
+func (s *Service) undoFailed(ctx context.Context, pending store.PendingServerUpdate, err error) error {
+	s.release()
+	msg := err.Error()
+	s.decideMu.Lock()
+	_, rerr := s.cfg.Store.RetirePendingServerUpdate(ctx, pending, store.ServerUpdateAttempt{
+		Version: pending.Version, Outcome: store.ServerUpdateFailed, Detail: msg, At: s.cfg.Now().UTC(),
+	})
+	s.decideMu.Unlock()
+	if rerr != nil {
+		slog.Error("serverupdate: record a swap that could not be undone", "version", pending.Version, "error", rerr)
+	}
+	s.publish(ctx, pending.RequestedBy, events.ServerUpdateFailed, pending.Version, msg)
+	return err
 }
 
 // unswap puts the previous binaries back and drops the swap record.
@@ -279,6 +360,23 @@ func (s *Service) fail(ctx context.Context, pending store.PendingServerUpdate, e
 	return err
 }
 
+func (s *Service) setCommitted() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.committed = true
+}
+
+// refuseWhileCommitted refuses a cancel or a new pending update while an
+// update that can no longer be cancelled is applying.
+func (s *Service) refuseWhileCommitted() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.committed {
+		return nil
+	}
+	return fmt.Errorf("%w: %s is applying now and can no longer be cancelled", ErrBusy, s.target)
+}
+
 // claim takes the one applying slot, so the RPC path and the idle poll can
 // never download over each other.
 func (s *Service) claim(target string) bool {
@@ -300,7 +398,7 @@ func (s *Service) setPhase(phase string) {
 func (s *Service) release() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.applying, s.phase, s.target = false, "", ""
+	s.applying, s.committed, s.phase, s.target = false, false, "", ""
 	if s.unlock != nil {
 		s.unlock()
 		s.unlock = nil
@@ -363,6 +461,11 @@ func (s *Service) undo(ctx context.Context, pending store.PendingServerUpdate, r
 		slog.Error("serverupdate: write the swap record", "error", err)
 	}
 	s.release()
+	if pending.RequestedBy == ServerActor {
+		if err := s.decline(ctx, selfupdate.Release{Version: rec.ToVersion, Build: rec.ToBuild, Hotfix: rec.ToHotfix}); err != nil {
+			slog.Error("serverupdate: a rolled-back update stays eligible", "version", rec.ToVersion, "error", err)
+		}
+	}
 	s.record(ctx, pending.Version, store.ServerUpdateRolledBack, detail)
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdateRolledBack, pending.Version, detail)
 }

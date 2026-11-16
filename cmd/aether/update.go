@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/shellquote"
@@ -66,7 +67,7 @@ func runUpdate(args []string) error {
 	if *check {
 		return reportCheck(ctx, *jsonOut)
 	}
-	if app := os.Getenv(selfupdate.PackagedEnv); app != "" {
+	if app := envname.Getenv(selfupdate.PackagedEnv); app != "" {
 		return fmt.Errorf("this aether is part of the %s, which installs its updates; update the %s instead", app, app)
 	}
 
@@ -74,18 +75,33 @@ func runUpdate(args []string) error {
 		return err
 	}
 	base := "https://github.com/" + selfupdate.Repo
-	var server linkedServer
+	var (
+		server linkedServer
+		latest selfupdate.Check
+	)
 	if !*force {
 		server = probeLinkedServer(ctx)
 	}
 	if match := matchServer(server); *tag == "" && match != "" {
+		if err := selfupdate.RefuseDowngrade(ctx, base, match); err != nil {
+			return err
+		}
 		*tag = match
 		fmt.Printf("installing %s to match the server\n", *tag)
 	} else if *tag == "" {
-		got, err := selfupdate.DefaultChecker().CheckFresh(ctx)
+		channel := func(context.Context) string { return server.channel }
+		if *force {
+			channel = cli.DefaultLinkChannel
+		}
+		checker, err := cli.NewFollowedChecker(base, time.Hour, channel)
 		if err != nil {
 			return err
 		}
+		got, err := checker.CheckFresh(ctx)
+		if err != nil {
+			return err
+		}
+		latest = got
 		if !got.UpdateAvailable {
 			printCheck(got)
 			return reportBinary()
@@ -96,7 +112,7 @@ func runUpdate(args []string) error {
 		return reportBinary()
 	}
 
-	if err := serverFirst(os.Stdout, *tag, server); err != nil {
+	if err := serverFirst(os.Stdout, targetRelease(*tag, latest, server), server); err != nil {
 		return err
 	}
 
@@ -112,12 +128,15 @@ func runUpdate(args []string) error {
 		return err
 	}
 	fmt.Printf("updating aether %s -> %s\n", version.String(), *tag)
-	replaced, err := selfupdate.Update(ctx, base, *tag)
+	replaced, err := selfUpdate(ctx, base, *tag)
 	for _, path := range replaced {
 		fmt.Printf("updated %s\n", path)
 	}
 	if err != nil {
 		return err
+	}
+	if err = linkBinaries(replaced); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
 	}
 	if len(replaced) > 1 {
 		fmt.Printf("aether-server on disk is now %s; the running server keeps its old version until you restart it: sudo systemctl restart aether-server\n", *tag)
@@ -133,6 +152,13 @@ func runUpdate(args []string) error {
 	// is where the new binary now sits.
 	return rebuildDesktopApp(replaced[0])
 }
+
+// The update and the links after it, behind variables so a test can
+// install nothing and make the links fail.
+var (
+	selfUpdate   = selfupdate.Update
+	linkBinaries = selfupdate.LinkAll
+)
 
 // The calls the hand-off makes, behind variables so a test can stand in
 // for systemd and for replacing the process.
@@ -236,6 +262,9 @@ func checkServerSchema(ctx context.Context, base, tag, self string) error {
 type linkedServer struct {
 	reachable bool
 	version   string
+	channel   string
+	build     int
+	hotfix    int
 	admin     bool
 	capable   bool
 	manual    []string
@@ -269,10 +298,10 @@ func probeLinkedServer(ctx context.Context) linkedServer {
 	if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
 		return linkedServer{}
 	}
-	out := linkedServer{reachable: true, version: info.ServerVersion, admin: cli.ServerAdmin(info)}
+	out := linkedServer{reachable: true, version: info.ServerVersion, build: info.Build, hotfix: info.Hotfix, admin: cli.ServerAdmin(info)}
 	var status protocol.ServerUpdateStatusResult
 	if err := c.Call(protocol.MethodServerUpdateStatus, struct{}{}, &status); err == nil {
-		out.capable, out.manual = status.Capable, status.ManualCommands
+		out.capable, out.manual, out.channel = status.Capable, status.ManualCommands, status.Channel
 	}
 	return out
 }
@@ -285,7 +314,26 @@ func matchServer(server linkedServer) string {
 	if !server.reachable {
 		return ""
 	}
-	return cli.MatchServer(version.Version, server.version)
+	return cli.MatchServer(selfupdate.Running(), server.release())
+}
+
+func (s linkedServer) release() selfupdate.Release {
+	return selfupdate.Release{Version: s.version, Build: s.build, Hotfix: s.hotfix}
+}
+
+// targetRelease is tag with the build this client knows for it: the
+// linked server's when it is the server's release, the release check's
+// when it is the latest.
+func targetRelease(tag string, latest selfupdate.Check, server linkedServer) selfupdate.Release {
+	switch {
+	case server.reachable && tag == version.ReleaseCore(server.version):
+		r := server.release()
+		r.Version = tag
+		return r
+	case tag == latest.Latest:
+		return latest.LatestRelease()
+	}
+	return selfupdate.Release{Version: tag}
 }
 
 // serverFirst refuses to move this client past a linked server that its
@@ -293,15 +341,15 @@ func matchServer(server linkedServer) string {
 // client can install. A member who cannot update the server is told who
 // can and the install goes ahead, as it does when the server is
 // unreachable or already current.
-func serverFirst(w io.Writer, target string, server linkedServer) error {
-	if !server.reachable || !selfupdate.Behind(server.version, target) {
+func serverFirst(w io.Writer, target selfupdate.Release, server linkedServer) error {
+	if !server.reachable || !selfupdate.Ahead(target, server.release()) {
 		return nil
 	}
 	running := printable(server.version)
 	switch {
-	case cli.ServerFirst(server.version, target, server.admin, server.capable):
+	case cli.ServerFirst(server.release(), target, server.admin, server.capable):
 		return fmt.Errorf("update the server first: aether server update (the server runs %s and this installs %s; --force skips this check)",
-			running, target)
+			running, target.Version)
 	case server.admin:
 		_, _ = fmt.Fprintf(w, "the server runs %s; update it first on the server host: %s\n", running, printable(strings.Join(server.manual, ", then ")))
 	default:
@@ -351,6 +399,11 @@ func reportBinary() error {
 	}
 	fmt.Printf("this binary is %s\n", self)
 	warnShadowed(os.Stderr, self)
+	// An update from a release that predates the second names leaves only
+	// the real files; an update that finds nothing to install completes
+	// the layout. Only a run that installs says what it could not create,
+	// so a directory this user may not write does not repeat it each time.
+	_ = selfupdate.Link(filepath.Dir(self))
 	return nil
 }
 
@@ -370,7 +423,11 @@ func warnShadowed(w io.Writer, self string) {
 // reportCheck prints the release check and exits 0 whatever it says: a
 // caller polling for an update wants an answer, not an exit status.
 func reportCheck(ctx context.Context, asJSON bool) error {
-	got, err := selfupdate.DefaultChecker().Check(ctx)
+	checker, err := cli.NewFollowedChecker("https://github.com/"+selfupdate.Repo, time.Hour, cli.DefaultLinkChannel)
+	if err != nil {
+		return err
+	}
+	got, err := checker.Check(ctx)
 	if err != nil {
 		return err
 	}

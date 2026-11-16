@@ -55,7 +55,7 @@ test('a member shares their agent account and a teammate launches on it', async 
   const bobPage = await bobContext.newPage()
   try {
     const openLaunch = async () => {
-      await bobPage.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New session' }).click()
+      await bobPage.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: 'New session' }).click()
       const dialog = bobPage.getByRole('dialog', { name: 'New session' })
       await expect(dialog).toBeVisible()
       return dialog
@@ -84,7 +84,7 @@ test('a member shares their agent account and a teammate launches on it', async 
       timeout: 60_000,
     })
 
-    await page.getByRole('navigation', { name: 'Aether' })
+    await page.getByRole('navigation', { name: 'Cloudfield' })
       .getByRole('button', { name: 'Members', exact: true }).click()
     const sharing = page.getByRole('region', { name: 'Roster' })
     const share = sharing.getByRole('switch', { name: `Share my account with ${bobName}` })

@@ -291,3 +291,55 @@ func assertNoLeftovers(t *testing.T, dir string) {
 		}
 	}
 }
+
+// TestShellCommandLinksTheSecondName runs the command with Link set: the
+// link is made beside Dst when the name is free, and kept as it is when
+// anything holds it, without failing the install.
+func TestShellCommandLinksTheSecondName(t *testing.T) {
+	requireTools(t)
+	for name, existing := range map[string]string{"free": "", "taken": "someone else's cloudfield"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			dst, link := filepath.Join(dir, "aether"), filepath.Join(dir, "cloudfield")
+			if existing != "" {
+				if err := os.WriteFile(link, []byte(existing), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			body := []byte("new release binary")
+			src := filepath.Join(t.TempDir(), "staged")
+			if err := os.WriteFile(src, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			req := request(src, dst, body)
+			req.Link = link
+			cmd, err := ShellCommand(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out, runErr := exec.Command("/bin/sh", "-c", cmd).CombinedOutput(); runErr != nil {
+				t.Fatalf("sh: %v: %s", runErr, out)
+			}
+			if got, _ := os.ReadFile(dst); string(got) != string(body) {
+				t.Fatalf("dst = %q, want the staged bytes", got)
+			}
+			if existing != "" {
+				if got, _ := os.ReadFile(link); string(got) != existing {
+					t.Fatalf("link = %q, want what held the name kept", got)
+				}
+				return
+			}
+			if target, err := os.Readlink(link); err != nil || target != "aether" {
+				t.Fatalf("link -> %q, %v; want aether", target, err)
+			}
+		})
+	}
+}
+
+func TestShellCommandRefusesALinkElsewhere(t *testing.T) {
+	req := request("/tmp/staged", "/usr/local/bin/aether", []byte("x"))
+	req.Link = "/tmp/cloudfield"
+	if _, err := ShellCommand(req); err == nil || !strings.Contains(err.Error(), "is not beside") {
+		t.Fatalf("ShellCommand = %v, want a link outside Dst's directory refused", err)
+	}
+}

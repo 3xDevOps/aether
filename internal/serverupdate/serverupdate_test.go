@@ -196,6 +196,14 @@ func newTestBus(t *testing.T) *events.InProc {
 
 func newEnv(t *testing.T, poison bool) *env {
 	t.Helper()
+	return newEnvStartedAs(t, poison, "aether-server", "")
+}
+
+// newEnvStartedAs is newEnv for a server started by the name start, which
+// is a link made by selfupdate.Link unless it is aether-server, on a host
+// whose unit directory is unitDir.
+func newEnvStartedAs(t *testing.T, poison bool, start, unitDir string) *env {
+	t.Helper()
 	dir := t.TempDir()
 	e := &env{
 		dir:     dir,
@@ -216,6 +224,11 @@ func newEnv(t *testing.T, poison bool) *env {
 	for _, path := range []string{e.self, e.sibling} {
 		if err := os.WriteFile(path, []byte("the old binary"), 0o755); err != nil {
 			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	if start != "aether-server" {
+		if err := selfupdate.Link(dir); err != nil {
+			t.Fatal(err)
 		}
 	}
 	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
@@ -250,8 +263,9 @@ func newEnv(t *testing.T, poison bool) *env {
 		Store:      db,
 		Bus:        bus,
 		Checker:    selfupdate.NewChecker(e.release.URL, time.Hour),
-		Executable: e.self,
+		Executable: filepath.Join(dir, start),
 		Host: Host{
+			UnitDir: unitDir,
 			Exec: func(path string, argv, environ []string) error {
 				e.execs <- execCall{path: path, argv: argv, env: environ}
 				// The real syscall.Exec never returns on success.

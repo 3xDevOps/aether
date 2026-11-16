@@ -1,12 +1,17 @@
 package serverupdate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
+
+	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/serversetup"
 )
 
 // Host carries the three things a self-update does to the machine it runs
@@ -34,6 +39,34 @@ type Host struct {
 	// for an update exits instead of re-executing, so systemd sees it. Nil
 	// means no: the process re-executes in place.
 	RestartsOnExit75 func() bool
+	// UnitDir is the systemd unit directory LinkUnit links the unit's
+	// second name in. Empty leaves the unit directory alone.
+	UnitDir string
+}
+
+// UnitAlias is the second name of the server's unit, a symlink to its
+// unit file. The unit keeps its name and text, because a binary from
+// before the second name restarts it by that name after a rollback.
+const UnitAlias = "cloudfield-server.service"
+
+// LinkUnit makes UnitAlias in UnitDir a link to the server's unit file
+// when the unit file is there and nothing holds the name, and reports
+// whether it did. A name held by anything else is left as it is and is no
+// error. It never reloads systemd: a daemon-reload acts on every unit of
+// the host.
+func (h Host) LinkUnit() (bool, error) {
+	if h.UnitDir == "" {
+		return false, nil
+	}
+	unit := filepath.Base(serversetup.UnitPath)
+	if _, err := os.Stat(filepath.Join(h.UnitDir, unit)); err != nil {
+		return false, nil
+	}
+	created, err := selfupdate.Symlink(h.UnitDir, unit, UnitAlias)
+	if errors.Is(err, selfupdate.ErrNameTaken) {
+		return false, nil
+	}
+	return created, err
 }
 
 // complete reports whether every hook is set. A partially filled Host is
@@ -43,20 +76,24 @@ func (h Host) complete() bool {
 }
 
 // HostProcess returns the real controls: syscall.Exec, `systemctl restart
-// aether-server`, and the INVOCATION_ID that systemd sets for every unit
-// it starts.
+// aether-server`, the INVOCATION_ID that systemd sets for every unit it
+// starts, and, for root under systemd, the unit directory.
 //
 // Only cmd/aether-server calls this. It is the single opt-in that lets a
 // process act on the host it runs on, so grepping for it finds every place
 // that can.
 func HostProcess() Host {
-	return Host{
+	h := Host{
 		Exec:         syscall.Exec,
 		Restart:      systemctlRestart,
 		UnderSystemd: func() bool { return os.Getenv("INVOCATION_ID") != "" },
 
 		RestartsOnExit75: unitRestartsOnExit75,
 	}
+	if h.UnderSystemd() && os.Geteuid() == 0 {
+		h.UnitDir = filepath.Dir(serversetup.UnitPath)
+	}
+	return h
 }
 
 // unitRestartsOnExit75 asks systemd how the unit restarts. Any failure to

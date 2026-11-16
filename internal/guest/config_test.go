@@ -19,10 +19,12 @@ func TestKernelArgsRoundTrip(t *testing.T) {
 			{Volume: VolumeShare, Source: "home", Target: "/root"},
 			{Volume: VolumeShare, Source: "repos/my repo,v2", Target: "/repos/my repo,v2", ReadOnly: true},
 			{Volume: VolumeData, Source: "tmp", Target: "/tmp"},
+			{Volume: VolumeState, Source: "0", Target: "/root/.copilot", Seed: []string{"config.json", "cache/on boarding.json"}},
 		},
 		Checkouts: []CheckoutMount{{Serial: "repo0", Key: "run-abc", Target: "/workspace"}, {Serial: "repo1", Key: "run-abc-r1", Target: "/repos/my repo"}},
 		Sockets:   []Socket{{Port: 1025, Path: "/run/aether/coord3.sock"}},
 		Serves:    []Socket{{Port: 2000, Path: "/run/dictation/engine.sock"}},
+		Loopbacks: []Loopback{{Port: 47630, Path: "/run/aether-omp/broker.sock"}},
 	}
 	line, err := cfg.KernelArgs("console=ttyS0 root=/dev/vda")
 	if err != nil {
@@ -50,6 +52,8 @@ func TestConfigRejects(t *testing.T) {
 		"unknown volume":    {Mounts: []Mount{{Volume: "disk", Source: "a", Target: "/a"}}},
 		"api port":          {Sockets: []Socket{{Port: APIPort, Path: "/run/x.sock"}}},
 		"served api port":   {Serves: []Socket{{Port: APIPort, Path: "/run/x.sock"}}},
+		"loopback port 0":   {Loopbacks: []Loopback{{Port: 0, Path: "/run/x.sock"}}},
+		"relative loopback": {Loopbacks: []Loopback{{Port: 47630, Path: "run/x.sock"}}},
 		"hostname":          {Hostname: "bad host"},
 		"network no prefix": {Network: &Network{Gateway: netip.MustParseAddr("10.0.0.1")}},
 		"checkout key path": {Checkouts: []CheckoutMount{{Serial: "repo0", Key: "../etc", Target: "/workspace"}}},

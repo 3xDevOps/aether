@@ -171,11 +171,9 @@ func (s *Scheduler) assistantContainerPlan(ctx context.Context, member domain.Me
 	if err != nil {
 		return runtime.Spec{}, fmt.Errorf("scheduler: stage the assistant's server binary: %w", err)
 	}
-	coord := []runtime.Mount{
-		{HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true},
-		{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
-		{HostPath: sock, ContainerPath: coordtransport.AssistantMountDir, ReadOnly: true},
-	}
+	coord := append(cliMounts(bin),
+		runtime.Mount{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
+		runtime.Mount{HostPath: sock, ContainerPath: coordtransport.AssistantMountDir, ReadOnly: true})
 	if err := checkCoordinationMounts(coord); err != nil {
 		return runtime.Spec{}, err
 	}
@@ -209,7 +207,7 @@ func (s *Scheduler) createAssistantContainer(ctx context.Context, member domain.
 	if err != nil {
 		return "", err
 	}
-	cid, err := s.cfg.Runtime.Create(ctx, spec)
+	cid, err := s.createContainer(ctx, spec)
 	if err != nil {
 		return "", fmt.Errorf("scheduler: create the assistant container: %w", err)
 	}
@@ -316,7 +314,7 @@ func (s *Scheduler) installAssistant(ctx context.Context, member domain.MemberID
 	if err = s.applyRunOwnership(nil, &domain.Run{}, member, mounts, user); err != nil {
 		return fmt.Errorf("scheduler: hand the assistant's install to its user: %w", err)
 	}
-	cid, err := s.cfg.Runtime.Create(ctx, runtime.Spec{
+	cid, err := s.createContainer(ctx, runtime.Spec{
 		Name:             "aether-assistant-install-" + string(member),
 		Image:            s.cfg.StandardImage,
 		Env:              map[string]string{"HOME": "/tmp", "PATH": assistantPath},

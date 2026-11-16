@@ -16,8 +16,10 @@ const path = require('node:path')
 const readline = require('node:readline')
 
 const { boundCli } = require('./cli-binding')
+const { SCHEMES, deepLinkSuffix, findDeepLink } = require('./deep-link')
 const notify = require('./notify')
-const { sidecarExitAction } = require('./sidecar-exit')
+const { relaunchOptions, relaunchTarget, sidecarExitAction } = require('./sidecar-exit')
+const { chooseUserData } = require('./user-data')
 const zoom = require('./zoom')
 
 // The full CLI build identity is separate from package.json's npm-valid
@@ -25,6 +27,8 @@ const zoom = require('./zoom')
 // Older shells only carried the package version.
 const manifest = require('./package.json')
 const shellVersion = manifest.aetherCliVersion || manifest.version
+// CLOUDFIELD_BIN when set, else AETHER_BIN (internal/envname).
+const explicitBin = process.env.CLOUDFIELD_BIN || process.env.AETHER_BIN
 // A damaged binding file is reported through fatal() once the app is ready,
 // not as Electron's uncaught-exception dialog at load.
 let installedBy = ''
@@ -36,6 +40,12 @@ try {
 }
 
 // --- single instance ----------------------------------------------------
+
+// Before the lock, which lives in the data directory. setPath refuses a
+// directory that does not exist, so it only runs to pick the earlier one.
+const appData = app.getPath('appData')
+const userData = chooseUserData(appData, app.name)
+if (userData !== path.join(appData, app.name)) app.setPath('userData', userData)
 
 const locked = app.requestSingleInstanceLock()
 if (!locked) {
@@ -93,11 +103,10 @@ function main() {
   }
 
   function locateAether() {
-    const explicit = process.env.AETHER_BIN
-    if (explicit) {
+    if (explicitBin) {
       try {
-        fs.accessSync(explicit, fs.constants.X_OK)
-        return explicit
+        fs.accessSync(explicitBin, fs.constants.X_OK)
+        return explicitBin
       } catch {
         return '' // an explicit path that does not work is an error, not a fallback
       }
@@ -147,7 +156,7 @@ function main() {
     if (!bin) {
       fatal(
         'aether CLI not found',
-        installedBy && !process.env.AETHER_BIN
+        installedBy && !explicitBin
           ? `The CLI that installed this app is no longer executable at ${installedBy}.\n\n` +
             'Restore it or set AETHER_BIN to the intended binary.'
           : 'The desktop app needs the aether CLI installed.\n\n' +
@@ -159,8 +168,9 @@ function main() {
     child = spawn(bin, ['gui', '--json', '--port', '0'], {
       stdio: ['ignore', 'pipe', 'inherit'],
       windowsHide: true,
-      // Tells the gateway this shell quits on exit 76 (localgw.ShellQuitsEnv).
-      env: { ...process.env, AETHER_SHELL_QUITS_ON_76: '1' },
+      // Tells the gateway this shell quits on exit 76 (localgw.ShellQuitsEnv)
+      // and which app is running (localops.ShellExeEnv).
+      env: { ...process.env, AETHER_SHELL_QUITS_ON_76: '1', AETHER_SHELL_EXE: process.execPath },
     })
 
     // The sidecar prints exactly one JSON line on stdout, then serves.
@@ -178,8 +188,16 @@ function main() {
       console.error('aether gui produced no handshake within 15s; killing it')
       spawned.kill('SIGKILL')
     }, 15000)
+    let relaunchPath = ''
+    let stdoutClosed = false
+    rl.on('close', () => {
+      stdoutClosed = true
+    })
     rl.on('line', (line) => {
-      if (parsed) return
+      if (parsed) {
+        relaunchPath = relaunchTarget(line) || relaunchPath
+        return
+      }
       let msg
       try {
         msg = JSON.parse(line)
@@ -214,10 +232,30 @@ function main() {
       // process is gone, so relaunching here would start into a half-swapped
       // one. Everything else keeps the respawn path.
       const action = sidecarExitAction(code)
-      if (action !== 'respawn') {
+      if (action === 'quit') {
         quitting = true
-        if (action === 'relaunch') app.relaunch()
         app.exit(0)
+        return
+      }
+      if (action === 'relaunch') {
+        quitting = true
+        // The line naming the app to relaunch can still be in the pipe
+        // when the exit event fires; a pipe that never closes must not keep
+        // the shell from relaunching.
+        let relaunched = false
+        const relaunch = () => {
+          if (relaunched) return
+          relaunched = true
+          const options = relaunchOptions(relaunchPath, process.execPath, process.argv)
+          if (options) app.relaunch(options)
+          else app.relaunch()
+          app.exit(0)
+        }
+        if (stdoutClosed) relaunch()
+        else {
+          rl.once('close', relaunch)
+          setTimeout(relaunch, 2000)
+        }
         return
       }
       respawns += 1
@@ -515,10 +553,11 @@ function main() {
 
   // --- deep links -------------------------------------------------------------
 
-  // aether://run/<id> focuses the window on that run: the SPA reads &run=<id>
-  // off the gateway URL and opens that run's terminal once it has hydrated
-  // (docs/local-gateway.md). aether://join?… and aether://claim?… open the
-  // Connect step with that link as #join= or #claim=.
+  // <scheme>://run/<id> focuses the window on that run: the SPA reads
+  // &run=<id> off the gateway URL and opens that run's terminal once it has
+  // hydrated (docs/local-gateway.md). <scheme>://join?… and
+  // <scheme>://claim?… open the Connect step with that link as #join= or
+  // #claim=.
   function handleDeepLink(raw) {
     const suffix = deepLinkSuffix(raw)
     if (!suffix) return
@@ -533,51 +572,6 @@ function main() {
       pendingSuffix = suffix
       openWindow()
     }
-  }
-
-  // Every part of a link is checked before any of it reaches the gateway
-  // URL; anything else is refused rather than concatenating
-  // attacker-shaped text into it.
-  function deepLinkSuffix(raw) {
-    let parsed
-    try {
-      parsed = new URL(raw)
-    } catch {
-      return ''
-    }
-    if (parsed.protocol !== 'aether:') return ''
-    // aether://run/<id> parses as host "run", pathname "/<id>".
-    if (parsed.hostname === 'run') {
-      const id = parsed.pathname.replace(/^\//, '')
-      // Run IDs are lowercase letters, digits, and hyphens (run-7k2m9q4xbd).
-      return /^[0-9a-z-]{10,32}$/.test(id) ? '&run=' + id : ''
-    }
-    const names =
-      parsed.hostname === 'join' ? ['edge', 'server', 'invitation'] : parsed.hostname === 'claim' ? ['edge', 'server'] : null
-    if (!names || (parsed.pathname !== '' && parsed.pathname !== '/')) return ''
-    const params = parsed.searchParams
-    if ([...params.keys()].length !== names.length || names.some((name) => params.getAll(name).length !== 1)) return ''
-    let edge
-    try {
-      edge = new URL(params.get('edge'))
-    } catch {
-      return ''
-    }
-    // A relay origin as edgeproto.Origin accepts it: https://host[:port], or
-    // http:// for a loopback host, nothing else. URL.origin drops an explicit
-    // default port, which edgeproto.Origin keeps.
-    const origin = params.get('edge')
-    const loopback =
-      edge.hostname === 'localhost' ||
-      edge.hostname === '[::1]' ||
-      /^127\.\d+\.\d+\.\d+$/.test(edge.hostname) ||
-      /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(edge.hostname)
-    const port = edge.protocol === 'https:' ? ':443' : edge.protocol === 'http:' && loopback ? ':80' : null
-    if (!port || (origin !== edge.origin && origin !== edge.origin + port)) return ''
-    if (!/^[a-z2-7]{26}$/.test(params.get('server'))) return ''
-    if (names.includes('invitation') && !/^inv-[0-9a-hjkmnp-tv-z]{10}$/.test(params.get('invitation'))) return ''
-    if (!/^#[a-z2-7]{16}$/.test(parsed.hash)) return ''
-    return '#' + parsed.hostname + '=' + encodeURIComponent(parsed.href)
   }
 
   // Opens a run in the page as it stands. The dashboard keeps its route in
@@ -609,11 +603,11 @@ function main() {
     else if (/^https:\/\//.test(link)) shell.openExternal(link)
   }
 
-  app.setAsDefaultProtocolClient('aether')
+  for (const scheme of SCHEMES) app.setAsDefaultProtocolClient(scheme)
 
   // Windows/Linux deliver deep links through the second instance's argv.
   app.on('second-instance', (_event, argv) => {
-    const link = argv.find((arg) => arg.startsWith('aether://'))
+    const link = findDeepLink(argv)
     if (link) handleDeepLink(link)
     else focusWindow()
   })
@@ -628,9 +622,9 @@ function main() {
 
   app.whenReady().then(() => {
     installMenu()
-    // Windows/Linux hand a cold-start aether:// link to the first
-    // instance's argv; handleDeepLink queues it until the gateway is up.
-    const link = process.argv.find((arg) => arg.startsWith('aether://'))
+    // Windows/Linux hand a cold-start link to the first instance's argv;
+    // handleDeepLink queues it until the gateway is up.
+    const link = findDeepLink(process.argv)
     if (link) handleDeepLink(link)
     startSidecar()
   })

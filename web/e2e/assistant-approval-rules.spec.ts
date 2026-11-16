@@ -107,7 +107,7 @@ test('Always approve saves a rule, a matching launch passes, another kind asks, 
   await expect.poll(() => confirmed.at(-1)).toEqual({ confirmation_id: 'conf-2', approve: false })
   await cards()
 
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'Assistant', exact: true }).click()
   const section = page.getByRole('region', { name: 'Approval rules' })
   await expect(section).toContainText(wording)

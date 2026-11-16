@@ -1,7 +1,7 @@
 # Terminals
 
-Aether shows three kinds of terminal in the dashboard. A session is one agent
-working on one task in its own sandbox; other terms are in the
+Cloudfield shows three kinds of terminal in the dashboard. A session is one
+agent working on one task in its own sandbox; other terms are in the
 [glossary](README.md#concepts).
 
 | Terminal | What it is |
@@ -253,7 +253,7 @@ the server your CLI is linked to. Without the config, `aether ssh [ssh options]
 | --- | --- |
 | `ssh <host>` | A login shell in `/workspace` |
 | `ssh <host> <command>` | The command through `bash -c` (or `sh -c`), output and exit status unchanged |
-| `scp`, `sftp` | Aether's own SFTP server. Relative paths are in the checkout. |
+| `scp`, `sftp` | Cloudfield's own SFTP server. Relative paths are in the checkout. |
 | `ssh -L`, `-D`, `-W` | A port on the session's own loopback (`localhost`, `127.0.0.1`, `::1`) only |
 
 `scp -O` and `rsync` run those programs inside the container. The standard
@@ -331,7 +331,7 @@ save`) so new sessions get them. See
 
 ## Keys and touch screens
 
-These work in every terminal Aether draws, when it has focus:
+These work in every terminal Cloudfield draws, when it has focus:
 
 | Key | What it does |
 | --- | --- |
@@ -376,8 +376,9 @@ On a phone:
 
 Paste an image straight into a terminal that accepts input, or choose **Tools →
 Upload image…**. The **Upload image to terminal** dialog previews it. Select
-**Upload and insert**. Aether stores the file in your home and types its path,
-quoted, without pressing Enter. Review the path, then press Enter yourself.
+**Upload and insert**. Cloudfield stores the file in your home and types its
+path, quoted, without pressing Enter. Review the path, then press Enter
+yourself.
 
 Only real image bytes work: PNG, JPEG, GIF or WebP up to 8 MiB. The server
 checks the decoded bytes, not the filename. Some clipboard managers copy only a
@@ -423,7 +424,7 @@ screen instead. A finished session opens from its final screen and stays read-on
 unless you reopen the session.
 
 The environment survives a server restart or update, and unsaved
-changes stay. A session keeps the Aether helper it was created with, so SSH
+changes stay. A session keeps the Cloudfield helper it was created with, so SSH
 features added by a later server need a new session.
 
 Session shells, and terminals the agent starts with `aether-internal terminal
@@ -463,13 +464,13 @@ A shell started by a server without terminal keepers, or in a container whose
 staged binary predates them, keeps running through a restart, but its screen,
 output and input are gone. It reads `PTY unavailable after recovery;
 execution was not reattached or restarted`; stop it and start another.
-Aether starts a terminal without a keeper only when the staged binary answers
-`unknown command: acp-keeper`. Any other keeper failure fails `terminal start`
-with `start the terminal keeper: <error>`, because the keeper may already
+Cloudfield starts a terminal without a keeper only when the staged binary
+answers `unknown command: acp-keeper`. Any other keeper failure fails `terminal
+start` with `start the terminal keeper: <error>`, because the keeper may already
 have started the command.
 
 Docker restarted with `live-restore` forgets every exec but not its
-processes: Aether then reads a terminal's state from its exec helper in the
+processes: Cloudfield then reads a terminal's state from its exec helper in the
 container, so a running terminal is never reported exited and `terminal
 stop` still stops it. A terminal whose process is provably gone, because its
 container stopped, reads **exited** with the reason; stopping it removes it

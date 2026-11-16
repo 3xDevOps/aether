@@ -29,9 +29,9 @@ beforeEach(() => {
 
 test('says the server words once, the minimum and the manual command, and takes focus', () => {
   render(<UpdateGate client={fakeApi()} />)
-  const heading = screen.getByRole('heading', { name: 'Update Aether to keep using this server' })
+  const heading = screen.getByRole('heading', { name: 'Update Cloudfield to keep using this server' })
   expect(document.activeElement).toBe(heading)
-  const region = screen.getByRole('region', { name: 'Update Aether to keep using this server' })
+  const region = screen.getByRole('region', { name: 'Update Cloudfield to keep using this server' })
   expect(screen.queryByRole('alert')).toBeNull()
   expect(
     within(region).getAllByText(/this aether is v1\.2\.3 and the server runs v1\.3\.0/, { ignore: 'pre' }),
@@ -57,7 +57,7 @@ test('Update now applies, shows progress, then says what is left to do', async (
   expect(await screen.findByText('Downloading and verifying v1.3.0…')).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Updating…' }).hasAttribute('disabled')).toBe(true)
   await act(async () => finish({ updated: ['/home/user/.local/bin/aether'], version: 'v1.3.0', restarting: false, rebuilding: false }))
-  expect(await screen.findByText('Aether v1.3.0 is installed.')).toBeTruthy()
+  expect(await screen.findByText('Cloudfield v1.3.0 is installed.')).toBeTruthy()
 })
 
 test('a failed update shows the real error and keeps the button', async () => {
@@ -82,7 +82,7 @@ test('a packaged client is told which app updates it, with no button or command'
     }),
   })
   render(<UpdateGate client={fakeApi()} />)
-  expect(screen.getByText('Updates come from the Android app: install its v1.3.0 release to update Aether.')).toBeTruthy()
+  expect(screen.getByText('Updates come from the Android app: install its v1.3.0 release to update Cloudfield.')).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.queryByText('aether update')).toBeNull()
 })
@@ -120,7 +120,7 @@ test('names the release and its page, never aether update, where the CLI cannot 
   render(<UpdateGate client={fakeApi()} />)
   expect(screen.getByText(/This aether cannot update itself\. Install v1\.3\.0 from its release page\./, { ignore: 'pre' })).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Release v1.3.0' }).getAttribute('href')).toBe(
-    'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+    'https://github.com/3xDevOps/cloudfield/releases/tag/v1.3.0',
   )
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.queryByText('aether update')).toBeNull()

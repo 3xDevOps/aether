@@ -51,12 +51,16 @@ verify() {
 		fail "$3/checksums.txt does not match the assets beside it"
 }
 
-# Downloads assets the way clients do: anonymously. Retries cover a release
-# that has just been published and is not yet served everywhere.
+# Downloads an asset the way clients do: anonymously. Retries cover a
+# release that has just been published and is not yet served everywhere.
+download() {
+	curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+		--retry 10 --retry-delay 6 --retry-all-errors --output "$2" "$1" </dev/null
+}
+
 fetch() {
 	for name in "$@"; do
-		curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-			--retry 10 --retry-delay 6 --retry-all-errors --output "$tmp/public/$name" "$public/$name"
+		download "$public/$name" "$tmp/public/$name"
 	done
 }
 
@@ -84,7 +88,72 @@ require_tag_commit() {
 		fail "tag $tag now names $tagged; this run built $commit, so $tag is not published"
 }
 
-# Latest goes to the highest version among complete published releases.
+# The place of release $1, whose manifest is $2, in the release order:
+# "<channel> <build code> <tag code>", channel "none" for a release from
+# before channels. A release on a channel takes the versionCode of its
+# (build, hotfix), which ranks it above every release from before channels;
+# those rank among themselves by their tag's versionCode, which also breaks
+# a tie between two releases with one build, so Latest does not depend on
+# the listing's order. A nightly tag has no tag versionCode and ties at 0.
+# Fails for a manifest of another tag or with channel fields an updater
+# refuses.
+release_order() {
+	fields=$(jq -r --arg tag "$1" '
+		select(type == "object" and .version == $tag)
+		| [(if has("channel") then .channel else "" end), (if has("build") then .build else 0 end), (if has("hotfix") then .hotfix else 0 end)]
+		| select((.[0] | IN("", "nightly", "beta", "stable")) and (.[1] | type) == "number" and (.[2] | type) == "number")
+		| "\(if .[0] == "" then "none" else .[0] end) \(.[1]) \(.[2])"' "$2" 2>/dev/null) || return 1
+	case $fields in *"
+"*) return 1 ;; esac
+	read -r channel build hotfix <<-EOF
+		$fields
+	EOF
+	case "$channel:$1" in
+	none:*)
+		[ "$build $hotfix" = "0 0" ] || return 1
+		code=$(sh "$script_dir/android-version-code.sh" "$1" 2>/dev/null </dev/null) || return 1
+		echo "none 0 $code"
+		;;
+	stable:*-*) return 1 ;;
+	stable:* | nightly:*-nightly.* | beta:*-beta.*)
+		code=$(sh "$script_dir/android-version-code.sh" "$1" "$build" "$hotfix" 2>/dev/null </dev/null) || return 1
+		label=$(sh "$script_dir/android-version-code.sh" "$1" 2>/dev/null </dev/null) || label=0
+		echo "$channel $code $label"
+		;;
+	*) return 1 ;;
+	esac
+}
+
+# Whether order $1 ranks above order $2, both "<channel> <build code> <tag code>".
+above() {
+	# Split on purpose: each order is three words.
+	# shellcheck disable=SC2086
+	set -- $1 $2
+	[ "$2" -gt "$5" ] || { [ "$2" -eq "$5" ] && [ "$3" -gt "$6" ]; }
+}
+
+# Sets order to the order of published release $1 from its public
+# manifest, downloaded once per run: a published manifest is never replaced.
+# Runs in the caller's shell so a failed download fails the run instead of
+# leaving the release out.
+published_order() {
+	order=
+	case $1 in v[0-9]*) ;; *) return 1 ;; esac
+	case $1 in *[!A-Za-z0-9.-]*) return 1 ;; esac
+	mkdir -p "$tmp/manifests"
+	if [ ! -s "$tmp/manifests/$1" ]; then
+		download "https://github.com/$repo/releases/download/$1/aether-release.json" "$tmp/manifests/$1.part" ||
+			fail "cannot read the aether-release.json of published release $1 to order it"
+		mv "$tmp/manifests/$1.part" "$tmp/manifests/$1"
+	fi
+	order=$(release_order "$1" "$tmp/manifests/$1") || {
+		echo "publish-release: published release $1 has an aether-release.json for another tag or with invalid channel fields; it is not ordered" >&2
+		return 1
+	}
+}
+
+# Latest goes to the highest stable release, or release from before
+# channels, among complete published releases that are not prereleases.
 # Every run recomputes it after its own publish and lists again after each
 # change until the listing agrees, so a run that read a listing before a
 # parallel release was published corrects its own write.
@@ -93,17 +162,18 @@ reconcile_latest() {
 	while :; do
 		list_releases
 		best=
-		best_code=0
+		best_order="none 0 0"
 		while read -r other draft prerelease others; do
 			[ "$draft $prerelease" = "false false" ] || continue
 			case ",$others," in *,aether-release.json,*) ;; *) continue ;; esac
-			code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null </dev/null) || continue
-			if [ "$code" -gt "$best_code" ]; then
+			published_order "$other" || continue
+			case $order in "none "* | "stable "*) ;; *) continue ;; esac
+			if above "$order" "$best_order"; then
 				best=$other
-				best_code=$code
+				best_order=$order
 			fi
 		done <"$tmp/releases"
-		[ -n "$best" ] || fail "no published release carries aether-release.json to mark Latest"
+		[ -n "$best" ] || fail "no published stable release, or release from before channels, carries aether-release.json to mark Latest"
 		[ "$best" != "$marked" ] || break
 		gh release edit "$best" --latest=true
 		marked=$best
@@ -120,16 +190,26 @@ case $(wc -l <"$tmp/release" | tr -d ' ') in
 esac
 printf '%s\n' "${names:-}" | tr ',' '\n' | sed '/^$/d' >"$tmp/names"
 
-# Release notes start at the highest published release below the tag.
-ours=$(sh "$script_dir/android-version-code.sh" "$tag")
+ours=$(release_order "$tag" "$manifest") ||
+	fail "$manifest does not describe $tag with channel fields an updater accepts, or $tag has no versionCode"
+case $ours in
+"nightly "* | "beta "*) publish_prerelease=true ;;
+*) publish_prerelease=false ;;
+esac
+
+# Release notes start at the highest published release below the tag that
+# is not a prerelease.
 previous=
-previous_code=0
-while read -r other draft prerelease _; do
+previous_order="none 0 0"
+while read -r other draft prerelease others; do
 	[ "$draft $prerelease" = "false false" ] || continue
-	code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null </dev/null) || continue
-	if [ "$code" -lt "$ours" ] && [ "$code" -gt "$previous_code" ]; then
+	case ",$others," in
+	*,aether-release.json,*) published_order "$other" || continue ;;
+	*) order="none 0 $(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null </dev/null)" || continue ;;
+	esac
+	if above "$ours" "$order" && above "$order" "$previous_order"; then
 		previous=$other
-		previous_code=$code
+		previous_order=$order
 	fi
 done <"$tmp/releases"
 
@@ -182,7 +262,7 @@ for name in checksums.txt aether-release.json aether-release.json.sig; do
 done
 
 require_tag_commit
-gh release edit "$tag" --draft=false --prerelease=false --latest=false
+gh release edit "$tag" --draft=false --prerelease="$publish_prerelease" --latest=false
 verify_public "$manifest"
 fetch aether-release.json aether-release.json.sig
 for name in aether-release.json aether-release.json.sig; do

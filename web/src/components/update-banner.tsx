@@ -40,7 +40,7 @@ import type {
 } from '@/lib/types'
 import { memberName } from '@/lib/member-name'
 import { cn, focusRing } from '@/lib/utils'
-import { compareVersions } from '@/lib/version'
+import { buildLabel, compareVersions } from '@/lib/version'
 import { useStore } from '@/store'
 import { useCapability, useIsSuperAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -107,7 +107,7 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
           {packaged && (
             <DialogDescription>
               {packagedLine(packaged)}
-              {packagedLatest && ` Aether ${packagedLatest} is released; the app's banner says when and where to update.`}
+              {packagedLatest && ` Cloudfield ${packagedLatest} is released; the app's banner says when and where to update.`}
             </DialogDescription>
           )}
           {line && <p role="status" className="text-ui text-muted">{line}</p>}
@@ -133,14 +133,14 @@ function ClientRow({ client, target, serverBehind }: { client: Api; target: Upda
   // A click's own answer, a cancel or "already current", stays on screen.
   if (answered && update) return <CliBanner update={update} client={client} serverBehind={serverBehind} />
   if (target.state === 'checking') {
-    return <StatusRow Icon={LoaderCircle} spin headline="Checking for a new Aether release…" />
+    return <StatusRow Icon={LoaderCircle} spin headline="Checking for a new Cloudfield release…" />
   }
   if (target.state === 'up_to_date') {
     const at = checkedTime(target.checkedAt)
     return (
       <StatusRow
         Icon={CircleCheck}
-        headline={`Aether on this computer is up to date (${target.version}).`}
+        headline={`Cloudfield on this computer is up to date (${target.version}).`}
         detail={at ? `Checked ${at}.` : undefined}
       />
     )
@@ -150,7 +150,7 @@ function ClientRow({ client, target, serverBehind }: { client: Api; target: Upda
     return (
       <StatusRow
         Icon={CircleAlert}
-        headline="Could not check for a new Aether release."
+        headline="Could not check for a new Cloudfield release."
         detail={at ? `Last successful check ${at}.` : undefined}
         error={target.error}
       />
@@ -185,10 +185,10 @@ export function useUpdateNotice(includeDismissed = false): { text: string; actio
   }
   // A packaged CLI's notice is its app's own, outside the dashboard.
   if (serves && !update?.cli.packaged && client.state === 'failed') {
-    return { text: `Update to Aether ${bareVersion(client.latest)} failed`, action: true }
+    return { text: `Update to Cloudfield ${bareVersion(client.latest)} failed`, action: true }
   }
   if (serves && !update?.cli.packaged && client.state === 'available' && dismissed.cli !== client.latest) {
-    return { text: `Aether ${bareVersion(client.latest)} is available`, action: true }
+    return { text: `Cloudfield ${bareVersion(client.latest)} is available`, action: true }
   }
   if (serves && cliVersion && shellIsStale(cliVersion) && dismissed.shell !== cliVersion) {
     return { text: 'The desktop app is out of date', action: true }
@@ -324,6 +324,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [cancelNote, setCancelNote] = useState('')
 
   if (target.state === 'unknown') return null
   if (target.state === 'checking') {
@@ -350,6 +351,17 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
       />
     )
   }
+  if (target.state === 'channel_wait') {
+    const stays = `${target.version}${target.build ? ` (${buildLabel(target.build, target.hotfix)})` : ''}`
+    const at = `${target.latest}${target.latestBuild ? ` (${buildLabel(target.latestBuild, target.latestHotfix)})` : ''}`
+    return (
+      <StatusRow
+        Icon={ServerCog}
+        headline={`The server stays on ${stays} until the ${target.channel} channel reaches it.`}
+        detail={`The ${target.channel} channel is at ${at}. The server never installs an older build.`}
+      />
+    )
+  }
   if (target.state === 'required' || target.state === 'ready_to_restart') return null
   const latest = target.latest
   if (target.state === 'available' && dismissed === latest) return null
@@ -357,6 +369,18 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const notesUrl = target.state === 'available' ? target.notesUrl : undefined
   const failedError = target.state === 'failed' || target.state === 'rolled_back' ? target.error : ''
   const NoticeIcon = failedError || error ? CircleAlert : ServerCog
+  const scheduleError = target.state === 'available' ? status?.schedule_error : ''
+  const notes = (
+    <>
+      {scheduleError && (
+        <div className="space-y-1">
+          <p className="text-muted">The server could not schedule it by itself:</p>
+          <p className={cn(verbatim, 'text-state-failed')}>{scheduleError}</p>
+        </div>
+      )}
+      {status?.decline_note && <NotRecorded error={status.decline_note} />}
+    </>
+  )
 
   if (!superAdmin) {
     return (
@@ -377,6 +401,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
             </p>
           )}
           {failedError && <p className={cn(verbatim, 'text-state-failed')}>{failedError}</p>}
+          {notes}
         </div>
         {notesUrl && <div className={bannerActions}><NotesLink href={notesUrl} /></div>}
       </div>
@@ -385,10 +410,12 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
 
   const act = async (when: ServerUpdateWhen) => {
     setError(null)
+    setCancelNote('')
     setBusy(true)
     if (when !== 'cancel') clearSettled()
     try {
       const result = await client.serverUpdate(when)
+      if (result.not_declined) setCancelNote(result.not_declined)
       // The feed reaches workspace timelines only, so a server with no workspaces sends nothing else.
       applyProgress({
         phase: result.status,
@@ -405,7 +432,8 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const capable = status?.capable ?? false
   const active = activeRunCount(runs, pausedRuns)
   const waiting = waitingLine(status?.waiting)
-  const scheduledBy = target.state === 'scheduled' ? memberName({ members, mergedInto }, target.by) : ''
+  const scheduledBy =
+    target.state === 'scheduled' ? (target.byServer ? 'the server' : memberName({ members, mergedInto }, target.by)) : ''
   const offer = target.state === 'available' || target.state === 'failed' || target.state === 'rolled_back'
 
   return (
@@ -454,6 +482,8 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
         )}
         {failedError && <p className={cn(verbatim, 'text-state-failed')}>{failedError}</p>}
         {error && <p className={cn(verbatim, 'text-state-failed')}>{error}</p>}
+        {cancelNote && <NotRecorded error={cancelNote} cancelled />}
+        {notes}
         {(!capable || target.state === 'failed' || target.state === 'rolled_back') && (
           <>
             <p className="text-muted">
@@ -511,6 +541,18 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+/** A cancel whose build could not be recorded as declined: the server's error unchanged under a plain lead. */
+function NotRecorded({ error, cancelled = false }: { error: string; cancelled?: boolean }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-muted">
+        {cancelled ? 'The update was cancelled. ' : ''}The server could not record the cancelled build as declined, so it may schedule it again:
+      </p>
+      <p className={cn(verbatim, 'text-state-failed')}>{error}</p>
     </div>
   )
 }

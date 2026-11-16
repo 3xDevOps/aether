@@ -269,3 +269,45 @@ func TestConfigDirEnvWinsOverPlatformLookup(t *testing.T) {
 		t.Fatalf("Path without %s = %q, want one under %s", ConfigDirEnv, got, other)
 	}
 }
+
+func TestConfigDirTakesCloudfieldNames(t *testing.T) {
+	home := testhome.Isolate(t)
+	old, renamed := filepath.Join(home, "old"), filepath.Join(home, "new")
+	t.Setenv(ConfigDirEnv, old)
+	t.Setenv("CLOUDFIELD_CONFIG_DIR", renamed)
+	if got, err := Path(); err != nil || got != filepath.Join(renamed, "aether", "config.json") {
+		t.Fatalf("Path with both variables = %q, %v; want CLOUDFIELD_CONFIG_DIR's", got, err)
+	}
+
+	t.Setenv("CLOUDFIELD_CONFIG_DIR", "")
+	if err := os.MkdirAll(filepath.Join(old, "aether"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "cloudfield"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Path(); err != nil || got != filepath.Join(old, "aether", "config.json") {
+		t.Fatalf("Path with a cloudfield file, not a directory = %q, %v; want the aether directory", got, err)
+	}
+	if err := os.Remove(filepath.Join(old, "cloudfield")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(old, "Cloudfield"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Path(); err != nil || got != filepath.Join(old, "aether", "config.json") {
+		t.Fatalf("Path with a Cloudfield directory = %q, %v; want the aether directory, since only an exact name counts", got, err)
+	}
+	if err := os.Remove(filepath.Join(old, "Cloudfield")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(old, "cloudfield"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Path(); err != nil || got != filepath.Join(old, "cloudfield", "config.json") {
+		t.Fatalf("Path with a cloudfield directory = %q, %v; want it", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(old, "aether")); err != nil {
+		t.Fatalf("the aether directory was moved: %v", err)
+	}
+}

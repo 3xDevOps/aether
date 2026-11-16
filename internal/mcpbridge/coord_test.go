@@ -316,7 +316,7 @@ func TestBridgeGuidesAgentsBeforeAnyCall(t *testing.T) {
 	stack := newCoordStack(t)
 	cs := session(t, stack.sockB, nil)
 	instructions := cs.InitializeResult().Instructions
-	if !strings.HasPrefix(instructions, "You are Aether session "+string(stack.runB)) || strings.Contains(instructions, "Aether hosts this session") {
+	if !strings.HasPrefix(instructions, "You are Cloudfield session "+string(stack.runB)) || strings.Contains(instructions, "Cloudfield hosts this session") {
 		t.Fatalf("instructions must be the session's role card alone: %q", instructions)
 	}
 	tools, err := cs.ListTools(t.Context(), nil)
@@ -375,7 +375,7 @@ func TestBridgeInstructionsFollowTheRun(t *testing.T) {
 		{name: "standard", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport},
 			want: []string{"- needs-input: only", "never report waiting"}, refuse: []string{"- waiting"}},
 		{name: "card in system prompt", enhanced: "1", card: "1", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport},
-			want: []string{coordhooks.Brief(coordhooks.Guide{Role: coordhooks.RoleInteractive, Wake: true})}, refuse: []string{"You are Aether session"}},
+			want: []string{coordhooks.Brief(coordhooks.Guide{Role: coordhooks.RoleInteractive, Wake: true})}, refuse: []string{"You are Cloudfield session"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(coordtransport.BackgroundEnv, tc.background)

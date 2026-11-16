@@ -68,7 +68,7 @@ export function UpdateGate({ client = api }: { client?: Api }) {
       .map((l) => ({ name: l.name, label: l.name, addr: l.addr })),
   ]
   const details = [
-    `Aether update required`,
+    `Cloudfield update required`,
     `Server: ${reason}`,
     `This client: ${clientVersion}`,
     `Server version: ${serverVersion}`,
@@ -101,7 +101,7 @@ export function UpdateGate({ client = api }: { client?: Api }) {
           <div className="min-w-0">
             <p className="mb-0.5 text-ui-sm font-medium text-muted">Update required</p>
             <h1 id="update-gate-title" ref={headingRef} tabIndex={-1} className="text-title leading-5 outline-none">
-              Update Aether to keep using this server
+              Update Cloudfield to keep using this server
             </h1>
           </div>
         </header>
@@ -114,7 +114,7 @@ export function UpdateGate({ client = api }: { client?: Api }) {
 
           {target.state === 'ready_to_restart' ? (
             <div className="space-y-2">
-              <p className="font-medium">Aether {target.latest} is installed.</p>
+              <p className="font-medium">Cloudfield {target.latest} is installed.</p>
               {desktop ? (
                 <p className="text-ui-sm text-muted">Quit and reopen the desktop app to use it.</p>
               ) : (

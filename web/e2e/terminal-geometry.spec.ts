@@ -69,7 +69,7 @@ test('new runs keep desktop viewers on the shared grid through resize and reatta
     await page.setViewportSize({ width: 1568, height: 1000 })
     await page.goto(alice.url)
     await page
-      .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+      .getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' })
       .getByRole('button', { name: /shared geometry regression/ })
       .click()
     const rows = page.locator('.xterm-rows:not([data-aether-frozen-view] *):visible > div')
@@ -295,7 +295,7 @@ done
   await page.setViewportSize({ width: 1568, height: 1000 })
   await page.goto(alice.url)
   await page
-    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+    .getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' })
     .getByRole('button', { name: /snapshot current prompt/ })
     .click()
 

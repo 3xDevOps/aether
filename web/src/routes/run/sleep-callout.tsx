@@ -56,8 +56,8 @@ export function SleepCallout({ run }: { run: RunRecord }) {
         <p>
           {failed && <>Asleep since {at}. </>}
           {saved
-            ? 'Aether saved the idle session to disk. Its processes, terminals, files and conversation come back where they were; connections to outside the session may not.'
-            : 'Aether stopped the idle container. The conversation, files and checkout are kept; running processes are not.'}
+            ? 'Cloudfield saved the idle session to disk. Its processes, terminals, files and conversation come back where they were; connections to outside the session may not.'
+            : 'Cloudfield stopped the idle container. The conversation, files and checkout are kept; running processes are not.'}
           {maySteer && (saved ? ' Send a message or press Wake to restore it.' : ' Send a message or press Wake to start it.')}
         </p>
       )}

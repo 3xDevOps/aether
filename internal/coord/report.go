@@ -194,7 +194,7 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 	var resolved []protocol.WaitCondition
 	switch {
 	case len(specs) > 0:
-		nextAction = "end your turn; Aether wakes you when " + strings.Join(receipt.Until, " or ") + " resolves, or when mail or a prompt arrives"
+		nextAction = "end your turn; Cloudfield wakes you when " + strings.Join(receipt.Until, " or ") + " resolves, or when mail or a prompt arrives"
 		resolved, err = s.cfg.Until.SettleRunWaits(ctx, run)
 		if err != nil {
 			slog.Warn("coord: read the run's new wait conditions; the background reads them", "run", run, "error", err)

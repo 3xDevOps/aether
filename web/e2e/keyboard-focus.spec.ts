@@ -160,7 +160,7 @@ test('Escape closes the footer menu without leaving the run', async ({
   // The shortcut stands down inside the terminal, which takes focus on mount.
   await page.getByRole('heading', { name: task, exact: true }).click()
 
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /, Live$/ }).click()
+  await page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: /, Live$/ }).click()
   const menu = page.getByRole('menu')
   await expect(menu).toBeVisible()
 
@@ -193,7 +193,7 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await expect(events).toBeFocused()
   expectVisibleFocus('the session view tab', await indicator(events))
   const row = page
-    .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+    .getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' })
     .getByRole('button', { name: new RegExp(task) })
   await row.focus()
   await page.keyboard.press('Shift+Tab')

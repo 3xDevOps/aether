@@ -107,7 +107,7 @@ it('tells an admin to update a server too old for connectors', async () => {
   expect(screen.queryByRole('button', { name: 'Get a code' })).toBeNull()
 })
 
-it('reconnects on the connector’s own tab with a code, revoking it only once its replacement calls Aether, from a server that lists no client_id', async () => {
+it('reconnects on the connector’s own tab with a code, revoking it only once its replacement calls Cloudfield, from a server that lists no client_id', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
   const older = { ...claude, client_id: undefined }
   const replacement = { ...older, id: 'con-claude00002', last_used_at: '2026-10-25T12:00:05Z' }
@@ -202,7 +202,7 @@ it('reconnects a connector on the server’s own URL there with a code, even whe
   })
   fireEvent.click(await screen.findByRole('button', { name: 'Reconnect Claude (claude.ai)' }))
   const dialog = await screen.findByRole('alertdialog')
-  expect(dialog.textContent).toContain('This gets a new code. Connect Aether again in Claude and paste the code; you can choose other scopes. Once the new connection calls Aether, this connector is revoked.')
+  expect(dialog.textContent).toContain('This gets a new code. Connect Aether again in Claude and paste the code; you can choose other scopes. Once the new connection calls Cloudfield, this connector is revoked.')
   fireEvent.click(within(dialog).getByRole('button', { name: 'Reconnect' }))
   expect(await screen.findByText('ABCD-EFGH')).toBeTruthy()
   const panel = screen.getByRole('tabpanel', { name: 'Claude' })
@@ -223,12 +223,88 @@ it('reconnects a connector on the server’s own URL there with a code, even whe
   expect(within(panel).getByText(own)).toBeTruthy()
 })
 
+const other = 'https://edge.other.example/mcp'
+const twoAddresses = { ...signedIn, universal_urls: [universal, other] }
+
+it('treats a connector at the edge’s other address as on the universal URL: no move, and a reconnect signs in there', async () => {
+  const client = show({ connectorList: vi.fn().mockResolvedValue({ connectors: [{ ...claude, resource: other }], ...twoAddresses }) })
+  expect(await screen.findByText('Universal URL')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Move Claude (claude.ai) to the universal URL' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Reconnect Claude (claude.ai)' }))
+  const dialog = await screen.findByRole('alertdialog')
+  expect(dialog.textContent).toContain('Connect Aether again in Claude and sign in')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Reconnect' }))
+  const panel = await screen.findByRole('tabpanel', { name: 'Claude' })
+  expect(await within(panel).findByText(other)).toBeTruthy()
+  expect(within(panel).getByText(/No code is needed/)).toBeTruthy()
+  expect(within(panel).queryByText(/This is this server’s own URL/)).toBeNull()
+  expect(client.connectorCode).not.toHaveBeenCalled()
+})
+
+it('finds a new connector that connected at the edge’s other address', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  show({
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [], ...twoAddresses }).mockResolvedValueOnce({ connectors: [], ...twoAddresses })
+      .mockResolvedValue({ connectors: [{ ...chatgpt, resource: other }], ...twoAddresses }),
+  })
+  await screen.findByText('No connectors yet')
+  fireEvent.click(screen.getByRole('button', { name: 'Watch for the connection' }))
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(await screen.findByText('ChatGPT (chatgpt.com) connected')).toBeTruthy()
+})
+
+const ownOld = { ...chatgpt, resource: own }
+const atOtherBefore = { ...chatgpt, id: 'con-otherbefore', resource: other, last_used_at: '2026-10-25T11:00:00Z' }
+const atOtherAdded = { ...chatgpt, id: 'con-otheradded1', resource: other, last_used_at: '2026-10-25T12:00:05Z' }
+const appearsAtOther = () => vi.fn().mockResolvedValueOnce({ connectors: [ownOld, atOtherBefore], ...twoAddresses }).mockResolvedValueOnce({ connectors: [ownOld, atOtherBefore], ...twoAddresses })
+  .mockResolvedValue({ connectors: [ownOld, atOtherBefore, atOtherAdded], ...twoAddresses })
+
+it('moves an own-URL connector to a replacement at the edge’s other address, leaving the one already there', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const client = show({ connectorList: appearsAtOther() })
+  fireEvent.click(await screen.findByRole('button', { name: 'Move ChatGPT (chatgpt.com) to the universal URL' }))
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Move' }))
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(6000)
+  await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith(ownOld.id))
+  expect(client.connectorRevoke).toHaveBeenCalledTimes(1)
+})
+
+it('does not take a connector at the edge’s other address for the reconnect of an own-URL one', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const client = show({
+    connectorList: appearsAtOther(),
+    connectorCode: vi.fn(async () => ({ url: universal, code: 'ABCD-EFGH', expires_at: '2026-10-25T12:10:00Z' })),
+  })
+  fireEvent.click((await screen.findAllByRole('button', { name: 'Reconnect ChatGPT (chatgpt.com)' }))[0])
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reconnect' }))
+  expect(await screen.findByText('ABCD-EFGH')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(9000)
+  expect(screen.getByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  expect(client.connectorRevoke).not.toHaveBeenCalled()
+})
+
+it('does not call the universal URL of another address the server’s own URL when it needs a code', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  show({
+    connectorList: vi.fn().mockResolvedValue({ connectors: [{ ...claude, resource: other }], url: own, universal_url: universal, universal_urls: [universal, other] }),
+    connectorCode: vi.fn(async () => ({ url: own, code: 'ABCD-EFGH', expires_at: '2026-10-25T12:10:00Z' })),
+  })
+  fireEvent.click(await screen.findByRole('button', { name: 'Reconnect Claude (claude.ai)' }))
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reconnect' }))
+  expect(await screen.findByText('ABCD-EFGH')).toBeTruthy()
+  const panel = screen.getByRole('tabpanel', { name: 'Claude' })
+  expect(within(panel).getByText(other)).toBeTruthy()
+  expect(within(panel).queryByText(/This is this server’s own URL/)).toBeNull()
+})
+
 async function move(name: string) {
   fireEvent.click(await screen.findByRole('button', { name: `Move ${name} to the universal URL` }))
   fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Move' }))
 }
 
-it('moves a connector on the server’s own URL to the universal URL, revoking it only once its replacement calls Aether', async () => {
+it('moves a connector on the server’s own URL to the universal URL, revoking it only once its replacement calls Cloudfield', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
   const old = { ...chatgpt, resource: own }
   const added = { ...chatgpt, id: 'con-universal01', resource: universal }
@@ -241,11 +317,11 @@ it('moves a connector on the server’s own URL to the universal URL, revoking i
   expect(await screen.findByText(own)).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Move ChatGPT (chatgpt.com) to the universal URL' }))
   const dialog = await screen.findByRole('alertdialog')
-  expect(dialog.textContent).toContain(`Add Aether again in ChatGPT with ${universal} and sign in. Once the new connection calls Aether, this connector is revoked`)
+  expect(dialog.textContent).toContain(`Add Aether again in ChatGPT with ${universal} and sign in. Once the new connection calls Cloudfield, this connector is revoked`)
   fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
   expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
   await vi.advanceTimersByTimeAsync(6000)
-  expect(await screen.findByText('Waiting for ChatGPT (chatgpt.com) to call Aether, then revoking ChatGPT (chatgpt.com)…')).toBeTruthy()
+  expect(await screen.findByText('Waiting for ChatGPT (chatgpt.com) to call Cloudfield, then revoking ChatGPT (chatgpt.com)…')).toBeTruthy()
   expect(client.connectorRevoke).not.toHaveBeenCalled()
   await vi.advanceTimersByTimeAsync(3000)
   await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-7k2m9q4xbd'))
@@ -417,7 +493,7 @@ it('retries a move for its own app and still takes a replacement that appeared b
   expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
   connectors = [old, added]
   await vi.advanceTimersByTimeAsync(600_000)
-  expect((await screen.findByRole('alert')).textContent).toContain('ChatGPT (chatgpt.com) has not called Aether yet')
+  expect((await screen.findByRole('alert')).textContent).toContain('ChatGPT (chatgpt.com) has not called Cloudfield yet')
   fireEvent.mouseDown(screen.getByRole('tab', { name: 'Claude' }))
   expect(screen.getByRole('tab', { name: 'Claude' }).getAttribute('aria-selected')).toBe('true')
   fireEvent.click(screen.getByRole('button', { name: 'Watch for the connection' }))

@@ -77,7 +77,7 @@ func digestText(items []*store.DigestItem, lines int) (string, string) {
 	for _, item := range items {
 		counts[item.Kind]++
 	}
-	title := "Aether"
+	title := "Cloudfield"
 	for _, k := range kinds {
 		if counts[k.kind] > 0 {
 			title += fmt.Sprintf(" · %d %s", counts[k.kind], k.label)

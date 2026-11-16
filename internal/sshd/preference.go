@@ -83,7 +83,7 @@ func (s *Server) preferenceWorkspace(ctx context.Context, member domain.MemberID
 func preferenceMethod[P any](call func(*Server, PreferenceService, context.Context, domain.MemberID, P) (any, error)) methodHandler {
 	return func(s *Server, ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 		if id, ok := ctx.Value(connIdentityKey{}).(connIdentity); (ok && id.connector != "") || domain.ViaFrom(ctx) != "" {
-			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "preferences are private: only you can read or change them, in the Aether app"}
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "preferences are private: only you can read or change them, in the Cloudfield app"}
 		}
 		svc := s.cfg.Services.Preferences
 		if svc == nil {

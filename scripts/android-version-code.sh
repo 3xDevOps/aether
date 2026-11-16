@@ -2,6 +2,7 @@
 # The Android versionCode for a release tag.
 #
 #     sh scripts/android-version-code.sh v0.4.0-alpha.6
+#     sh scripts/android-version-code.sh v0.9.0-beta.2 412 [<hotfix>]
 #
 # Android installs an update only when its versionCode is above the installed
 # one, and the number is the only ordering it reads: versionName is a label.
@@ -20,15 +21,27 @@
 # Android's versionCode maximum is 2100000000, which is what the ceilings
 # below hold the number under: major 209, minor 99, patch 99, and a
 # pre-release number of 199, above which alpha.N would reach beta's rank.
+#
+# A release on a channel carries a signed build number and hotfix count,
+# which the tag does not, so the release workflow passes them:
+#
+#     100000000 + build * 100 + hotfix
+#
+# That is above every code the tag formula gives a version below v10.0.0, and
+# a nightly and the releases promoted from it share a code. A -nightly.N tag
+# has no tag formula, so it needs a build.
 set -eu
 
 MAX_MAJOR=209
 MAX_MINOR=99
 MAX_PATCH=99
 MAX_PRERELEASE=199
+MAX_CODE=2100000000
+BUILD_BASE=100000000
+MAX_HOTFIX=99
 
-if [ "$#" -ne 1 ]; then
-	echo "usage: android-version-code.sh <tag>" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
+	echo "usage: android-version-code.sh <tag> [<build> [<hotfix>]]" >&2
 	exit 2
 fi
 
@@ -49,6 +62,9 @@ number() {
 }
 
 tag=${1#v}
+build=${2-}
+hotfix=${3-0}
+has_build=$(($# > 1))
 core=${tag%%-*}
 prerelease=""
 case $tag in
@@ -73,6 +89,24 @@ done
 [ "$minor" -le "$MAX_MINOR" ] || fail "minor version $minor is above $MAX_MINOR"
 [ "$patch" -le "$MAX_PATCH" ] || fail "patch version $patch is above $MAX_PATCH"
 
+if [ "$has_build" -eq 1 ]; then
+	case $prerelease in
+	'' | alpha.* | beta.* | rc.* | nightly.*) ;;
+	*) fail "not a release tag: \"$prerelease\" is not alpha.N, beta.N, rc.N or nightly.N" ;;
+	esac
+	if [ -n "$prerelease" ]; then
+		number "${prerelease#*.}" || fail "not a release tag: \"${prerelease#*.}\" is not a pre-release number"
+	fi
+	number "$build" || fail "build \"$build\" is not a number"
+	[ "$build" -ge 1 ] || fail "build $build is not positive"
+	number "$hotfix" || fail "hotfix \"$hotfix\" is not a number"
+	[ "$hotfix" -le "$MAX_HOTFIX" ] || fail "hotfix $hotfix is above $MAX_HOTFIX"
+	code=$((BUILD_BASE + build * 100 + hotfix))
+	[ "$code" -le "$MAX_CODE" ] || fail "build $build gives versionCode $code, above Android's $MAX_CODE"
+	echo "$code"
+	exit 0
+fi
+
 if [ -z "$prerelease" ]; then
 	rank=999
 else
@@ -80,6 +114,7 @@ else
 	alpha.*) base=100 count=${prerelease#alpha.} ;;
 	beta.*) base=300 count=${prerelease#beta.} ;;
 	rc.*) base=500 count=${prerelease#rc.} ;;
+	nightly.*) fail "a nightly tag has no versionCode without its build: android-version-code.sh v$tag <build>" ;;
 	*) fail "not a release tag: \"$prerelease\" is not alpha.N, beta.N or rc.N" ;;
 	esac
 	number "$count" || fail "not a release tag: \"$count\" is not a pre-release number"

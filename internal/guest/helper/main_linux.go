@@ -221,6 +221,7 @@ func serve() error {
 	go forwardSignals(procs)
 	record("forward sockets", forwardSockets(cfg.Sockets))
 	record("serve sockets", serveSockets(cfg.Serves))
+	record("listen on loopback ports", listenLoopbacks(cfg.Loopbacks))
 
 	bootError := ""
 	if len(failures) > 0 {

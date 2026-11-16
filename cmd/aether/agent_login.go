@@ -37,7 +37,7 @@ func agentLogin(args []string) error {
 	case !found:
 		return fmt.Errorf("no agent %q; aether agent list shows yours", args[0])
 	case agent.LoginCommand == "":
-		return fmt.Errorf("agent %s has no sign-in command Aether knows; run its own login in aether terminal", agent.Name)
+		return fmt.Errorf("agent %s has no sign-in command Cloudfield knows; run its own login in aether terminal", agent.Name)
 	case !agent.Installed:
 		return fmt.Errorf("agent %s is not installed in your environment; run aether agent add %s first", agent.Name, agent.Name)
 	}

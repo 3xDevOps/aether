@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/3xDevOps/Aether/desktop"
+	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/version"
@@ -148,7 +149,7 @@ func buildAndInstall(buildDir, zipPath string, source bool, mode buildMode, note
 	}
 	found, _ := localops.DesktopFindsCLI(home)
 	if !found {
-		if explicit := os.Getenv("AETHER_BIN"); explicit != "" {
+		if explicit := envname.Getenv("AETHER_BIN"); explicit != "" {
 			return fmt.Errorf("aether CLI is required to build the desktop app: AETHER_BIN %q is not an installed executable; install the CLI or set AETHER_BIN to its path (see docs/install.md)", explicit)
 		}
 		return fmt.Errorf("aether CLI is required to build the desktop app but was not found (PATH or %s); install the CLI first (see docs/install.md)", installDirs)

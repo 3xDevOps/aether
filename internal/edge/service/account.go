@@ -55,8 +55,8 @@ func (s *Service) signedInRecently(v visitor) bool {
 	return s.now().Sub(v.SignedInAt) <= reauthWindow
 }
 
-func (s *Service) reauthURL() string {
-	return s.signinOrigin + signinPath + "?" + url.Values{"next": {"/account"}}.Encode()
+func (s *Service) reauthURL(r *http.Request) string {
+	return s.pair(r).signin + signinPath + "?" + url.Values{"next": {"/account"}}.Encode()
 }
 
 func (s *Service) summary(ctx context.Context, a edgeproto.AccountInfo) (edgeproto.AccountSummary, error) {
@@ -81,11 +81,12 @@ func (s *Service) summary(ctx context.Context, a edgeproto.AccountInfo) (edgepro
 // device tokens and live connections end, the servers it owns become
 // ownerless, and every server it owned or belonged to is sent
 // edgeproto.AccountDeleted, now or when it next connects.
-func (s *Service) deleteAccount(ctx context.Context, v visitor, confirm string) error {
+func (s *Service) deleteAccount(r *http.Request, v visitor, confirm string) error {
+	ctx := r.Context()
 	a := v.Account
 	if !s.signedInRecently(v) {
 		return pageErr(http.StatusForbidden, "deleting an account needs a sign-in in this browser from the last %s: sign in again at %s, then delete it within %s",
-			reauthWindow, s.reauthURL(), reauthWindow)
+			reauthWindow, s.reauthURL(r), reauthWindow)
 	}
 	if !confirms(a, confirm) {
 		return pageErr(http.StatusBadRequest, "the confirmation does not name this account: type %s", confirmText(a))
@@ -117,7 +118,7 @@ func (s *Service) accountPage(w http.ResponseWriter, r *http.Request, v visitor)
 	s.render(w, http.StatusOK, "account_page", s.view(&v, "Account", accountPage{
 		AccountSummary: sum,
 		Fresh:          s.signedInRecently(v),
-		Reauth:         s.reauthURL(),
+		Reauth:         s.reauthURL(r),
 		Window:         reauthWindow,
 		Transfer:       transferCommand,
 	}))
@@ -129,13 +130,13 @@ func (s *Service) accountDelete(w http.ResponseWriter, r *http.Request, v visito
 	if err != nil {
 		return err
 	}
-	if err := s.deleteAccount(r.Context(), v, r.PostForm.Get("confirm")); err != nil {
+	if err := s.deleteAccount(r, v, r.PostForm.Get("confirm")); err != nil {
 		status := errorStatus(err)
 		logFailure(r, status, err)
 		page := s.view(&v, "Account", accountPage{
 			AccountSummary: sum,
 			Fresh:          s.signedInRecently(v),
-			Reauth:         s.reauthURL(),
+			Reauth:         s.reauthURL(r),
 			Window:         reauthWindow,
 			Transfer:       transferCommand,
 		})

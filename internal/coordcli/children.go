@@ -158,7 +158,7 @@ func readTask(task, file string, in io.Reader) (string, error) {
 func childSkill(status *protocol.CoordStatusResult) string {
 	switch {
 	case slices.Contains(status.Capabilities, protocol.MethodChildStart):
-		return "Subsessions: `aether-internal subsession start` runs part of your task as a separate Aether session with a fresh context and its own container and branch, on any installed agent and model, on this session's account for this session's agent or your session owner's own account otherwise; its report reaches your inbox and wakes you. " +
+		return "Subsessions: `aether-internal subsession start` runs part of your task as a separate Cloudfield session with a fresh context and its own container and branch, on any installed agent and model, on this session's account for this session's agent or your session owner's own account otherwise; its report reaches your inbox and wakes you. " +
 			"The majority of straightforward tasks can be done in one session: split parallel or bulky parts across your own subagents or workflows. They share your checkout, start in seconds, and their results land in your working tree. " +
 			"Reserve a subsession for a large, independent stream of work that needs its own branch or pull request, would run for hours, or needs another agent, model, or harness. Don't use subsessions in excess unless there is a need to use them over subagents/singular session workflows. Honor the number of subsessions and agents the user asks for. " +
 			"When to start one, the steps, the task format and the account rules: `aether-internal skill subsessions`. " +
@@ -169,7 +169,7 @@ func childSkill(status *protocol.CoordStatusResult) string {
 	return ""
 }
 
-const subsessionTopic = `Subsessions: separate Aether sessions you start, then collect. Each has a fresh
+const subsessionTopic = `Subsessions: separate Cloudfield sessions you start, then collect. Each has a fresh
 context and its own container, branch and setup time, and appears under this
 session in the dashboard, where people can watch and steer it.
 The majority of straightforward tasks can be done in one session: split
