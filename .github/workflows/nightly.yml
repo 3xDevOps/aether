@@ -36,8 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # The job's if compares without case and also matches an
-      # organization variable; this takes only the exact value.
+      # The job's if compares without case; this takes only the exact,
+      # case-sensitive value true.
       - name: Require NIGHTLY_ENABLED to be exactly true
         env:
           NIGHTLY_ENABLED: ${{ vars.NIGHTLY_ENABLED }}

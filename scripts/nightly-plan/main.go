@@ -534,8 +534,8 @@ func keyCheck(seed string) error {
 		_, err = selfupdate.VerifyManifest(data, sig, tag)
 		return err
 	}
-	if probe("v0.0.0-nightly.1", selfupdate.ChannelNightly) != nil {
-		return fmt.Errorf("main does not trust %s: its public half is not in nightlyKeys (internal/selfupdate/keys.go); ship it in a release first, then turn nightlies on", keyEnv)
+	if err := probe("v0.0.0-nightly.1", selfupdate.ChannelNightly); err != nil {
+		return fmt.Errorf("main does not trust %s: %w; its public half must be in nightlyKeys (internal/selfupdate/keys.go) and shipped in a release before nightlies are turned on", keyEnv, err)
 	}
 	if probe("v0.0.0-beta.1", selfupdate.ChannelBeta) == nil {
 		return fmt.Errorf("%s verifies a beta manifest, so it is a release key; the nightly environment must hold only the nightly key", keyEnv)

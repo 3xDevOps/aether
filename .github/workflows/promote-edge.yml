@@ -135,10 +135,15 @@ jobs:
           persist-credentials: false
       # Re-running this job alone skips publisher-policy, and for a call
       # also its caller's admin check. A scheduled nightly has no admin
-      # behind it; its call is covered by publisher-policy's caller rule.
-      - name: Require an admin
-        if: env.CHANNEL != 'nightly'
-        run: sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
+      # behind it, so its caller rule is checked again instead.
+      - name: Require an admin, or nightly.yml on main for nightly
+        run: |
+          if [ "$CHANNEL" != nightly ]; then
+            sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
+          elif [ "$GITHUB_WORKFLOW_REF" != "$GITHUB_REPOSITORY/.github/workflows/nightly.yml@refs/heads/main" ]; then
+            echo "::error::only nightly.yml on main moves nightly, not $GITHUB_WORKFLOW_REF"
+            exit 1
+          fi
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
@@ -177,16 +182,8 @@ jobs:
           "$RUNNER_TEMP/aether-edge" release-check --tag "$TAG" --digest "$DIGEST" --from "$TAG" --from-digest "$DIGEST" \
             --channel "$CHANNEL" --keep-manifests "$RUNNER_TEMP/kept" --json >/dev/null
           channel=$(jq -r '.channel // ""' "$RUNNER_TEMP/kept/$TAG.json")
-          # Whatever the tag carries now, even nothing: stable takes a stable
-          # or, until the first channel stable, a release from before
-          # channels; beta takes anything but a nightly.
-          case $CHANNEL:$channel in
-          stable:stable | stable: | beta:beta | beta:stable | beta:) ;;
-          *)
-            echo "::error::$TAG is a ${channel:-pre-channel} release, which aether-edge:$CHANNEL does not take"
-            exit 1
-            ;;
-          esac
+          # Whatever the tag carries now, even nothing.
+          sh scripts/edge-channel-takes.sh "$CHANNEL" "$channel"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
       - name: Require a 24-hour soak
         if: env.CHANNEL == 'stable'

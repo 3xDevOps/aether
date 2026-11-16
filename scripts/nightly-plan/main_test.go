@@ -457,7 +457,7 @@ func TestKeyCheck(t *testing.T) {
 		t.Fatalf("a trusted nightly key: %v", err)
 	}
 	for name, tc := range map[string]struct{ seed, want string }{
-		"untrusted":     {seed(untrusted), "its public half is not in nightlyKeys"},
+		"untrusted":     {seed(untrusted), "not signed by a trusted release key; do not install it; its public half must be in nightlyKeys"},
 		"a release key": {seed(releasetest.Key), "so it is a release key"},
 		"empty":         {"", "is not a base64 32-byte ed25519 seed"},
 		"not a seed":    {"c2hvcnQ=", "is not a base64 32-byte ed25519 seed"},
