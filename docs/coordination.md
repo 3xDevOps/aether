@@ -1231,7 +1231,8 @@ checkout, and more sessions are not faster by default.
 `aether-internal skill subsessions` gives agents these criteria, the steps, the
 task format and the account rules. The caller is its **parent**. A subsession
 is an ordinary session with its own sandbox, checkout and branch, owned by the
-parent's owner, and it appears under its parent in the dashboard. Subsessions
+parent's owner, and it appears under its parent in the dashboard, behind the
+parent's **N finished** line once it has finished. Subsessions
 are on by default and go one level deep: a subsession cannot start subsessions, and
 `subsession start` from one is refused with `session <id> is itself a subsession of
 <parent>, and subsessions go one level deep; ...`. Any other session except a
