@@ -18,7 +18,9 @@ image=ghcr.io/3xdevops/aether-edge
 service=aether-edge
 backups=/var/lib/aether-edge/backups
 promotion_type=https://github.com/3xDevOps/aether/edge-promotion/v1
-promoter=https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main
+# promote-edge.yml on main, in the repository under its old name or its
+# current one.
+promoter='^https://github\.com/3xDevOps/(aether|cloudfield)/\.github/workflows/promote-edge\.yml@refs/heads/main$'
 
 say() {
 	printf 'edge-update: %s\n' "$*" >&2
@@ -32,7 +34,7 @@ die() {
 usage() {
 	cat >&2 <<'EOF'
 usage: aether-edge-update [--check] [--channel nightly|beta|stable|latest] [--manual-steps-done]
-       aether-edge-update --rollback [--restore-backup]
+       aether-edge-update --rollback [--restore-backup] [--drop-origin-pairs]
        aether-edge-update --recover
 EOF
 	exit 2
@@ -41,6 +43,7 @@ EOF
 mode=update
 manual_steps_done=0
 restore_backup=0
+drop_pairs=0
 channel_flag=""
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -49,6 +52,7 @@ while [ $# -gt 0 ]; do
 	--recover) mode=recover ;;
 	--manual-steps-done) manual_steps_done=1 ;;
 	--restore-backup) restore_backup=1 ;;
+	--drop-origin-pairs) drop_pairs=1 ;;
 	--channel)
 		[ $# -ge 2 ] || usage
 		channel_flag="$2"
@@ -58,24 +62,25 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
-[ "$restore_backup" = 0 ] || [ "$mode" = rollback ] || usage
+[ "$restore_backup$drop_pairs" = 00 ] || [ "$mode" = rollback ] || usage
 
-config="${AETHER_EDGE_UPDATE_CONFIG:-/etc/aether-edge-update.env}"
+# CLOUDFIELD_X wins over AETHER_X when it is not empty (internal/envname).
+config="${CLOUDFIELD_EDGE_UPDATE_CONFIG:-${AETHER_EDGE_UPDATE_CONFIG:-/etc/aether-edge-update.env}}"
 # shellcheck disable=SC1090 # the operator's settings
 [ ! -f "$config" ] || . "$config"
-channel="${channel_flag:-${AETHER_EDGE_UPDATE_CHANNEL:-stable}}"
+channel="${channel_flag:-${CLOUDFIELD_EDGE_UPDATE_CHANNEL:-${AETHER_EDGE_UPDATE_CHANNEL:-stable}}}"
 case "$channel" in
 nightly | beta | stable | latest) ;;
 *) die "the channel is nightly, beta, stable or latest, got '$channel'; set AETHER_EDGE_UPDATE_CHANNEL in $config or pass --channel" ;;
 esac
-state_dir="${AETHER_EDGE_UPDATE_STATE:-/var/lib/aether-edge-update}"
+state_dir="${CLOUDFIELD_EDGE_UPDATE_STATE:-${AETHER_EDGE_UPDATE_STATE:-/var/lib/aether-edge-update}}"
 releases="$state_dir/releases"
-compose_dir="${AETHER_EDGE_UPDATE_COMPOSE_DIR:-/opt/aether-edge}"
-digest_file="${AETHER_EDGE_UPDATE_DIGEST_FILE:-$compose_dir/.env}"
-relay_url="${AETHER_EDGE_UPDATE_RELAY_URL:-}"
-tolerance="${AETHER_EDGE_UPDATE_SERVER_TOLERANCE:-10%}"
-server_wait="${AETHER_EDGE_UPDATE_SERVER_WAIT:-120}"
-public_wait="${AETHER_EDGE_UPDATE_PUBLIC_WAIT:-300}"
+compose_dir="${CLOUDFIELD_EDGE_UPDATE_COMPOSE_DIR:-${AETHER_EDGE_UPDATE_COMPOSE_DIR:-/opt/aether-edge}}"
+digest_file="${CLOUDFIELD_EDGE_UPDATE_DIGEST_FILE:-${AETHER_EDGE_UPDATE_DIGEST_FILE:-$compose_dir/.env}}"
+relay_url="${CLOUDFIELD_EDGE_UPDATE_RELAY_URL:-${AETHER_EDGE_UPDATE_RELAY_URL:-}}"
+tolerance="${CLOUDFIELD_EDGE_UPDATE_SERVER_TOLERANCE:-${AETHER_EDGE_UPDATE_SERVER_TOLERANCE:-10%}}"
+server_wait="${CLOUDFIELD_EDGE_UPDATE_SERVER_WAIT:-${AETHER_EDGE_UPDATE_SERVER_WAIT:-120}}"
+public_wait="${CLOUDFIELD_EDGE_UPDATE_PUBLIC_WAIT:-${AETHER_EDGE_UPDATE_PUBLIC_WAIT:-300}}"
 
 for n in "$server_wait" "$public_wait" "${tolerance%\%}"; do
 	case "$n" in
@@ -195,7 +200,7 @@ run_on_data() {
 bootstrap() {
 	to="${new:-sha256:<digest>}"
 	say "$image@$1 predates aether-edge version --json, release-check, backup and schema, which this updater runs from the running image. Upgrade once by hand (docs/edge.md, \"First upgrade\"), in $compose_dir:"
-	say "  1. verify $to: cosign verify-attestation --new-bundle-format --type $promotion_type --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity $promoter $image@$to"
+	say "  1. verify $to: cosign verify-attestation --new-bundle-format --type $promotion_type --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '$promoter' $image@$to"
 	say "  2. back up: docker compose stop $service && cp -a data data.pre-update"
 	say "  3. pin it: set AETHER_EDGE_DIGEST=$to in $digest_file"
 	say "  4. docker compose up -d --wait $service"
@@ -213,11 +218,11 @@ version_json() {
 
 # Exits 0 when promote-edge.yml on main attested digest $1 as release $2
 # on one of the channels $3, a JSON array. The workflow file run from any
-# other ref signs with another identity, which cosign refuses.
+# other ref or repository signs with another identity, which cosign refuses.
 verify_promotion() {
 	atts="$(cosign verify-attestation --new-bundle-format --type "$promotion_type" \
 		--certificate-oidc-issuer https://token.actions.githubusercontent.com \
-		--certificate-identity "$promoter" \
+		--certificate-identity-regexp "$promoter" \
 		"$image@$1")" || return 1
 	printf '%s\n' "$atts" | jq -e --argjson cs "$3" --arg t "$2" --arg d "$1" \
 		'.payload | @base64d | fromjson | .predicate | select(.channel as $c | any($cs[]; . == $c)) | select(.tag == $t and .digest == $d)' >/dev/null && return 0
@@ -634,9 +639,29 @@ refuse_restore() {
 	die "$prev_version cannot run the database $cur_version migrated, so this rollback restores $prev_backup, taken $(date -u -d "@$taken" +%Y-%m-%dT%H:%M:%SZ), $((($(date +%s) - taken) / 86400)) days ago. Every account, device, sign-in and server change since then is lost. Run aether-edge-update --rollback --restore-backup to roll back anyway; nothing changed"
 }
 
+# Prints the address pairs the edge's Compose service lists beyond its
+# first, in AETHER_EDGE_ORIGIN_PAIRS or its CLOUDFIELD_ name.
+origin_pairs() {
+	cfg="$(compose config --format json)" || die "docker compose config failed in $compose_dir; nothing changed"
+	printf '%s\n' "$cfg" | jq -r --arg s "$service" '.services[$s].environment // {}
+		| [.CLOUDFIELD_EDGE_ORIGIN_PAIRS, .AETHER_EDGE_ORIGIN_PAIRS] | map(select(. != null and . != "")) | .[0] // ""'
+}
+
+# Exits 0 when image $1 speaks edge protocol 6 or later: it is from the
+# first release that serves more than one address pair, or a later one.
+serves_pairs() {
+	docker run --rm --network none "$image@$1" version --json | jq -e '.protocol.version >= 6' >/dev/null 2>&1
+}
+
 rollback() {
 	[ -s "$state_dir/previous" ] || die "no previous release recorded in $state_dir/previous"
 	read -r prev_digest prev_version prev_backup <"$state_dir/previous"
+	if [ "$drop_pairs" = 0 ]; then
+		pairs="$(origin_pairs)" || exit 1
+		if [ -n "$pairs" ] && ! serves_pairs "$prev_digest"; then
+			die "$service lists more address pairs in AETHER_EDGE_ORIGIN_PAIRS, and $prev_version ($prev_digest) reports no edge protocol 6 or later in version --json, so it serves only the first pair and every server enrolled at another loses the edge. Remove AETHER_EDGE_ORIGIN_PAIRS from $compose_dir first, or run aether-edge-update --rollback --drop-origin-pairs to roll back anyway; nothing changed"
+		fi
+	fi
 	cur="$(current_digest)"
 	cur_json="$(version_json "$cur")" || exit 1
 	cur_version="$(printf '%s\n' "$cur_json" | jq -r .version)"
