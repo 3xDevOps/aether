@@ -88,6 +88,9 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 	targets := make([]string, len(mounts))
 	sources := make([]string, len(mounts))
 	for i, m := range mounts {
+		if m.Kind == MountSeed {
+			continue
+		}
 		target := path.Clean(m.ContainerPath)
 		if !path.IsAbs(target) {
 			return fmt.Errorf("runtime: mount %d: target %q must be absolute", i, m.ContainerPath)
@@ -159,10 +162,15 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 		}
 
 		for j := range i {
+			if mounts[j].Kind == MountSeed {
+				continue
+			}
 			if targets[j] == target {
 				return fmt.Errorf("runtime: mounts %d and %d: duplicate target %q", j, i, target)
 			}
-			if underSlash(target, targets[j]) {
+			// Only a session VM has state mounts, and its helper binds a home
+			// mount over one in order, as it binds every mount.
+			if underSlash(target, targets[j]) && mounts[j].Kind != MountState {
 				if policy.AllowedNestings[target] != targets[j] {
 					return fmt.Errorf("runtime: mount %d: target %q nests under mount %d target %q without approval", i, target, j, targets[j])
 				}
@@ -173,7 +181,9 @@ func ValidateMounts(mounts []Mount, policy MountPolicy) error {
 					return fmt.Errorf("runtime: mount %d: target %q nests under mount %d whose source %q is not a directory", i, target, j, mounts[j].HostPath)
 				}
 			}
-			if underSlash(targets[j], target) {
+			// A session VM's state mount covers a shared login mounted
+			// before it, once the guest has copied that login in.
+			if underSlash(targets[j], target) && m.Kind != MountState {
 				return fmt.Errorf("runtime: mount %d: target %q contains mount %d target %q; a nested mount must be ordered after its parent", i, target, j, targets[j])
 			}
 			if mounts[j].ReadOnly && withinHost(mounted, sources[j]) && mounted != sources[j] {

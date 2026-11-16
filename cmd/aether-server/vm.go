@@ -11,6 +11,7 @@ import (
 	goruntime "runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
@@ -75,7 +76,7 @@ func prepareVMHost(ctx context.Context, w io.Writer, baseURL, kernel string) err
 			return fmt.Errorf("apt-get installed %s, and %s is still not on PATH", still[0].Package, still[0].Program)
 		}
 	}
-	files := []serversetup.Pinned{serversetup.CloudHypervisor}
+	files := []serversetup.Pinned{serversetup.CloudHypervisor, serversetup.OMPBroker}
 	if kernel == server.DefaultVMKernel && selfupdate.ValidTag(version.Version) {
 		k, err := serversetup.ReleaseKernel(ctx, baseURL, version.Version, kernel)
 		if err != nil {
@@ -143,11 +144,14 @@ func splitInstalled(files []serversetup.Pinned) (installed, missing []serversetu
 // released with in place before the server starts any VM, so an update
 // from a client or the dashboard, or the rollback of one, runs VMs on the
 // files the running server expects. It reaches the network only when the
-// kernel in place came from another release.
+// kernel in place came from another release. The pinned omp downloads in
+// the background, outside an update's startup check: a broker refuses to
+// start until it is in place.
 func ensureVMFiles(ctx context.Context, kernel string) error {
 	if vmHostSupported() != nil || os.Getenv(selfupdate.OptOutEnv) != "" {
 		return nil
 	}
+	go installOMPBroker()
 	files := []serversetup.Pinned{serversetup.CloudHypervisor}
 	if kernel == server.DefaultVMKernel && selfupdate.ValidTag(version.Version) && serversetup.ReleaseOf(kernel) != version.Version {
 		k, err := serversetup.ReleaseKernel(ctx, selfupdate.DefaultChecker().BaseURL(), version.Version, kernel)
@@ -167,4 +171,21 @@ func ensureVMFiles(ctx context.Context, kernel string) error {
 		slog.Info("session VMs: installed "+f.Name, "path", f.Path)
 	}
 	return nil
+}
+
+// installOMPBroker puts the pinned omp at its path for omp's auth brokers,
+// logging the outcome.
+func installOMPBroker() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	f := serversetup.OMPBroker
+	ok, err := serversetup.Installed(f.Path, f.Asset)
+	if err == nil && !ok {
+		if err = serversetup.InstallAll(ctx, []serversetup.Pinned{f}); err == nil {
+			slog.Info("session VMs: installed "+f.Name, "path", f.Path)
+		}
+	}
+	if err != nil {
+		slog.Warn("session VMs: install "+f.Name+" for omp's auth broker; omp sessions in VMs cannot sign in until `aether-server vm install` installs it", "path", f.Path, "error", err)
+	}
 }

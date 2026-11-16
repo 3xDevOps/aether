@@ -416,7 +416,7 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	if err != nil {
 		return launch{}, err
 	}
-	cfg := guest.Config{Hostname: rec.Key, Mounts: p.mounts, Checkouts: checkouts, Sockets: p.sockets, Serves: rec.Serves}
+	cfg := guest.Config{Hostname: rec.Key, Mounts: p.mounts, Checkouts: checkouts, Sockets: p.sockets, Serves: rec.Serves, Loopbacks: p.loopbacks}
 	if rec.Browser.Path != "" {
 		cfg.Serves = append(cfg.Serves, guest.Socket{Port: guest.BrowserPort, Path: guest.BrowserSocket})
 	}

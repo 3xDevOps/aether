@@ -99,6 +99,8 @@ x86 kernels cap the whole line at 2047 bytes, and `KernelArgs` fails past it.
 | `aether.checkout=<serial>,<key>,<target>` | Mount the checkout disk with virtio serial `<serial>` for the git service under `<key>` and bind its checkout at `<target>`. |
 | `aether.sock=<port>,<path>` | Listen on `<path>` and relay each connection to vsock port `<port>` on the host. |
 | `aether.serve=<port>,<path>` | Listen on vsock port `<port>` for the host and relay each connection to `<path>` (below). |
+| `aether.loopback=<port>,<path>` | Listen on `127.0.0.1:<port>` and relay each connection to the socket at `<path>` in the VM, for a program that reaches a server only by an HTTP address, such as omp's auth broker. |
+| `aether.seed=<target>,<file>` | Follows the state mount at `<target>`: at every boot, before binding it, copy `<target>/<file>` as the home shows it into the mount's directory, or remove the copy when the home has none. |
 
 Paths are escaped per segment as in a URL, so a space or a comma in a path
 does not split an argument.

@@ -70,6 +70,17 @@ func TestValidateMountsAccepts(t *testing.T) {
 			{HostPath: e.credDir, ContainerPath: "/root/.claude"},
 			{HostPath: sub, ContainerPath: "/root/.config"},
 		}, e.policy()},
+		{"session VM state over a login seeded from it", []Mount{
+			{HostPath: e.credDir, ContainerPath: "/root"},
+			{HostPath: e.credDir, Subpath: "sub", ContainerPath: "/root/.copilot/config.json"},
+			{HostPath: sub, Subpath: "0", ContainerPath: "/root/.copilot", Kind: MountState},
+			{HostPath: sub, ContainerPath: "/root/.copilot/config.json", Kind: MountSeed},
+		}, MountPolicy{
+			OwnedRoots:        []string{e.root},
+			WorktreeHostPath:  e.worktree,
+			WorktreeMountPath: "/workspace",
+			AllowedNestings:   map[string]string{"/root/.copilot/config.json": "/root", "/root/.copilot": "/root"},
+		}},
 		{"approved nesting child after parent", []Mount{
 			{HostPath: e.credDir, ContainerPath: "/root/.claude"},
 			{HostPath: sub, ContainerPath: "/root/.claude/creds"},

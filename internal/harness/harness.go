@@ -226,11 +226,14 @@ func isPathWithin(candidate, root string) bool {
 
 // VMState is a home-relative directory that holds nothing but a CLI's
 // databases. Env, when set, is the variable that points the CLI at it, or
-// at File in it.
+// at File in it. Seed names files in the home's Dir, such as a login,
+// copied into the session's own at every cold start of its VM; Dir then
+// need not hold databases only.
 type VMState struct {
 	Dir  string
 	Env  string
 	File string
+	Seed []string
 }
 
 // Profile converts a generic definition to a launch profile. The registry
@@ -252,8 +255,8 @@ func (d Definition) Profile() Profile {
 		p.EnvPassthrough = append([]string(nil), registered.EnvPassthrough...)
 		p.Env = maps.Clone(registered.Env)
 		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
-		p.VMState = append([]VMState(nil), registered.VMState...)
-		p.VMSingle = registered.VMSingle
+		p.VMState = slices.Clone(registered.VMState)
+		p.LoginBroker = registered.LoginBroker
 		if p.ACPMode == "" {
 			p.ACPMode = registered.ACPMode
 		}
@@ -328,9 +331,9 @@ type Profile struct {
 	// sessions share. Sessions in separate VMs cannot share one, so in a
 	// session VM each directory is the session's own.
 	VMState []VMState
-	// VMSingle, when set, says why only one session VM at a time may run the
-	// CLI on a home: it keeps such databases where no setting moves them.
-	VMSingle string
+	// LoginBroker marks omp, whose logins the server's auth broker serves to
+	// session VMs instead of a shared account's login directory.
+	LoginBroker bool
 	// LocalRoot is the home-relative profile directory (e.g. ".claude");
 	// empty means no profile sync.
 	LocalRoot string
@@ -581,9 +584,12 @@ var profiles = map[string]Profile{
 		EffortLevels:   []string{"off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"},
 		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY"},
 		// omp keeps its login in a SQLite WAL database beside its config,
-		// and a WAL database cannot be shared file by file.
+		// and a WAL database cannot be shared file by file. In session VMs
+		// omp uses the XDG layout, which moves every database it keeps out
+		// of ~/.omp, and the server's auth broker for its logins.
 		CredentialPaths: []string{".omp/agent"},
-		VMSingle:        "keeps its logins in a SQLite database that two session VMs cannot share",
+		LoginBroker:     true,
+		VMState:         []VMState{{Dir: ".local/share/omp"}, {Dir: ".local/state/omp"}, {Dir: ".cache/omp"}},
 		LocalRoot:       ".omp",
 		// The WAL and shm files hold provider keys too.
 		DenyNames:       []string{"agent.db", "agent.db-wal", "agent.db-shm"},
@@ -658,9 +664,12 @@ var profiles = map[string]Profile{
 		// the token in config.json. Copilot replaces it by rename, but it is
 		// not pinned: whether Copilot can write it as a mount is unverified.
 		CredentialPaths: []string{".copilot/config.json"},
-		VMSingle:        "keeps its session index in a SQLite database beside its login, which two session VMs cannot share",
-		DenyNames:       []string{"config.json"},
-		InstallScript:   "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @github/copilot; else echo \"npm is not in this environment's PATH, and copilot installs through npm\" >&2; false; fi",
+		// The session index ~/.copilot/session-store.db sits beside the
+		// login, and COPILOT_HOME moves both. The login is a GitHub OAuth
+		// app token, which no use invalidates, so a copy of it is safe.
+		VMState:       []VMState{{Dir: ".copilot", Seed: []string{"config.json", "settings.json", "mcp-config.json"}}},
+		DenyNames:     []string{"config.json"},
+		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @github/copilot; else echo \"npm is not in this environment's PATH, and copilot installs through npm\" >&2; false; fi",
 		// Not DeviceLogin: with no keychain, copilot login asks y/N before
 		// it stores the token.
 		LoginCommand: "copilot login --device-code",
@@ -724,11 +733,15 @@ var profiles = map[string]Profile{
 		// ~/.gemini/antigravity-cli/settings.json.
 		EnvPassthrough:  []string{"GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"},
 		CredentialPaths: []string{".gemini/antigravity-cli/antigravity-oauth-token"},
-		VMSingle:        "keeps its conversations in SQLite databases that two session VMs cannot share",
-		DenyNames:       []string{"antigravity-oauth-token"},
-		InstallScript:   "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-		LoginCommand:    "agy",
-		UpdateScript:    "agy update",
+		// conversation_summaries.db sits beside the login and no documented
+		// setting moves it. Google does not rotate the login's refresh
+		// token, so a copy of it is safe; without onboarding.json the TUI
+		// shows its first-run screens.
+		VMState:       []VMState{{Dir: ".gemini/antigravity-cli", Seed: []string{"antigravity-oauth-token", "settings.json", "cache/onboarding.json"}}},
+		DenyNames:     []string{"antigravity-oauth-token"},
+		InstallScript: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+		LoginCommand:  "agy",
+		UpdateScript:  "agy update",
 	},
 	"custom": {Name: "custom"},
 }
