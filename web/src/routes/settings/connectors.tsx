@@ -506,7 +506,8 @@ function Connectors({ client }: { client: Api }) {
         <SettingRow label="No connectors yet" help="One appears here once you select Allow on the Aether page." />
       )}
       {connectors?.map((c) => {
-        const movable = !!c.resource && !!info.universal_url && c.resource !== info.universal_url && info.url === info.universal_url
+        const atUniversal = !!c.resource && (c.resource === info.universal_url || (info.universal_urls ?? []).includes(c.resource))
+        const movable = !!c.resource && !!info.universal_url && !atUniversal && info.url === info.universal_url
         return (
           <SettingRow
             key={c.id}
@@ -514,7 +515,7 @@ function Connectors({ client }: { client: Api }) {
             help={(
               <>
                 <span className="block">{scopeList(c)}</span>
-                {c.resource && <span className="block">{c.resource === info.universal_url ? 'Universal URL' : <>This server’s own URL, <Code>{c.resource}</Code></>}</span>}
+                {c.resource && <span className="block">{atUniversal ? 'Universal URL' : <>This server’s own URL, <Code>{c.resource}</Code></>}</span>}
                 Added <RelativeTime at={c.created_at} />
                 {' · '}{c.last_used_at ? <>last used <RelativeTime at={c.last_used_at} /></> : 'never used'}
               </>

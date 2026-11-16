@@ -223,6 +223,14 @@ it('reconnects a connector on the server’s own URL there with a code, even whe
   expect(within(panel).getByText(own)).toBeTruthy()
 })
 
+it('treats a connector at the edge’s other address as on the universal URL, with no move offered', async () => {
+  const other = 'https://edge.other.example/mcp'
+  show({ connectorList: vi.fn().mockResolvedValue({ connectors: [{ ...claude, resource: other }], ...signedIn, universal_urls: [universal, other] }) })
+  expect(await screen.findByText('Universal URL')).toBeTruthy()
+  expect(screen.queryByText(other)).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Move Claude (claude.ai) to the universal URL' })).toBeNull()
+})
+
 async function move(name: string) {
   fireEvent.click(await screen.findByRole('button', { name: `Move ${name} to the universal URL` }))
   fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Move' }))
