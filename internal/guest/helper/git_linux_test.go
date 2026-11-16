@@ -892,10 +892,11 @@ func TestStoppedVMSessionIsShownFromItsLastSnapshot(t *testing.T) {
 	if err := p.host.StartDiffWatch(ctx, testWorkspace, testRun); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(p.checkout, "README"), []byte("changed\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(p.checkout, "new.txt"), []byte("new\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(p.checkout, "new.txt"), []byte("new\n"), 0o644); err != nil {
+	p.nextDiff(t, hasFile("new.txt"))
+	if err := os.WriteFile(filepath.Join(p.checkout, "README"), []byte("changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink("README", filepath.Join(p.checkout, "link")); err != nil {
