@@ -19,6 +19,7 @@ import (
 // unconverted are the AETHER_ variables still read under their old name
 // alone, each with the reason.
 var unconverted = map[string]string{
+	"AETHER_SHELL_EXE":                                      "the desktop shell names itself to the gateway it spawns; an inherited CLOUDFIELD_SHELL_EXE must not win",
 	"AETHER_DEVEXEC_CONTROL_GROUP":                          "set by the runtime for one helper exec; a CLOUDFIELD_ twin inherited from an image or workspace would share the helper's state with another group",
 	"AETHER_BROWSER_CREATION_KEY@images/browser/server.mjs": "set by the server for the browser companion it starts",
 	"AETHER_RELEASE_SIGNING_KEY":                            "a secret the release workflows set; no person types it",
