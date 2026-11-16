@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,7 +28,19 @@ var applyUpdate = func(ctx context.Context, baseURL, tag string) ([]string, erro
 	if err := selfupdate.RefuseDowngrade(ctx, baseURL, tag); err != nil {
 		return nil, err
 	}
-	return selfupdate.UpdateWithAuthorization(ctx, baseURL, tag)
+	updated, err := selfupdate.UpdateWithAuthorization(ctx, baseURL, tag)
+	if err == nil {
+		linkSecondName(updated[0])
+	}
+	return updated, err
+}
+
+// linkSecondName gives the binary just installed at path its second name.
+// A link that cannot be made never fails the update; it is logged.
+func linkSecondName(path string) {
+	if err := selfupdate.Link(filepath.Dir(path)); err != nil {
+		slog.Warn("could not give the updated binary its second name", "error", err)
+	}
 }
 
 // probeAccess is selfupdate.Probe behind a variable so tests can describe

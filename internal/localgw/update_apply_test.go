@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -511,5 +512,34 @@ func TestUpdateCheckLeavesTheServerFirstForAnOldServersAdmin(t *testing.T) {
 	}
 	if !check.ServerFirst || check.TargetVersion != "" {
 		t.Fatalf("server_first = %v target_version = %q, want the server first", check.ServerFirst, check.TargetVersion)
+	}
+}
+
+// TestLinkSecondNameAfterAnUpdate is what applyUpdate runs after the
+// swap: the second name appears beside the binary, and a directory that
+// refuses it changes nothing for the update.
+func TestLinkSecondNameAfterAnUpdate(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "aether")
+	if err := os.WriteFile(bin, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkSecondName(bin)
+	if got, err := os.Readlink(filepath.Join(dir, "cloudfield")); err != nil || got != "aether" {
+		t.Fatalf("cloudfield -> %q, %v; want aether", got, err)
+	}
+	if os.Geteuid() == 0 {
+		return
+	}
+	if err := os.Remove(filepath.Join(dir, "cloudfield")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	linkSecondName(bin)
+	if _, err := os.Lstat(filepath.Join(dir, "cloudfield")); !os.IsNotExist(err) {
+		t.Fatalf("cloudfield in a read-only directory: %v", err)
 	}
 }
