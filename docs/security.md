@@ -1189,9 +1189,9 @@ What the mark cannot do:
 
 **Two kinds of key.** Release keys sign any manifest and pointer. Nightly keys,
 a separate list in the binary, verify only a document whose signed `channel` is
-`nightly`; a nightly-signed pointer must also name a nightly release. The nightly
-list is empty until the first nightly key ships in a release, so no
-nightly verifies yet, and a client older than that release cannot verify any.
+`nightly`; a nightly-signed pointer must also name a nightly release. The first
+nightly key ships in `v0.8.7-beta.15`; a client older than that release cannot
+verify any nightly.
 Nightlies publish unattended, so their key lives in the `nightly` environment,
 limited to `main`, and never signs a beta or stable. Whoever holds a leaked
 nightly key and can put files in the repository's releases can:
