@@ -461,6 +461,26 @@ never put live credentials in a report.
 
 ## Releases
 
+Aether ships on three release channels, `nightly`, `beta` and `stable`
+([install.md](docs/install.md#release-channel) describes them for
+operators). `nightly.yml` builds a nightly from the newest `main` commit with
+green CI. An admin promotes a nightly to beta and a beta to stable with
+`promote.yml`; a promotion rebuilds the same commit under the new tag and
+keeps its build number. A fix to a released line goes out as a hotfix tag on
+a `release/X.Y` branch. Each channel's newest release is named by a signed
+pointer, and releases order by their signed build number, not their tag
+([security.md](docs/security.md#release-channels)). The admin steps that
+must exist first are listed in order under
+[Set up releases](#set-up-releases).
+
+### Tag a release
+
+Pushing a tag from `main` is the path for the migration's `v0.8.7-beta.N`
+only. After the migration, releases come from nightly and Promote, because a
+`main` tag publishes a build-0 release that no channel-aware install takes
+and Promote refuses as a source. `vX.Y.Z` with Z of 1 or more is the hotfix
+path ([Hotfixes](#hotfixes)).
+
 Maintainers release by pushing a tag: `vMAJOR.MINOR.0`, or a version with
 `-alpha.N`, `-beta.N` or `-rc.N`, on a `main` commit, or a hotfix
 `vMAJOR.MINOR.PATCH` (patch 1 or more) on a `release/MAJOR.MINOR` commit
@@ -476,9 +496,9 @@ only the push session. From a `main` checkout with `gh` and
 `jq`:
 
 ```sh
-git tag -a v0.8.0 -m v0.8.0 <commit>
-sh scripts/release-ci-check.sh 3xDevOps/aether "$(git rev-parse 'v0.8.0^{commit}')" &&
-git push origin v0.8.0
+git tag -a v0.8.7-beta.1 -m v0.8.7-beta.1 <commit>
+sh scripts/release-ci-check.sh 3xDevOps/aether "$(git rev-parse 'v0.8.7-beta.1^{commit}')" &&
+git push origin v0.8.7-beta.1
 ```
 
 Push tags one at a time: GitHub starts no workflow when more than three are
@@ -511,6 +531,8 @@ A failure before publishing leaves at most a draft: fix the cause and run
 `gh run rerun <session-id> --failed`. Published assets are never replaced, so a
 bad published release needs a new tag.
 
+### Promote
+
 An admin promotes a published nightly to beta, or a published beta to
 stable, with `.github/workflows/promote.yml` on `main`:
 
@@ -528,48 +550,86 @@ the current nightly base. A failed run is re-run with `gh run rerun
 <session-id> --failed`; a new dispatch of the same commit reuses a tag it
 left without a release.
 
-`.github/workflows/nightly.yml` builds nightlies, and does nothing until
-an admin sets the repository variable `NIGHTLY_ENABLED` to `true`. Every 30
+Promote runs only from `main`, and refuses a dispatcher or re-runner who is
+not a repository admin. An agent promotes by running that command on an
+admin's GitHub login. `from` is a nightly or beta tag, or the full SHA of
+one; `to` is `beta` or `stable`.
+
+The migration's first stable is the one run that takes a release from before
+channels. It promotes the `v0.8.7-beta.N` that shipped the channel-aware
+updater to `v0.8.7`, signs it as build 1, and writes the first
+`stable.json` and `beta.json`. It refuses once either pointer exists:
+
+```sh
+gh workflow run promote.yml -f from=v0.8.7-beta.<N> -f to=stable -f first-pointer=true
+```
+
+Promote then moves `aether-edge:beta` through `promote-edge.yml`
+(`:stable` moves by hand, as the Edge releases note below says).
+
+### Nightlies
+
+`.github/workflows/nightly.yml` builds nightlies, and does nothing until an
+admin sets the repository variable `NIGHTLY_ENABLED` to `true`. Every 30
 minutes it takes the newest `main` commit with green push CI, waits until 4
 hours after the last nightly unless an admin ran
-`gh workflow run nightly.yml`, and has `release-build.yml` tag it
-`vX.Y.Z-nightly.N` with the next build number, sign it with
-`AETHER_NIGHTLY_SIGNING_KEY` in the `nightly` environment, and move
-`nightly.json`; `promote-edge.yml` then moves `aether-edge:nightly`. A run
-that finds a nightly tag its failed predecessor left without a release
-builds that tag again. With `NIGHTLY_PRUNE_ENABLED` also `true`, it deletes
-once a day the release and images, never the git tag, of each nightly older
-than 14 days, except the newest and every nightly above `stable.json`'s
-build. This lists what it would delete, and deletes nothing (`gh` needs
-the `read:packages` scope):
+`gh workflow run nightly.yml` ("build now"), and has `release-build.yml` tag
+it `vX.Y.Z-nightly.N` with the next build number. `X.Y.Z` is the last stable
+with its minor bumped, or the core of a higher beta (after `v0.8.7`,
+`v0.9.0-nightly.1`). The `release` job in the `nightly` environment signs it
+with `AETHER_NIGHTLY_SIGNING_KEY` and moves `nightly.json`; `promote-edge.yml`
+then moves `aether-edge:nightly`. A run that finds a nightly tag its failed
+predecessor left without a release builds that tag again, but not
+before 4 hours have passed since the later of the tag and the newest failed
+`nightly.yml` run.
+
+Before it builds, the `signing-key` job refuses a nightly key `main` does not
+trust, so a missing public key in `nightlyKeys` fails the run before
+anything is built or tagged.
+
+With `NIGHTLY_PRUNE_ENABLED` also `true`, it deletes once a day (04:07 UTC) the release
+and images, never the git tag, of each nightly older than 14 days, except
+the newest, every nightly above `stable.json`'s build, and a nightly whose
+image a channel tag (`nightly`, `beta`, `stable` or `latest`) still carries,
+which keeps its release and images. It prunes nothing while `nightly.json` or
+`stable.json` cannot be read and verified. This lists what it would
+delete, and deletes nothing (`gh` needs the `read:packages` scope):
 
 ```sh
 go build -o /tmp/nightly-plan ./scripts/nightly-plan
 GITHUB_REPOSITORY=3xDevOps/aether NIGHTLY_PLAN=/tmp/nightly-plan sh scripts/nightly-prune.sh --dry-run
 ```
 
-Before `NIGHTLY_ENABLED` is set, a release must carry the nightly public key in
-`nightlyKeys` (`internal/selfupdate/keys.go`), and the `nightly` environment
-must exist, limited to `main`, holding the private key. The `signing-key` job
-refuses a key `main` does not trust before anything is built or tagged.
+Switch builds on and off with the repository variables:
 
-Only the exact value `true` turns either variable on. An organization
-variable of the same name also reaches this repository; check with
-`gh variable list --org 3xDevOps` that neither exists there.
+```sh
+gh variable set NIGHTLY_ENABLED --body true --repo 3xDevOps/aether          # builds
+gh variable set NIGHTLY_PRUNE_ENABLED --body true --repo 3xDevOps/aether    # pruning too, after a dry run looks right
+gh variable delete NIGHTLY_PRUNE_ENABLED --repo 3xDevOps/aether             # stops pruning only
+gh variable delete NIGHTLY_ENABLED --repo 3xDevOps/aether                   # stops everything, pruning included
+```
+
+A run already in progress finishes. Only the exact value `true` turns either
+variable on. An organization variable of the same name also reaches this
+repository; check with `gh variable list --org 3xDevOps` that neither exists
+there.
 
 Nightly's build and Promote share the `channels` concurrency group, and
 GitHub keeps one pending run per group: a nightly build waiting behind a
 running Promote cancels a second Promote waiting there, and the other way
 round. A cancelled Promote tags and publishes nothing; dispatch it again.
 
+### Pointers
+
 A workflow that moves a channel pointer (`<channel>.json` on the
 `channels` prerelease) keeps the pair it signed as the `pointer-<channel>`
 artifact for 90 days. If an upload leaves half a pair, restore that
 artifact with the `gh run download ... && gh release upload channels
---clobber ...` command the failed run prints. Once it has expired, remove
-what is left of the pointer and re-sign it with `first-pointer` for the
-release it named or one above it, never below: installs refuse a pointer
-lower than one they have seen.
+--clobber ...` command the failed run prints. Once the artifact has expired
+there is no workflow path to re-sign a pointer: `first-pointer` takes only the
+migration's `v0.8.7-beta.N` and refuses once a pointer exists, and
+`nightly.yml` has no such input. It needs a code change first. Never sign one
+below what installs have seen: they refuse a lower pointer.
 
 ### Hotfixes
 
@@ -658,6 +718,84 @@ Before the first hotfix, a repository admin sets up three protections:
    release, and under **Deployment branches and tags** allow only tags
    `v*` and the branch `main`.
 
+### Set up releases
+
+Releases need these admin steps. Do them in order; nothing below publishes,
+tags or prunes until a step says so. Each of 1 to 5 is one-time.
+
+1. **No stray variables.** `gh variable list --org 3xDevOps` and `gh variable
+   list --repo 3xDevOps/aether` must show no `NIGHTLY_ENABLED` or
+   `NIGHTLY_PRUNE_ENABLED`. `nightly.yml` is on `main`, so an organization
+   variable set to `true` would start nightly runs as soon as the pointers
+   exist, and the first run would create an unprotected `nightly` environment.
+2. **The `release` environment.** **Settings → Environments → release**:
+   under **Deployment branches and tags** allow only the tag rule `v*` and
+   the branch `main` (Promote runs on `main`), and add the maintainers who
+   release as **Required reviewers**. Put `AETHER_RELEASE_SIGNING_KEY` here
+   and delete any repository secret of that name. Check what exists with
+   `gh api repos/3xDevOps/aether/environments/release`: a null
+   `deployment_branch_policy` means any branch or tag may use the key. The
+   Android job reads `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`,
+   `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` as repository secrets;
+   losing that keystore means no release can update an installed app again.
+3. **The `edge-promotion` environment**, limited to the branch `main`, with
+   no required reviewers, or every nightly would wait on a person. The first
+   run creates it unprotected otherwise.
+4. **The `channels` prerelease** that holds the pointers. Latest and the
+   installers never pick it, and its tag starts no release:
+
+   ```sh
+   gh release create channels --prerelease --title channels --notes 'Signed channel pointers.' --target main
+   ```
+
+5. **Rulesets for hotfixes**, before the first one: `release/*` branches and
+   `v*` tags, with the commands under [Hotfixes](#hotfixes). If a `v*` tag
+   ruleset exists, GitHub Actions must be allowed to create tags, or the
+   signer's tag step is refused and nothing is published. The tag ruleset
+   must also let a repository admin push a tag, because `release.yml` checks
+   for a repository admin: GitHub's `OrganizationAdmin` bypass covers
+   organization owners only, so add **Repository admin** to the ruleset's
+   bypass list in **Settings → Rules** (the REST docs name no role id for
+   it).
+6. **The nightly key pair**, before the migration's tag. Generate an ed25519
+   key pair offline ([Release signing](docs/security.md#release-signing) says
+   the formats), and merge the public key into `nightlyKeys` in
+   `internal/selfupdate/keys.go` in a reviewed pull request. Then
+   `v0.8.7-beta.N` and `v0.8.7` carry it. After the migration a `main` tag
+   publishes build 0, which channel-aware installs are never offered, and an
+   install whose `nightlyKeys` is empty refuses `nightly.json`; only a hotfix,
+   or a beta and stable promoted from a nightly built after the key merged,
+   can deliver it. The repository has no key
+   generation command: a maintainer generates the pair offline. The gate
+   before the first nightly is `main`'s `keys.go`: the `signing-key` job fails when `main` does
+   not trust the nightly key. If the migration already happened without the
+   key, use one of those two ways.
+7. **The migration**, once. Ship the channel-aware updater as
+   `v0.8.7-beta.N` the old way (the tag flow above), which becomes Latest and
+   reaches every install. Then promote it with `first-pointer`
+   ([Promote](#promote)). It becomes `v0.8.7`, build 1, with the first
+   `stable.json` and `beta.json`. A server still on `v0.8.7-beta.N` has no
+   signed build, so it shows the update but waits for a super admin's
+   `aether server update`; from `v0.8.7` on it applies updates itself, and
+   `AETHER_NO_UPDATE_CHECK=1` stops that.
+8. **The nightly environment and pruning**, before you switch nightlies on:
+   - **Settings → Environments → New environment**, named `nightly`:
+     deployment branches limited to `main`, no required reviewers, and the
+     secret `AETHER_NIGHTLY_SIGNING_KEY`. Do not put
+     `AETHER_RELEASE_SIGNING_KEY` there, and keep no repository-level secret
+     of either name.
+   - For pruning, in each of the packages `aether-browser`, `aether-edge` and
+     `aether-standard`, under **Package settings → Manage Actions access**,
+     give this repository the **Admin** role. Without it a prune fails with
+     403 partway: images go first and the release is kept, so the next prune
+     retries.
+9. **Switch nightlies on** when `stable.json` and `beta.json` exist, with
+   `gh variable set NIGHTLY_ENABLED` ([Nightlies](#nightlies)). The first
+   nightly is `v0.9.0-nightly.1`, build 2. Run the prune dry run, then set
+   `NIGHTLY_PRUNE_ENABLED`. Turn them off with `gh variable delete`.
+10. **Point the project's own server at nightly:** `sudo aether-server update
+   --channel nightly --yes` on it.
+
 <details>
 <summary>Edge releases and the signing key</summary>
 
@@ -673,24 +811,12 @@ against them by their signed build, and nightlies are pruned.
 A release that becomes Latest moves `ghcr.io/3xdevops/aether-edge:latest`.
 Promote moves `:beta` whenever it moves `beta.json`, on a stable
 promotion too, and `nightly.yml` moves `:nightly`. Production edges follow
-`:stable`, which only `promote-edge.yml` moves, run by an admin at least 24
-hours after the release
-(`-f soak_override_reason='<why>'` promotes sooner):
+`:stable`, which only an admin's `promote-edge.yml` run moves, at least 24
+hours after the release; [edge.md](docs/edge.md#promoting-an-edge-release-to-stable)
+has the command, the soak override and the refusals.
 
-```sh
-docker buildx imagetools inspect ghcr.io/3xdevops/aether-edge:<tag>   # Digest:
-gh workflow run promote-edge.yml -f tag=<tag> -f digest=sha256:<digest>
-```
-
-It refuses a release older, by signed build and hotfix, than the one
-`stable` carries, and one whose `min_upgrade_from` is above it.
-
-Keep `AETHER_RELEASE_SIGNING_KEY` in the `release` environment
-(**Settings → Environments**) limited to `v*` tags and `main` (Promote
-runs on `main`), delete any repository
-secret of that name, and limit `edge-promotion` to `main`. The Android job
-reads `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
-and `ANDROID_KEY_PASSWORD`. Losing that keystore means no release can update
-an installed app again.
+Limit `edge-promotion` to `main` ([Set up releases](#set-up-releases)).
+Losing the Android keystore means no release can update an installed app
+again.
 
 </details>

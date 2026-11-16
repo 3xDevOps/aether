@@ -716,13 +716,16 @@ the secret in as a systemd credential. If the file is missing the start fails wi
 ### In a container
 
 The release publishes `ghcr.io/3xdevops/aether-edge` for linux/amd64 and
-linux/arm64, running as uid and gid 65532. `<release-tag>` never moves. `latest`
-moves with every release, alphas included, and can migrate the database on an
-unattended restart, so keep it out of production. `stable` moves to a release an
-admin promoted after it qualified and soaked
-([CONTRIBUTING.md](../CONTRIBUTING.md#releases)); `beta` and `nightly` move
-to the releases promoted on those release channels. In production pin `stable` by
-digest (`ghcr.io/3xdevops/aether-edge:stable@sha256:<digest>`, from `docker
+linux/arm64, running as uid and gid 65532. `<release-tag>` never moves. The
+other tags are release channels, the same three Aether servers follow
+([install.md](install.md#release-channel)), and each moves only when a
+workflow promotes a release onto it ([Promoting an edge
+release](#promoting-an-edge-release-to-stable)). `stable` is the one to run:
+an admin moves it to a release that qualified and soaked 24 hours. `beta`
+and `nightly` carry builds that have soaked less. `latest` follows GitHub's
+Latest release with no promotion attestation, and can migrate the database
+on an unattended restart, so keep it out of production. In production pin `stable`
+by digest (`ghcr.io/3xdevops/aether-edge:stable@sha256:<digest>`, from `docker
 buildx imagetools inspect ghcr.io/3xdevops/aether-edge:stable`) and change it
 deliberately.
 
@@ -1133,7 +1136,7 @@ carries, whatever the version says (an edge whose image predates release
 channels compares versions instead), and never runs a digest that a signed
 release does not name.
 Before it switches, it checks with `cosign` that `promote-edge.yml` on `main`
-promoted the digest (except on `latest`), runs `aether-edge release-check` from
+promoted the digest onto the host's channel (except on `latest`), runs `aether-edge release-check` from
 the running image, and backs the database up to
 `backups/pre-update-<version>-<UTC time>.db`. A blocking manual step holds the
 update: it exits 3 and changes nothing. After `docker compose up -d --wait` it
@@ -1150,6 +1153,11 @@ Logs are in `journalctl -u aether-edge-update`. It needs Docker with Compose,
 fixed address, put it in `AETHER_EDGE_TRUSTED_PROXIES`, and keep
 `forwardedHeaders.trustedIPs` and `forwardedHeaders.insecure` unset on the entry
 point the edge uses.
+
+The hosted Aether Edge service follows `stable`, like any host left on the
+default.
+
+#### Installing the updater
 
 At the release tag you install, copy `scripts/edge-update.sh` to
 `/usr/local/sbin/aether-edge-update`, `packaging/edge/aether-edge-update.env.example`
@@ -1239,6 +1247,54 @@ updater does the rest.
 release cannot run the migrated database it changes nothing and exits 1 with the
 backup's age, because restoring loses every account, device and server change
 since. To roll back anyway, add `--restore-backup`.
+
+### Promoting an edge release to stable
+
+This is for maintainers. The image tags `nightly`, `beta` and `stable` move
+only through `.github/workflows/promote-edge.yml`, which copies the exact
+index the release signed and attested; it never builds, and never moves a
+tag to a lower build. Each move publishes an `edge-promotion/v1` attestation
+naming the tag's channel, which hosts check ([Verifying an
+image](#verifying-an-image)). The attestation is signed by `promote-edge.yml`
+on `main`, which hosts pin, so only a run of that file on `main` moves a tag.
+
+| Tag | Moved by | When |
+| --- | --- | --- |
+| `nightly` | `nightly.yml` calling `promote-edge.yml` | each nightly it publishes; the tag takes only a nightly release |
+| `beta` | `promote.yml` calling `promote-edge.yml` | each time Promote moves `beta.json`, on a promotion to stable too. A hotfix moves `beta.json` only when it is above it, and never `:beta`, which follows at the next Promote |
+| `stable` | an admin dispatching `promote-edge.yml` | by hand, as below |
+
+Promote never waits on `stable`: an admin promotes a release's image once
+it has been published for 24 hours. Edges on the previous stable keep
+working meanwhile, because their compat floors let an older edge serve
+updated servers. A stable that raises a compat floor cannot wait, so promote
+its image at once with `soak_override_reason`.
+
+```sh
+docker buildx imagetools inspect ghcr.io/3xdevops/aether-edge:<tag>   # Digest:
+gh workflow run promote-edge.yml -f tag=<tag> -f digest=sha256:<digest>
+# sooner than 24 hours after publication:
+gh workflow run promote-edge.yml -f tag=<tag> -f digest=sha256:<digest> -f soak_override_reason='<why>'
+```
+
+The run refuses, with these errors:
+
+- `release <tag> is a draft; promote only a published release`;
+- `<tag> is a <channel> release, which aether-edge:stable does not take`
+  (`stable` takes a stable release, or one from before channels; `beta` anything
+  but a nightly);
+- `<tag> was published <n> hours ago; wait until 24 hours have passed or give soak_override_reason`;
+- `ghcr.io/3xdevops/aether-edge:<tag> is <digest>, not <digest>` when the
+  digest you passed is not the tag's index;
+- `ghcr.io/3xdevops/aether-edge:stable carries <tag>; release-check refuses to move it to <tag> (see its output above); promote a release between them first if <tag> upgrades only from a later one`
+  when the new release is not above the carried one by build, or its
+  `min_upgrade_from` is above the carried one. A blocking manual step does
+  not refuse the move: edges on the channel hold until their operator
+  takes it.
+
+The admin check applies to a dispatch for `stable` only. `beta` moves only
+from `promote.yml` and `nightly` only from `nightly.yml`, each running on
+`main`; `promote-edge.yml` refuses a call from any other workflow or ref.
 
 ### Operator commands
 
