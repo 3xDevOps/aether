@@ -3,7 +3,7 @@ name: Promote
 # An admin promotes a published nightly to beta, or a published beta to
 # stable. release-build.yml rebuilds that commit under the new tag, signs
 # it with the release key, publishes it and moves the channel pointers;
-# a beta then moves aether-edge:beta through promote-edge.yml.
+# aether-edge:beta then moves with beta.json through promote-edge.yml.
 run-name: Promote ${{ inputs.from }} to ${{ inputs.to }}
 
 on:
@@ -186,9 +186,11 @@ jobs:
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
+  # aether-edge:beta moves with beta.json: for a beta, and for a stable
+  # that moved beta.json because it was above it.
   edge-beta:
     needs: [promote-plan, release-build]
-    if: ${{ inputs.to == 'beta' }}
+    if: ${{ inputs.to == 'beta' || needs.release-build.outputs.pointer-if-above-names-release == 'true' }}
     permissions:
       contents: read
       actions: read

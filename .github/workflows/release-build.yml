@@ -60,6 +60,9 @@ on:
       edge-digest:
         description: Index digest of ghcr.io/3xdevops/aether-edge:<tag>
         value: ${{ jobs.edge-manifest.outputs.digest }}
+      pointer-if-above-names-release:
+        description: true when the pointer-if-above channel's pointer names this release, moved by this run or an earlier attempt
+        value: ${{ jobs.release.outputs.pointer-if-above-names-release }}
     secrets:
       AETHER_RELEASE_SIGNING_KEY:
         required: false
@@ -974,6 +977,8 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      pointer-if-above-names-release: ${{ steps.if-above.outputs.names }}
     steps:
       - name: Require the tools commit to be on main
         env:
@@ -1135,6 +1140,7 @@ jobs:
           overwrite: true
           retention-days: 90
       - name: Move the channel pointer the release is above
+        id: if-above
         if: inputs.pointer-if-above != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1146,6 +1152,13 @@ jobs:
           if [ "$FIRST_POINTER" = true ]; then first=(--first); fi
           mkdir "$RUNNER_TEMP/pointer-$POINTER_IF_ABOVE"
           sh scripts/publish-pointer.sh "${first[@]}" --if-above "$POINTER_IF_ABOVE" "$TAG" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/pointer-$POINTER_IF_ABOVE"
+          # Also when an earlier attempt moved it: the pointer
+          # publish-pointer.sh just verified, or wrote, names this tag.
+          mkdir "$RUNNER_TEMP/if-above-now"
+          gh release download channels --pattern "$POINTER_IF_ABOVE.json" --dir "$RUNNER_TEMP/if-above-now"
+          if [ "$(jq -r .tag "$RUNNER_TEMP/if-above-now/$POINTER_IF_ABOVE.json")" = "$TAG" ]; then
+            echo "names=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() && inputs.pointer-if-above != '' }}
         with:
