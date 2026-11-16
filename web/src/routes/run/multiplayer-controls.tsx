@@ -1,4 +1,4 @@
-import { useRef, type CSSProperties } from 'react'
+import { useId, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ControlMatrix } from '@/components/control-matrix'
 import { Shield, Users } from '@/components/icons'
@@ -10,7 +10,7 @@ import { memberName, resolveMember } from '@/lib/member-name'
 import { allowed } from '@/lib/permissions'
 import type { RoomController } from '@/lib/types'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
-import { dotFadeShape, useDotFade } from '@/routes/run/dot-fade'
+import { useDotFade } from '@/routes/run/dot-fade'
 import { ControlButton } from '@/routes/terminal/control-button'
 import { useStore } from '@/store'
 import { useSelf } from '@/store/hooks'
@@ -61,8 +61,9 @@ export function MultiplayerControls({ run, agent, onPeople }: {
   onPeople: () => void
 }) {
   const self = useSelf(run.workspace_id)
+  const keyboardHelpID = useId()
   const strip = useRef<HTMLDivElement>(null)
-  const fadesDots = useDotFade(strip)
+  useDotFade(strip)
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const summary = usePresenceSummary(run, agent)
@@ -86,16 +87,18 @@ export function MultiplayerControls({ run, agent, onPeople }: {
   return (
     <div
       ref={strip}
-      data-dot-fade={fadesDots || undefined}
-      style={fadesDots ? dotFadeShape as CSSProperties : undefined}
+      tabIndex={0}
       role="group"
       aria-label="Multiplayer controls"
-      className="@container/multiplayer relative isolate shrink-0 overflow-clip border-b border-seam bg-chrome px-2 py-1">
+      aria-describedby={keyboardHelpID}
+      className="@container/multiplayer relative isolate shrink-0 overflow-clip border-b border-seam bg-chrome px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-focus">
       <ControlMatrix
         appearance={agent.localControl ? 'active'
           : agent.controlUnavailable ? 'hidden' : agent.roomControl?.loss ?? 'hidden'}
         takeoverProgress={agent.takeover.holderProgress}
+        breathing={false}
       />
+      <span id={keyboardHelpID} className="sr-only">Use arrow keys to move the dot interaction point; press Enter or Space to pulse it.</span>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <Button size="sm" variant="ghost" className="control-matrix-clear shrink-0" hint="See people and notes for this session" onClick={onPeople}>
           <Users />
