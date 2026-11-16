@@ -1261,7 +1261,7 @@ on `main`, which hosts pin, so only a run of that file on `main` moves a tag.
 | Tag | Moved by | When |
 | --- | --- | --- |
 | `nightly` | `nightly.yml` calling `promote-edge.yml` | each nightly it publishes |
-| `beta` | `promote.yml` calling `promote-edge.yml` | each time Promote moves `beta.json`, on a promotion to stable too. A hotfix moves `beta.json` but not `:beta`, which follows at the next Promote |
+| `beta` | `promote.yml` calling `promote-edge.yml` | each time Promote moves `beta.json`, on a promotion to stable too. A hotfix moves `beta.json` only when it is above it, and never `:beta`, which follows at the next Promote |
 | `stable` | an admin dispatching `promote-edge.yml` | by hand, as below |
 
 Promote never waits on `stable`: an admin promotes a release's image once

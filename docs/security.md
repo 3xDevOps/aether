@@ -1132,8 +1132,7 @@ from three signed documents, none from GitHub's own ordering or labels:
   (`channel pointer beta.json is signed for channel "stable"; do not follow
   it`) and a manifest its channel does not take (`v0.9.0-nightly.13 is a
   nightly release, which an install on beta does not take`). A channel takes
-  its own releases and those above it: `stable` takes stable, `beta` beta and
-  stable, `nightly` all.
+  its own releases and those above it ([channels](install.md#release-channel)).
 
 **The high-water mark.** Every install keeps the highest `(build, hotfix)` it
 has accepted from each channel's pointer: on a server in
@@ -1194,7 +1193,8 @@ as the release key is rotated ([above](#release-signing)): ship the next public
 key in a release before anything is signed with it.
 
 **The trusted signer.** Releases are built in one job and signed in another.
-The jobs that build run the released commit's code and hold no signing key. The
+The jobs that build run the released commit's code and hold no manifest or
+pointer signing key (the Android job is the exception, below). The
 job that signs checks out `main`, takes only the built artifacts and values,
 and runs `main`'s `release-manifest`, `publish-release.sh` and pointer writer
 with the key. Code from the commit being released, including a commit that
@@ -1205,6 +1205,15 @@ reach is decided by its GitHub environment: `release` for beta and stable,
 before it signs.
 
 Limits of that arrangement:
+
+- The Android job decodes the Android keystore secrets and runs the released
+  commit's Gradle with them, so the keystore is within reach of the built
+  commit's code. `nightly.yml` passes those secrets too, so that happens
+  unattended on every nightly.
+- A signing job re-run by a non-admin with write access is not checked for
+  admin: the admin step covers a promotion's dispatch, and the `nightly`
+  environment has no reviewers. A re-run can only finish what the original
+  run resolved.
 
 - GitHub environments limit which refs a workflow may use a secret from, but
   not which workflow file. A tag runs the tagged commit's own workflow files,

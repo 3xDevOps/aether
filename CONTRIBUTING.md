@@ -742,18 +742,27 @@ tags or prunes until a step says so. Each of 1 to 4 is one-time.
    `v*` tags, with the commands under [Hotfixes](#hotfixes). If a `v*` tag
    ruleset exists, GitHub Actions must be allowed to create tags, or the
    signer's tag step is refused and nothing is published.
-5. **The migration**, once. Ship the channel-aware updater as
+5. **The nightly key pair**, before the migration's tag. Generate an ed25519
+   key pair offline ([Release signing](docs/security.md#release-signing) says
+   the formats), and merge the public key into `nightlyKeys` in
+   `internal/selfupdate/keys.go` in a reviewed pull request. Then
+   `v0.8.7-beta.N` and `v0.8.7` carry it. After the migration no release can
+   deliver it: a `main` tag publishes build 0, which channel-aware installs
+   are never offered, Promote needs a nightly, and an install whose
+   `nightlyKeys` is empty refuses `nightly.json`. The gate before the first
+   nightly is `main`'s `keys.go`: the `signing-key` job fails when `main` does
+   not trust the nightly key. If the migration already happened without the
+   key, carry it in a hotfix, or in a beta and stable promoted from a nightly
+   built after the key merged.
+6. **The migration**, once. Ship the channel-aware updater as
    `v0.8.7-beta.N` the old way (the tag flow above), which becomes Latest and
-   reaches every install. Then promote it with `first-pointer` ([Promote](#promote)).
-   It becomes `v0.8.7`, build 1, with the first `stable.json` and `beta.json`.
-6. **The nightly key and environment**, before the first nightly and before
-   you switch it on:
-   - Generate an ed25519 key pair offline ([Release
-     signing](docs/security.md#release-signing) says the formats). Add the
-     public key to `nightlyKeys` in `internal/selfupdate/keys.go` in a
-     reviewed pull request, and ship it in a release first. A client older
-     than that release cannot verify a nightly, and until then
-     `release-manifest` refuses to sign one.
+   reaches every install. Then promote it with `first-pointer`
+   ([Promote](#promote)). It becomes `v0.8.7`, build 1, with the first
+   `stable.json` and `beta.json`. A server still on `v0.8.7-beta.N` has no
+   signed build, so it shows the update but waits for a super admin's
+   `aether server update`; from `v0.8.7` on it applies updates itself, and
+   `AETHER_NO_UPDATE_CHECK=1` stops that.
+7. **The nightly environment and pruning**, before you switch nightlies on:
    - **Settings → Environments → New environment**, named `nightly`:
      deployment branches limited to `main`, no required reviewers, and the
      secret `AETHER_NIGHTLY_SIGNING_KEY`. Do not put
@@ -766,11 +775,11 @@ tags or prunes until a step says so. Each of 1 to 4 is one-time.
      retries.
    - Run `gh variable list --org 3xDevOps`: it must show no
      `NIGHTLY_ENABLED` or `NIGHTLY_PRUNE_ENABLED`.
-7. **Switch nightlies on** when `stable.json` and `beta.json` exist, with
+8. **Switch nightlies on** when `stable.json` and `beta.json` exist, with
    `gh variable set NIGHTLY_ENABLED` ([Nightlies](#nightlies)). The first
    nightly is `v0.9.0-nightly.1`, build 2. Run the prune dry run, then set
    `NIGHTLY_PRUNE_ENABLED`. Turn them off with `gh variable delete`.
-8. **Point the project's own server at nightly:** `sudo aether-server update
+9. **Point the project's own server at nightly:** `sudo aether-server update
    --channel nightly --yes` on it.
 
 <details>

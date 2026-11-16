@@ -818,12 +818,12 @@ release preflight failed: the server no longer takes this update: v0.9.0-nightly
 ```
 
 Clients follow their server. `aether update` and the desktop app take the
-release of the channel their default linked server follows, and never one
-above that server ([Update a client](#update-a-client)). The Android app
-follows its server too. A Google Play install gets stable releases only,
-because Play cannot carry a build every 4 hours; on a beta or nightly server,
-install the release-signed APK from GitHub ([Android
-app](#android-app)).
+release of the channel their default linked server follows, and by default
+never one above that server; a member who cannot update the server, or
+`--force`, can ([Update a client](#update-a-client)). The Android app in
+Aether Edge mode offers the server's release; in Tailscale mode its bundled
+CLI follows its own `config.json`, and `stable` when it has none
+([Android app](#android-app)).
 
 ### Automatic updates
 
@@ -837,9 +837,12 @@ its actor, not a member.
 
 The server schedules nothing when:
 
-- It has not chosen its channel yet, or it runs a build from source (no
-  signed build number, a version past a tag, or dirty). `server.update_status`
-  still offers the release.
+- It has not chosen its channel yet, it runs a build from source (a version
+  past a tag, or dirty), or it runs a release from before channels, which has
+  no signed build. `server.update_status` still offers the release; a server
+  on `v0.8.7-beta.N` shows the update and stays until a super admin runs
+  `aether server update` or `sudo aether-server update`. Self-applying starts
+  once it runs `v0.8.7`, build 1.
 - The release is from before channels, has no signed build, or fails the
   update preflight. `schedule_error` in `server.update_status` says why the
   server last failed to schedule the newest release; it retries on a backoff
@@ -968,12 +971,6 @@ Run `aether update`, or **Update now** on the dashboard's update screen, then
 retry; both install the server's release. Updating and git fetch and push keep
 working meanwhile. Rerun a refused `aether link --repo` afterwards to set the
 git remote. Development builds (`dev` or a bare commit) are never refused.
-
-### Promoting an edge release to stable
-
-Only an admin moves the Aether Edge image tag `stable`, with
-`promote-edge.yml`. The steps, the 24-hour soak and the refusals are in
-[edge.md](edge.md#promoting-an-edge-release-to-stable).
 
 ### Verified releases
 
