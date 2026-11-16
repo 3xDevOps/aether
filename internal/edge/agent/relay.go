@@ -50,7 +50,7 @@ func (a *Agent) open(s *session, m edgeproto.Open) {
 		return
 	}
 	a.reply(s, edgeproto.OpenResult{ConnID: m.ConnID})
-	go a.attach(m, grant, slots)
+	go a.attach(s, m, grant, slots)
 }
 
 func (a *Agent) reply(s *session, m edgeproto.Message) {
@@ -62,7 +62,7 @@ func (a *Agent) reply(s *session, m edgeproto.Message) {
 // attach dials the data socket of one open and hands the connection to
 // sshd, or for an http open to Config.HTTP. It holds the slot open took
 // from slots until the connection closes.
-func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant, slots chan struct{}) {
+func (a *Agent) attach(s *session, m edgeproto.Open, grant edgeproto.Grant, slots chan struct{}) {
 	a.mu.Lock()
 	ctx := a.runCtx
 	a.mu.Unlock()
@@ -98,7 +98,7 @@ func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant, slots chan struc
 		"provider", grant.Account.Provider, "subject", grant.Account.Subject, "device", grant.DeviceID)
 	switch m.Kind {
 	case edgeproto.KindHTTP:
-		a.serveHTTP(ctx, rc)
+		a.serveHTTP(ctx, s, rc)
 	case edgeproto.KindClaim:
 		a.cfg.SSH.ServeEdgeClaim(ctx, rc, grant, a.claimAttempt(grant))
 	default:
