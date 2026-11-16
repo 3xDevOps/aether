@@ -329,3 +329,22 @@ func TestLinkAllLinksEachDirectoryOnce(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkWritesTheShimOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows only")
+	}
+	dir := t.TempDir()
+	writeBinaries(t, dir, "bin", "aether.exe")
+	for range 2 {
+		if err := Link(dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "cloudfield.cmd")); err != nil || string(got) != "@\"%~dp0aether.exe\" %*\r\n" {
+		t.Fatalf("cloudfield.cmd = %q, %v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "cloudfield")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a symlink on Windows: %v", err)
+	}
+}

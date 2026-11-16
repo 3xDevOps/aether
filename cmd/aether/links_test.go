@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,9 +16,9 @@ import (
 )
 
 // TestUpdateWithNothingToInstallLinks runs this binary installed as
-// aether, the layout an updater from before the second names leaves:
+// aether (aether.exe on Windows), the layout an updater from before the second names leaves:
 // `aether update` that finds it is already on the release still creates
-// cloudfield beside it, and says nothing where it may not, since it would
+// cloudfield (cloudfield.cmd on Windows) beside it, and says nothing where it may not, since it would
 // say it again on every run.
 func TestUpdateWithNothingToInstallLinks(t *testing.T) {
 	if argv := os.Getenv("AETHER_CLI_TEST_ARGV"); argv != "" {
@@ -28,13 +29,17 @@ func TestUpdateWithNothingToInstallLinks(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root writes into a read-only directory")
 	}
+	bin := "aether"
+	if runtime.GOOS == "windows" {
+		bin = "aether.exe"
+	}
 	dir := t.TempDir()
 	self, err := os.Open(os.Args[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = self.Close() }()
-	f, err := os.OpenFile(filepath.Join(dir, "aether"), os.O_CREATE|os.O_WRONLY, 0o755)
+	f, err := os.OpenFile(filepath.Join(dir, bin), os.O_CREATE|os.O_WRONLY, 0o755)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +51,7 @@ func TestUpdateWithNothingToInstallLinks(t *testing.T) {
 	}
 	update := func() string {
 		t.Helper()
-		cmd := exec.Command(filepath.Join(dir, "aether"), "-test.run=^TestUpdateWithNothingToInstallLinks$")
+		cmd := exec.Command(filepath.Join(dir, bin), "-test.run=^TestUpdateWithNothingToInstallLinks$")
 		home := t.TempDir()
 		for _, kv := range os.Environ() {
 			if !strings.HasPrefix(kv, "AETHER_") {
@@ -62,18 +67,27 @@ func TestUpdateWithNothingToInstallLinks(t *testing.T) {
 		return string(out)
 	}
 
-	if err = os.Chmod(dir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	if out := update(); strings.Contains(out, "warning") || strings.Contains(out, "ln -s") {
-		t.Fatalf("update with nothing to install in a directory it may not write printed:\n%s", out)
-	}
-
-	if err = os.Chmod(dir, 0o755); err != nil {
-		t.Fatal(err)
+	// A read-only directory is a Unix permission; on Windows chmod only
+	// sets the read-only attribute, which does not stop a new file.
+	if runtime.GOOS != "windows" {
+		if err = os.Chmod(dir, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		if out := update(); strings.Contains(out, "warning") || strings.Contains(out, "ln -s") {
+			t.Fatalf("update with nothing to install in a directory it may not write printed:\n%s", out)
+		}
+		if err = os.Chmod(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if out := update(); strings.Contains(out, "warning") {
 		t.Fatalf("update printed a warning:\n%s", out)
+	}
+	if runtime.GOOS == "windows" {
+		if got, err := os.ReadFile(filepath.Join(dir, "cloudfield.cmd")); err != nil || string(got) != "@\"%~dp0aether.exe\" %*\r\n" {
+			t.Fatalf("cloudfield.cmd = %q, %v; want the shim that runs aether.exe", got, err)
+		}
+		return
 	}
 	if got, err := os.Readlink(filepath.Join(dir, "cloudfield")); err != nil || got != "aether" {
 		t.Fatalf("cloudfield -> %q, %v; want aether", got, err)
