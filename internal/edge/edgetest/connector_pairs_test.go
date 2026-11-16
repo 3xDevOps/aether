@@ -2,10 +2,13 @@ package edgetest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -66,6 +69,11 @@ func TestConnectorAtEveryRelayOrigin(t *testing.T) {
 	atB := connectAt(t, h, client, al, s, baseB)
 	universalB := universalAt(t, h, client, al, s, policy)
 	mustCall(t, baseA, before.AccessToken)
+	list := call[protocol.ConnectorListResult](t, h.control(al, s), protocol.MethodConnectorList, struct{}{})
+	if want := []string{relayA + edgeproto.PathUniversalMCP, relayB + edgeproto.PathUniversalMCP}; !slices.Equal(list.UniversalURLs, want) ||
+		list.UniversalURL != want[0] {
+		t.Errorf("connector.list universal URLs %v (%s), want %v", list.UniversalURLs, list.UniversalURL, want)
+	}
 
 	for _, tc := range []struct {
 		name, base, token, issued string
@@ -85,6 +93,25 @@ func TestConnectorAtEveryRelayOrigin(t *testing.T) {
 		if want := "the access token is for " + tc.issued + ", not " + tc.base; resp.StatusCode != http.StatusUnauthorized || !strings.Contains(body, want) {
 			t.Errorf("%s: %s %q, want 401 %q", tc.name, resp.Status, body, want)
 		}
+	}
+
+	code, verifier := authorizationCode(t, h, client, al, s, baseA)
+	form := url.Values{"grant_type": {"authorization_code"}, "client_id": {client.id}, "code": {code}, "code_verifier": {verifier},
+		"redirect_uri": {client.redirect}, "resource": {baseB}}
+	_, body := mcpRequest(t, http.MethodPost, baseB+"/token", http.Header{"Content-Type": {"application/x-www-form-urlencoded"}}, strings.NewReader(form.Encode()))
+	if want := "the authorization code was issued for " + baseA + ", not " + baseB; !strings.Contains(body, `"invalid_grant"`) || !strings.Contains(body, want) {
+		t.Errorf("A's authorization code at B: %s, want invalid_grant %q", body, want)
+	}
+	_, page := mcpRequest(t, http.MethodGet, authorizeURL(client, baseA), nil, nil)
+	m := requestField.FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("consent page at A:\n%s", page)
+	}
+	pairing := call[protocol.ConnectorCodeResult](t, h.control(al, s), protocol.MethodConnectorCode, struct{}{})
+	resp, page := mcpRequest(t, http.MethodPost, baseB+"/authorize", http.Header{"Content-Type": {"application/x-www-form-urlencoded"}},
+		strings.NewReader(url.Values{"request": {m[1]}, "code": {pairing.Code}}.Encode()))
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(page, "This form was not issued by this server.") {
+		t.Errorf("A's consent form posted at B: %s\n%s", resp.Status, page)
 	}
 
 	refresh := func(base, token string, resource string) tokenAnswer {
@@ -232,5 +259,77 @@ func mustCall(t *testing.T, base, token string) {
 	t.Helper()
 	if resp, body := toolsList(t, base, token, nil); resp.StatusCode != http.StatusOK || !strings.Contains(body, "aether_list_workspaces") {
 		t.Fatalf("tools/list at %s: %s %q", base, resp.Status, body)
+	}
+}
+
+// authorizeURL is an authorization request for base from client, with
+// the PKCE challenge of pkceVerifier.
+func authorizeURL(client *connectorClient, base string) string {
+	sum := sha256.Sum256([]byte(pkceVerifier))
+	return base + "/authorize?" + url.Values{"response_type": {"code"}, "client_id": {client.id}, "redirect_uri": {client.redirect},
+		"state": {"s"}, "code_challenge": {base64.RawURLEncoding.EncodeToString(sum[:])}, "code_challenge_method": {"S256"},
+		"resource": {base}}.Encode()
+}
+
+const pkceVerifier = "a-verifier-of-forty-three-characters-or-more-0123"
+
+// authorizationCode has the member behind c authorize client at base
+// with a pairing code, and returns the authorization code and its PKCE
+// verifier.
+func authorizationCode(t *testing.T, h *harness, client *connectorClient, c *client, s *serverNode, base string) (string, string) {
+	t.Helper()
+	pairing := call[protocol.ConnectorCodeResult](t, h.control(c, s), protocol.MethodConnectorCode, struct{}{})
+	res, err := client.consent(t.Context(), authorizeURL(client, base), pairing.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Iss != base {
+		t.Fatalf("authorization at %s returned iss %q", base, res.Iss)
+	}
+	return res.Code, pkceVerifier
+}
+
+// A server that speaks edge protocol 5, as one released before
+// VersionRelayOrigin does, behind an edge that serves two pairs and sets
+// Aether-Edge-Relay-Origin, ignores the header: it serves its connector
+// at the relay origin it enrolled at only, as before.
+func TestConnectorAtEdgeProtocol5(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.proxy.setTamper(t, func(e logEntry) (edgeproto.Message, bool) {
+		if ch, ok := e.msg.(edgeproto.Challenge); ok {
+			ch.Version = edgeproto.VersionRelayOrigin - 1
+			return ch, true
+		}
+		return e.msg, true
+	})
+	client := newConnectorClient(t)
+	s := h.newConnectorServer(edgeproto.PolicyApprovedDevices, client, sshd.Services{})
+	al := h.login(alice)[0]
+	h.claimServer(al, s)
+	baseA := h.relayURL + edgeproto.MCPPath(s.id)
+	h.stopEdge()
+	h.pairB = true
+	h.startEdge()
+	s.waitEnrolled()
+	if v := s.agent.EdgeVersion(); v != edgeproto.VersionRelayOrigin-1 {
+		t.Fatalf("EdgeVersion = %d, want %d", v, edgeproto.VersionRelayOrigin-1)
+	}
+	baseB := h.relayB + edgeproto.MCPPath(s.id)
+	var prm map[string]any
+	resp, body := mcpRequest(t, http.MethodGet, h.relayB+"/.well-known/oauth-protected-resource"+edgeproto.MCPPath(s.id), nil, nil)
+	if resp.StatusCode != http.StatusOK || json.Unmarshal([]byte(body), &prm) != nil || prm["resource"] != baseA {
+		t.Fatalf("protected resource metadata at B: %s %s, want resource %s", resp.Status, body, baseA)
+	}
+	code, verifier := authorizationCode(t, h, client, al, s, baseA)
+	form := url.Values{"grant_type": {"authorization_code"}, "client_id": {client.id}, "code": {code}, "code_verifier": {verifier},
+		"redirect_uri": {client.redirect}, "resource": {baseB}}
+	_, body = mcpRequest(t, http.MethodPost, baseB+"/token", http.Header{"Content-Type": {"application/x-www-form-urlencoded"}}, strings.NewReader(form.Encode()))
+	if !strings.Contains(body, `"invalid_target"`) || !strings.Contains(body, "resource must be "+baseA) {
+		t.Errorf("a resource at B: %s, want invalid_target naming %s", body, baseA)
+	}
+	if list := call[protocol.ConnectorListResult](t, h.control(al, s), protocol.MethodConnectorList, struct{}{}); len(list.UniversalURLs) != 1 ||
+		list.UniversalURLs[0] != h.relayURL+edgeproto.PathUniversalMCP {
+		t.Errorf("connector.list universal URLs %v, want only %s", list.UniversalURLs, h.relayURL+edgeproto.PathUniversalMCP)
 	}
 }

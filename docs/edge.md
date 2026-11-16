@@ -897,7 +897,7 @@ current control connection gets `421 the edge relayed this request from
 | Edge | Server | Connector at another relay origin of the edge |
 | --- | --- | --- |
 | 6 | 6 | Works, bound to that origin |
-| 5 (one origin pair), or below | 6 | Only the server's own relay origin, as before. The server ignores the header, which an older edge passes through from the client |
+| 5 or below | 6 | Only the server's own relay origin, as before. The server ignores the header, which an older edge passes through from the client |
 | 6 | 5 or below | Only the server's own relay origin; `resource` at another gets `invalid_target`. The server ignores the header |
 
 Update the edge to protocol 6 before adding a pair. `MinVersion` stays 1, so
@@ -906,7 +906,8 @@ for, so they survive a server restart, an edge restart and a reconnect. While
 the edge stops serving an origin, its tokens reach nothing; they work again,
 within their lifetimes, once the edge serves it again. A server that enrolls at
 another relay origin of the same edge keeps accepting tokens issued at the one
-it left, as long as the edge announces it.
+it left while the edge speaks protocol 6 and announces it; below 6 it accepts
+only the origin it enrolled at.
 
 `/metrics` counts per address: `aether_edge_servers_by_origin{origin}` (servers
 holding a control channel by the relay origin they enrolled at),

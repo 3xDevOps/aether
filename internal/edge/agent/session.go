@@ -366,6 +366,18 @@ func (a *Agent) EdgeVersion() int {
 	return a.live.protocol
 }
 
+// RelayOrigins are the relay origins connector requests may come in on:
+// those the enrolled control connection announced, from
+// edgeproto.VersionRelayOrigin, else only the one the server dialed.
+func (a *Agent) RelayOrigins() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.live == nil || a.live.protocol < edgeproto.VersionRelayOrigin {
+		return []string{a.origin}
+	}
+	return slices.Clone(a.live.origins)
+}
+
 // EdgeKey is the key of the edge the control connection is enrolled
 // with, nil while there is none.
 func (a *Agent) EdgeKey() ed25519.PublicKey {

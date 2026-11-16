@@ -15,10 +15,9 @@ import (
 // serveHTTP serves the requests of one http connection, opened on s, with
 // Config.HTTP, one after another, until either side closes it. Each
 // request's context carries the relay origin it came in on (RelayOrigin).
-// net/http interrupts a
-// read by moving its deadline into the past, which closes a
-// websocket.NetConn, so the server reads and writes a pipe that is
-// copied to and from rc.
+// net/http interrupts a read by moving its deadline into the past, which
+// closes a websocket.NetConn, so the server reads and writes a pipe that
+// is copied to and from rc.
 func (a *Agent) serveHTTP(ctx context.Context, s *session, rc *relayConn) {
 	conn, bridge := net.Pipe()
 	done := make(chan struct{})

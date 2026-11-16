@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -108,9 +109,9 @@ func printConnectors(w io.Writer, list protocol.ConnectorListResult, code *proto
 			used = "last used " + ago(now.Sub(last))
 		}
 		at := ""
-		switch c.Resource {
-		case "":
-		case list.UniversalURL:
+		switch {
+		case c.Resource == "":
+		case c.Resource == list.UniversalURL || slices.Contains(list.UniversalURLs, c.Resource):
 			at = "  universal URL"
 		default:
 			at = "  at " + c.Resource
