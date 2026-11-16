@@ -123,13 +123,19 @@ func TestRefuses(t *testing.T) {
 		{
 			name: "no current pointer without -first",
 			args: []string{"-channel", "beta", "-tag", "v0.9.0-beta.2", "-manifest", beta},
-			want: "pass exactly one of -current",
+			want: "pass -current",
 		},
 		{
-			name: "-first beside a current pointer",
+			name: "-first beside a pointer naming another release",
 			args: []string{"-channel", "beta", "-tag", "v0.9.0-beta.2", "-manifest", beta, "-first",
 				"-current", writeCurrent(t, "v0.9.0-beta.1", 380, releasetest.Key)},
-			want: "pass exactly one of -current",
+			want: "beta.json already names v0.9.0-beta.1 at build 380; first-pointer is only",
+		},
+		{
+			name: "-first beside a pointer naming this tag at another build",
+			args: []string{"-channel", "beta", "-tag", "v0.9.0-beta.2", "-manifest", beta, "-first",
+				"-current", writeCurrent(t, "v0.9.0-beta.2", 413, releasetest.Key)},
+			want: "beta.json already names v0.9.0-beta.2 at build 413",
 		},
 		{
 			name: "a channel the release is not on",
@@ -208,5 +214,20 @@ func TestIfAboveMovesOnlyUpward(t *testing.T) {
 				t.Fatalf("pointer %+v, %v; want v0.9.0 at build 412", p, err)
 			}
 		})
+	}
+}
+
+// The migration's Promote writes the first stable.json and then the first
+// beta.json; a re-run after the second failed must get past the first.
+func TestFirstConvergesOnTheRunsOwnPointer(t *testing.T) {
+	trust(t)
+	beta := writeManifest(t, "v0.9.0-beta.3", "beta", 413)
+	out := t.TempDir()
+	if err := run([]string{"-channel", "beta", "-tag", "v0.9.0-beta.3", "-manifest", beta, "-first",
+		"-current", writeCurrent(t, "v0.9.0-beta.3", 413, releasetest.Key), "-out", out}, now); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(out); len(entries) != 0 {
+		t.Fatalf("wrote %v over the pointer this release already has", entries)
 	}
 }

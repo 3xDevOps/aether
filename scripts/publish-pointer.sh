@@ -3,7 +3,8 @@
 # $3: reads the current pointer from the channels prerelease, has
 # release-pointer refuse a lower (build, hotfix) and sign the new one into
 # $4, uploads it and reads it back the way updaters do. A channel without a
-# pointer needs --first. With --if-above it leaves a pointer that is not
+# pointer needs --first; with --first, a pointer that already names this
+# exact release (a re-run of the run that wrote it) stays. With --if-above it leaves a pointer that is not
 # below the release as it is. The caller keeps $4 as the workflow artifact
 # pointer-<channel>, the pair an admin restores if the upload fails.
 # Every writer must run in the channels concurrency group, so no two read
@@ -67,17 +68,17 @@ case "$assets:$first" in
 ":")
 	fail "channels has no $name. A missing pointer is not a first one: a failed upload or a deletion may have removed a higher one, and installs that saw it refuse anything lower. Restore the last good pair from the pointer-$channel artifact of the run that last moved it ($(restore '<run-id>')). $expired. Only when the channel has never had a pointer, run with the first-pointer input"
 	;;
-"$name $name.sig:1") fail "channels already has $name; first-pointer is only for a channel without one" ;;
-"$name $name.sig:")
+"$name $name.sig:"*)
 	gh release download channels --pattern "$name" --pattern "$name.sig" --dir "$tmp/current"
 	set -- -current "$tmp/current/$name"
+	[ -z "$first" ] || set -- -first "$@"
 	;;
 *) fail "channels holds $assets for $name; it needs both $name and $name.sig. Restore the last good pair from the pointer-$channel artifact of the run that last moved it: $(restore '<run-id>'). $expired" ;;
 esac
 
 "$tool" -channel "$channel" -tag "$tag" -manifest "$dist/aether-release.json" ${if_above:+"$if_above"} "$@" -out "$pair"
-if [ -n "$if_above" ] && [ ! -e "$pair/$name" ]; then
-	echo "$name is not below $tag and stays"
+if [ ! -e "$pair/$name" ]; then
+	if [ -n "$if_above" ]; then echo "$name is not below $tag and stays"; else echo "$name already names $tag and stays"; fi
 	exit 0
 fi
 
