@@ -59,28 +59,31 @@ if paths=$(git ls-files --cached --others --exclude-standard | grep -E "$legacy_
 	failed=1
 fi
 
-# The product is named Cloudfield. Each line below still says the old name
-# on purpose and goes when what it names is renamed: the connector entry a
-# member adds in ChatGPT or Claude, the Slack bot and the desktop app, the
-# server's wake prompt, the symbol fonts, and two listing images not yet
-# shot again.
-old_name_kept='Name it <strong>Aether</strong>
-Install Aether from the
-Add Aether again in
-Connect Aether again
-the Aether bot
-or quit Aether.
-/^Aether has
-Aether Symbols
-Aether Nerd Symbols
-The Aether mark and wordmark
-The Aether board on a phone'
-if matches=$(git grep --untracked -n -I -w -e Aether -- \
-	'web/src' 'web/public/sw.js' 'internal/edge/service/templates' \
-	'packaging/claude-connector' 'packaging/chatgpt-plugin' 'android/listing' \
-	':(exclude)web/src/**/*.test.ts' ':(exclude)web/src/**/*.test.tsx' |
-	grep -v -E '^[^:]+:[0-9]+:[[:space:]]*(//|/\*|\*)' |
-	grep -v -F -e "$old_name_kept"); then
+# The product is named Cloudfield. Each exception below still names
+# something called Aether and goes when that thing is renamed: the
+# connector entry a member adds in ChatGPT or Claude, the Slack bot, the
+# desktop app, the wake prompt the server sends, the symbol fonts, and two
+# listing images not yet shot again.
+check_old_name() {
+	if matches=$(git grep --untracked -n -I -w -e Aether -- "$@" |
+		grep -v -E \
+			-e "^web/src/routes/settings/connectors\\.tsx:[0-9]+:.*(Name it <strong>Aether</strong>|Install Aether from the|Add Aether again in|Connect Aether again)" \
+			-e "^web/src/routes/settings/notifications\\.tsx:[0-9]+:.*the Aether bot" \
+			-e "^web/src/components/palette/forward-dialog\\.tsx:[0-9]+:.*or quit Aether\\." \
+			-e "^web/src/store/session-rows\\.ts:[0-9]+:.*/\\^Aether has" \
+			-e "^web/src/index\\.css:[0-9]+:.*'Aether (Nerd )?Symbols'" \
+			-e "^android/listing/README\\.md:[0-9]+:.*The Aether (mark and wordmark|board on a phone)"); then
+		printf '%s\n' "$matches"
+		failed=1
+	fi
+}
+
+check_old_name 'internal/edge/service/templates' 'packaging/claude-connector' \
+	'packaging/chatgpt-plugin' 'android/listing'
+# Comment lines in dashboard source are not copy.
+if matches=$(check_old_name 'web/src' 'web/public/sw.js' ':(exclude)web/src/test' \
+	':(exclude)web/src/*.test.ts' ':(exclude)web/src/*.test.tsx' |
+	grep -v -E '^[^:]+:[0-9]+:[[:space:]]*(//|/\*|\*([[:space:]]|/|$))'); then
 	printf '%s\n' "$matches"
 	failed=1
 fi

@@ -12,7 +12,7 @@ pull request sessions are in
 | --- | --- | --- |
 | Any Go code | `make test` | Go |
 | Server code that touches containers, git, SSH or storage | `make test-integration` | Docker, git; root to match CI |
-| Dashboard components in `web/src` | `cd web && bun run typecheck && bun run test` | Bun, Node 22+ |
+| Dashboard components in `web/src` | `cd web && bun run typecheck && bun run test`, then `make public-audit` | Bun, Node 22+ |
 | Something a person clicks through in the dashboard | `make test-e2e` | Docker, git, Bun, Node 22+, Playwright's Chromium |
 | `scripts/`, the installers, `desktop/` | `make test-scripts` | sh, Node, OpenSSL 3, jq, Go |
 | `.github/workflows/` | `make lint-workflows` | ShellCheck |
