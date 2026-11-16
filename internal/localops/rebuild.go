@@ -58,21 +58,33 @@ func realUser(sudoUser string, lookup func(string) (*user.User, error), homeDir 
 // account can write /Applications, and under sudo the environment carries
 // root's XDG_DATA_HOME, not the user's.
 func InstalledDesktopApp(goos string, ru RealUser) (string, bool) {
+	apps := InstalledDesktopApps(goos, ru)
+	if len(apps) == 0 {
+		return "", false
+	}
+	return apps[0], true
+}
+
+// InstalledDesktopApps is every desktop app installed for ru, most likely
+// first. A machine can hold an app under the legacy product name beside one
+// under this build's.
+func InstalledDesktopApps(goos string, ru RealUser) []string {
 	xdg := os.Getenv("XDG_DATA_HOME")
 	if ru.ViaSudo {
 		xdg = ""
 	}
+	var apps []string
 	for _, candidate := range desktopAppPaths(goos, ru.Home, xdg, os.Getenv("LOCALAPPDATA")) {
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate, true
+			apps = append(apps, candidate)
 		}
 	}
-	return "", false
+	return apps
 }
 
 // desktopAppPaths lists the candidate install locations for goos, most
-// likely first. It mirrors desktopLayout; an empty list means this OS has
-// no desktop app at all.
+// likely first: this build's product name, then the legacy one. It mirrors
+// desktopLayout; an empty list means this OS has no desktop app at all.
 //
 // The unix branches join with path and test for a leading slash
 // themselves, because path/filepath answers for the machine running the
@@ -83,28 +95,27 @@ func InstalledDesktopApp(goos string, ru RealUser) (string, bool) {
 // windows branch keeps filepath, which is that OS's own rule on the only
 // machine where those paths can exist.
 func desktopAppPaths(goos, home, xdgData, localAppData string) []string {
-	switch goos {
-	case "linux":
-		var paths []string
-		// A relative XDG_DATA_HOME is invalid per the spec and treated as
-		// unset, the same way desktopLayout treats it.
-		if strings.HasPrefix(xdgData, "/") {
-			paths = append(paths, path.Join(xdgData, "aether", "desktop"))
+	var paths []string
+	for _, name := range productNames() {
+		switch goos {
+		case "linux":
+			// A relative XDG_DATA_HOME is invalid per the spec and treated
+			// as unset, the same way desktopLayout treats it.
+			if strings.HasPrefix(xdgData, "/") {
+				paths = append(paths, path.Join(xdgData, linuxAppDir(name), "desktop"))
+			}
+			paths = append(paths, path.Join(home, ".local", "share", linuxAppDir(name), "desktop"))
+		case "darwin":
+			paths = append(paths,
+				path.Join(macSystemApplications, darwinBundle(name)),
+				path.Join(home, "Applications", darwinBundle(name)))
+		case "windows":
+			if filepath.IsAbs(localAppData) {
+				paths = append(paths, filepath.Join(localAppData, "Programs", windowsAppDir(name)))
+			}
 		}
-		return append(paths, path.Join(home, ".local", "share", "aether", "desktop"))
-	case "darwin":
-		return []string{
-			path.Join(macSystemApplications, "Aether.app"),
-			path.Join(home, "Applications", "Aether.app"),
-		}
-	case "windows":
-		if !filepath.IsAbs(localAppData) {
-			return nil
-		}
-		return []string{filepath.Join(localAppData, "Programs", "Aether Desktop")}
-	default:
-		return nil
 	}
+	return paths
 }
 
 // RebuildAppArgv is the command that rebuilds the installed desktop app.
@@ -189,7 +200,7 @@ func DesktopAppRunning(goos, app string) bool {
 		return procExeUnder(app)
 	case "darwin":
 		// The bundle's executable, the argv[0] LaunchServices starts it with.
-		return pgrepMatches(filepath.Join(app, "Contents", "MacOS", "Aether"))
+		return pgrepMatches(DesktopAppExe(goos, app))
 	default:
 		return false
 	}

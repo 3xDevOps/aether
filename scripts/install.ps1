@@ -1075,10 +1075,12 @@ function Invoke-AetherInstall {
     }
     $binDir = [Environment]::ExpandEnvironmentVariables($binDir)
     $binDir = Remove-AetherTrailingSeparators (Get-AetherAbsolutePath $binDir)
-    $desktopDir = Join-Path $localAppData 'Programs\Aether Desktop'
+    # The desktop app's folder is named after its product name, Aether before
+    # the rename and Cloudfield after; `aether gui build` picks which.
+    $desktopDirs = @('Aether', 'Cloudfield' | ForEach-Object { Join-Path $localAppData ('Programs\{0} Desktop' -f $_) })
     $desktopBuildDir = Join-Path $localAppData 'aether\desktop-build'
     $nodeCacheDir = Join-Path $localAppData 'aether\node'
-    foreach ($blocked in @($desktopDir, $desktopBuildDir, $nodeCacheDir)) {
+    foreach ($blocked in ($desktopDirs + @($desktopBuildDir, $nodeCacheDir))) {
         if (Test-AetherPathWithin $binDir $blocked) {
             throw ("refusing -BinDir {0}: it is inside the managed desktop or build cache {1}" -f $binDir, $blocked)
         }
@@ -1089,7 +1091,7 @@ function Invoke-AetherInstall {
         Installed = Join-Path $binDir 'aether.exe'
     }
     $destination = $wanted.Installed
-    $desktopPath = Join-Path $desktopDir 'aether-desktop.exe'
+    $desktopPaths = @($desktopDirs | ForEach-Object { Join-Path $_ 'aether-desktop.exe' })
     $script:AetherStep = 0
     $script:AetherSteps = if ($role -eq 'client') { 3 } else { 2 }
     $scope = if ($role -eq 'client') { 'CLI and desktop app' } else { 'CLI only' }
@@ -1116,7 +1118,7 @@ function Invoke-AetherInstall {
 
         $runningPaths = @()
         if (-not $release.Unchanged) { $runningPaths += $destination }
-        if ($role -eq 'client') { $runningPaths += $desktopPath }
+        if ($role -eq 'client') { $runningPaths += $desktopPaths }
         if ($runningPaths.Count -gt 0) {
             $running = @(Get-AetherRunningProcess $runningPaths)
             if ($running.Count -gt 0) {
@@ -1134,7 +1136,7 @@ function Invoke-AetherInstall {
             else {
                 Write-AetherStep ('installing the CLI {0}' -f $release.Tag)
             }
-            $destination = Install-AetherCli $release.Path $binDir $release.Expected @($destination, $desktopPath)
+            $destination = Install-AetherCli $release.Path $binDir $release.Expected (@($destination) + $desktopPaths)
         }
         Write-AetherDetail $destination
         try {
@@ -1150,7 +1152,9 @@ function Invoke-AetherInstall {
         if ($role -eq 'client') {
             Write-AetherStep 'installing the desktop app (the build output follows)'
             Invoke-AetherGuiBuild $destination
-            Write-AetherDetail ('installed {0}' -f $desktopPath)
+            # Both folders can exist; the one the install filled was written last.
+            $installed = @($desktopPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Sort-Object { (Get-Item -LiteralPath (Split-Path -Parent $_)).LastWriteTimeUtc })
+            Write-AetherDetail ('installed {0}' -f $(if ($installed.Count -gt 0) { $installed[-1] } else { $desktopPaths[0] }))
         }
         Write-Host 'next:'
         if ($role -eq 'client') {
