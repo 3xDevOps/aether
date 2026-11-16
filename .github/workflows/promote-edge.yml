@@ -3,8 +3,9 @@ name: Promote edge
 # Moves ghcr.io/3xdevops/aether-edge:<channel> to a published release's
 # image, by copying the exact index the release signed and attested. It
 # never builds and never moves a channel to an older build. An admin
-# dispatches it for stable; promote.yml calls it for beta. docs/install.md,
-# Promoting an edge release to stable, describes when to run it.
+# dispatches it for stable; promote.yml calls it for beta and nightly.yml
+# for nightly. docs/edge.md, Promoting an edge release to stable,
+# describes when to run it.
 on:
   workflow_call:
     inputs:
@@ -17,7 +18,7 @@ on:
         required: true
         type: string
       channel:
-        description: Image tag to move, beta; the caller's own checks cover the call
+        description: Image tag to move, beta or nightly; the caller's own checks cover the call
         required: true
         type: string
   workflow_dispatch:
@@ -68,9 +69,9 @@ jobs:
             exit 1
           fi
           case $CHANNEL in
-          beta | stable) ;;
+          nightly | beta | stable) ;;
           *)
-            echo "::error::channel $CHANNEL is not beta or stable"
+            echo "::error::channel $CHANNEL is not nightly, beta or stable"
             exit 1
             ;;
           esac
@@ -79,19 +80,25 @@ jobs:
           ref: refs/heads/main
           persist-credentials: false
       # Moving stable is an admin's own dispatch. beta moves only from
-      # Promote, which ran its admin check before it built the release; in a
+      # Promote, which ran its admin check before it built the release, and
+      # nightly only from nightly.yml, which built a green main commit; in a
       # called workflow GITHUB_WORKFLOW_REF names the caller.
       - name: Check the promoter
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$CHANNEL" = stable ]; then
-            sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
-          elif [ "$GITHUB_WORKFLOW_REF" != "$GITHUB_REPOSITORY/.github/workflows/promote.yml@refs/heads/main" ]; then
-            echo "::error::only promote.yml on main moves $CHANNEL, not $GITHUB_WORKFLOW_REF"
-            exit 1
-          fi
+          case $CHANNEL in
+          stable) sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR" ;;
+          *)
+            caller=promote.yml
+            if [ "$CHANNEL" = nightly ]; then caller=nightly.yml; fi
+            if [ "$GITHUB_WORKFLOW_REF" != "$GITHUB_REPOSITORY/.github/workflows/$caller@refs/heads/main" ]; then
+              echo "::error::only $caller on main moves $CHANNEL, not $GITHUB_WORKFLOW_REF"
+              exit 1
+            fi
+            ;;
+          esac
           echo "allowed=true" >> "$GITHUB_OUTPUT"
 
   promote:
@@ -127,8 +134,10 @@ jobs:
           ref: refs/heads/main
           persist-credentials: false
       # Re-running this job alone skips publisher-policy, and for a call
-      # also its caller's admin check.
+      # also its caller's admin check. A scheduled nightly has no admin
+      # behind it; its call is covered by publisher-policy's caller rule.
       - name: Require an admin
+        if: env.CHANNEL != 'nightly'
         run: sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
