@@ -1259,8 +1259,9 @@ Enhanced`. Who may turn them off is in [teams.md](teams.md#subsessions).
   standard input), plus optional `--model`, `--mode
   standard|enhanced|background` and `--account <member-id>`. Without
   `--account`, a subsession of the parent's agent starts on the parent's
-  account, and any other agent, or a parent handed over from another member, on
-  the owner's own account. `--account` takes the owner's account or one shared
+  account, and any other agent on the owner's own account. A parent handed over
+  from another member is refused: it still runs the previous owner's agent on
+  their home. `--account` takes the owner's account or one shared
   with them whose owner reaches every workspace of the parent; any other is
   refused with `-32001 child.start: permission denied: member <id> has not
   shared their account with you` or `... the owner of account <id> has no
