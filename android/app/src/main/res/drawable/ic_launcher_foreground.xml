@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Converted from cloudfield-android-foreground.svg
+     (3xDevOps/aether-web public/cloudfield), shape for shape. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="25.5"
+        android:translateY="23"
+        android:scaleX="0.2583333333"
+        android:scaleY="0.2583333333">
+        <path
+            android:strokeColor="#ff735d"
+            android:strokeWidth="14"
+            android:pathData="M189.36 187.81A97 97 0 0 1 158.28 209.13" />
+        <path
+            android:strokeColor="#ff7b5b"
+            android:strokeWidth="14"
+            android:pathData="M144.34 213.9A97 97 0 0 1 106.72 216.09" />
+        <path
+            android:strokeColor="#ff835a"
+            android:strokeWidth="14"
+            android:pathData="M92.32 212.97A97 97 0 0 1 58.99 195.41" />
+        <path
+            android:strokeColor="#ff8b57"
+            android:strokeWidth="14"
+            android:pathData="M48.27 185.3A97 97 0 0 1 28.8 153.03" />
+        <path
+            android:strokeColor="#ff9355"
+            android:strokeWidth="14"
+            android:pathData="M24.85 138.84A97 97 0 0 1 24.85 101.16" />
+        <path
+            android:strokeColor="#ff9a53"
+            android:strokeWidth="14"
+            android:pathData="M28.8 86.97A97 97 0 0 1 48.27 54.7" />
+        <path
+            android:strokeColor="#ffa150"
+            android:strokeWidth="14"
+            android:pathData="M58.99 44.59A97 97 0 0 1 92.32 27.03" />
+        <path
+            android:strokeColor="#ffa84c"
+            android:strokeWidth="14"
+            android:pathData="M106.72 23.91A97 97 0 0 1 144.34 26.1" />
+        <path
+            android:strokeColor="#ffb049"
+            android:strokeWidth="14"
+            android:pathData="M158.28 30.87A97 97 0 0 1 189.36 52.19" />
+        <path
+            android:strokeColor="#ff745d"
+            android:strokeWidth="14"
+            android:pathData="M169.68 170.73A71 71 0 0 1 139.09 188.38" />
+        <path
+            android:strokeColor="#ff7f5b"
+            android:strokeWidth="14"
+            android:pathData="M125.45 190.79A71 71 0 0 1 90.67 184.66" />
+        <path
+            android:strokeColor="#ff8958"
+            android:strokeWidth="14"
+            android:pathData="M78.67 177.73A71 71 0 0 1 55.97 150.68" />
+        <path
+            android:strokeColor="#ff9355"
+            android:strokeWidth="14"
+            android:pathData="M51.23 137.66A71 71 0 0 1 51.23 102.34" />
+        <path
+            android:strokeColor="#ff9c52"
+            android:strokeWidth="14"
+            android:pathData="M55.97 89.32A71 71 0 0 1 78.67 62.27" />
+        <path
+            android:strokeColor="#ffa54e"
+            android:strokeWidth="14"
+            android:pathData="M90.67 55.34A71 71 0 0 1 125.45 49.21" />
+        <path
+            android:strokeColor="#ffaf49"
+            android:strokeWidth="14"
+            android:pathData="M139.09 51.62A71 71 0 0 1 169.68 69.27" />
+        <path
+            android:fillColor="#f7f0e4"
+            android:pathData="M111 120A9 9 0 1 0 129 120A9 9 0 1 0 111 120Z" />
+    </group>
+</vector>

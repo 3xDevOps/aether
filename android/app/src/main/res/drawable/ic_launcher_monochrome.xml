@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Converted from cloudfield-android-monochrome.svg
+     (3xDevOps/aether-web public/cloudfield), shape for shape. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="30"
+        android:translateY="28"
+        android:scaleX="1.625"
+        android:scaleY="1.625">
+        <path
+            android:strokeColor="#ffffff"
+            android:strokeWidth="4"
+            android:pathData="M24.03 24.92A12 12 0 0 1 8.61 25.46" />
+        <path
+            android:strokeColor="#ffffff"
+            android:strokeWidth="4"
+            android:pathData="M6.81 23.71A12 12 0 0 1 6.81 8.29" />
+        <path
+            android:strokeColor="#ffffff"
+            android:strokeWidth="4"
+            android:pathData="M8.61 6.54A12 12 0 0 1 24.03 7.08" />
+        <path
+            android:strokeColor="#ffffff"
+            android:strokeWidth="3"
+            android:pathData="M20.01 20.46A6 6 0 0 1 10.26 17.75" />
+        <path
+            android:strokeColor="#ffffff"
+            android:strokeWidth="3"
+            android:pathData="M10.26 14.25A6 6 0 0 1 20.01 11.54" />
+        <path
+            android:fillColor="#ffffff"
+            android:pathData="M14 16A2 2 0 1 0 18 16A2 2 0 1 0 14 16Z" />
+    </group>
+</vector>
