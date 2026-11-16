@@ -1422,7 +1422,8 @@ MiB. Binary or oversized content is read-only; an oversized response sets
 the wire shape for compatibility.
 
 `files.write` without `run_id` requires **Push** and creates a one-file commit
-on the workspace base branch; it does not push upstream. With `run_id`, it
+on the workspace base branch; it does not push upstream, and it is refused
+(`denied`) when a source mirror owns that base. With `run_id`, it
 requires **Steer** and changes that session's uncommitted checkout. Existing file
 modes are preserved and new files use `0644`. Session-checkout saves recheck the
 revision immediately before atomic rename under Cloudfield's root lock. Base

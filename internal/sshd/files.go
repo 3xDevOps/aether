@@ -312,6 +312,8 @@ func filesWriteError(method, run string, err error) *protocol.Error {
 		return invalidParams("workspace_id does not own run_id")
 	case errors.Is(err, gitengine.ErrRevisionConflict):
 		return &protocol.Error{Code: protocol.CodeConflict, Message: method + ": file changed; reload before saving"}
+	case errors.Is(err, gitengine.ErrMirroredBase):
+		return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": this workspace base is mirrored from upstream; edit it there, not in Cloudfield"}
 	}
 	if run != "" {
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": this session's checkout was removed; pull the branch to edit its files"}

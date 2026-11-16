@@ -29,6 +29,13 @@ var ErrInvalidPath = errors.New("invalid file path")
 // ErrRevisionConflict reports that the file changed after the client read it.
 var ErrRevisionConflict = errors.New("gitengine: file revision conflict")
 
+// ErrMirroredBase reports an attempt to write a workspace base branch that the
+// mirror owns. The upstream owns a mirrored base: it moves only through a
+// forward refresh or an admin adopting a revision by its full commit SHA. The
+// receive-pack update hook refuses pushes to it, but a direct update-ref (as in
+// writeBareFile) never runs that hook, so the invariant is enforced here too.
+var ErrMirroredBase = errors.New("gitengine: ref is a mirrored base owned by the upstream")
+
 // ErrWorkspaceMismatch reports that a run does not belong to the addressed
 // workspace. It is intentionally distinct so the RPC can reject bad input.
 var ErrWorkspaceMismatch = errors.New("gitengine: workspace and session do not match")
@@ -711,6 +718,9 @@ func (e *Engine) writeBareFile(ctx context.Context, repo, ref, name string, cont
 	if err := e.checkBranchName(ctx, ref); err != nil {
 		return FileRead{}, err
 	}
+	if e.isMirroredBase(ctx, repo, ref) {
+		return FileRead{}, ErrMirroredBase
+	}
 	base, err := e.git(ctx, repo, "rev-parse", "--verify", "refs/heads/"+ref)
 	if err != nil {
 		return FileRead{}, err
@@ -987,5 +997,9 @@ func (e *Engine) FilesRead(ctx context.Context, workspace domain.WorkspaceID, ru
 	if err != nil {
 		return FileRead{}, err
 	}
-	return e.ReadFileMeta(ctx, repo, ref, path, maxBytes)
+	meta, err := e.ReadFileMeta(ctx, repo, ref, path, maxBytes)
+	if err == nil && e.isMirroredBase(ctx, repo, ref) {
+		meta.Writable = false
+	}
+	return meta, err
 }
