@@ -260,7 +260,7 @@ func TestRetireLegacyDesktopReportsAFailedRemoval(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
 	err := retireLegacyDesktop("linux", f.lookup, f.renamedExe)
-	if err == nil || !strings.Contains(err.Error(), f.legacy[0]) || !strings.Contains(err.Error(), "sudo rm -rf") {
+	if err == nil || !strings.Contains(err.Error(), f.legacy[0]) || !strings.Contains(err.Error(), "delete it by hand") {
 		t.Fatalf("err = %v, want the path and the remove hint", err)
 	}
 	f.assertLegacyKept(t)
@@ -547,4 +547,79 @@ func TestRetireLegacyDesktopKeepsTheShortcutOfAReinstalledApp(t *testing.T) {
 	}
 	mustBeGone(t, retired)
 	f.assertLegacyKept(t)
+}
+
+// XDG_DATA_HOME inside the old app's folder puts the running renamed app
+// inside it; the old folder then stays.
+func TestRetireLegacyDesktopKeepsAnOldFolderHoldingTheRunningApp(t *testing.T) {
+	renameProduct(t)
+	f := newRetireFixture(t, "linux")
+	xdg := filepath.Join(f.legacy[0], "x")
+	t.Setenv("XDG_DATA_HOME", xdg)
+	shell := fakeInstall(t, "linux", filepath.Join(xdg, "cloudfield", "desktop"))
+	if err := retireLegacyDesktop("linux", f.lookup, shell); err != nil {
+		t.Fatal(err)
+	}
+	mustExist(t, shell)
+	f.assertLegacyKept(t)
+}
+
+func TestWithin(t *testing.T) {
+	for _, tc := range []struct {
+		goos, dir, p string
+		want         bool
+	}{
+		{"linux", "/a/b", "/a/b/c", true},
+		{"linux", "/a/b", "/a/b", false},
+		{"linux", "/a/b", "/a/bc", false},
+		{"linux", "/a/b/c", "/a/b", false},
+		{"linux", "/A/b", "/a/b/c", false},
+		{"darwin", "/Applications/Aether.app", "/applications/aether.app/Contents", true},
+		{"windows", "/Programs/Aether Desktop", "/programs/aether desktop/x", true},
+	} {
+		if got := within(tc.goos, tc.dir, tc.p); got != tc.want {
+			t.Errorf("within(%s, %q, %q) = %v, want %v", tc.goos, tc.dir, tc.p, got, tc.want)
+		}
+	}
+}
+
+// A .aether-retired- entry that is not a real directory is not a removal to
+// finish: a symlink is neither followed nor removed. Its owner is checked
+// too, which a test cannot set up without a second account.
+func TestRetireLegacyDesktopRetriesOnlyARealDirectory(t *testing.T) {
+	renameProduct(t)
+	f := newRetireFixture(t, "linux")
+	elsewhere := t.TempDir()
+	keep := filepath.Join(elsewhere, "keep")
+	if err := os.WriteFile(keep, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	retired := filepath.Join(filepath.Dir(f.legacy[0]), retiredPrefix+"desktop")
+	if err := os.Symlink(elsewhere, retired); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(f.legacy[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := retireLegacyDesktop("linux", f.lookup, f.renamedExe); err != nil {
+		t.Fatal(err)
+	}
+	mustExist(t, retired)
+	mustExist(t, keep)
+}
+
+// RetireLegacyDesktop acts on this process's own home, not on SUDO_USER's.
+func TestRetireLegacyDesktopUsesTheProcessHome(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a unix account that is not root")
+	}
+	renameProduct(t)
+	f := newRetireFixture(t, "linux")
+	t.Setenv("HOME", f.home)
+	t.Setenv("SUDO_USER", "no-such-account-for-this-test")
+	if err := RetireLegacyDesktop("linux", f.renamedExe); err != nil {
+		t.Fatal(err)
+	}
+	mustBeGone(t, f.legacy[0])
+	mustExist(t, f.renamedExe)
 }

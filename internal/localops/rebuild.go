@@ -265,23 +265,15 @@ var geteuid = os.Geteuid
 // electron-builder writes.
 var bundleIDPattern = regexp.MustCompile(`<key>CFBundleIdentifier</key>\s*<string>([^<]*)</string>`)
 
-// RetireLegacyDesktop removes the app installed under the legacy product
-// name once an app under this build's name has started: shellExe must be
-// the executable of an install of this build's name, so a development
-// `electron .`, a legacy shell or an unset shellExe removes nothing, and so
-// does a root process. A legacy location is removed only when it is a real
-// directory this user owns, carries this app's identity (the bundle id on
-// darwin, the CLI binding InstallDesktop writes elsewhere), is not also a
-// location of this build's name, is not seen running (linux and darwin
-// only) and neither holds nor sits inside the running app. It is moved to a
-// retiredPrefix directory beside it first: Windows refuses that rename
-// while the app runs, so a running app is left whole, and a delete that
-// fails afterwards is finished at the next start. On windows the legacy
-// Start Menu shortcut goes with the app; on linux the renamed app's
-// launcher already replaced the legacy one. The data directory lives
-// elsewhere and is never touched.
+// RetireLegacyDesktop removes this user's install of the legacy-name app,
+// and on windows its Start Menu shortcut, once shellExe is the executable
+// of an install under this build's name. It removes nothing else: not a
+// running app, another app of the same name, the data directory, or
+// anything when run as root.
 func RetireLegacyDesktop(goos, shellExe string) error {
-	return retireLegacyDesktop(goos, LookupRealUser, shellExe)
+	return retireLegacyDesktop(goos, func() (RealUser, error) {
+		return realUser("", nil, os.UserHomeDir)
+	}, shellExe)
 }
 
 func retireLegacyDesktop(goos string, lookup func() (RealUser, error), shellExe string) error {
@@ -308,9 +300,9 @@ func retireLegacyDesktop(goos string, lookup func() (RealUser, error), shellExe 
 		return nil
 	}
 	removeErr := func(p string, err error) error {
-		hint := removeHint(goos, p, err)
-		if hint == "" {
-			hint = " (delete it by hand to stop this message)"
+		hint := " (delete it by hand to stop this message)"
+		if goos == "windows" {
+			hint = removeHint(goos, p, err)
 		}
 		return fmt.Errorf("localops: remove the old app %s, which %s replaces%s: %w", p, productName, hint, err)
 	}

@@ -19,9 +19,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/localops"
 )
 
-// A shell names itself in AETHER_SHELL_EXE. While the product name is the
-// legacy one, `aether gui --json` serves as before: the handshake is the
-// first stdout line and the app that started it stays installed.
+// While the product name is the legacy one, `aether gui --json` started by
+// an installed shell serves as before and removes no install: neither the
+// one that started it nor one in the other location.
 func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
 	if os.Getenv("AETHER_GUI_RETIRE_HELPER") == "1" {
 		os.Args = []string{os.Args[0], "gui", "--json", "--port", "0"}
@@ -30,18 +30,28 @@ func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
 	}
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
-	exe := localops.DesktopAppExe("linux", filepath.Join(home, ".local", "share", "aether", "desktop"))
-	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
-		t.Fatal(err)
+	xdg := filepath.Join(root, "data")
+	var exes []string
+	for _, app := range []string{filepath.Join(xdg, "aether", "desktop"), filepath.Join(home, ".local", "share", "aether", "desktop")} {
+		exe := localops.DesktopAppExe("linux", app)
+		binding := filepath.Join(app, "resources", "aether-cli.json")
+		if err := os.MkdirAll(filepath.Dir(binding), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(binding, []byte(`{"path":"/usr/local/bin/aether"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		writeTestExecutable(t, exe, "#!/bin/sh\nexit 0\n")
+		exes = append(exes, exe)
 	}
-	writeTestExecutable(t, exe, "#!/bin/sh\nexit 0\n")
+	exe := exes[0]
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGUIKeepsTheAppThatStartedIt$")
 	cmd.Env = append(os.Environ(),
 		"AETHER_GUI_RETIRE_HELPER=1",
 		localops.ShellExeEnv+"="+exe,
 		"HOME="+home,
-		"XDG_DATA_HOME=",
+		"XDG_DATA_HOME="+xdg,
 		"XDG_CONFIG_HOME="+filepath.Join(root, "config"),
 		"XDG_CACHE_HOME="+filepath.Join(root, "cache"),
 		"AETHER_CONFIG_DIR=",
@@ -92,8 +102,10 @@ func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("aether gui: %v; stderr: %s", err, stderr.String())
 	}
-	if _, err := os.Stat(exe); err != nil {
-		t.Errorf("the app that started the gateway was removed: %v; stderr: %s", err, stderr.String())
+	for _, exe := range exes {
+		if _, err := os.Stat(exe); err != nil {
+			t.Errorf("%s was removed: %v; stderr: %s", exe, err, stderr.String())
+		}
 	}
 }
 
