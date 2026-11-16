@@ -206,7 +206,7 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
   const lower = surfaces(cap).filter((surface) => surface.place === 'admin')
 
   return (
-    <nav aria-label="Aether" className="flex min-h-0 flex-1 flex-col">
+    <nav aria-label="Cloudfield" className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-1 px-2">
         <WorkspaceSwitcher />
         <Button

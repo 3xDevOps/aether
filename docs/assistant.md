@@ -79,7 +79,7 @@ when a server upgrade pins a newer version.
   means an action waits for your approval.
 - Press `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS), even while a text field or
   a terminal has focus.
-- Run **Ask Aether** from the command palette.
+- Run **Ask Cloudfield** from the command palette.
 
 Viewers do not see the assistant. On a wide screen the panel docks on the right
 and can be resized. On a narrow window it floats over the page and `Esc` closes

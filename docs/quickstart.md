@@ -91,7 +91,7 @@ next:
        sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
   2. on your computer, install Aether if it is not there yet (Windows: docs/install.md):
        curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client
-  3. on your computer: in the Aether app's Connect step choose Aether relay, sign in
+  3. on your computer: in the Aether app's Connect step choose Cloudfield relay, sign in
      with GitHub and paste the claim link above; in a terminal:
        aether login
        aether link --claim <server id>-<secret>
@@ -157,7 +157,7 @@ is linked, answer **How does this computer reach your server?**:
 | Choice | When | Then |
 | --- | --- | --- |
 | **Tailscale** (recommended) | This computer is on the server's tailnet. | Enter the name setup printed in **Server's tailnet name**, and click **Link**. |
-| **Aether relay** | Setup printed a claim link, or someone sent you an invitation. | Click **Sign in with GitHub**, open the address shown and confirm the code. Paste the claim link into **Claim or invite link** and click **Claim and link**. Or paste either link into **Have an invitation or claim link?** first. |
+| **Cloudfield relay** | Setup printed a claim link, or someone sent you an invitation. | Click **Sign in with GitHub**, open the address shown and confirm the code. Paste the claim link into **Claim or invite link** and click **Claim and link**. Or paste either link into **Have an invitation or claim link?** first. |
 | **SSH address** | This computer reaches the server's SSH port directly. | Enter `<server-host>:2222`, and an **Invite code** if an admin gave you one, then click **Link**. |
 
 Opening the `aether://claim` link on your computer opens the relay choice with

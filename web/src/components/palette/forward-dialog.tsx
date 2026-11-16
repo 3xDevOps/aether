@@ -118,7 +118,7 @@ export function ForwardDialog() {
             {runID ? 'Forward a port from this session' : 'Forward a port from your environment'}
           </DialogTitle>
           <DialogDescription>
-            Opens the same port on this computer and carries its connections to {place}, until you stop it or quit Aether.
+            Opens the same port on this computer and carries its connections to {place}, until you stop it or quit Cloudfield.
           </DialogDescription>
         </DialogHeader>
         <form

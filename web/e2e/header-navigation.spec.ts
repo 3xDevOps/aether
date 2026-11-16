@@ -36,7 +36,7 @@ test('header navigation preserves destinations and focus across resize and text-
 
   await page.setViewportSize({ width: 864, height: 900 })
   await expect(templates).toBeVisible()
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByLabel('Text size', { exact: true }).click()
   await page.getByRole('option', { name: 'Larger', exact: true }).click()
   await expect(templates).toBeHidden()

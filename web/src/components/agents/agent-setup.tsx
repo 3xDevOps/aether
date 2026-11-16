@@ -133,7 +133,7 @@ export function AgentSetup({
           <>
             <p className="text-ui text-text">
               {needsInstall
-                ? `Installs ${name}${enhanced && agent.enhanced === 'adapter' ? ' and its Enhanced adapter' : ''} in your environment, the sandbox (a container or virtual machine) Aether keeps for you on the server. Every workspace uses it.`
+                ? `Installs ${name}${enhanced && agent.enhanced === 'adapter' ? ' and its Enhanced adapter' : ''} in your environment, the sandbox (a container or virtual machine) Cloudfield keeps for you on the server. Every workspace uses it.`
                 : `${name} is installed in your environment${enhanced ? ' with Enhanced' : ''}.`}
             </p>
             <div className="flex flex-wrap items-center gap-2">
@@ -212,7 +212,7 @@ export function AgentSetup({
           </ul>
         )}
         {checked && agent.installed === true && (agent.login_found === false || agent.login_problem) && (
-          <p className="text-ui-sm text-muted">{agent.login_problem ? 'This login cannot sign the agent in' : "Aether looks for the agent's login file in your environment"}; log in above, then check again.</p>
+          <p className="text-ui-sm text-muted">{agent.login_problem ? 'This login cannot sign the agent in' : "Cloudfield looks for the agent's login file in your environment"}; log in above, then check again.</p>
         )}
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
         <div className="flex flex-wrap items-center gap-2">

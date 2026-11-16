@@ -141,7 +141,7 @@ test('an Enhanced run holding background work stays working, asks while it waits
 
   await page.goto(`${alice.url}&run=${run.id}`)
   const log = page.getByRole('log', { name: 'Chat' })
-  const runs = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Sessions' })
+  const runs = page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('region', { name: 'Sessions' })
   const header = page.locator('[data-slot="pane-header"]')
   const box = page.getByRole('combobox', { name: 'Message the agent' })
   await expect(log.getByText(/^Finished/).first()).toBeVisible({ timeout: 60_000 })

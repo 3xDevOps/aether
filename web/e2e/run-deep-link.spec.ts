@@ -38,7 +38,7 @@ test('a run deep link opens that run and the address follows navigation', async 
   await page.reload()
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
 
-  await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: 'Settings', exact: true }).click()
   expect(new URL(page.url()).search).toBe('?page=settings')
   await page.goBack()
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()

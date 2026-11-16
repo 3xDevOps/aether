@@ -43,7 +43,7 @@ beforeEach(async () => {
   })
 })
 
-const nav = () => within(screen.getByRole('navigation', { name: 'Aether' }))
+const nav = () => within(screen.getByRole('navigation', { name: 'Cloudfield' }))
 // jsdom counts a header inside main as a banner; a browser does not.
 const topBanners = () => screen.queryAllByRole('banner').filter((header) => !header.closest('main'))
 const runList = () => within(nav().getByRole('region', { name: 'Sessions' }))
@@ -659,10 +659,10 @@ describe('sidebar visibility', () => {
     expect(useStore.getState().sidebarCollapsed).toBe(false)
 
     fireEvent.keyDown(window, { key: 'b', ctrlKey: true })
-    expect(screen.queryByRole('navigation', { name: 'Aether' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Cloudfield' })).toBeNull()
 
     fireEvent.click(within(screen.getByRole('main')).getByRole('button', { name: 'Open sidebar' }))
-    expect(screen.getByRole('navigation', { name: 'Aether' })).toBeDefined()
+    expect(screen.getByRole('navigation', { name: 'Cloudfield' })).toBeDefined()
   })
 })
 
@@ -712,7 +712,7 @@ describe('phone shell', () => {
     atViewport(390, { pointer: 'coarse' })
     render(<AppShell />)
 
-    expect(screen.queryByRole('navigation', { name: 'Aether' })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Cloudfield' })).toBeNull()
     const tabs = within(screen.getByRole('navigation', { name: 'Main navigation' }))
     fireEvent.click(tabs.getByRole('button', { name: 'More pages' }))
 

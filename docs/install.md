@@ -432,7 +432,7 @@ valid for 30 minutes (`sudo aether-server edge claim-code` prints a new one).
 Setup starts nothing; it ends on `next:`: start the service, then on your
 machine link it. On a tailnet that is `aether link <MagicDNS name>`, or
 **Tailscale** in the app's Connect step; through the edge, `aether login` and
-`aether link --claim <code>`, or **Aether relay** with the claim link; with
+`aether link --claim <code>`, or **Cloudfield relay** with the claim link; with
 neither, `aether link <this-host>:2222`. When the edge is not
 `https://edge.onaether.dev`, both client commands carry `--edge <url>`, because
 a claim code names no edge.

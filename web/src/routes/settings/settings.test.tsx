@@ -192,7 +192,7 @@ describe('settings view', () => {
     render(<SettingsRoute params={{ section: 'server' }} client={fakeApi()} />)
 
     const server = screen.getByRole('region', { name: 'Server' })
-    expect(within(server).getByText(/Updates come from the Android app: install its new version to update Aether\./)).toBeDefined()
+    expect(within(server).getByText(/Updates come from the Android app: install its new version to update Cloudfield\./)).toBeDefined()
     expect(within(server).queryByRole('button', { name: 'Update…' })).toBeNull()
   })
 

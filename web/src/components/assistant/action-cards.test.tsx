@@ -480,7 +480,7 @@ describe('quiet outcomes and names', () => {
     ])
     const launched = await card(aside, /^Launched session on main-repo with Claude Code\. Working in the background$/)
     expect(within(launched).getByText("session · main-repo · Claude Code opus · Bob's account, shared · no fallback")).toBeDefined()
-    expect(within(launched).getByText(/^Aether notifies you here/)).toBeDefined()
+    expect(within(launched).getByText(/^Cloudfield notifies you here/)).toBeDefined()
     await userEvent.click(within(launched).getByRole('button', { name: 'Open session' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
   })

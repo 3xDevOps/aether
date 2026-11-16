@@ -195,7 +195,7 @@ function CapturesSession({ runID, workspaceID, client = api, open, onOpenChange:
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="border-b border-seam px-3 py-2 text-ui-xs text-muted">
-              Retain only reviewed captures. Images, URLs and notes may contain credentials or customer data; Aether does not reliably redact them.
+              Retain only reviewed captures. Images, URLs and notes may contain credentials or customer data; Cloudfield does not reliably redact them.
               Retained copies use capture access and expiry, not private live-session permissions. Nothing is automatically retained or attached to a public PR.
             </div>
             {captureRetention}

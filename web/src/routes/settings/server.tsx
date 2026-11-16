@@ -67,7 +67,7 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
           id="version"
           label="Version"
           help={[
-            `Aether ${info.server_version}, protocol ${info.protocol_version}.`,
+            `Cloudfield ${info.server_version}, protocol ${info.protocol_version}.`,
             update && `${update.text}.`,
             checking ? 'Checking for updates…' : checkedLine,
             packaged && packagedLine(packaged),

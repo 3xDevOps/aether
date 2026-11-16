@@ -24,7 +24,7 @@ test('a run starts in Enhanced unless Standard is picked', async ({ page, aether
     return runs.find((r) => r.task === task)?.mode
   }
   const launch = async (task: string, pick?: string) => {
-    await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'New session' }).click()
+    await page.getByRole('navigation', { name: 'Cloudfield' }).getByRole('button', { name: 'New session' }).click()
     const dialog = page.getByRole('dialog', { name: 'New session' })
     await expect(dialog.getByRole('radio', { name: /^Claude Code/ })).toBeChecked()
     const modes = dialog.getByRole('radiogroup', { name: 'Mode' }).getByRole('radio')

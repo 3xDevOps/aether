@@ -34,7 +34,7 @@ async function mount() {
 
 /** The sidebar's run list; the board repeats every run task it shows. */
 function sidebar() {
-  return within(within(screen.getByRole('navigation', { name: 'Aether' })).getByRole('region', { name: 'Sessions' }))
+  return within(within(screen.getByRole('navigation', { name: 'Cloudfield' })).getByRole('region', { name: 'Sessions' }))
 }
 
 describe('App', () => {
@@ -78,7 +78,7 @@ describe('App', () => {
   // even if nothing were mounted to answer it.
   it('opens the launch form from the sidebar, with no palette involved', async () => {
     await mount()
-    const nav = await screen.findByRole('navigation', { name: 'Aether' })
+    const nav = await screen.findByRole('navigation', { name: 'Cloudfield' })
     const launch = await within(nav).findByRole('button', { name: 'New session' })
 
     fireEvent.click(launch)
@@ -121,7 +121,7 @@ describe('App', () => {
         socket.onopen?.()
         socket.onmessage?.({ data: JSON.stringify({ ok: true }) })
       })
-      expect(screen.getByRole('navigation', { name: 'Aether' })).toBeDefined()
+      expect(screen.getByRole('navigation', { name: 'Cloudfield' })).toBeDefined()
       expect(app.container.querySelector('.launch-splash')).toBeNull()
     } finally {
       app.unmount()
@@ -169,7 +169,7 @@ describe('App', () => {
           },
         }),
       )
-      expect(await screen.findByRole('heading', { name: 'Update Aether to keep using this server' })).toBeDefined()
+      expect(await screen.findByRole('heading', { name: 'Update Cloudfield to keep using this server' })).toBeDefined()
       expect(screen.queryByRole('button', { name: 'Retry connection' })).toBeNull()
     } finally {
       app.unmount()

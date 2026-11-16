@@ -7,7 +7,7 @@ describe('ConnectionError', () => {
 
     render(<ConnectionError kind="server" dead={false} error={null} onRetry={retry} />)
 
-    expect(screen.getByRole('heading', { name: 'Cannot reach your Aether server' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'Cannot reach your Cloudfield server' })).toBeDefined()
     expect(screen.getByText(/server did not answer over SSH/i)).toBeDefined()
     screen.getByRole('button', { name: 'Retry connection' }).click()
     expect(retry).toHaveBeenCalledOnce()

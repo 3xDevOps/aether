@@ -26,7 +26,7 @@ describe('App offline state', () => {
   it('replaces the shell with the server-offline page before hydration', () => {
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: 'Cannot reach your Aether server' })).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'Cannot reach your Cloudfield server' })).toBeDefined()
     expect(screen.queryAllByText('Board')).toHaveLength(0)
   })
 
@@ -61,7 +61,7 @@ describe('App during an in-app update', () => {
     render(<App />)
 
     expect(
-      screen.queryByRole('heading', { name: 'Cannot reach your Aether server' }),
+      screen.queryByRole('heading', { name: 'Cannot reach your Cloudfield server' }),
     ).toBeNull()
   })
 })

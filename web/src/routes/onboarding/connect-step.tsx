@@ -25,7 +25,7 @@ type Route = 'tailscale' | 'relay' | 'ssh'
 
 const routes: { value: Route; title: string; detail: string }[] = [
   { value: 'tailscale', title: 'Tailscale', detail: 'This computer and the server are on the same tailnet.' },
-  { value: 'relay', title: 'Aether relay', detail: 'No Tailscale or open port: sign in with GitHub.' },
+  { value: 'relay', title: 'Cloudfield relay', detail: 'No Tailscale or open port: sign in with GitHub.' },
   { value: 'ssh', title: 'SSH address', detail: 'A host and port this computer reaches directly.' },
 ]
 
@@ -168,7 +168,7 @@ export function ConnectStep({ client, caps, another, onNext }: { client: Api; ca
     <Step
       label="Connect"
       title="Connect to your server"
-      lead="Aether runs agents on a server: yours, or one you were invited to. Link this computer to it once."
+      lead="Cloudfield runs agents on a server: yours, or one you were invited to. Link this computer to it once."
       actions={(connected || !local) && (
         <Button
           onClick={() => {
@@ -262,7 +262,7 @@ export function ConnectStep({ client, caps, another, onNext }: { client: Api; ca
           </div>
           {route === 'tailscale' && (
             <p className="text-ui-sm text-muted">
-              No tailnet? Choose Aether relay, or install{' '}
+              No tailnet? Choose Cloudfield relay, or install{' '}
               <a href="https://tailscale.com/download" target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2">
                 Tailscale
               </a>{' '}

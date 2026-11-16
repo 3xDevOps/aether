@@ -30,7 +30,7 @@ const hosted = <Guide to="the-dashboard">the dashboard your server hosts</Guide>
 function help(state: PushState | null, gateway: string | undefined, hinted = false): ReactNode {
   if (!state) return 'Reading this device…'
   if (state.kind === 'blocked') {
-    if (androidShell()) return 'Android blocks notifications from Aether. Allow them under App info → Notifications (long-press the Aether icon), then turn this on.'
+    if (androidShell()) return 'Android blocks notifications from Cloudfield. Allow them under App info → Notifications (long-press the Cloudfield icon), then turn this on.'
     return 'This browser blocks notifications from this dashboard. Allow them in its site settings, then reload.'
   }
   if (state.kind !== 'unsupported') {
@@ -43,7 +43,7 @@ function help(state: PushState | null, gateway: string | undefined, hinted = fal
       return <><Code>aether gui</Code> serves this dashboard from your computer, where a notification could not open it later. Open {hosted} on the device and turn this on there.</>
     case 'home-screen':
       if (hinted) return 'On iPhone and iPad, only the home-screen app gets notifications.'
-      return <>On iPhone and iPad, notifications reach Aether only when it is opened from the home screen. <Guide to="add-it-to-your-home-screen">Add it to your home screen</Guide>, open it from there and turn this on.</>
+      return <>On iPhone and iPad, notifications reach Cloudfield only when it is opened from the home screen. <Guide to="add-it-to-your-home-screen">Add it to your home screen</Guide>, open it from there and turn this on.</>
     case 'distributor':
       return (
         <>
@@ -87,7 +87,7 @@ export function SlackSection({ client }: { client: Api }) {
     return read()
   }))
 
-  const bot = code?.bot || status?.bot || 'the Aether bot'
+  const bot = code?.bot || status?.bot || 'the Cloudfield bot'
   const team = code?.team || status?.team
   let help: ReactNode = error ? null : 'Reading Slack…'
   let control: ReactNode
@@ -149,7 +149,7 @@ function InstallHint({ onDismiss }: { onDismiss: () => void }) {
   return (
     <Callout
       tone="review"
-      title="Install Aether to get notifications"
+      title="Install Cloudfield to get notifications"
       actions={(
         <Button size="sm" variant="secondary" className="coarse:h-11" onClick={() => {
           try {
@@ -161,7 +161,7 @@ function InstallHint({ onDismiss }: { onDismiss: () => void }) {
         }}>Dismiss</Button>
       )}
     >
-      Needs iOS 16.4 or later. In Safari, tap <b>Share</b> (the square with an arrow; under ⋯ if hidden), then <b>Add to Home Screen</b>. Chrome on iOS can add it too. Open Aether from the new icon and turn this on there.
+      Needs iOS 16.4 or later. In Safari, tap <b>Share</b> (the square with an arrow; under ⋯ if hidden), then <b>Add to Home Screen</b>. Chrome on iOS can add it too. Open Cloudfield from the new icon and turn this on there.
     </Callout>
   )
 }

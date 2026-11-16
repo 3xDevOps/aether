@@ -8,7 +8,7 @@ test('outside clicks and Escape collapse the new session draft, which resumes af
   await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('project'))
 
   await page.goto(alice.url)
-  const nav = page.getByRole('navigation', { name: 'Aether' })
+  const nav = page.getByRole('navigation', { name: 'Cloudfield' })
   await nav.getByRole('button', { name: 'New session' }).click()
   const dialog = page.getByRole('dialog', { name: 'New session' })
   await dialog.getByLabel('Task').fill('keep this draft')
