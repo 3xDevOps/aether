@@ -317,6 +317,7 @@ type fakeVMM struct {
 	calls      []string
 	restored   bool
 	srv        *http.Server
+	listener   net.Listener
 }
 
 func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
@@ -325,7 +326,7 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &fakeVMM{state: "Running"}
+	v := &fakeVMM{state: "Running", listener: l}
 	for _, arg := range args {
 		if arg == "--restore" {
 			v.state, v.restored = "Paused", true
@@ -370,7 +371,12 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 	return v, nil
 }
 
-func (v *fakeVMM) close() { _ = v.srv.Close() }
+// Close alone leaves the listener to Serve when Serve has not tracked it yet,
+// and Serve's late close would unlink the socket of the unit's next monitor.
+func (v *fakeVMM) close() {
+	_ = v.srv.Close()
+	_ = v.listener.Close()
+}
 
 func (v *fakeVMM) called() []string {
 	v.mu.Lock()
