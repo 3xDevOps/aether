@@ -11,12 +11,16 @@ import (
 
 const gitTimeout = 2 * time.Minute
 
-// runBranchRefspec mirrors the server-owned run branches into the
-// remote-tracking namespace. Forced (+) because these refs are the
-// server's to move; and remote-tracking refs only - the local working
-// tree and local branches are never touched.
-func runBranchRefspec(remote string) string {
-	return "+refs/heads/aether/run-*:refs/remotes/" + remote + "/aether/run-*"
+// runBranchRefspecs mirror the server-owned run branches, under either
+// session-branch prefix, into the remote-tracking namespace. Forced (+)
+// because these refs are the server's to move; and remote-tracking refs
+// only - the local working tree and local branches are never touched.
+func runBranchRefspecs(remote string) []string {
+	var specs []string
+	for _, prefix := range []string{"aether/run-", "cloudfield/run-"} {
+		specs = append(specs, "+refs/heads/"+prefix+"*:refs/remotes/"+remote+"/"+prefix+"*")
+	}
+	return specs
 }
 
 // git runs one git subcommand in the local repo and returns trimmed stdout.
@@ -40,10 +44,11 @@ func (d *Daemon) git(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// fetchRuns fetches every aether/run-* branch from the server remote into
-// refs/remotes/<remote>/aether/run-*.
+// fetchRuns fetches every aether/run-* and cloudfield/run-* branch from the
+// server remote into refs/remotes/<remote>/ under the same name.
 func (d *Daemon) fetchRuns(ctx context.Context) error {
-	_, err := d.git(ctx, "fetch", "--quiet", "--no-tags", d.cfg.Remote, runBranchRefspec(d.cfg.Remote))
+	args := append([]string{"fetch", "--quiet", "--no-tags", d.cfg.Remote}, runBranchRefspecs(d.cfg.Remote)...)
+	_, err := d.git(ctx, args...)
 	return err
 }
 

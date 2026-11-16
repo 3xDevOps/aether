@@ -103,6 +103,17 @@ func TestIntegrationFetchRunsIsRefsOnly(t *testing.T) {
 	if got := gitc(t, local, "rev-parse", "refs/remotes/aether/aether/run-r1-fix-auth-v2"); got != sha2 {
 		t.Errorf("second ref = %s, want %s", got, sha2)
 	}
+
+	sha3 := serverCommit(t, bare, "cloudfield/run-r2-fix-auth", "renamed.txt")
+	if err := d.fetchRuns(context.Background()); err != nil {
+		t.Fatalf("third fetchRuns: %v", err)
+	}
+	if got := gitc(t, local, "rev-parse", "refs/remotes/aether/cloudfield/run-r2-fix-auth"); got != sha3 {
+		t.Errorf("cloudfield ref = %s, want %s", got, sha3)
+	}
+	if out := gitc(t, local, "branch", "--list", "cloudfield/run-*"); out != "" {
+		t.Errorf("fetch created local branches:\n%s", out)
+	}
 }
 
 func TestIntegrationPushBase(t *testing.T) {
