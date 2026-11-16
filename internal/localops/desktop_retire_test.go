@@ -247,7 +247,38 @@ func TestRetireLegacyDesktopReportsAFailedRemoval(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), f.legacy[0]) || !strings.Contains(err.Error(), "sudo rm -rf") {
 		t.Fatalf("err = %v, want the path and the remove hint", err)
 	}
+	f.assertLegacyKept(t)
 	mustExist(t, f.renamedExe)
+}
+
+// The legacy app is still running from behind a symlinked parent, where
+// /proc names the resolved path.
+func TestRetireLegacyDesktopKeepsARunningOldApp(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("reads /proc")
+	}
+	renameProduct(t)
+	f := newRetireFixture(t, "linux")
+	target := filepath.Join(t.TempDir(), "share")
+	share := filepath.Dir(filepath.Dir(f.legacy[0]))
+	if err := os.Rename(share, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, share); err != nil {
+		t.Fatal(err)
+	}
+	legacyExe := DesktopAppExe("linux", f.legacy[0])
+	if err := os.Remove(legacyExe); err != nil {
+		t.Fatal(err)
+	}
+	startAppExe(t, filepath.Join(target, "aether", "desktop", filepath.Base(legacyExe)))
+	if !waitFor(func() bool { return DesktopAppRunning("linux", filepath.Join(target, "aether", "desktop")) }) {
+		t.Fatal("the legacy app did not start")
+	}
+	if err := RetireLegacyDesktop("linux", f.user(), f.renamedExe); err != nil {
+		t.Fatal(err)
+	}
+	mustExist(t, legacyExe)
 }
 
 // A Windows app that could not be removed keeps its Start Menu shortcut, so

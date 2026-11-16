@@ -63,6 +63,16 @@ func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	waited := false
+	stop := func() string {
+		if !waited {
+			waited = true
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+		return stderr.String()
+	}
+	t.Cleanup(func() { stop() })
 	lines := make(chan string, 1)
 	go func() {
 		line, _ := bufio.NewReader(stdout).ReadString('\n')
@@ -72,11 +82,10 @@ func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
 	select {
 	case line := <-lines:
 		if err := json.Unmarshal([]byte(line), &handshake); err != nil || handshake.URL == "" {
-			t.Fatalf("handshake %q: %v; stderr: %s", line, err, stderr.String())
+			t.Fatalf("handshake %q: %v; stderr: %s", line, err, stop())
 		}
 	case <-time.After(30 * time.Second):
-		_ = cmd.Process.Kill()
-		t.Fatalf("no handshake; stderr: %s", stderr.String())
+		t.Fatalf("no handshake; stderr: %s", stop())
 	}
 	// SIGTERM only cancels the gateway's context, so the step after the
 	// handshake still runs before the process exits.
@@ -84,6 +93,7 @@ func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = io.Copy(io.Discard, stdout)
+	waited = true
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("aether gui: %v; stderr: %s", err, stderr.String())
 	}

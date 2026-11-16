@@ -293,8 +293,8 @@ func RetireLegacyDesktop(goos string, ru RealUser, shellExe string) error {
 		if !legacyInstall(goos, app, shellApp) {
 			continue
 		}
-		if err := os.RemoveAll(app); err != nil {
-			errs = append(errs, fmt.Errorf("localops: remove the old app %s%s: %w", app, removeHint(goos, app, err), err))
+		if err := retireApp(goos, app); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	if goos == "windows" && len(errs) == 0 && !anyExists(legacy) {
@@ -318,7 +318,29 @@ func legacyInstall(goos, app, shellApp string) bool {
 	if err != nil || sameFile(resolved, shellApp) || within(goos, resolved, shellApp) || within(goos, shellApp, resolved) {
 		return false
 	}
-	return !DesktopAppRunning(goos, app)
+	// /proc reports the resolved executable, pgrep the path it was started by.
+	return !DesktopAppRunning(goos, app) && !DesktopAppRunning(goos, resolved)
+}
+
+// retireApp moves app aside before deleting it. Windows refuses to rename a
+// directory whose files a running program holds open, and DesktopAppRunning
+// cannot tell there, so a running app is left whole rather than half
+// deleted.
+func retireApp(goos, app string) error {
+	aside, err := os.MkdirTemp(filepath.Dir(app), installOldPrefix+"*")
+	if err == nil {
+		err = os.Rename(app, filepath.Join(aside, filepath.Base(app)))
+		if err != nil {
+			_ = os.Remove(aside)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("localops: remove the old app %s%s: %w", app, removeHint(goos, app, err), err)
+	}
+	if err := os.RemoveAll(aside); err != nil {
+		return fmt.Errorf("localops: remove the old app, moved to %s%s: %w", aside, removeHint(goos, aside, err), err)
+	}
+	return nil
 }
 
 func removeLegacyShortcut() error {
