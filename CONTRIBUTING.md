@@ -558,21 +558,23 @@ git push origin v0.9.1
 `release.yml` then runs `scripts/release-hotfix.sh` from `main`. It reads
 the signed manifest of the published `vX.Y.(Z-1)`, which must be a stable
 release with a build; its hotfix count leads back to the base, whose
-manifest must be stable on the same build with hotfix 0. `stable.json`
-must verify too. It refuses the tag unless its commit is the head of
-`release/X.Y`, contains `vX.Y.(Z-1)` and differs from it, and the branch's
-only merge base with `main` is the base commit, so the branch carries
-nothing newer from `main`. The release is stable,
-with the base's build and the next hotfix count. A line whose base is from
-before channels has no build and cannot take a hotfix. After publishing,
-the signer moves `stable.json` and then `beta.json`, each only when the
-hotfix is above it. A hotfix on a line older than `stable.json` moves
-neither, and only installs that ask for that tag get it. Once a nightly
-carries the fix, promote it to beta too, because beta can sit at a build
-above the hotfix that lacks the fix. A hotfix waits for the `channels`
-concurrency group that every pointer writer shares. GitHub keeps one pending run per
-group, so a pending hotfix can be cancelled when another writer queues;
-re-run it with `gh run rerun <run-id>`.
+manifest must be stable on the same build with hotfix 0. `stable.json` and
+`beta.json` must verify too. It refuses the tag unless its commit is the
+head of `release/X.Y`, contains `vX.Y.(Z-1)` and differs from it, and the
+branch's only merge base with `main` is the base commit, so the branch
+carries nothing newer from `main`. The release is stable, with the base's
+build and the next hotfix count. A line whose base is from before channels
+has no build and cannot take a hotfix. After publishing, the signer moves
+`beta.json` and then `stable.json`, each only when the hotfix is above it;
+in that order beta never falls below stable, even if the second move
+fails. A hotfix on a line older than `stable.json` moves neither, and only
+installs that ask for that tag get it. Once a nightly carries the fix,
+promote it to beta too, because beta can sit at a build above the hotfix
+that lacks the fix. A hotfix never moves `aether-edge:beta`: that tag
+follows at the next Promote to beta. A hotfix waits for the `channels`
+concurrency group that every pointer writer shares. GitHub keeps one
+pending run per group, so a pending hotfix can be cancelled when another
+writer queues; re-run it with `gh run rerun <run-id>`.
 
 A push to the branch runs the branch's `ci.yml`, and the tag runs its
 `release.yml` and `release-build.yml`. A line whose base commit predates

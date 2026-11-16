@@ -120,8 +120,8 @@ jobs:
             core=${GITHUB_REF_NAME#v}
             branch=release/${core%.*}
             url=$(sh scripts/release-ci-check.sh --branch "$branch" "$GITHUB_REPOSITORY" "$sha")
-            printf '%s\n' channel=stable "build=$build" "hotfix=$hotfix" 'pointer-if-above=stable beta' >> "$GITHUB_OUTPUT"
-            echo "Hotfix $GITHUB_REF_NAME of $base: stable, build $build, hotfix $hotfix, on \`$branch\`; moves stable.json, then beta.json, each only if the hotfix is above it" >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' channel=stable "build=$build" "hotfix=$hotfix" 'pointer-if-above=beta stable' >> "$GITHUB_OUTPUT"
+            echo "Hotfix $GITHUB_REF_NAME of $base: stable, build $build, hotfix $hotfix, on \`$branch\`; moves beta.json, then stable.json, each only if the hotfix is above it" >> "$GITHUB_STEP_SUMMARY"
           else
             sh scripts/android-version-code.sh "$GITHUB_REF_NAME"
             url=$(sh scripts/release-ci-check.sh "$GITHUB_REPOSITORY" "$sha")

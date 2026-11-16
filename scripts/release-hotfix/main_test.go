@@ -18,7 +18,7 @@ import (
 
 var at = time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 
-// releases serves signed manifests and stable.json the way release
+// releases serves signed manifests and pointers the way release
 // downloads do; a path it does not hold answers 404.
 type releases map[string][]byte
 
@@ -36,14 +36,14 @@ func (r releases) manifest(t *testing.T, tag, channel string, build, hotfix int,
 	r["/releases/download/"+tag+"/"+selfupdate.SignatureName] = sig
 }
 
-func (r releases) stable(t *testing.T, tag string, build, hotfix int) {
+func (r releases) pointer(t *testing.T, channel, tag string, build, hotfix int) {
 	t.Helper()
 	data, sig := releasetest.SignPointer(t, selfupdate.Pointer{
-		Schema: selfupdate.PointerSchema, Channel: "stable", Tag: tag, Commit: commit(tag),
+		Schema: selfupdate.PointerSchema, Channel: channel, Tag: tag, Commit: commit(tag),
 		Build: build, Hotfix: hotfix, StoreSchema: 115, PublishedAt: at,
 	}, releasetest.Key)
-	r["/releases/download/channels/stable.json"] = data
-	r["/releases/download/channels/stable.json.sig"] = sig
+	r["/releases/download/channels/"+channel+".json"] = data
+	r["/releases/download/channels/"+channel+".json.sig"] = sig
 }
 
 // commit is a distinct full SHA per tag.
@@ -75,7 +75,8 @@ func line(t *testing.T) releases {
 	r.manifest(t, "v0.9.0", "stable", 412, 0, releasetest.Key)
 	r.manifest(t, "v0.9.1", "stable", 412, 1, releasetest.Key)
 	r.manifest(t, "v0.9.2", "stable", 412, 2, releasetest.Key)
-	r.stable(t, "v0.9.2", 412, 2)
+	r.pointer(t, "stable", "v0.9.2", 412, 2)
+	r.pointer(t, "beta", "v0.9.2", 412, 2)
 	return r
 }
 
@@ -134,6 +135,9 @@ func TestRefusesAHotfixItCannotOrder(t *testing.T) {
 		"no stable.json": {"v0.9.3", func(t *testing.T, r releases) {
 			delete(r, "/releases/download/channels/stable.json")
 		}, "channel pointer stable.json"},
+		"no beta.json": {"v0.9.3", func(t *testing.T, r releases) {
+			delete(r, "/releases/download/channels/beta.json.sig")
+		}, "channel pointer beta.json"},
 		"untrusted stable.json": {"v0.9.3", func(t *testing.T, r releases) {
 			r["/releases/download/channels/stable.json.sig"] = r["/releases/download/v0.9.0/"+selfupdate.SignatureName]
 		}, "stable.json"},

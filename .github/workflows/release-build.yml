@@ -44,7 +44,9 @@ on:
         description: >-
           Channels, space-separated and in order, whose pointers to move to this
           release only when the release is above each, after pointer; empty for
-          none
+          none. List beta before stable: a release above beta.json is above
+          stable.json too, so beta stays at or above stable if a later entry
+          fails
         type: string
         default: ''
       first-pointer:

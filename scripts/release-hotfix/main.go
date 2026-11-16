@@ -8,8 +8,9 @@
 // names the line's base, vX.Y.(Z-1-h), which must be the stable release on
 // the same build with hotfix 0: the release the line's release/X.Y branch
 // is cut from. The hotfix signs that build and hotfix h+1. It also verifies
-// the current stable.json, so a hotfix whose pointers cannot be moved is
-// refused before anything builds; the signer decides which pointers move.
+// the current beta.json and stable.json, so a hotfix whose pointers cannot
+// be moved is refused before anything builds; the signer decides which
+// pointers move.
 //
 // It prints build, hotfix, base-tag, base-commit and previous-commit as
 // name=value lines. scripts/release-hotfix.sh runs it.
@@ -76,8 +77,10 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	hotfix := previous.Hotfix + 1
 
-	if _, err = selfupdate.FetchPointer(ctx, repo, selfupdate.ChannelStable); err != nil {
-		return err
+	for _, channel := range []string{selfupdate.ChannelBeta, selfupdate.ChannelStable} {
+		if _, err = selfupdate.FetchPointer(ctx, repo, channel); err != nil {
+			return err
+		}
 	}
 	_, err = fmt.Fprintf(stdout, "build=%d\nhotfix=%d\nbase-tag=%s\nbase-commit=%s\nprevious-commit=%s\n",
 		base.Build, hotfix, baseTag, base.Commit, previous.Commit)
