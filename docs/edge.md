@@ -797,15 +797,16 @@ docker exec <container> aether-edge release-check \
 ```
 
 A digest that `nightly`, `beta` or `stable` names also carries a promotion
-attestation from `promote-edge.yml` on `main`. A host that follows one of them
-requires it. The printed predicate must name that channel, the digest and the
-tag `release-check` verified:
+attestation from `promote-edge.yml` on `main`, signed in the repository under
+its old name or its current one. A host that follows one of them requires it.
+The printed predicate must name that channel, the digest and the tag
+`release-check` verified:
 
 ```sh
 cosign verify-attestation --new-bundle-format \
   --type https://github.com/3xDevOps/aether/edge-promotion/v1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main \
+  --certificate-identity-regexp '^https://github\.com/3xDevOps/(aether|cloudfield)/\.github/workflows/promote-edge\.yml@refs/heads/main$' \
   ghcr.io/3xdevops/aether-edge@sha256:<digest>
 ```
 
@@ -1242,11 +1243,29 @@ updater does the rest.
   ([First upgrade](#first-upgrade)).
 - A host that reboots mid-update is recovered at boot by
   `aether-edge-update-recover.service`, or by `sudo aether-edge-update --recover`.
+- An updater copied before the repository took its current name refuses every
+  promotion made since: each run exits 1 with `<tag> (<digest>) on <channel> has
+  no valid promotion attestation from promote-edge.yml on main`, after cosign's
+  error naming the signer it got. Install the new updater on every host before
+  the first promotion after the rename, from the release you install:
+
+  ```sh
+  curl -fsSL -o edge-update.sh https://raw.githubusercontent.com/3xDevOps/Aether/<release-tag>/scripts/edge-update.sh
+  sudo install -m 0755 edge-update.sh /usr/local/sbin/aether-edge-update
+  sudo aether-edge-update --check
+  ```
 
 `sudo aether-edge-update --rollback` returns to the previous release. If that
 release cannot run the migrated database it changes nothing and exits 1 with the
 backup's age, because restoring loses every account, device and server change
-since. To roll back anyway, add `--restore-backup`.
+since. To roll back anyway, add `--restore-backup`. While the edge's
+`AETHER_EDGE_ORIGIN_PAIRS` is set, it also refuses a release whose `version
+--json` reports an edge protocol below 6, which serves only the first
+[address pair](#more-than-one-address-pair), and exits 1 with `... reports no
+edge protocol 6 or later in version --json`. Remove the setting first, or add
+`--drop-origin-pairs` to cut off the servers enrolled at the other pairs. The
+rollback after a failed update returns to the release that ran before and is
+never refused.
 
 ### Promoting an edge release to stable
 

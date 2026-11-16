@@ -17,6 +17,7 @@ world="$tmp/world"
 mkdir -p "$bin"
 
 image=ghcr.io/3xdevops/aether-edge
+promoter='^https://github\.com/3xDevOps/(aether|cloudfield)/\.github/workflows/promote-edge\.yml@refs/heads/main$'
 A=sha256:$(printf '%064d' 0 | tr 0 a)
 B=sha256:$(printf '%064d' 0 | tr 0 b)
 C=sha256:$(printf '%064d' 0 | tr 0 c)
@@ -30,6 +31,9 @@ D=sha256:$(printf '%064d' 0 | tr 0 d)
 #   label       a version label that differs from version
 #   reports     a version the running container reports instead
 #   supports    the highest database schema the image supports
+#   protocol    the edge protocol version --json reports (default 1)
+#   no-protocol version --json reports no protocol
+#   version-fails  docker run of the image fails
 #   floor       the compat floor its migrations leave in the database
 #   legacy      the image predates version --json and release-check
 #   no-release-check  the image has version --json but not release-check
@@ -44,7 +48,8 @@ D=sha256:$(printf '%064d' 0 | tr 0 d)
 # $WORLD/data/backups/<name>, $WORLD/release-check ("<exit> [min]"),
 # $WORLD/unrouted (how many /v1/edge requests the proxy answers 404
 # first), $WORLD/extra-digest (a second repository digest), $WORLD/reasons
-# (the JSON reasons of a min_upgrade_from hold), $WORLD/clock (the seconds
+# (the JSON reasons of a min_upgrade_from hold), $WORLD/environment (the
+# JSON environment docker compose config shows for the edge), $WORLD/clock (the seconds
 # date +%s prints and sleep advances), and the switches backup-fails,
 # restore-fails, schema-fails, gone (no container until the next up),
 # hang (a refused /v1/edge request takes curl's 10 s timeout),
@@ -66,8 +71,8 @@ backup() {
 version_json() {
 	order=',"build":0,"hotfix":0'
 	[ ! -f "$w/prebuild/$2" ] || order=""
-	printf '{"version":"%s","commit":"abc"%s,"store_schema":%s,"store_compat_floor":%s,"protocol":{"version":1,"min_version":1}}\n' \
-		"$1" "$order" "$(get supports "$2" 1)" "$(get floor "$2" "$(get supports "$2" 1)")"
+	printf '{"version":"%s","commit":"abc"%s,"store_schema":%s,"store_compat_floor":%s,"protocol":{"version":%s,"min_version":1}}\n' \
+		"$1" "$order" "$(get supports "$2" 1)" "$(get floor "$2" "$(get supports "$2" 1)")" "$(get protocol "$2" 1)"
 }
 image=ghcr.io/3xdevops/aether-edge
 case "$1" in
@@ -90,7 +95,7 @@ run)
 		--volumes-from) [ ! -f "$w/gone" ] || { echo "docker: Error response from daemon: No such container: $2." >&2; exit 125; } ;;
 		-v)
 			case "$2" in
-			"$w/data:/var/lib/aether-edge" | "$AETHER_EDGE_UPDATE_STATE/releases:/run/aether-edge-update/releases") ;;
+			"$w/data:/var/lib/aether-edge" | "${CLOUDFIELD_EDGE_UPDATE_STATE:-$AETHER_EDGE_UPDATE_STATE}/releases:/run/aether-edge-update/releases") ;;
 			*) echo "docker stub: unexpected mount $2" >&2; exit 2 ;;
 			esac
 			;;
@@ -106,7 +111,14 @@ run)
 		exit 0
 	fi
 	case "$1" in
-	version) version_json "$(get version "$d")" "$d" ;;
+	version)
+		[ ! -f "$w/version-fails/$d" ] || { echo "docker: Error response from daemon: manifest for $image@$d not found" >&2; exit 125; }
+		if [ -f "$w/no-protocol/$d" ]; then
+			printf '{"version":"%s","commit":"abc"}\n' "$(get version "$d")"
+		else
+			version_json "$(get version "$d")" "$d"
+		fi
+		;;
 	release-check)
 		[ ! -f "$w/no-release-check/$d" ] || { echo "aether-edge: unknown command \"release-check\"" >&2; exit 2; }
 		tag="$3" digest="$5" from="$7"
@@ -122,7 +134,7 @@ run)
 			--from-manifest=*) saved="${7#--from-manifest=}" want="$want --from-manifest=$saved" ;;
 			esac
 			[ "$*" = "$want" ] || { echo "docker stub: release-check from $d got '$*', not $want" >&2; exit 2; }
-			keep="$AETHER_EDGE_UPDATE_STATE/releases"
+			keep="${CLOUDFIELD_EDGE_UPDATE_STATE:-$AETHER_EDGE_UPDATE_STATE}/releases"
 			if [ -n "$saved" ]; then
 				[ "$(cat "$keep/${saved#/run/aether-edge-update/releases/}")" = "signed manifest of $from" ] ||
 					{ echo "aether-edge: the running release: saved $saved: aether-release.json for $from is not signed by a trusted release key; do not install it" >&2; exit 1; }
@@ -211,7 +223,8 @@ compose)
 	env_file="$3"
 	case "$4" in
 	config)
-		printf '{"name":"edge","services":{"aether-edge":{"volumes":[{"type":"bind","source":"%s","target":"/var/lib/aether-edge","bind":{}}]}}}\n' "$w/data"
+		printf '{"name":"edge","services":{"aether-edge":{"environment":%s,"volumes":[{"type":"bind","source":"%s","target":"/var/lib/aether-edge","bind":{}}]}}}\n' \
+			"$(cat "$w/environment" 2>/dev/null || echo '{}')" "$w/data"
 		;;
 	stop)
 		if [ -f "$w/write-on-stop" ]; then
@@ -270,7 +283,9 @@ EOF
 # Answers with one attestation whose predicate promotes the digest on
 # stable as its version, or as $WORLD/promotion/<digest> says ("<channel>
 # <tag> [<digest>]", or "none" for no attestation). Like cosign, it refuses
-# when the signer, $WORLD/signer if set, is not the identity asked for.
+# when the signer, $WORLD/signer if set, does not match the identity
+# expression asked for, which grep -E reads as Go's regexp does for the
+# updater's expression.
 cat >"$bin/cosign" <<'EOF'
 #!/bin/sh
 set -eu
@@ -278,7 +293,10 @@ printf 'cosign %s\n' "$*" >>"$CMD_LOG"
 signer="$(cat "$WORLD/signer" 2>/dev/null || echo https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main)"
 while [ $# -gt 1 ]; do
 	case "$1" in
-	--certificate-identity) [ "$2" = "$signer" ] || { echo "error: expected SAN value \"$2\", got \"$signer\"" >&2; exit 1; } ;;
+	--certificate-identity-regexp)
+		printf '%s\n' "$signer" | grep -Eq -- "$2" ||
+			{ echo "Error: none of the expected identities matched what was in the certificate, got subjects [$signer] with issuer https://token.actions.githubusercontent.com" >&2; exit 1; }
+		;;
 	esac
 	shift
 done
@@ -393,7 +411,7 @@ refute_denied() {
 # with that reason.
 reset() {
 	rm -rf "$world" "$state" "$compose_dir"
-	for d in version pruned prebuild label promotion reports supports floor legacy no-release-check up-fails gone-after-up term-on-up unready claimed slow fingerprint data/backups; do
+	for d in version pruned prebuild label promotion reports supports protocol no-protocol version-fails floor legacy no-release-check up-fails gone-after-up term-on-up unready claimed slow fingerprint data/backups; do
 		mkdir -p "$world/$d"
 	done
 	mkdir -p "$compose_dir"
@@ -439,7 +457,7 @@ assert "docker pull --quiet $image:stable"
 assert "$image@$A release-check --tag v1.1.0 --digest $B --from v1.0.0 --json"
 assert_before "docker exec aether-edge aether-edge backup /var/lib/aether-edge/backups/pre-update-v1.1.0-" "up -d --wait --wait-timeout 180 aether-edge"
 assert_before "release-check" "aether-edge backup"
-assert "cosign verify-attestation --new-bundle-format --type https://github.com/3xDevOps/aether/edge-promotion/v1 --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main $image@$B"
+assert "cosign verify-attestation --new-bundle-format --type https://github.com/3xDevOps/aether/edge-promotion/v1 --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp $promoter $image@$B"
 assert_before "cosign verify-attestation" "release-check"
 refute "restore"
 refute " stop aether-edge"
@@ -575,7 +593,7 @@ refute "compose"
 reset
 echo "$A" >"$world/channel"
 run 0 --check
-assert "cosign verify-attestation --new-bundle-format --type https://github.com/3xDevOps/aether/edge-promotion/v1 --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main $image@$A"
+assert "cosign verify-attestation --new-bundle-format --type https://github.com/3xDevOps/aether/edge-promotion/v1 --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp $promoter $image@$A"
 assert_before "cosign verify-attestation" "$image@$A version --json"
 assert "$image@$A release-check --tag v1.0.0 --digest $A --from v1.0.0 --json"
 assert_out "verified the running v1.0.0 ($A)"
@@ -639,15 +657,48 @@ for promotion in none "stable v1.0.5" "latest v1.1.0" "stable v1.1.0 $D"; do
 	assert_digest "$A"
 done
 
-# A promotion signed from a branch or by another workflow.
-for signer in promote-edge.yml@refs/heads/evil release.yml@refs/heads/main; do
+# promote-edge.yml on main signs from the repository under its old name
+# or its current one.
+for repo in aether cloudfield; do
 	reset
-	echo "https://github.com/3xDevOps/aether/.github/workflows/$signer" >"$world/signer"
+	echo "https://github.com/3xDevOps/$repo/.github/workflows/promote-edge.yml@refs/heads/main" >"$world/signer"
+	run 0
+	assert_out "now running v1.1.0"
+	reset
+	echo "$A" >"$world/channel"
+	echo "https://github.com/3xDevOps/$repo/.github/workflows/promote-edge.yml@refs/heads/main" >"$world/signer"
+	run 0 --check
+	assert_out "verified the running v1.0.0 ($A)"
+done
+
+# A promotion signed from a branch, by another workflow, from another
+# repository of the organisation, from a fork in another organisation, or
+# from a lookalike address.
+for signer in \
+	3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/evil \
+	3xDevOps/cloudfield/.github/workflows/promote-edge.yml@refs/heads/main-evil \
+	3xDevOps/cloudfield/.github/workflows/release.yml@refs/heads/main \
+	3xDevOps/cloudfield/.github/workflows/promote-edge.yaml@refs/heads/main \
+	3xDevOps/website/.github/workflows/promote-edge.yml@refs/heads/main \
+	3xDevOps/cloudfield-fork/.github/workflows/promote-edge.yml@refs/heads/main \
+	evil/cloudfield/.github/workflows/promote-edge.yml@refs/heads/main \
+	evil/aether/.github/workflows/promote-edge.yml@refs/heads/main \
+	3xdevops/cloudfield/.github/workflows/promote-edge.yml@refs/heads/main \
+	3xDevOps/cloudfield/.github/workflows/promote-edgexyml@refs/heads/main \
+	evil/x/.github/workflows/w.yml@refs/heads/a/https://github.com/3xDevOps/cloudfield/.github/workflows/promote-edge.yml@refs/heads/main; do
+	reset
+	echo "https://github.com/$signer" >"$world/signer"
 	run 1
-	assert_out "has no valid promotion attestation"
+	assert_out "Error: none of the expected identities matched what was in the certificate, got subjects [https://github.com/$signer]"
+	assert_out "v1.1.0 ($B) on stable has no valid promotion attestation from promote-edge.yml on main; nothing changed"
 	refute "release-check"
 	assert_digest "$A"
 done
+reset
+echo https://githubxcom/3xDevOps/cloudfield/.github/workflows/promote-edge.yml@refs/heads/main >"$world/signer"
+run 1
+assert_out "has no valid promotion attestation"
+assert_digest "$A"
 
 reset
 echo none >"$world/promotion/$B"
@@ -1188,6 +1239,159 @@ echo 1 >"$world/claimed/$B"
 export AETHER_EDGE_UPDATE_SERVER_TOLERANCE=50%
 run 0
 assert_digest "$B"
+
+# A manual rollback to a release below edge protocol 6 serves only the
+# first address pair, so it is refused while the edge lists more, unless
+# forced. The list may come under either name; empty is unset.
+pairs="https://auth2.example.net https://edge2.example.net client-id-2 /run/secrets/github-client-secret-2"
+for name in AETHER_EDGE_ORIGIN_PAIRS CLOUDFIELD_EDGE_ORIGIN_PAIRS; do
+	reset
+	run 0
+	printf '{"%s":"%s"}\n' "$name" "$pairs" >"$world/environment"
+	: >"$log"
+	run 1 --rollback
+	assert_out "aether-edge lists more address pairs in $name, and v1.0.0 ($A) reports no edge protocol 6 or later in version --json"
+	assert_out "Remove $name from $compose_dir first"
+	assert_out "run aether-edge-update --rollback --drop-origin-pairs to roll back anyway; nothing changed"
+	refute "aether-edge backup"
+	assert_digest "$B"
+	assert_state idle
+	run 0 --rollback --drop-origin-pairs
+	assert_out "now running v1.0.0"
+	assert_digest "$A"
+done
+for environment in '{}' '{"AETHER_EDGE_ORIGIN_PAIRS":""}' '{"CLOUDFIELD_EDGE_ORIGIN_PAIRS":""}'; do
+	reset
+	run 0
+	echo "$environment" >"$world/environment"
+	run 0 --rollback
+	assert_digest "$A"
+done
+reset
+echo 6 >"$world/protocol/$A"
+run 0
+printf '{"AETHER_EDGE_ORIGIN_PAIRS":"%s"}\n' "$pairs" >"$world/environment"
+run 0 --rollback
+assert_digest "$A"
+reset
+printf '{"AETHER_EDGE_ORIGIN_PAIRS":"%s"}\n' "$pairs" >"$world/environment"
+touch "$world/unready/$B"
+run 1
+assert_out "rolled back to v1.0.0 after v1.1.0 failed"
+assert_digest "$A"
+reset
+run 2 --drop-origin-pairs
+assert_digest "$A"
+
+# A previous image that cannot show protocol 6 is refused too: one from
+# before version --json, one docker cannot run, one whose version --json
+# names no protocol.
+for missing in legacy version-fails no-protocol; do
+	reset
+	run 0
+	touch "$world/$missing/$A"
+	printf '{"AETHER_EDGE_ORIGIN_PAIRS":"%s"}\n' "$pairs" >"$world/environment"
+	: >"$log"
+	run 1 --rollback
+	assert_out "reports no edge protocol 6 or later in version --json"
+	refute "aether-edge backup"
+	assert_digest "$B"
+	assert_state idle
+done
+
+# --drop-origin-pairs passes only the pairs check: a database the previous
+# release cannot run still needs --restore-backup.
+reset
+echo 2 >"$world/supports/$B"
+echo 2 >"$world/floor/$B"
+run 0
+printf '{"AETHER_EDGE_ORIGIN_PAIRS":"%s"}\n' "$pairs" >"$world/environment"
+run 1 --rollback --drop-origin-pairs
+assert_out "Run aether-edge-update --rollback --restore-backup to roll back anyway; nothing changed"
+assert_digest "$B"
+
+# --rollback over an interrupted switch finishes the switch, then refuses
+# the rollback below protocol 6.
+reset
+run 0
+cat >"$state/state" <<EOF
+state=switching
+kind=update
+from_digest=$A
+from_version='v1.0.0'
+to_digest=$B
+to_version='v1.1.0'
+fingerprint='SHA256:good'
+servers=3
+backup='/var/lib/aether-edge/backups/pre-update-v1.1.0.db'
+restore=''
+restored=0
+reason=''
+since=2026-01-01T00:00:00Z
+EOF
+printf '{"AETHER_EDGE_ORIGIN_PAIRS":"%s"}\n' "$pairs" >"$world/environment"
+run 1 --rollback
+assert_out "finishing the interrupted switch"
+assert_out "reports no edge protocol 6 or later in version --json"
+assert_digest "$B"
+assert_state idle
+
+# --recover rolls an interrupted switch back below protocol 6 with the
+# pairs set: it returns to the release that ran before.
+reset
+printf '{"AETHER_EDGE_ORIGIN_PAIRS":"%s"}\n' "$pairs" >"$world/environment"
+touch "$world/term-on-up/$B"
+run 1
+assert_state rolling-back
+run 1 --recover
+assert_out "the next run retries $B"
+assert_digest "$A"
+assert_state idle
+
+# CLOUDFIELD_X wins over AETHER_X, from the environment or the file
+# CLOUDFIELD_EDGE_UPDATE_CONFIG names; an empty one counts as unset.
+reset
+printf 'AETHER_EDGE_UPDATE_CHANNEL=stable\nCLOUDFIELD_EDGE_UPDATE_CHANNEL=beta\n' >"$tmp/both.env"
+echo beta >"$world/channel-name"
+echo "beta v1.1.0" >"$world/promotion/$B"
+CLOUDFIELD_EDGE_UPDATE_CONFIG="$tmp/both.env" CLOUDFIELD_EDGE_UPDATE_RELAY_URL=https://edge2.example.net run 0
+assert "docker pull --quiet $image:beta"
+assert "curl -fsS --max-time 10 -H Aether-Edge-Version: 1 https://edge2.example.net/v1/edge"
+refute "https://edge.example.com"
+assert_digest "$B"
+reset
+CLOUDFIELD_EDGE_UPDATE_STATE="$tmp/state2" CLOUDFIELD_EDGE_UPDATE_RELAY_URL="" run 0
+assert "https://edge.example.com/v1/edge"
+grep -qx "state=idle" "$tmp/state2/state" || fail "CLOUDFIELD_EDGE_UPDATE_STATE was not used"
+[ ! -e "$state/state" ] || fail "AETHER_EDGE_UPDATE_STATE was used beside CLOUDFIELD_EDGE_UPDATE_STATE"
+rm -rf "$tmp/state2"
+
+# The order is: CLOUDFIELD_ in the file, CLOUDFIELD_ in the environment,
+# AETHER_ in the file, AETHER_ in the environment.
+for case in "CLOUDFIELD_EDGE_UPDATE_RELAY_URL=https://file.example.net|https://env.example.net|https://file.example.net" \
+	"AETHER_EDGE_UPDATE_RELAY_URL=https://file.example.net|https://env.example.net|https://env.example.net"; do
+	reset
+	echo "${case%%|*}" >"$tmp/order.env"
+	rest="${case#*|}"
+	CLOUDFIELD_EDGE_UPDATE_CONFIG="$tmp/order.env" CLOUDFIELD_EDGE_UPDATE_RELAY_URL="${rest%|*}" run 0
+	assert "${rest#*|}/v1/edge"
+done
+reset
+echo AETHER_EDGE_UPDATE_RELAY_URL=https://file.example.net >"$tmp/order.env"
+AETHER_EDGE_UPDATE_CONFIG="$tmp/order.env" run 0
+assert "https://file.example.net/v1/edge"
+
+# Messages name the variable in effect.
+reset
+CLOUDFIELD_EDGE_UPDATE_CHANNEL=weekly run 1
+assert_out "set CLOUDFIELD_EDGE_UPDATE_CHANNEL in $tmp/none or pass --channel"
+reset
+CLOUDFIELD_EDGE_UPDATE_SERVER_TOLERANCE=x run 1
+assert_out "AETHER_EDGE_UPDATE_SERVER_WAIT and AETHER_EDGE_UPDATE_PUBLIC_WAIT take whole seconds and CLOUDFIELD_EDGE_UPDATE_SERVER_TOLERANCE a count"
+reset
+echo 'CLOUDFIELD_EDGE_UPDATE_RELAY_URL=' >"$tmp/order.env"
+AETHER_EDGE_UPDATE_RELAY_URL="" CLOUDFIELD_EDGE_UPDATE_CONFIG="$tmp/order.env" run 1
+assert_out "AETHER_EDGE_UPDATE_RELAY_URL is not set; set it in $tmp/order.env"
 
 # Bad settings are refused before anything runs.
 for bad in x 10%% %; do

@@ -8,14 +8,16 @@ bin="$tmp/bin"
 mkdir -p "$bin"
 
 # $STATE/identity is the "<signer> <source ref> <caller workflow> <run id>"
-# the image's attestation was made with; $STATE/jobs-<id> are that run's
+# the image's attestation was made with, in the repository $STATE/repo
+# names (default the current one); $STATE/jobs-<id> are that run's
 # jobs as "<name>|<conclusion>" lines and $STATE/run-<id> its
 # "<status> <conclusion>".
 cat >"$bin/gh" <<'EOF'
 #!/bin/sh
 set -eu
 echo "gh $*" >>"$STATE/log"
-repo=https://github.com/3xDevOps/Aether
+signed=$(cat "$STATE/repo" 2>/dev/null || echo 3xDevOps/cloudfield)
+repo=https://github.com/$signed
 case "$1 $2" in
 "attestation verify")
 	[ -f "$STATE/identity" ] || exit 1
@@ -23,10 +25,10 @@ case "$1 $2" in
 	shift 2
 	want=
 	while [ "$#" -gt 0 ]; do
-		case $1 in --signer-workflow) want="$want ${2##*/}" ;; --source-ref) want="$want $2" ;; esac
+		case $1 in --repo | --signer-workflow | --source-ref) want="$want $2" ;; esac
 		shift
 	done
-	[ "$want" = " $signer $source" ] || { echo "no matching attestation" >&2; exit 1; }
+	[ "$want" = " $signed $signed/.github/workflows/$signer $source" ] || { echo "no matching attestation" >&2; exit 1; }
 	jq -n --arg c "$repo/.github/workflows/$caller" --arg r "$repo/actions/runs/$id/attempts/1" \
 		'[{verificationResult: {signature: {certificate: {buildConfigURI: $c, runInvocationURI: $r}}}}]'
 	;;
@@ -34,11 +36,11 @@ case "$1 $2" in
 	id=$(printf '%s' "$3" | sed 's,.*/runs/\([0-9]*\)/jobs.*,\1,')
 	jq -R 'split("|") | {name: .[0], conclusion: .[1]}' "$STATE/jobs-$id" | jq -s '{jobs: .}'
 	;;
-"api repos/3xDevOps/Aether/actions/runs/"*)
+"api repos/3xDevOps/cloudfield/actions/runs/"*)
 	id=${2##*/}
 	read -r status conclusion <"$STATE/run-$id"
 	jq -n --arg s "$status" --arg c "$conclusion" --arg id "$id" \
-		'{status: $s, conclusion: $c, html_url: ("https://github.com/3xDevOps/Aether/actions/runs/" + $id)}'
+		'{status: $s, conclusion: $c, html_url: ("https://github.com/3xDevOps/cloudfield/actions/runs/" + $id)}'
 	;;
 *) exit 2 ;;
 esac
@@ -60,7 +62,7 @@ reset() {
 }
 
 run() {
-	PATH="$bin:$PATH" GITHUB_REPOSITORY=3xDevOps/Aether EDGE_ATTESTATION_RETRY_DELAY=0 \
+	PATH="$bin:$PATH" GITHUB_REPOSITORY=3xDevOps/cloudfield EDGE_ATTESTATION_RETRY_DELAY=0 \
 		sh "$script_dir/edge-attestation.sh" "$1" ghcr.io/3xdevops/aether-edge@sha256:abc v0.9.0-beta.3 >"$tmp/out" 2>&1
 }
 
@@ -69,7 +71,7 @@ run() {
 reset
 echo "release-build.yml refs/heads/main promote.yml@refs/heads/main 7" >"$STATE/identity"
 run qualify || fail "a Promote-built release: $(cat "$tmp/out")"
-grep -qx 'edge-qualify succeeded in https://github.com/3xDevOps/Aether/actions/runs/7' "$tmp/out" || fail "evidence: $(cat "$tmp/out")"
+grep -qx 'edge-qualify succeeded in https://github.com/3xDevOps/cloudfield/actions/runs/7' "$tmp/out" || fail "evidence: $(cat "$tmp/out")"
 
 # A nightly: release-build.yml from main, in a nightly.yml run.
 reset
@@ -81,6 +83,29 @@ for signer in release-build.yml release.yml; do
 	reset
 	echo "$signer refs/tags/v0.9.0-beta.3 release.yml@refs/tags/v0.9.0-beta.3 7" >"$STATE/identity"
 	run qualify || fail "a pushed tag signed by $signer: $(cat "$tmp/out")"
+done
+
+# A release built before the repository took its current name is signed
+# under its old name, and its run is read under the current one.
+for signer in release-build.yml release.yml; do
+	reset
+	echo 3xDevOps/aether >"$STATE/repo"
+	echo "$signer refs/tags/v0.9.0-beta.3 release.yml@refs/tags/v0.9.0-beta.3 7" >"$STATE/identity"
+	run qualify || fail "a pushed tag signed by $signer under the old name: $(cat "$tmp/out")"
+	grep -qx 'edge-qualify succeeded in https://github.com/3xDevOps/cloudfield/actions/runs/7' "$tmp/out" || fail "evidence: $(cat "$tmp/out")"
+done
+reset
+echo 3xDevOps/aether >"$STATE/repo"
+echo "release-build.yml refs/heads/main promote.yml@refs/heads/main 7" >"$STATE/identity"
+run qualify || fail "a Promote-built release under the old name: $(cat "$tmp/out")"
+
+# Refused: an attestation signed under any other repository name.
+for other in 3xDevOps/website evil/aether evil/cloudfield 3xDevOps/aether-fork; do
+	reset
+	echo "$other" >"$STATE/repo"
+	echo "release.yml refs/tags/v0.9.0-beta.3 release.yml@refs/tags/v0.9.0-beta.3 7" >"$STATE/identity"
+	if run verify; then fail "an attestation signed in $other was accepted"; fi
+	grep -q 'has no attestation from release-build.yml or release.yml in 3xDevOps/cloudfield or 3xDevOps/aether for v0.9.0-beta.3: no matching attestation' "$tmp/out" || fail "$other: $(cat "$tmp/out")"
 done
 
 # A release from before edge-qualify needs its whole run to have succeeded.
@@ -107,6 +132,6 @@ echo "release-build.yml refs/tags/v0.9.0-beta.2 release.yml@refs/tags/v0.9.0-bet
 if run verify; then fail "another tag's attestation was accepted"; fi
 reset
 if run verify; then fail "an image without an attestation was accepted"; fi
-[ "$(grep -c 'attestation verify' "$STATE/log")" = 9 ] || fail "did not retry every identity 3 times"
+[ "$(grep -c 'attestation verify' "$STATE/log")" = 18 ] || fail "did not retry every identity under both names 3 times"
 
 echo "edge-attestation tests passed"
