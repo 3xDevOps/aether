@@ -18,8 +18,10 @@ directories:
 files:
   - main.js
   - cli-binding.js
+  - deep-link.js
   - notify.js
   - sidecar-exit.js
+  - user-data.js
   - zoom.js
   - preload.js
   - package.json
@@ -28,7 +30,7 @@ files:
 electronLanguages:
   - en-US
 
-# aether://run/<id> deep links (main.js handleDeepLink). macOS reads the
+# aether:// and cloudfield:// deep links (main.js handleDeepLink). macOS reads the
 # scheme from the bundle's Info.plist, so a runtime
 # setAsDefaultProtocolClient alone is not enough there; Linux gets an
 # x-scheme-handler MIME entry in the .desktop file.
@@ -36,6 +38,7 @@ protocols:
   - name: Aether
     schemes:
       - aether
+      - cloudfield
 
 mac:
   # Ad-hoc signature: Apple Silicon refuses to launch an unsigned binary,

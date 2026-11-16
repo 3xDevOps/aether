@@ -483,6 +483,29 @@ func main() {
     Assert-AetherTest (Get-AetherTestBytesEqual (Join-Path $env:SystemRoot 'System32\PING.EXE') $runningCli) 'install over a running CLI replaced it'
     Assert-AetherEqual $beforePath (Get-AetherTestUserPath) 'locked CLI changed user PATH'
 
+    # A desktop app running from its folder under the new product name stops a
+    # client install as one under the old name does.
+    $renamedLocal = Join-Path $root 'renamed-localappdata'
+    $renamedDesktop = Join-Path $renamedLocal 'Programs\Cloudfield Desktop\aether-desktop.exe'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $renamedDesktop) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $env:SystemRoot 'System32\PING.EXE') -Destination $renamedDesktop
+    Write-AetherRelease $releaseRoot $version $fixture $fixture
+    $renamedProcess = Start-Process -FilePath $renamedDesktop -ArgumentList @('-n', '60', '127.0.0.1') -WindowStyle Hidden -PassThru
+    try {
+        $result = Invoke-AetherPowerShellFile $installer @('-Version', $version) @{
+            AETHER_BASE_URL = $baseUrl
+            LOCALAPPDATA = $renamedLocal
+        }
+    } finally {
+        Stop-Process -Id $renamedProcess.Id -Force -ErrorAction SilentlyContinue
+        $renamedProcess.WaitForExit()
+    }
+    Assert-AetherTest ($result.ExitCode -ne 0) 'install beside a running renamed desktop app was reported as success'
+    foreach ($expected in @(('aether-desktop (pid {0}) {1}' -f $renamedProcess.Id, $renamedDesktop), 'Nothing was changed.')) {
+        Assert-AetherTest ($result.Stderr.Contains($expected)) ("running renamed desktop message lacks [{0}]: {1}" -f $expected, $result.Output)
+    }
+    Assert-AetherTest (-not (Test-Path -LiteralPath (Join-Path $renamedLocal 'Programs\Aether\aether.exe'))) 'install beside a running renamed desktop app installed the CLI'
+
     # A fresh default install invokes the exact installed CLI and leaves the
     # generated desktop executable beside (not inside) the CLI directory.
     $freshLocal = Join-Path $root 'fresh-localappdata'
