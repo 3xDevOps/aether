@@ -860,7 +860,12 @@ func TestGitServiceAnswersTheServersCheckoutCalls(t *testing.T) {
 		if err := sess.Start(runCtx, string(testRun)); err != nil {
 			t.Fatal(err)
 		}
-		go func() { _ = sess.Run(runCtx) }()
+		ran := make(chan error, 1)
+		go func() { ran <- sess.Run(runCtx) }()
+		t.Cleanup(func() {
+			cancel()
+			<-ran
+		})
 		deadline := time.Now().Add(20 * time.Second)
 		for {
 			if data, err := os.ReadFile(filepath.Join(p.checkout, "local.txt")); err == nil && string(data) == "from local" {
