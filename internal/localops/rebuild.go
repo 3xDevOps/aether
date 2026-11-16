@@ -1,12 +1,16 @@
 package localops
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/user"
 	"path"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -69,22 +73,29 @@ func InstalledDesktopApp(goos string, ru RealUser) (string, bool) {
 // first. A machine can hold an app under the legacy product name beside one
 // under this build's.
 func InstalledDesktopApps(goos string, ru RealUser) []string {
-	xdg := os.Getenv("XDG_DATA_HOME")
-	if ru.ViaSudo {
-		xdg = ""
-	}
 	var apps []string
-	for _, candidate := range desktopAppPaths(goos, ru.Home, xdg, os.Getenv("LOCALAPPDATA")) {
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			apps = append(apps, candidate)
+	for _, name := range productNames() {
+		for _, candidate := range userAppPaths(goos, ru, name) {
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				apps = append(apps, candidate)
+			}
 		}
 	}
 	return apps
 }
 
-// desktopAppPaths lists the candidate install locations for goos, most
-// likely first: this build's product name, then the legacy one. It mirrors
-// desktopLayout; an empty list means this OS has no desktop app at all.
+// userAppPaths is appPathsNamed for ru's account.
+func userAppPaths(goos string, ru RealUser, name string) []string {
+	xdg := os.Getenv("XDG_DATA_HOME")
+	if ru.ViaSudo {
+		xdg = ""
+	}
+	return appPathsNamed(goos, name, ru.Home, xdg, os.Getenv("LOCALAPPDATA"))
+}
+
+// appPathsNamed lists the candidate install locations of the app named
+// name for goos, most likely first. It mirrors desktopLayout; an empty list
+// means this OS has no desktop app at all.
 //
 // The unix branches join with path and test for a leading slash
 // themselves, because path/filepath answers for the machine running the
@@ -94,28 +105,27 @@ func InstalledDesktopApps(goos string, ru RealUser) []string {
 // still the linux and darwin layouts when a Windows runner asks. The
 // windows branch keeps filepath, which is that OS's own rule on the only
 // machine where those paths can exist.
-func desktopAppPaths(goos, home, xdgData, localAppData string) []string {
-	var paths []string
-	for _, name := range productNames() {
-		switch goos {
-		case "linux":
-			// A relative XDG_DATA_HOME is invalid per the spec and treated
-			// as unset, the same way desktopLayout treats it.
-			if strings.HasPrefix(xdgData, "/") {
-				paths = append(paths, path.Join(xdgData, linuxAppDir(name), "desktop"))
-			}
-			paths = append(paths, path.Join(home, ".local", "share", linuxAppDir(name), "desktop"))
-		case "darwin":
-			paths = append(paths,
-				path.Join(macSystemApplications, darwinBundle(name)),
-				path.Join(home, "Applications", darwinBundle(name)))
-		case "windows":
-			if filepath.IsAbs(localAppData) {
-				paths = append(paths, filepath.Join(localAppData, "Programs", windowsAppDir(name)))
-			}
+func appPathsNamed(goos, name, home, xdgData, localAppData string) []string {
+	switch goos {
+	case "linux":
+		var paths []string
+		// A relative XDG_DATA_HOME is invalid per the spec and treated as
+		// unset, the same way desktopLayout treats it.
+		if strings.HasPrefix(xdgData, "/") {
+			paths = append(paths, path.Join(xdgData, linuxAppDir(name), "desktop"))
+		}
+		return append(paths, path.Join(home, ".local", "share", linuxAppDir(name), "desktop"))
+	case "darwin":
+		return []string{
+			path.Join(macSystemApplications, darwinBundle(name)),
+			path.Join(home, "Applications", darwinBundle(name)),
+		}
+	case "windows":
+		if filepath.IsAbs(localAppData) {
+			return []string{filepath.Join(localAppData, "Programs", windowsAppDir(name))}
 		}
 	}
-	return paths
+	return nil
 }
 
 // RebuildAppArgv is the command that rebuilds the installed desktop app.
@@ -238,4 +248,150 @@ func pgrepMatches(pattern string) bool {
 	// pgrep prints the pids it found; this caller wants the exit status.
 	_, err := exec.Command("pgrep", "-f", pattern).Output()
 	return err == nil
+}
+
+// ShellExeEnv is set by the desktop shell to its own executable when it
+// starts `aether gui`. Shells built before it existed leave it unset.
+const ShellExeEnv = "AETHER_SHELL_EXE"
+
+// retiredPrefix names the directory beside it that an old app is moved to
+// before it is deleted. Nothing else creates such a directory, so one found
+// at a later start is a removal to finish.
+const retiredPrefix = ".aether-retired-"
+
+// geteuid is os.Geteuid, a variable so tests can run as root.
+var geteuid = os.Geteuid
+
+// bundleIDPattern finds CFBundleIdentifier in the XML Info.plist
+// electron-builder writes.
+var bundleIDPattern = regexp.MustCompile(`<key>CFBundleIdentifier</key>\s*<string>([^<]*)</string>`)
+
+// RetireLegacyDesktop removes this user's install of the legacy-name app,
+// and on windows its Start Menu shortcut, once shellExe is the executable
+// of an install under this build's name. It removes nothing else: not a
+// running app, another app of the same name, the data directory, or
+// anything when run as root.
+func RetireLegacyDesktop(goos, shellExe string) error {
+	return retireLegacyDesktop(goos, func() (RealUser, error) {
+		return realUser("", nil, os.UserHomeDir)
+	}, shellExe)
+}
+
+func retireLegacyDesktop(goos string, lookup func() (RealUser, error), shellExe string) error {
+	if productName == legacyProductName || shellExe == "" || geteuid() == 0 {
+		return nil
+	}
+	ru, err := lookup()
+	if err != nil {
+		return err
+	}
+	shell, err := filepath.EvalSymlinks(shellExe)
+	if err != nil {
+		return nil
+	}
+	current := userAppPaths(goos, ru, productName)
+	shellApp := ""
+	for _, app := range current {
+		if sameFile(DesktopAppExe(goos, app), shell) {
+			shellApp, err = filepath.EvalSymlinks(app)
+			break
+		}
+	}
+	if shellApp == "" || err != nil {
+		return nil
+	}
+	removeErr := func(p string, err error) error {
+		hint := " (delete it by hand to stop this message)"
+		if goos == "windows" {
+			hint = removeHint(goos, p, err)
+		}
+		return fmt.Errorf("localops: remove the old app %s, which %s replaces%s: %w", p, productName, hint, err)
+	}
+	var errs []error
+	for _, app := range userAppPaths(goos, ru, legacyProductName) {
+		retired := filepath.Join(filepath.Dir(app), retiredPrefix+filepath.Base(app))
+		if info, err := os.Lstat(retired); err != nil || !info.Mode().IsDir() || !ownedByUser(info) {
+			if !oldApp(goos, app, current, shellApp) {
+				continue
+			}
+			if err := os.Rename(app, retired); err != nil {
+				errs = append(errs, removeErr(app, err))
+				continue
+			}
+		}
+		// The moved app stays until the shortcut is gone, as the mark that
+		// the next start has to finish. An app installed again since keeps
+		// its shortcut.
+		if _, err := os.Lstat(app); goos == "windows" && errors.Is(err, fs.ErrNotExist) {
+			programs, err := resolveWindowsPrograms()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("localops: resolve Start Menu Programs folder: %w", err))
+				continue
+			}
+			link := filepath.Join(programs, legacyProductName+".lnk")
+			if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				errs = append(errs, fmt.Errorf("localops: remove the old Start Menu shortcut %s: %w", link, err))
+				continue
+			}
+		}
+		if err := os.RemoveAll(retired); err != nil {
+			errs = append(errs, removeErr(retired, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// oldApp reports whether app is an install of the legacy app to remove.
+func oldApp(goos, app string, current []string, shellApp string) bool {
+	info, err := os.Lstat(app)
+	if err != nil || !info.Mode().IsDir() || !ownedByUser(info) {
+		return false
+	}
+	if !regularFile(DesktopAppExe(goos, app)) {
+		return false
+	}
+	if goos == "darwin" {
+		plist, _ := os.ReadFile(filepath.Join(app, "Contents", "Info.plist"))
+		if m := bundleIDPattern.FindSubmatch(plist); m == nil || string(m[1]) != builder.AppID {
+			return false
+		}
+	} else if !regularFile(filepath.Join(app, filepath.FromSlash(cliBindingFile))) {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(app)
+	if err != nil || sameFile(resolved, shellApp) || within(resolved, shellApp) || within(shellApp, resolved) {
+		return false
+	}
+	for _, c := range current {
+		if c == app || sameFile(c, resolved) {
+			return false
+		}
+	}
+	// /proc reports the resolved executable, pgrep the path it was started by.
+	return !DesktopAppRunning(goos, app) && !DesktopAppRunning(goos, resolved)
+}
+
+func regularFile(p string) bool {
+	info, err := os.Lstat(p)
+	return err == nil && info.Mode().IsRegular()
+}
+
+func sameFile(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	return err == nil && os.SameFile(ai, bi)
+}
+
+// within reports whether p is inside dir, by the host's rules, because
+// both are paths on this machine: filepath.Rel already ignores case on
+// windows, and darwin's default file system ignores it too.
+func within(dir, p string) bool {
+	if runtime.GOOS == "darwin" {
+		dir, p = strings.ToLower(dir), strings.ToLower(p)
+	}
+	rel, err := filepath.Rel(dir, p)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

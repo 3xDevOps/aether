@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localgw"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
@@ -29,6 +31,10 @@ func init() {
 	})
 }
 
+// retireLegacyDesktop is localops.RetireLegacyDesktop, a variable so a test
+// can see the gateway call it.
+var retireLegacyDesktop = localops.RetireLegacyDesktop
+
 func runGUI(args []string) error {
 	if len(args) > 0 && args[0] == "build" {
 		return guiBuild(args[1:])
@@ -41,6 +47,10 @@ func runGUI(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// Unset so that nothing this gateway starts, such as a relaunched
+	// shell's own gateway, inherits it.
+	shellExe := os.Getenv(localops.ShellExeEnv)
+	_ = os.Unsetenv(localops.ShellExeEnv)
 	cfg, err := cli.Load()
 	if err != nil {
 		if !errors.Is(err, cli.ErrNotLinked) {
@@ -119,6 +129,10 @@ func runGUI(args []string) error {
 		}
 		fmt.Println(string(line))
 		_ = os.Stdout.Sync()
+		// stdout is the shell's protocol; the next start retries.
+		if err := retireLegacyDesktop(runtime.GOOS, shellExe); err != nil {
+			fmt.Fprintf(os.Stderr, "aether gui: %v\n", err)
+		}
 	} else {
 		fmt.Println(url)
 		if !*urlOnly {

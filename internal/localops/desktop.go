@@ -50,6 +50,7 @@ const legacyProductName = "Aether"
 // launcher replaces the old one's and Electron registers that launcher as
 // the link handler.
 type builderConfig struct {
+	AppID         string `yaml:"appId"`
 	ProductName   string `yaml:"productName"`
 	ExtraMetadata struct {
 		DesktopName string `yaml:"desktopName"`
@@ -74,8 +75,8 @@ func embeddedBuilderConfig() builderConfig {
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		panic(fmt.Sprintf("localops: parse the embedded electron-builder.yml: %v", err))
 	}
-	if cfg.ProductName == "" || cfg.ExtraMetadata.DesktopName == "" || cfg.Linux.ExecutableName == "" {
-		panic(fmt.Sprintf("localops: the embedded electron-builder.yml lacks productName, extraMetadata.desktopName or linux.executableName: %+v", cfg))
+	if cfg.AppID == "" || cfg.ProductName == "" || cfg.ExtraMetadata.DesktopName == "" || cfg.Linux.ExecutableName == "" {
+		panic(fmt.Sprintf("localops: the embedded electron-builder.yml lacks appId, productName, extraMetadata.desktopName or linux.executableName: %+v", cfg))
 	}
 	return cfg
 }
