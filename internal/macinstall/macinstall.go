@@ -40,6 +40,10 @@ type Request struct {
 	// by root against the root-owned copy, which closes the window in
 	// which the same user could swap Src while the dialog is up.
 	SHA256 string
+	// Link, when set, is a path beside Dst that root makes a relative
+	// symlink to Dst once Dst is installed, if nothing is there yet. It is
+	// never replaced, and failing to create it does not fail the install.
+	Link string
 }
 
 // ErrCanceled reports that the user dismissed the dialog or macOS refused
@@ -62,6 +66,7 @@ const (
 	mv      = "/bin/mv"
 	rm      = "/bin/rm"
 	echo    = "/bin/echo"
+	ln      = "/bin/ln"
 	// osascript is what shows the dialog.
 	osascript = "/usr/bin/osascript"
 	// launchctl says which kind of login session this process is in.
@@ -85,7 +90,7 @@ func HasGUISession() bool {
 // Tools lists every program the privileged command runs, for a test that
 // wants to skip where one is missing.
 func Tools() []string {
-	return []string{mktemp, install, openssl, chmod, mv, rm, echo}
+	return []string{mktemp, install, openssl, chmod, mv, rm, echo, ln}
 }
 
 // ExitChecksumMismatch is the status the privileged command exits with
@@ -106,7 +111,8 @@ var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 //  3. hashes the root-owned copy and exits ExitChecksumMismatch unless it
 //     matches SHA256;
 //  4. makes the copy 0755 and renames it over Dst - atomic within one
-//     directory, and a running binary keeps its old inode.
+//     directory, and a running binary keeps its old inode;
+//  5. with Link set, links it to Dst's name when nothing is at Link.
 func ShellCommand(req Request) (string, error) {
 	if err := check(req); err != nil {
 		return "", err
@@ -125,6 +131,11 @@ func ShellCommand(req Request) (string, error) {
 			"exit " + strconv.Itoa(ExitChecksumMismatch) + "; }",
 		chmod + ` 0755 "$t"`,
 		mv + ` -f "$t" ` + shellquote.QuoteAlways(req.Dst),
+	}
+	if req.Link != "" {
+		l := shellquote.QuoteAlways(req.Link)
+		steps = append(steps, "{ [ -e "+l+" ] || [ -L "+l+" ] || "+ln+" -s "+
+			shellquote.QuoteAlways(filepath.Base(req.Dst))+" "+l+"; } || :")
 	}
 	return strings.Join(steps, "; "), nil
 }
@@ -148,6 +159,12 @@ func Script(req Request, prompt string) (string, error) {
 // directory.
 func check(req Request) error {
 	paths := []struct{ name, path string }{{"source", req.Src}, {"destination", req.Dst}}
+	if req.Link != "" {
+		if filepath.Dir(req.Link) != filepath.Dir(req.Dst) {
+			return fmt.Errorf("link %q is not beside %q", req.Link, req.Dst)
+		}
+		paths = append(paths, struct{ name, path string }{"link", req.Link})
+	}
 	for _, p := range paths {
 		if !filepath.IsAbs(p.path) {
 			return fmt.Errorf("%s %q is not an absolute path", p.name, p.path)

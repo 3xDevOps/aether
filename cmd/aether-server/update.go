@@ -20,6 +20,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
+	"github.com/3xDevOps/Aether/internal/serversetup"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
@@ -100,6 +101,7 @@ func updateCmd(args []string) error {
 	if *channel != "" {
 		return setChannel(context.Background(), os.Stdout, baseURL, stateDir, database, *channel, *yes)
 	}
+	linkSecondNamesAndReload(self)
 	unlock, err := serverupdate.Lock(stateDir)
 	if err != nil {
 		return err
@@ -179,6 +181,27 @@ func installVMFiles(ctx context.Context, self string, serveArgs []string) error 
 		return fmt.Errorf("%s vm install: %w: %s", self, err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+// linkSecondNamesAndReload gives the binaries beside self and the unit
+// their second names when they are missing, whether or not an update
+// follows, and reloads systemd when it does not resolve the unit's yet.
+// The update goes ahead whatever this finds; each problem is a warning.
+func linkSecondNamesAndReload(self string) {
+	if err := selfupdate.Link(filepath.Dir(self)); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
+	}
+	unitDir := filepath.Dir(serversetup.UnitPath)
+	if err := (serverupdate.Host{UnitDir: unitDir}).LinkUnit(); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
+		return
+	}
+	if _, err := os.Lstat(filepath.Join(unitDir, serverupdate.UnitAlias)); err != nil || unitAliasResolved() {
+		return
+	}
+	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: systemctl daemon-reload: %v: %s\n", err, strings.TrimSpace(string(out)))
+	}
 }
 
 func step(w io.Writer, what string, do func() error) error {

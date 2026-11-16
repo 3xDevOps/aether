@@ -80,7 +80,7 @@ func stubAdmin(t *testing.T, fn adminInstaller) {
 }
 
 // copyAsRoot does what the privileged command does, as this user: copies
-// the staged file over the destination, mode 0755.
+// the staged file over the destination, mode 0755, and links Link to it.
 func copyAsRoot(t *testing.T, req macinstall.Request) error {
 	t.Helper()
 	dir := filepath.Dir(req.Dst)
@@ -92,7 +92,10 @@ func copyAsRoot(t *testing.T, req macinstall.Request) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(req.Dst, body, 0o755)
+	if err = os.WriteFile(req.Dst, body, 0o755); err != nil || req.Link == "" {
+		return err
+	}
+	return os.Symlink(filepath.Base(req.Dst), req.Link)
 }
 
 func TestUpdateWithAuthorizationAsksWhenUnwritable(t *testing.T) {
@@ -124,6 +127,9 @@ func TestUpdateWithAuthorizationAsksWhenUnwritable(t *testing.T) {
 	}
 	if got.Dst != dst {
 		t.Fatalf("request dst = %s, want %s", got.Dst, dst)
+	}
+	if want := filepath.Join(filepath.Dir(dst), "cloudfield"); got.Link != want {
+		t.Fatalf("request link = %q, want %s", got.Link, want)
 	}
 	if !strings.Contains(got.Src, filepath.Join("aether", "update")) {
 		t.Fatalf("request src = %s, want it under the private staging directory", got.Src)

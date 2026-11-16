@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -157,6 +156,9 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 		return nil, s.failOrRetry(ctx, pending, scheduled, err)
 	}
 	slog.Info("serverupdate: binaries replaced", "version", pending.Version, "paths", rec.Binaries)
+	if err := s.cfg.Host.LinkUnit(); err != nil {
+		slog.Warn("serverupdate: link the unit's second name", "error", err)
+	}
 	if scheduled && !s.busyNow(ctx).Idle() {
 		if err := unswap(s.cfg.StateDir, rec); err != nil {
 			return nil, s.undoFailed(ctx, pending, fmt.Errorf("a session started during the download, and undoing the swap failed: %w", err))
@@ -262,7 +264,7 @@ func swap(ctx context.Context, p Plan, tag string, m selfupdate.Manifest) (*swap
 		Binaries:    []string{p.Self},
 		At:          p.Now().UTC(),
 	}
-	if sibling := filepath.Join(filepath.Dir(p.Self), "aether"); fileExists(sibling) {
+	if sibling, ok := selfupdate.Beside(p.Self, "aether"); ok {
 		rec.Binaries = append(rec.Binaries, sibling)
 	}
 	schema, err := p.Schema(ctx)

@@ -388,6 +388,12 @@ func reportBinary() error {
 	}
 	fmt.Printf("this binary is %s\n", self)
 	warnShadowed(os.Stderr, self)
+	// An update from a release that predates the second names leaves only
+	// the real files; an update that finds nothing to install completes
+	// the layout.
+	if err := selfupdate.Link(filepath.Dir(self)); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
+	}
 	return nil
 }
 
