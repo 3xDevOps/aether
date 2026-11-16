@@ -40,7 +40,7 @@ gh api --paginate "repos/$repo/releases?per_page=100" --jq '.[] | select(.draft 
 
 case $from in
 v*) source=$from ;;
-*) source=$("$tool" source -from "$from" -to "$to" -tags "$tmp/tags") ;;
+*) source=$("$tool" source -from "$from" -to "$to" -tags "$tmp/tags" -published "$tmp/published") ;;
 esac
 grep -qxF "$source" "$tmp/published" || fail "$source is not a published release; promote only a published one"
 gh release download "$source" --repo "$repo" --pattern aether-release.json --pattern aether-release.json.sig --dir "$tmp/manifest"

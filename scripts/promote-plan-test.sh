@@ -102,7 +102,7 @@ grep -q -- '-from v0.9.0-nightly.12 -to beta -tags' "$STATE/log" || fail "resolv
 # reach resolve.
 reset
 FROM=$nightly TO=beta VERSION=1.0.0 FIRST_POINTER=true run || fail "a commit: $(cat "$tmp/out")"
-grep -q "promote-plan source -from $nightly -to beta" "$STATE/log" || fail "source was not resolved: $(cat "$STATE/log")"
+grep -q "promote-plan source -from $nightly -to beta -tags .* -published " "$STATE/log" || fail "source was not resolved: $(cat "$STATE/log")"
 grep -q -- '-from v0.9.0-nightly.12 -to beta -version 1.0.0 -first-pointer -tags' "$STATE/log" || fail "resolve got: $(cat "$STATE/log")"
 
 # An unpublished source is refused before anything is downloaded.

@@ -1,7 +1,7 @@
 // Command promote-plan decides what promote.yml builds. Its source
 // subcommand finds the release a full commit SHA names:
 //
-//	promote-plan source -from <sha> -to <beta|stable> -tags <file>
+//	promote-plan source -from <sha> -to <beta|stable> -tags <file> -published <file>
 //
 // and resolve verifies that release's signed manifest and the target
 // channel's pointer against the keys this build trusts, then prints the
@@ -73,11 +73,12 @@ func source(args []string, out io.Writer) error {
 	from := fs.String("from", "", "full commit SHA of a nightly or beta")
 	to := fs.String("to", "", "beta or stable")
 	tagsFile := fs.String("tags", "", "file of <tag> <commit> lines")
+	publishedFile := fs.String("published", "", "file of published release tags")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if !fullSHA.MatchString(*from) || *tagsFile == "" || fs.NArg() != 0 {
-		return errors.New("usage: promote-plan source -from <40 hex> -to <beta|stable> -tags <file>")
+	if !fullSHA.MatchString(*from) || *tagsFile == "" || *publishedFile == "" || fs.NArg() != 0 {
+		return errors.New("usage: promote-plan source -from <40 hex> -to <beta|stable> -tags <file> -published <file>")
 	}
 	form, err := sourceForm(*to)
 	if err != nil {
@@ -87,14 +88,18 @@ func source(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	published, err := readLines(*publishedFile)
+	if err != nil {
+		return err
+	}
 	best := ""
 	for tag, commit := range tags {
-		if commit == *from && form.MatchString(tag) && (best == "" || selfupdate.Behind(best, tag)) {
+		if commit == *from && published[tag] && form.MatchString(tag) && (best == "" || selfupdate.Behind(best, tag)) {
 			best = tag
 		}
 	}
 	if best == "" {
-		return fmt.Errorf("no %s tag names commit %s", strings.TrimPrefix(form.String(), "^v"), *from)
+		return fmt.Errorf("no published %s tag names commit %s", strings.TrimPrefix(form.String(), "^v"), *from)
 	}
 	_, err = fmt.Fprintln(out, best)
 	return err
@@ -158,7 +163,7 @@ func resolve(args []string, out io.Writer) error {
 	if tagged, ok := tags[*from]; !ok || tagged != m.Commit {
 		return fmt.Errorf("tag %s names %q, but its signed manifest names commit %s", *from, tagged, m.Commit)
 	}
-	p, version, err := promotion(m, *to, *override, *first, tags)
+	p, version, err := promotion(m, *to, *override, *first, tags, published)
 	if err != nil {
 		return err
 	}
@@ -173,7 +178,7 @@ func resolve(args []string, out io.Writer) error {
 
 // promotion checks that m may be promoted to to and returns the release it
 // becomes, without its tag, and the version core of that tag.
-func promotion(m selfupdate.Manifest, to, override string, first bool, tags map[string]string) (plan, string, error) {
+func promotion(m selfupdate.Manifest, to, override string, first bool, tags map[string]string, published map[string]bool) (plan, string, error) {
 	p := plan{commit: m.Commit, channel: to, build: m.Build, hotfix: m.Hotfix, pointer: to, first: first}
 	if to == selfupdate.ChannelStable {
 		p.ifAbove = selfupdate.ChannelBeta
@@ -203,18 +208,20 @@ func promotion(m selfupdate.Manifest, to, override string, first bool, tags map[
 	if override != "" {
 		version = override
 	}
-	if base := nightlyBase(tags); selfupdate.Behind("v"+version, "v"+base) {
+	if base := nightlyBase(tags, published); selfupdate.Behind("v"+version, "v"+base) {
 		return plan{}, "", fmt.Errorf("version %s is below the current nightly base %s; pass version %s or above", version, base, base)
 	}
 	return p, version, nil
 }
 
 // nightlyBase is the X.Y.Z nightlies are built at: the higher of the last
-// stable with its minor bumped and the core of the highest beta above it.
-func nightlyBase(tags map[string]string) string {
+// stable with its minor bumped and the core of the highest beta above it,
+// among published releases. A tag a failed Promote left without one does
+// not count, so a new dispatch of that promotion can resume it.
+func nightlyBase(tags map[string]string, published map[string]bool) string {
 	stable := ""
 	for tag := range tags {
-		if stableRe.MatchString(tag) && (stable == "" || selfupdate.Behind(stable, tag)) {
+		if published[tag] && stableRe.MatchString(tag) && (stable == "" || selfupdate.Behind(stable, tag)) {
 			stable = tag
 		}
 	}
@@ -225,7 +232,7 @@ func nightlyBase(tags map[string]string) string {
 		base = fmt.Sprintf("v%s.%d.0", parts[0], minor+1)
 	}
 	for tag := range tags {
-		if g := betaRe.FindStringSubmatch(tag); g != nil && selfupdate.Behind(base, "v"+g[1]) {
+		if g := betaRe.FindStringSubmatch(tag); g != nil && published[tag] && selfupdate.Behind(base, "v"+g[1]) {
 			base = "v" + g[1]
 		}
 	}

@@ -129,6 +129,8 @@ func TestResolvesTheNewRelease(t *testing.T) {
 	noStable.published = []string{"v0.8.7-beta.14"}
 	noStable.pointers = nil
 	stableOverride := baseWorld()
+	unpublishedStable := baseWorld()
+	unpublishedStable.tags["v0.9.0"] = betaCommit
 	for _, tc := range []struct {
 		name  string
 		w     world
@@ -142,6 +144,7 @@ func TestResolvesTheNewRelease(t *testing.T) {
 		{"an override at the base's floor or above", baseWorld(), nightly12, []string{"-to", "beta", "-version", "1.0.0"}, "tag=v1.0.0-beta.1", nil},
 		{"beta to stable moves beta when above it", baseWorld(), beta2, []string{"-to", "stable"}, "tag=v0.9.0 commit=" + betaCommit + " channel=stable build=405 hotfix=0 pointer=stable pointer-if-above=beta first-pointer=false", nil},
 		{"the migration's first stable", noStable, pre14, []string{"-to", "stable", "-first-pointer"}, "tag=v0.8.7 commit=" + preCommit + " channel=stable build=1 hotfix=0 pointer=stable pointer-if-above=beta first-pointer=true", nil},
+		{"a failed stable Promote's tag resumes, its tag not raising the floor", unpublishedStable, beta2, []string{"-to", "stable"}, "tag=v0.9.0", nil},
 		{"stable override", stableOverride, beta2, []string{"-to", "stable", "-version", "0.10.0"}, "tag=v0.10.0", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -228,17 +231,20 @@ func TestRefusesAPromotion(t *testing.T) {
 func TestSourceFindsTheReleaseACommitNames(t *testing.T) {
 	dir := t.TempDir()
 	tags := filepath.Join(dir, "tags")
-	write(t, tags, []byte("v0.9.0-nightly.9 "+nightlyCommit+"\nv0.9.0-nightly.10 "+nightlyCommit+"\nv0.9.0-beta.1 "+nightlyCommit+"\n"))
+	write(t, tags, []byte("v0.9.0-nightly.9 "+nightlyCommit+"\nv0.9.0-nightly.10 "+nightlyCommit+"\nv0.9.0-beta.1 "+nightlyCommit+"\nv0.9.0-beta.2 "+nightlyCommit+"\n"))
+	// v0.9.0-beta.2 is a failed Promote's tag with no published release.
+	published := filepath.Join(dir, "published")
+	write(t, published, []byte("v0.9.0-nightly.9\nv0.9.0-nightly.10\nv0.9.0-beta.1\n"))
 	for to, want := range map[string]string{"beta": "v0.9.0-nightly.10", "stable": "v0.9.0-beta.1"} {
 		var out bytes.Buffer
-		if err := run([]string{"source", "-from", nightlyCommit, "-to", to, "-tags", tags}, &out); err != nil {
+		if err := run([]string{"source", "-from", nightlyCommit, "-to", to, "-tags", tags, "-published", published}, &out); err != nil {
 			t.Fatal(err)
 		}
 		if got := strings.TrimSpace(out.String()); got != want {
 			t.Errorf("to %s: source = %s, want %s", to, got, want)
 		}
 	}
-	if err := run([]string{"source", "-from", otherCommit, "-to", "beta", "-tags", tags}, &bytes.Buffer{}); err == nil {
+	if err := run([]string{"source", "-from", otherCommit, "-to", "beta", "-tags", tags, "-published", published}, &bytes.Buffer{}); err == nil {
 		t.Fatal("a commit no nightly names resolved")
 	}
 }
