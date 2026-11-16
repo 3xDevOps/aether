@@ -6,10 +6,12 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -24,12 +26,14 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
 // Base images the test pulls, pinned like every image this repository runs.
@@ -38,10 +42,18 @@ const (
 	nginxImage    = "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de"
 )
 
-// qualifyVersion prefixes the versions of this tree's test builds, which
-// are newer than any release so that the updater never refuses one as a
-// downgrade.
-const qualifyVersion = "v99.0.0-qualify."
+// This tree's test builds are stable releases v99.0.<n> at build
+// qualifyBuild+n, above any release, so the updater never refuses one as
+// a downgrade.
+const (
+	qualifyVersion = "v99.0."
+	qualifyBuild   = 9000000
+)
+
+// qualifyKey signs the manifests of this tree's test builds, which trust
+// it beside the release keys, so their own release-check verifies the
+// signed channel and build the fake GitHub serves.
+var qualifyKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x71}, ed25519.SeedSize))
 
 // switchWait bounds how long servers take to reconnect after a switch.
 const switchWait = 2 * time.Minute
@@ -55,6 +67,8 @@ type edgeImage struct {
 	// version --json reports.
 	updater       bool
 	schema, floor int
+	// build is the build it was built with, 0 for none.
+	build int
 }
 
 // migrationStep is a migration a test build appends to the edge store's.
@@ -81,37 +95,65 @@ type qualify struct {
 	h      *harness
 	// fingerprint is the edge key's, which every release must keep.
 	fingerprint string
+
+	// fetches counts the requests for each release's manifest, and
+	// withdrawn holds releases whose manifests the fake GitHub answers 404
+	// for.
+	mu        sync.Mutex
+	fetches   map[string]int
+	withdrawn map[string]bool
+}
+
+// qualifyTLS is one certificate for the edge's two origins and GitHub's
+// two hosts, trusted by the edge, the updater's curl and this process,
+// which reads its roots once, so every starting point shares it.
+type qualifyTLS struct {
+	cert, key []byte
+	ca        string
 }
 
 // TestEdgeUpgrade qualifies an edge upgrade against real containers, as
-// docs/testing.md, "Edge upgrade qualification", describes: the previous
-// release with accounts and claimed servers, then scripts/edge-update.sh
-// through a failed release, a release that migrates and fails, an
-// additive migration and a rollback onto the migrated database, and the
-// previous release's server on the new edge.
+// docs/testing.md, "Edge upgrade qualification", describes: from each
+// release a channel's hosts run, with accounts and claimed servers, to
+// this tree, and from the first of them on through a failed release, a
+// release that migrates and fails, an additive migration and a rollback
+// onto the migrated database, and the previous release's server on the
+// new edge.
 func TestEdgeUpgrade(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Fatal("TestEdgeUpgrade needs root: the edge's data directory belongs to uid 65532 (sudo make test-edge-upgrade)")
 	}
-	q := newQualify(t)
-	prevTag := q.git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "HEAD^")
+	root := strings.TrimSpace(mustOutput(t, "git", "rev-parse", "--show-toplevel"))
+	starts := startingPoints(t, root, os.Getenv("EDGE_QUALIFY_CHANNEL"))
+	work := t.TempDir()
+	cert, key := selfSigned(t, "localhost", "127.0.0.1", "github.com", "api.github.com")
+	tls := qualifyTLS{cert: cert, key: key, ca: filepath.Join(work, "ca.pem")}
+	if err := os.WriteFile(tls.ca, cert, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSL_CERT_FILE", tls.ca)
+	for i, s := range starts {
+		if !t.Run(s.tag, func(t *testing.T) { qualifyFrom(t, tls, s, i == 0) }) {
+			return
+		}
+	}
+}
+
+// qualifyFrom updates an edge from prev to this tree. With full it then
+// goes through the failing, migrating and rollback releases.
+func qualifyFrom(t *testing.T, tls qualifyTLS, prev start, full bool) {
+	q := newQualify(t, tls)
+	prevTag := prev.tag
 	worktree := filepath.Join(q.work, "previous")
 	q.git("worktree", "add", "--detach", worktree, prevTag)
 	t.Cleanup(func() { _, _ = q.run("git", "-C", q.root, "worktree", "remove", "--force", worktree) })
 	peer := make(chan string, 1)
 	go func() { peer <- q.buildPreviousServer(worktree) }()
 
-	prev := q.build(prevTag, worktree)
-	a := q.build(qualifyVersion+"1", q.root)
-	failing := "INSERT INTO qualify_missing VALUES (1)"
-	f := q.build(qualifyVersion+"2", q.patched(qualifyVersion+"2", migrationStep{a.schema + 1, failing}))
-	mf := q.build(qualifyVersion+"3", q.patched(qualifyVersion+"3",
-		migrationStep{a.schema + 1, "CREATE TABLE qualify_raised (id INTEGER PRIMARY KEY)"},
-		migrationStep{a.schema + 2, failing}))
-	m := q.build(qualifyVersion+"4", q.patched(qualifyVersion+"4",
-		migrationStep{a.floor, "CREATE TABLE qualify_additive (id INTEGER PRIMARY KEY)"}))
+	prevImg := q.build(prevTag, worktree, prev.build)
+	a := q.signed(1, q.patched(qualifyVersion+"1"), prevTag)
 
-	q.setDigest(prev.digest)
+	q.setDigest(prevImg.digest)
 	q.compose("up", "-d", "--wait", "aether-edge")
 	q.fingerprint = q.edgeFingerprint()
 	t.Logf("%s runs with edge key %s", prevTag, q.fingerprint)
@@ -121,33 +163,54 @@ func TestEdgeUpgrade(t *testing.T) {
 	for i, s := range servers {
 		q.claim(clients[i], s.id, s.claimCode(t, time.Now()))
 	}
-	q.requireData(prev, clients, servers)
+	q.requireData(prevImg, clients, servers)
 
 	q.promote(a)
-	if prev.updater {
+	if prevImg.updater {
 		q.update(0, "now running "+a.version)
 	} else {
 		q.update(1, "predates aether-edge version --json")
-		q.requireData(prev, clients, servers)
+		q.requireData(prevImg, clients, servers)
 		q.compose("stop", "aether-edge")
 		q.mustRun("cp", "-a", filepath.Join(q.dir, "data"), filepath.Join(q.dir, "data.pre-update"))
 		q.setDigest(a.digest)
 		q.compose("up", "-d", "--wait", "aether-edge")
 	}
 	q.requireData(a, clients, servers)
+	if !full {
+		q.previousServer(<-peer, worktree, clients[0])
+		return
+	}
 
+	failing := "INSERT INTO qualify_missing VALUES (1)"
+	f := q.signed(2, q.patched(qualifyVersion+"2", migrationStep{a.schema + 1, failing}), a.version)
+	mf := q.signed(3, q.patched(qualifyVersion+"3",
+		migrationStep{a.schema + 1, "CREATE TABLE qualify_raised (id INTEGER PRIMARY KEY)"},
+		migrationStep{a.schema + 2, failing}), a.version)
+	m := q.signed(4, q.patched(qualifyVersion+"4",
+		migrationStep{a.floor, "CREATE TABLE qualify_additive (id INTEGER PRIMARY KEY)"}), a.version)
+
+	// From here the running release is this tree's, whose release-check
+	// verifies the signed manifests the fake GitHub serves.
 	q.promote(f)
 	out := q.update(1, "rolled back to "+a.version+" after "+f.version+" failed")
 	if strings.Contains(out, "restoring") {
 		t.Fatalf("%s left the database at schema %d; the rollback restored it anyway", f.version, a.schema)
 	}
+	q.requireFetched(f.version)
+	q.requireKept(a.version, f.version)
 	q.requireFailed(f)
 	q.requireData(a, clients, servers)
 	q.requireSchema(a.schema)
 	q.update(0, "skipping "+f.digest+", which failed before")
 
+	// GitHub no longer serves the running release's manifest, as after
+	// pruning; the updater orders by the copy it kept.
+	q.withdraw(a.version)
+	asked := q.fetched(a.version)
 	q.promote(mf)
 	q.update(1, "restoring /var/lib/aether-edge/backups/pre-update-"+mf.version+"-")
+	q.requireFetched(mf.version)
 	q.requireFailed(mf)
 	q.requireData(a, clients, servers)
 	q.requireSchema(a.schema)
@@ -174,10 +237,13 @@ func TestEdgeUpgrade(t *testing.T) {
 	q.requireFailed(m)
 	q.requireData(a, clients, servers)
 	q.requireSchema(a.schema + 1)
+	if n := q.fetched(a.version) - asked; n != 0 {
+		t.Fatalf("%s's manifest was requested %d times after GitHub stopped serving it; the updater must read its kept copy", a.version, n)
+	}
 }
 
-func newQualify(t *testing.T) *qualify {
-	q := &qualify{t: t, work: t.TempDir(), github: newFakeGitHub(t)}
+func newQualify(t *testing.T, tls qualifyTLS) *qualify {
+	q := &qualify{t: t, work: t.TempDir(), github: newFakeGitHub(t), fetches: map[string]int{}, withdrawn: map[string]bool{}}
 	var err error
 	if q.docker, err = exec.LookPath("docker"); err != nil {
 		t.Fatal(err)
@@ -216,6 +282,10 @@ func newQualify(t *testing.T) *qualify {
 		if r.URL.Path == "/login/oauth/access_token" {
 			r.URL.Path = "/token"
 		}
+		if rest, ok := strings.CutPrefix(r.URL.Path, "/"+selfupdate.Repo+"/releases/download/"); ok {
+			q.serveRelease(w, rest)
+			return
+		}
 		q.github.srv.Config.Handler.ServeHTTP(w, r)
 	})}
 	go func() { _ = gh.Serve(ln) }()
@@ -223,15 +293,9 @@ func newQualify(t *testing.T) *qualify {
 
 	proxyDir := filepath.Join(q.work, "proxy")
 	q.mkdir(proxyDir, 0o755)
-	// One certificate for the edge's two origins and GitHub's two hosts,
-	// trusted by the edge, the updater's curl and this process.
-	cert, key := selfSigned(t, "localhost", "127.0.0.1", "github.com", "api.github.com")
+	cert, ca := tls.cert, tls.ca
 	q.write(filepath.Join(proxyDir, "cert.pem"), cert, 0o444)
-	q.write(filepath.Join(proxyDir, "key.pem"), key, 0o400)
-	ca := filepath.Join(q.work, "ca.pem")
-	q.write(ca, cert, 0o444)
-	// The system roots are read once, at the first TLS handshake.
-	t.Setenv("SSL_CERT_FILE", ca)
+	q.write(filepath.Join(proxyDir, "key.pem"), tls.key, 0o400)
 	conf, err := os.ReadFile(filepath.Join("testdata", "upgrade", "nginx.conf"))
 	if err != nil {
 		t.Fatal(err)
@@ -294,9 +358,10 @@ networks:
 		}
 		q.write(filepath.Join(bin, stub), data, 0o755)
 	}
-	releases, promoted := filepath.Join(q.work, "releases"), filepath.Join(q.work, "promoted")
+	releases, promoted, signed := filepath.Join(q.work, "releases"), filepath.Join(q.work, "promoted"), filepath.Join(q.work, "signed")
 	q.mkdir(releases, 0o755)
 	q.mkdir(promoted, 0o755)
+	q.mkdir(signed, 0o755)
 	config := filepath.Join(q.work, "aether-edge-update.env")
 	q.write(config, fmt.Appendf(nil, `AETHER_EDGE_UPDATE_RELAY_URL=https://%s
 AETHER_EDGE_UPDATE_COMPOSE_DIR=%s
@@ -313,7 +378,8 @@ AETHER_EDGE_UPDATE_PUBLIC_WAIT=60
 	})
 	q.env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"AETHER_EDGE_UPDATE_CONFIG="+config, "CURL_CA_BUNDLE="+ca, "QUALIFY_DOCKER="+q.docker,
-		"QUALIFY_IMAGE="+q.registry+"/aether-edge", "QUALIFY_RELEASES="+releases, "QUALIFY_PROMOTED="+promoted)
+		"QUALIFY_IMAGE="+q.registry+"/aether-edge", "QUALIFY_RELEASES="+releases, "QUALIFY_PROMOTED="+promoted,
+		"QUALIFY_SIGNED="+signed, "QUALIFY_NETWORK="+q.network, "QUALIFY_CA="+ca)
 	return q
 }
 
@@ -366,17 +432,18 @@ func (q *qualify) mkdir(path string, mode os.FileMode) {
 	}
 }
 
-// build builds images/edge/Dockerfile in context as version, labelled as
-// a release labels it, and pushes it. Release version signs its digest.
-func (q *qualify) build(version, context string) edgeImage {
+// build builds images/edge/Dockerfile in context as version at build,
+// labelled as a release labels it, and pushes it. Release version signs
+// its digest.
+func (q *qualify) build(version, context string, build int) edgeImage {
 	q.t.Helper()
 	ref := q.registry + "/aether-edge:" + version
 	start := time.Now()
 	q.dockerRun("build", "-q", "-f", filepath.Join(context, "images", "edge", "Dockerfile"),
-		"--build-arg", "VERSION="+version, "--build-arg", "COMMIT=qualify",
+		"--build-arg", "VERSION="+version, "--build-arg", "COMMIT=qualify", "--build-arg", fmt.Sprintf("RELEASE_BUILD=%d", build),
 		"--label", "org.opencontainers.image.version="+version, "-t", ref, context)
 	q.dockerRun("push", "-q", ref)
-	img := edgeImage{version: version, digest: q.manifestDigest(version)}
+	img := edgeImage{version: version, digest: q.manifestDigest(version), build: build}
 	q.write(filepath.Join(q.work, "releases", version), []byte(img.digest), 0o644)
 	var v struct {
 		StoreSchema      int  `json:"store_schema"`
@@ -391,7 +458,8 @@ func (q *qualify) build(version, context string) edgeImage {
 }
 
 // patched copies what images/edge/Dockerfile builds from into a new
-// context, with steps appended to the edge store's migrations.
+// context, with steps appended to the edge store's migrations and
+// qualifyKey trusted beside the release keys.
 func (q *qualify) patched(name string, steps ...migrationStep) string {
 	q.t.Helper()
 	dir := filepath.Join(q.work, "src-"+name)
@@ -414,6 +482,9 @@ func (q *qualify) patched(name string, steps ...migrationStep) string {
 	}
 	src.WriteString("\t)\n}\n")
 	q.write(filepath.Join(dir, "internal", "edge", "store", "qualify_migrations.go"), []byte(src.String()), 0o644)
+	key := base64.StdEncoding.EncodeToString(qualifyKey.Public().(ed25519.PublicKey))
+	q.write(filepath.Join(dir, "internal", "selfupdate", "qualify_keys.go"), fmt.Appendf(nil,
+		"package selfupdate\n\nfunc init() { releaseKeys = append(releaseKeys, mustDecodeKeys(%q)...) }\n", key), 0o644)
 	return dir
 }
 

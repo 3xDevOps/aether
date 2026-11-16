@@ -551,8 +551,9 @@ jobs:
             echo "::warning title=aether-edge is not public::$image cannot be read anonymously: $(printf '%s' "$out" | tail -n 1). A repository administrator must open https://github.com/orgs/3xDevOps/packages/container/package/aether-edge, choose Package settings, set Danger Zone > Change visibility to Public, and, if the package page does not show 3xDevOps/aether as its repository, use Connect repository to link it."
           fi
 
-  # make test-edge-upgrade on this commit: the previous release, then
-  # scripts/edge-update.sh through failed and migrating builds of it, in
+  # make test-edge-upgrade on this commit: from the releases the channel
+  # pointers name, then scripts/edge-update.sh through failed and
+  # migrating builds of it, in
   # real containers and without a registry outside the runner.
   # promote-edge.yml refuses to promote a release whose run has no
   # successful job of this name.
@@ -561,7 +562,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -573,7 +574,8 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Qualify an edge upgrade
-        run: sudo env "PATH=$PATH" "HOME=$HOME" make test-edge-upgrade
+        # A nightly also upgrades from the previous nightly.
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "EDGE_QUALIFY_CHANNEL=$CHANNEL" make test-edge-upgrade
 
   release-binaries:
     needs: release-inputs

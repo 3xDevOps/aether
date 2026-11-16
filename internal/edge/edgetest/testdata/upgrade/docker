@@ -1,23 +1,35 @@
 #!/bin/sh
 # docker for scripts/edge-update.sh in TestEdgeUpgrade: the real docker
 # ($QUALIFY_DOCKER), with the updater's image mapped to the test registry
-# ($QUALIFY_IMAGE) and back in the digests it reads. release-check is
-# answered here instead: the image's binary trusts only the real release
-# keys and fetches from github.com. Release <tag> signs the digest in
-# $QUALIFY_RELEASES/<tag>, which --keep-manifests keeps as its manifest.
+# ($QUALIFY_IMAGE) and back in the digests it reads. A release-check run
+# from one of the test's signed builds ($QUALIFY_SIGNED/<digest>) is real:
+# it runs on the test network ($QUALIFY_NETWORK), where github.com is the
+# test's fake, trusting its certificate ($QUALIFY_CA). Any other image's
+# binary trusts only the real release keys, so its release-check is
+# answered here instead: release <tag> signs the digest in
+# $QUALIFY_RELEASES/<tag>, and --keep-manifests keeps
+# $QUALIFY_RELEASES/<tag>.json and .sig when the test signed them, or a
+# placeholder.
 set -eu
 from=ghcr.io/3xdevops/aether-edge
 to=$QUALIFY_IMAGE
 
-check=0
+check=0 running=""
 for a; do
 	shift
 	case $a in
 	"$from"*) a=$to${a#"$from"} ;;
 	release-check) check=1 ;;
 	esac
+	[ "$check" = 1 ] || case $a in "$to@"*) running=${a#"$to@"} ;; esac
 	set -- "$@" "$a"
 done
+
+if [ "$check" = 1 ] && [ -n "$running" ] && [ -f "$QUALIFY_SIGNED/$running" ]; then
+	shift
+	exec "$QUALIFY_DOCKER" run --network "$QUALIFY_NETWORK" -v "$QUALIFY_CA:/run/qualify/ca.pem:ro" \
+		-e SSL_CERT_FILE=/run/qualify/ca.pem "$@"
+fi
 
 if [ "$check" = 1 ]; then
 	tag="" digest="" from="" keep="" mount="" saved=0 prev=""
@@ -46,6 +58,11 @@ if [ "$check" = 1 ]; then
 		for r in "$tag" "$from"; do
 			[ "$r" != "$from" ] || [ "$saved" = 0 ] || continue
 			[ -f "$QUALIFY_RELEASES/$r" ] || continue
+			if [ -f "$QUALIFY_RELEASES/$r.json" ]; then
+				cp "$QUALIFY_RELEASES/$r.json.sig" "$dir/$r.json.sig"
+				cp "$QUALIFY_RELEASES/$r.json" "$dir/$r.json"
+				continue
+			fi
 			echo sig >"$dir/$r.json.sig"
 			cp "$QUALIFY_RELEASES/$r" "$dir/$r.json"
 		done
