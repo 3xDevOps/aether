@@ -136,18 +136,23 @@
   color: color-mix(in srgb, var(--text) 24%, transparent);
 }
 
-@property --dot-fade {
-  syntax: '<number>';
-  inherits: true;
-  initial-value: 0;
+.control-matrix-grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
 }
 
-[data-dot-fade] {
-  transition: --dot-fade var(--dot-return) ease-out;
+.control-matrix-ring {
+  fill: none;
+  stroke: var(--control-light);
+  stroke-width: 1.5px;
 }
 
-[data-dot-fade] > .control-matrix {
-  mask-image: radial-gradient(circle var(--dot-radius) at var(--dot-px, 0) var(--dot-py, 0), rgb(0 0 0 / calc(1 - var(--dot-fade) * (1 - var(--dot-min)))) var(--dot-inner), #000);
+.control-matrix[data-dot-grid-active],
+.control-matrix[data-dot-grid-active] > .control-matrix-light > div {
+  background: none;
 }
 
 .control-matrix ~ .text-muted,

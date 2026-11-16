@@ -3136,11 +3136,18 @@ and below 30rem **Multiplayer** keeps only its icon. The controller summary
 truncates instead of wrapping, at 12rem below a 48rem strip. Offline or
 failed presence reads mark the retained roster **(last known)**. Control and
 presence failures stay beside the action rather than inside a closed composer.
-With a mouse on a layout wider than the 767px phone breakpoint and motion allowed, the strip's
-dots fade to nothing under the pointer and return to full 54px away:
-`useDotFade` (`routes/run/dot-fade.ts`) writes the pointer position into a
-`mask-image` on `.control-matrix` from one `pointermove` listener, batched per
-frame, and eases the mask out over 1200ms on `pointerleave`.
+With a mouse or touch pointer on the multiplayer strip, `useDotFade`
+(`routes/run/dot-fade.ts`) swaps the strip's dot texture for SVG copies of
+it and springs each dot away from the pointer. Pointer speed adds a
+two-branch V wake, and a click or tap swells the nearby dots under a spreading
+ring. The clear bars behind text damp motion to 25%. The effect is decoration,
+so the strip is not a tab stop and takes no keys. The hook listens on the strip
+alone: `ControlButton`'s pointer capture and a touch's implicit capture keep a drag's
+moves there, and `touch-pan-y` keeps a horizontal touch drag from turning into
+a pan. Events only record the pointer; each animation frame measures the strip
+and its clear bars once, moves the dots, and rewrites only those not at rest.
+When every dot is back at rest the SVG is removed and the static texture
+returns. With reduced motion the strip keeps the static texture.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
 cancellation and server acknowledgement as Standard sessions. Streaming updates
@@ -3151,19 +3158,23 @@ generation. Takeover denials belong to the requester, not the holder.
 `MultiplayerControls` renders `ControlMatrix` as the strip's background,
 and `TerminalPane` renders it behind the agent terminal's toolbar. The
 component is a neutral dot layer, one `radial-gradient` tile, under a
-colored copy of the same dots. The bars give each group of text and
-buttons `.control-matrix-clear`, a 90% `--chrome` fill with a blurred
-shadow of the same colour that hides the dots under the group and fades
-them back in around it. A rule on the matrix's siblings turns
-`text-muted` on the bar to `--text`. The copy is clipped from the left by
-`--control-reach`, a registered `@property` number (1 empty, 0 full), so it
-is revealed from the right edge, where the control button sits. The
+colored copy of the same dots. While the strip's dots move, `useDotFade`
+removes these backgrounds and draws each layer's dots as an SVG inside the
+same element, red hold copy included, so the clipping, masks, colors and paint
+order below apply unchanged.
+The bars give each group of text and buttons `.control-matrix-clear`, a 90%
+`--chrome` fill with a blurred shadow of the same colour that hides the dots
+under the group and fades them back in around it. A rule on the matrix's
+siblings turns `text-muted` on the bar to `--text`. The copy is clipped from the
+left by `--control-reach`, a registered `@property` number (1 empty, 0 full),
+so it is revealed from the right edge, where the control button sits. The
 acquisition, release and takeover animations drive `--control-reach` and
 `color` on the colored layer. Its opacity is a separate animation: 70%
 while the dots move or a hold is under way, then half once acquisition
-settles, breathing on an infinite 8-second loop. During a hold
-`--control-hold` moves a 4rem gradient mask that fades the teal out and a
-red copy in. In
+settles. Behind the terminal toolbar it then breathes on an infinite 8-second
+loop; on the multiplayer strip, whose dots answer the pointer, it holds still.
+During a hold `--control-hold` moves a 4rem gradient mask that fades the teal
+out and a red copy in. In
 Enhanced sessions its appearance follows the acknowledged ACP lease, not the
 unused agent terminal's history or connection state, and it shows on every
 view that shows the strip. Voluntary release retracts it; takeover
