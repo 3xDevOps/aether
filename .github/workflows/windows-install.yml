@@ -160,7 +160,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # Both clients trust the fake release's key instead of the release
       # key. The overlay swaps one file at build time; no source changes.
-      # They are built the way release.yml builds the Windows CLI: the
+      # They are built the way release-build.yml builds the Windows CLI: the
       # goversioninfo resource and manifest, -trimpath, and release ldflags.
       - name: Build the old and new clients and the fake release
         run: |

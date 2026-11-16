@@ -7,9 +7,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -129,12 +127,11 @@ func (r *Release) SetBuild(tag, channel string, build, hotfix int) {
 // the contents of <channel>.json and its .sig.
 func SignPointer(t testing.TB, p selfupdate.Pointer, key ed25519.PrivateKey) (data, sig []byte) {
 	t.Helper()
-	data, err := json.MarshalIndent(p, "", "  ")
+	data, sig, err := selfupdate.SignPointer(p, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	data = append(data, '\n')
-	return data, []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(key, data)) + "\n")
+	return data, sig
 }
 
 // SetPointer serves data and sig as channel's pointer and its signature;

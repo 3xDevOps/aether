@@ -134,8 +134,8 @@ jobs:
       - name: Require the release run to have qualified the edge
         env:
           COMMIT: ${{ steps.manifest.outputs.commit }}
-        # Until release.yml has an edge-qualify job, the whole release run
-        # must have succeeded.
+        # A release run from before edge-qualify existed has no such job;
+        # then the whole release run must have succeeded.
         run: |
           run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?event=push&branch=$TAG&per_page=100" |
             jq -c --arg sha "$COMMIT" '[.workflow_runs[] | select(.head_sha == $sha)] | max_by(.run_number) // empty')
@@ -146,7 +146,7 @@ jobs:
           id=$(printf '%s' "$run" | jq -r .id)
           url=$(printf '%s' "$run" | jq -r .html_url)
           qualify=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?filter=latest&per_page=100" |
-            jq -s '[.[].jobs[] | select(.name == "edge-qualify" or (.name | startswith("edge-qualify ")))]')
+            jq -s '[.[].jobs[] | select(.name == "edge-qualify" or (.name | startswith("edge-qualify ")) or (.name | endswith(" / edge-qualify")))]')
           if [ "$(printf '%s' "$qualify" | jq length)" -gt 0 ]; then
             if ! printf '%s' "$qualify" | jq -e 'all(.conclusion == "success")' >/dev/null; then
               echo "::error::edge-qualify did not succeed in $url"
@@ -182,11 +182,15 @@ jobs:
             echo "::error::$IMAGE:$TAG is $tagged, not $DIGEST"
             exit 1
           fi
+          # release-build.yml signs releases built since the split from
+          # release.yml, which signed the ones before it.
           verify() {
             for attempt in 1 2 3; do
-              gh attestation verify "oci://$1" --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-                --source-ref "refs/tags/$TAG" --deny-self-hosted-runners && return 0
+              for signer in release-build.yml release.yml; do
+                gh attestation verify "oci://$1" --repo "$GITHUB_REPOSITORY" \
+                  --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/$signer" \
+                  --source-ref "refs/tags/$TAG" --deny-self-hosted-runners && return 0
+              done
               [ "$attempt" = 3 ] || sleep 10
             done
             return 1
@@ -251,8 +255,11 @@ jobs:
             exit 1
           fi
           gh attestation verify "oci://$IMAGE:stable" --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-            --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-build.yml" \
+            --source-ref "refs/tags/$TAG" --deny-self-hosted-runners ||
+            gh attestation verify "oci://$IMAGE:stable" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
           anonymous=$(mktemp -d)
           test "$(DOCKER_CONFIG=$anonymous crane digest "$IMAGE:stable")" = "$DIGEST"
           {

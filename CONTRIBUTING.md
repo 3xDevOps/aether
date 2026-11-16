@@ -482,11 +482,15 @@ git push origin v0.8.0
 Push tags one at a time: GitHub starts no workflow when more than three are
 pushed at once. Do not create the GitHub release yourself.
 `.github/workflows/release.yml` runs only when the tag's pusher is a
-repository admin and `AETHER_RELEASE_SIGNING_KEY` is set. It builds every
-binary, the Windows desktop zips, the signed Android app, the guest kernel
-for session VMs and the browser, edge and standard images from the tag's
-commit, runs the edge upgrade qualification and a Defender scan, and uploads
-the assets to a draft. After
+repository admin and `AETHER_RELEASE_SIGNING_KEY` is set, and calls
+`.github/workflows/release-build.yml`. That builds every binary, the Windows
+desktop zips, the signed Android app, the guest kernel for session VMs and
+the browser, edge and standard images from the tag's commit, and runs the
+edge upgrade qualification and a Defender scan. Its `release` job alone
+holds the signing key: it checks out the `main` commit that
+`release-policy` read, checks that the Go binaries record the tag's commit,
+signs the assets with that checkout's `release-manifest` and uploads them
+to a draft with its `scripts/publish-release.sh`. After
 checking them against the signed manifest it publishes a normal release,
 not a GitHub prerelease, because the installers and update checks read
 `/releases/latest`, which skips prereleases. Only a release whose signed
@@ -504,6 +508,15 @@ attestations. Windows and macOS binaries are not code-signed.
 A failure before publishing leaves at most a draft: fix the cause and run
 `gh run rerun <session-id> --failed`. Published assets are never replaced, so a
 bad published release needs a new tag.
+
+A workflow that moves a channel pointer (`<channel>.json` on the
+`channels` prerelease) keeps the pair it signed as the `pointer-<channel>`
+artifact for 90 days. If an upload leaves half a pair, restore that
+artifact with the `gh run download ... && gh release upload channels
+--clobber ...` command the failed run prints. Once it has expired, remove
+what is left of the pointer and re-sign it with `first-pointer` for the
+release it named or one above it, never below: installs refuse a pointer
+lower than one they have seen.
 
 <details>
 <summary>Edge releases and the signing key</summary>

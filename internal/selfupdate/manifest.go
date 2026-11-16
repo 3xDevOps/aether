@@ -409,6 +409,18 @@ func SignManifest(m Manifest, key ed25519.PrivateKey) (data, sig []byte, err err
 	return data, sig, nil
 }
 
+// SignPointer encodes p and signs the encoded bytes with key, returning the
+// contents of PointerName(p.Channel) and its signature.
+func SignPointer(p Pointer, key ed25519.PrivateKey) (data, sig []byte, err error) {
+	data, err = json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	data = append(data, '\n')
+	sig = []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(key, data)) + "\n")
+	return data, sig, nil
+}
+
 // statusError is a response other than 200 OK.
 type statusError struct {
 	url    string

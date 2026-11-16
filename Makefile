@@ -265,6 +265,7 @@ test-scripts:
 	sh scripts/install-sysbox-test.sh
 	sh scripts/deploy-test.sh
 	sh scripts/publish-release-test.sh
+	sh scripts/publish-pointer-test.sh
 	sh scripts/release-ci-check-test.sh
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
