@@ -36,14 +36,16 @@ pull request sessions are in
 `make test` runs `go test -race` over every package. `make test TEST_RACE=`
 drops the race detector; the SQLite driver is transpiled C, which the
 detector slows ten to twenty times (`internal/store` takes 26 s without it and
-over five minutes with it). CI runs pull requests without `-race` and the
-merge queue and `main` with it.
+over five minutes with it). CI runs pull requests without `-race`, except
+`internal/store`, and the merge queue and `main` with it.
 
 `make test-store` runs `internal/store` alone under `-race` with
-`-gcflags='modernc.org/...=-d=checkptr=0'`: checkptr, which `-race` turns
-on, is off for the SQLite library's packages and stays on for every project
-package. CI runs it on every event as the `store-tests` job and leaves
-`internal/store` out of `build-and-test`'s `make test`.
+`-d=checkptr=0` passed through `-gcflags` to `modernc.org/sqlite/...`,
+`modernc.org/libc/...`, `modernc.org/memory` and `modernc.org/mathutil`:
+checkptr, which `-race` turns on, is off for the SQLite library's packages
+and stays on for every other package. CI runs it on every event as the
+`store-tests` job and leaves `internal/store` out of `build-and-test`'s
+`make test`.
 
 ```sh
 make test                                   # everything

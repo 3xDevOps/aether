@@ -220,14 +220,17 @@ browser-smoke:
 test:
 	go test $(TEST_RACE) -parallel 16 -timeout 20m $(TEST_PKGS)
 
-# internal/store under the race detector, which CI runs as a job of its own
-# and leaves out of `test`. Its migration tests spend their time in the
-# transpiled SQLite library, so checkptr is off for that library's packages
-# only; it stays on for every project package.
-STORE_GCFLAGS := modernc.org/...=-d=checkptr=0
-
+# internal/store under the race detector, as CI's store-tests job runs it.
+# Its migration tests spend their time in the transpiled SQLite library, so
+# checkptr is off for exactly that library's packages; a package from any
+# other module keeps it, a new modernc.org one included.
 test-store:
-	go test -race -gcflags='$(STORE_GCFLAGS)' -parallel 16 -timeout 20m ./internal/store
+	go test -race \
+		-gcflags='modernc.org/sqlite/...=-d=checkptr=0' \
+		-gcflags='modernc.org/libc/...=-d=checkptr=0' \
+		-gcflags='modernc.org/memory=-d=checkptr=0' \
+		-gcflags='modernc.org/mathutil=-d=checkptr=0' \
+		-parallel 16 -timeout 20m ./internal/store
 
 # The `integration`-tagged tests (real Docker, real git), in the packages that
 # carry them - the unit tests are `make test`'s job. CI shards it with

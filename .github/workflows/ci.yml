@@ -268,8 +268,7 @@ jobs:
         with:
           mode: save
 
-  # internal/store under -race, on every event. In build-and-test it took
-  # most of the job and starved the timing-sensitive tests beside it.
+  # internal/store under -race, on every event, pull requests included.
   store-tests:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
