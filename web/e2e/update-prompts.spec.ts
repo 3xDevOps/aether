@@ -18,7 +18,7 @@ function clientStatus(latest: string, cli: Partial<UpdateStatus['cli']> = {}, ex
       commit: 'abc1234',
       latest,
       update_available: latest !== 'v0.7.0',
-      release_url: `https://github.com/3xDevOps/Aether/releases/tag/${latest}`,
+      release_url: `https://github.com/3xDevOps/cloudfield/releases/tag/${latest}`,
       dev: false,
       disabled: false,
       can_self_update: true,
@@ -51,7 +51,7 @@ const serverBehind: ServerUpdateStatus = {
   latest_version: 'v0.8.0',
   update_available: true,
   capable: true,
-  notes_url: 'https://github.com/3xDevOps/Aether/releases/tag/v0.8.0',
+  notes_url: 'https://github.com/3xDevOps/cloudfield/releases/tag/v0.8.0',
 }
 
 const json = (route: Route, body: unknown, status = 200) =>

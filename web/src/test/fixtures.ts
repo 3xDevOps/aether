@@ -200,7 +200,7 @@ export function updateStatus(over: Partial<UpdateStatus> = {}): UpdateStatus {
       latest: 'v1.3.0',
       update_available: true,
       asset: 'aether-linux-amd64',
-      release_url: 'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+      release_url: 'https://github.com/3xDevOps/cloudfield/releases/tag/v1.3.0',
       dev: false,
       disabled: false,
       can_self_update: true,

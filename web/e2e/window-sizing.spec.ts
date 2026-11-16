@@ -42,7 +42,7 @@ function available(over: Record<string, unknown> = {}) {
       latest: 'v0.3.0',
       update_available: true,
       asset: 'aether-darwin-arm64',
-      release_url: 'https://github.com/3xDevOps/Aether/releases/tag/v0.3.0',
+      release_url: 'https://github.com/3xDevOps/cloudfield/releases/tag/v0.3.0',
       dev: false,
       disabled: false,
       can_self_update: true,

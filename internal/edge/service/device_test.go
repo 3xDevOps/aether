@@ -370,7 +370,7 @@ func TestJoinPage(t *testing.T) {
 		`value="` + testRelay + "/join/" + server + `/inv-7k2m9q4xbd"`,
 		`<script src="/join.js">`,
 		"aether link &lt;link&gt;",
-		"https://github.com/3xDevOps/aether/releases/latest",
+		"https://github.com/3xDevOps/cloudfield/releases/latest",
 	} {
 		if resp.StatusCode != http.StatusOK || !strings.Contains(page, want) {
 			t.Errorf("join page: %s, want it to contain %q\n%s", resp.Status, want, page)

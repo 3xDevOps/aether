@@ -25,7 +25,7 @@ import (
 )
 
 // Repo is the GitHub repository releases are published from.
-const Repo = "3xDevOps/Aether"
+const Repo = "3xDevOps/cloudfield"
 
 // httpClient downloads manifests and assets. GitHub release asset URLs
 // redirect to a CDN, so redirects are followed, but never off https. The

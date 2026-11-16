@@ -41,7 +41,7 @@ for this review.
 In this mode the app has no accounts, no sign-in and no password of its own:
 the phone's Tailscale login identifies it, and the server decides what that
 member may do. The server and the dashboard are open source, with
-documentation at https://github.com/3xDevOps/Aether. In this mode the app
+documentation at https://github.com/3xDevOps/cloudfield. In this mode the app
 sends nothing to us and only ever loads the server named above, over HTTPS.
 The other choice, "Aether Edge", signs in with GitHub through the Aether
 edge and needs no tailnet; it is not needed to review the dashboard.
@@ -83,7 +83,7 @@ What the app does before a server is reached:
    open in the phone's browser.
 
 The server and the dashboard the app shows are open source, with
-screenshots and documentation at https://github.com/3xDevOps/Aether.
+screenshots and documentation at https://github.com/3xDevOps/cloudfield.
 In Tailscale mode the app itself sends nothing to us and only ever loads the
 server the user named, over HTTPS.
 ```

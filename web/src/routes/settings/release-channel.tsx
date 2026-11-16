@@ -33,7 +33,7 @@ const meaning: Record<ReleaseChannel, string> = {
 }
 
 /** The Promote workflow's page; its Run button is what promotes. */
-export const promoteURL = 'https://github.com/3xDevOps/aether/actions/workflows/promote.yml'
+export const promoteURL = 'https://github.com/3xDevOps/cloudfield/actions/workflows/promote.yml'
 
 export type Confirmation = 'nightly' | 'wait'
 

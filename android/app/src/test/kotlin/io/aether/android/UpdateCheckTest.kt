@@ -13,7 +13,7 @@ private const val DAY = 24 * HOUR
 private fun line(latest: String?, available: Boolean, version: String = "v1.2.3"): String {
     val latestField = latest?.let { "\"latest\":\"$it\"," } ?: ""
     return "{\"version\":\"$version\",\"commit\":\"abc1234\",$latestField" +
-        "\"update_available\":$available,\"release_url\":\"https://github.com/3xDevOps/Aether/releases/tag/$latest\"," +
+        "\"update_available\":$available,\"release_url\":\"https://github.com/3xDevOps/cloudfield/releases/tag/$latest\"," +
         "\"dev\":false,\"disabled\":false,\"packaged\":\"Android app\",\"can_self_update\":false," +
         "\"checked_at\":\"2026-10-16T05:00:00Z\"}"
 }

@@ -14,7 +14,7 @@ import { disablePush, enablePush, readPush, testPush, watchAndroidPushState, typ
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 
-const docs = 'https://github.com/3xDevOps/Aether/blob/main/docs'
+const docs = 'https://github.com/3xDevOps/cloudfield/blob/main/docs'
 
 function Guide({ page = 'networking', to, children }: { page?: string; to?: string; children: ReactNode }) {
   return (

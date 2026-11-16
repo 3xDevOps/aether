@@ -203,5 +203,5 @@ func printHelp(w io.Writer) {
 	_ = tw.Flush()
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "start: aether status shows what is set up and the next step; aether <command> --help explains a command")
-	_, _ = fmt.Fprintln(w, "coding agents: aether help agents, or https://github.com/3xDevOps/Aether/blob/main/docs/agents.md")
+	_, _ = fmt.Fprintln(w, "coding agents: aether help agents, or https://github.com/3xDevOps/cloudfield/blob/main/docs/agents.md")
 }

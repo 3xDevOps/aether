@@ -41,7 +41,7 @@ test('shows the CLI banner to a collaborator when the CLI is behind', async () =
   ).toBeTruthy()
   const notes = screen.getByRole('link', { name: 'Release notes' })
   expect(notes.getAttribute('href')).toBe(
-    'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+    'https://github.com/3xDevOps/cloudfield/releases/tag/v1.3.0',
   )
   expect(notes.getAttribute('target')).toBe('_blank')
   expect(client.localUpdateCheck).toHaveBeenCalledTimes(1)
@@ -66,7 +66,7 @@ test('offers no button or command where the CLI cannot update itself', async () 
     await screen.findByText(/This aether cannot update itself\. Install v1\.3\.0 from its release page\./),
   ).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Release v1.3.0' }).getAttribute('href')).toBe(
-    'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+    'https://github.com/3xDevOps/cloudfield/releases/tag/v1.3.0',
   )
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.queryByText(/aether update/)).toBeNull()

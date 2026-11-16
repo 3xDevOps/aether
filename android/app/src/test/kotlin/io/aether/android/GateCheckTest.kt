@@ -22,7 +22,7 @@ private fun body(
         "\"server_version\":\"$serverVersion\",\"server_behind\":false,\"supervised\":false$gateFields}\n"
 }
 
-private const val APK = "https://github.com/3xDevOps/Aether/releases/download/v0.8.1/aether-android.apk"
+private const val APK = "https://github.com/3xDevOps/cloudfield/releases/download/v0.8.1/aether-android.apk"
 
 class GateCheckTest {
     @Test

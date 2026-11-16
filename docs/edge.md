@@ -687,13 +687,13 @@ install it with the unit and the environment file (`<arch>` is `amd64` or
 `arm64`):
 
 ```sh
-base=https://github.com/3xDevOps/Aether/releases/download/<release-tag>
+base=https://github.com/3xDevOps/cloudfield/releases/download/<release-tag>
 curl -fLO "$base/aether-edge-linux-<arch>"
 curl -fLO "$base/checksums.txt"
 sha256sum --check --ignore-missing checksums.txt
 sudo install -m 0755 aether-edge-linux-<arch> /usr/local/bin/aether-edge
 
-src=https://raw.githubusercontent.com/3xDevOps/Aether/<release-tag>/packaging
+src=https://raw.githubusercontent.com/3xDevOps/cloudfield/<release-tag>/packaging
 sudo curl -fsSL -o /etc/systemd/system/aether-edge.service "$src/systemd/aether-edge.service"
 sudo useradd --system --home-dir /var/lib/aether-edge --no-create-home --shell /usr/sbin/nologin aether-edge
 sudo install -d -m 0700 /etc/aether-edge
@@ -972,7 +972,7 @@ Encrypt account.
    nginx. `nginx -t` prints `syntax is ok` and `test is successful`:
 
    ```sh
-   src=https://raw.githubusercontent.com/3xDevOps/Aether/<release-tag>/packaging
+   src=https://raw.githubusercontent.com/3xDevOps/cloudfield/<release-tag>/packaging
    curl -fsSL "$src/nginx/aether-edge.conf.example" |
      sed -e 's/<signin-host>/auth.example.com/g' -e 's/<relay-host>/edge.example.com/g' |
      sudo tee /etc/nginx/conf.d/aether-edge.conf >/dev/null
@@ -1250,7 +1250,7 @@ updater does the rest.
   the first promotion after the rename, from the release you install:
 
   ```sh
-  curl -fsSL -o edge-update.sh https://raw.githubusercontent.com/3xDevOps/Aether/<release-tag>/scripts/edge-update.sh
+  curl -fsSL -o edge-update.sh https://raw.githubusercontent.com/3xDevOps/cloudfield/<release-tag>/scripts/edge-update.sh
   sudo install -m 0755 edge-update.sh /usr/local/sbin/aether-edge-update
   sudo aether-edge-update --check
   ```

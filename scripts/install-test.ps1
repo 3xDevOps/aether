@@ -834,7 +834,7 @@ catch {
     Write-AetherApi $releaseRoot -Tags @('v0.7.0-alpha.12', 'v0.7.0-alpha.11')
     $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $selectEnv
     Assert-AetherTest ($result.ExitCode -ne 0) 'an all-incomplete release list succeeded'
-    Assert-AetherTest ($result.Stderr.Contains('no complete release for windows/amd64 among the newest 2 releases of 3xDevOps/Aether; pass -Version <tag>')) ("no-candidate failure was not explained: " + $result.Output)
+    Assert-AetherTest ($result.Stderr.Contains('no complete release for windows/amd64 among the newest 2 releases of 3xDevOps/cloudfield; pass -Version <tag>')) ("no-candidate failure was not explained: " + $result.Output)
     Assert-AetherTest ($result.Stdout.Contains('v0.7.0-alpha.12 is not fully published yet (no checksums.txt)')) ("no-candidate failure did not name the probed release: " + $result.Output)
     Assert-AetherEqual 'old select CLI' ([IO.File]::ReadAllText($selectCli)) 'no-candidate failure replaced the CLI'
 

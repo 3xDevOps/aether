@@ -8,7 +8,7 @@
 
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-6EE7D6?style=flat-square)](go.mod)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-4A6FA5?style=flat-square)](LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/3xDevOps/aether?include_prereleases&style=flat-square&color=4A6FA5)](https://github.com/3xDevOps/aether/releases)
+[![Latest release](https://img.shields.io/github/v/release/3xDevOps/cloudfield?include_prereleases&style=flat-square&color=4A6FA5)](https://github.com/3xDevOps/cloudfield/releases)
 ![Status: beta](https://img.shields.io/badge/status-beta-FF9D6B?style=flat-square)
 
 [Quickstart](docs/quickstart.md) · [Install](docs/install.md) · [Docs](docs/) · [Contributing](CONTRIBUTING.md)
@@ -46,12 +46,12 @@ Cloudfield installs in two places:
 Run the installer command on **both** your remote server & your client computer **(MacOS/Linux Clients)**
 ```sh
 # MacOS & Linux
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh
 ```
 
 To install the client app on **Windows**, run the Windows installer instead. 
 ```powershell
-Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 > See the [Windows install guide](docs/install.md#windows-install-script) for supported releases and script-policy requirements.
@@ -62,7 +62,7 @@ For manual installation or uninstallation, see [install.md](docs/install.md#manu
 >[!TIP]
 > Cloudfield can also be accessed on the go! You can use any mobile AI chatbot that supports MCP connectors. That way you can directly use the Claude or ChatGPT
 > apps on your phone to launch agents on aether and check in on them. We recommend that you go through onboarding first before setting up connectors. See
-> [Connectors Guide](https://github.com/3xDevOps/aether/blob/main/docs/connectors.md)  
+> [Connectors Guide](https://github.com/3xDevOps/cloudfield/blob/main/docs/connectors.md)  
 
 
 >[!TIP]

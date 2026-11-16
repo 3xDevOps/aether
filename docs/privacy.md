@@ -10,7 +10,7 @@ shows, and for that edge. Effective 2026-10-16.
 ## Who publishes it
 
 Cloudfield is published by 3xDevOps, <https://github.com/3xDevOps>. Questions
-about this policy go to <https://github.com/3xDevOps/Aether/issues>.
+about this policy go to <https://github.com/3xDevOps/cloudfield/issues>.
 Privacy requests about what the project's edge holds, such as a copy or a
 deletion, go to <team@onaether.dev>; deleting your own account needs no
 request ([What an edge stores](#what-an-edge-stores)).
@@ -240,7 +240,7 @@ push service receives:
   size, at most 4096 bytes, and when it was sent.
 - **A signed token** (RFC 8292): the public half of a key your server
   generated for this purpose, the push service's own address, an expiry, and
-  the fixed contact `https://github.com/3xDevOps/Aether`. It names neither
+  the fixed contact `https://github.com/3xDevOps/cloudfield`. It names neither
   your server nor you.
 - **Delivery settings**: a 24-hour time to live, high urgency (normal for a
   reported success and for the message that clears a need), and a topic,
@@ -632,4 +632,4 @@ screen links to both that page and the licence text.
 ## Changes
 
 Changes to this policy are commits to this file; its history is public at
-<https://github.com/3xDevOps/Aether/commits/main/docs/privacy.md>.
+<https://github.com/3xDevOps/cloudfield/commits/main/docs/privacy.md>.

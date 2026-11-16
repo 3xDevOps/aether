@@ -22,7 +22,7 @@ The human pastes this into their coding agent:
 ```text
 Set up Aether on my server and this computer, or do this Aether task: <task>.
 Read the guide first: run `aether help agents`, or if aether is not installed,
-fetch https://raw.githubusercontent.com/3xDevOps/Aether/main/docs/agents.md
+fetch https://raw.githubusercontent.com/3xDevOps/cloudfield/main/docs/agents.md
 
 Rules:
 1. Run `aether status` first, if aether is installed, and do only what is
@@ -73,13 +73,13 @@ Rules:
 CLI only, into `~/.local/bin`, without `sudo`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client --role none --bin-dir "$HOME/.local/bin"
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client --role none --bin-dir "$HOME/.local/bin"
 ```
 
 With the desktop app too (it downloads Electron and takes a few minutes):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --role client
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --role client
 ```
 
 Check with `aether version`. On Windows, follow
@@ -101,7 +101,7 @@ Add `--sysbox=false` to the `aether-server install` commands below unless the
 human allowed Docker inside sessions.
 
 ```sh
-ssh <user>@<host> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --role none'
+ssh <user>@<host> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --role none'
 ```
 
 With the edge, pass the access policy the human chose:

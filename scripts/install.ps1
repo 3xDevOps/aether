@@ -643,7 +643,7 @@ function Read-AetherRelease {
         $actual = (Get-FileHash -LiteralPath $binaryPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
         if ($actual -cne $expected) {
             Remove-Item -LiteralPath $binaryPath -Force -ErrorAction SilentlyContinue
-            throw ("checksum mismatch for {0} of {1}: checksums.txt lists {2}, the download has {3}. The download was deleted and nothing was installed. Rerun the installer; if it fails again, something between you and {4} (a proxy or mirror) is changing the file - report it at https://github.com/3xDevOps/Aether/issues" -f $asset, $Tag, $expected, $actual, $BaseUrl)
+            throw ("checksum mismatch for {0} of {1}: checksums.txt lists {2}, the download has {3}. The download was deleted and nothing was installed. Rerun the installer; if it fails again, something between you and {4} (a proxy or mirror) is changing the file - report it at https://github.com/3xDevOps/cloudfield/issues" -f $asset, $Tag, $expected, $actual, $BaseUrl)
         }
     }
     if ($signed) {
@@ -1043,7 +1043,7 @@ function Invoke-AetherInstall {
     if (-not (Test-Path -LiteralPath $script:AetherCurl -PathType Leaf)) { $script:AetherCurl = $null }
     $architecture = Get-AetherNativeArchitecture
     $repo = Get-AetherEnv 'REPO'
-    if ([string]::IsNullOrWhiteSpace($repo)) { $repo = '3xDevOps/Aether' }
+    if ([string]::IsNullOrWhiteSpace($repo)) { $repo = '3xDevOps/cloudfield' }
     $baseUrl = Get-AetherEnv 'BASE_URL'
     if ([string]::IsNullOrWhiteSpace($baseUrl)) { $baseUrl = 'https://github.com/{0}/releases/download' -f $repo }
     $baseUrl = $baseUrl.TrimEnd('/')

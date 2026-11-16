@@ -31,7 +31,7 @@ lists it in full.
 | --- | --- |
 | Does your app collect or share any of the required user data types? | Yes |
 | Is all of the user data collected by your app encrypted in transit? | Yes |
-| Do you provide a way for users to request that their data is deleted? | Yes. Uninstalling removes everything on the phone; the server's administrator deletes server-side data; the edge account is deleted on the edge's Account page. Link: `https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md#deleting-your-data` |
+| Do you provide a way for users to request that their data is deleted? | Yes. Uninstalling removes everything on the phone; the server's administrator deletes server-side data; the edge account is deleted on the edge's Account page. Link: `https://github.com/3xDevOps/cloudfield/blob/main/docs/privacy.md#deleting-your-data` |
 
 ## Data types
 
@@ -108,4 +108,4 @@ data, and nothing is downloaded or installed.
 | Government app | No |
 | Financial features | None |
 | Health | None |
-| Account deletion | The app creates no accounts in Tailscale mode. In Edge mode the edge account is deleted on the edge's Account page (`https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md#what-an-edge-stores`) |
+| Account deletion | The app creates no accounts in Tailscale mode. In Edge mode the edge account is deleted on the edge's Account page (`https://github.com/3xDevOps/cloudfield/blob/main/docs/privacy.md#what-an-edge-stores`) |

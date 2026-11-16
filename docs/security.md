@@ -45,7 +45,7 @@ credentials out of the report.
 | [Team memory](#team-memory) | Only members pin notes into briefs. Notes with secrets are refused. Agents cannot delete. | A note can be wrong or planted. It is data, never an instruction. |
 | [Sysbox](#the-agent-container) | Docker inside a session without the host socket. Container root maps to an unprivileged host user. | Installing it from the dashboard runs a root script on the host. |
 | [Release signing](#release-signing) | Updaters install only binaries listed in a signed manifest for that exact tag. | `aether gui build --zip` checks only the app layout of a local zip. |
-| [Self-update](#server-and-client-updates) | Only signed `v*` releases of `3xDevOps/Aether`. A failed download replaces nothing. | A super admin chooses which release the server runs. |
+| [Self-update](#server-and-client-updates) | Only signed `v*` releases of `3xDevOps/cloudfield`. A failed download replaces nothing. | A super admin chooses which release the server runs. |
 | [Vulnerability scanning](#vulnerability-scanning) | `govulncheck` runs on every pull request that changes code. | It is advisory: a finding does not fail the build. |
 
 ## The agent container
@@ -1258,7 +1258,7 @@ maintainer step ([CONTRIBUTING.md](../CONTRIBUTING.md#releases)).
 `aether server update` lets a super admin replace the server's binaries without a
 shell on the host. That adds no power, since a super admin can already run any code
 on the server's Docker daemon. The version must be a `v` semver tag from the
-`3xDevOps/Aether` releases; a client never supplies a URL. Both binaries are
+`3xDevOps/cloudfield` releases; a client never supplies a URL. Both binaries are
 verified before either is replaced.
 
 **Install** in the **Docker inside sessions** row of **Settings → Server** (admins

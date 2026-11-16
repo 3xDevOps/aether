@@ -7472,7 +7472,7 @@ from a nightly is not older than that nightly.
   `server.update_status` (each present only when the last check verified
   that pointer, and absent after a restart until the first check). Each has
   a **Promote** link to
-  `https://github.com/3xDevOps/aether/actions/workflows/promote.yml`. The
+  `https://github.com/3xDevOps/cloudfield/actions/workflows/promote.yml`. The
   link only opens that page; its Run button promotes.
 - **Channel wait.** While `server.update_status` reports `channel_wait`, the
   server row says the server stays on its build, with both builds, until the

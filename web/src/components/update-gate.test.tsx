@@ -120,7 +120,7 @@ test('names the release and its page, never aether update, where the CLI cannot 
   render(<UpdateGate client={fakeApi()} />)
   expect(screen.getByText(/This aether cannot update itself\. Install v1\.3\.0 from its release page\./, { ignore: 'pre' })).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Release v1.3.0' }).getAttribute('href')).toBe(
-    'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+    'https://github.com/3xDevOps/cloudfield/releases/tag/v1.3.0',
   )
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.queryByText('aether update')).toBeNull()
