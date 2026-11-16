@@ -246,6 +246,15 @@ func (s *Server) runRoomPost(ctx context.Context, member domain.MemberID, raw js
 	if len(p.IdempotencyKey) > protocol.CollaborationMaxIdempotencyKeyBytes {
 		return nil, invalidParams("idempotency_key is too long")
 	}
+	// Members may post only member kinds. "system" is reserved for server-authored
+	// rows (handoff records, usage-fallback notes); the dashboard renders it as an
+	// authorless event row, so accepting it from a member lets a collaborator forge
+	// unattributed server notices.
+	switch p.Kind {
+	case protocol.RoomMessageComment, protocol.RoomMessageSteerRequest, protocol.RoomMessageQuestion, protocol.RoomMessageReply:
+	default:
+		return nil, invalidParams("unsupported message kind")
+	}
 	if err := validateCollaborationAttachments(p.Attachments); err != nil {
 		return nil, err
 	}
