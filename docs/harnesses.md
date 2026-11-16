@@ -357,7 +357,7 @@ Standard sessions need Codex 0.131.0 or newer. With an older one, the session's 
 prints:
 
 ```text
-codex-cli 0.130.0 is too old: Aether attaches Codex's terminal to its app-server, which needs Codex 0.131.0 or newer.
+codex-cli 0.130.0 is too old: Cloudfield attaches Codex's terminal to its app-server, which needs Codex 0.131.0 or newer.
 Update it here, then start a new session:
   npm install -g --prefix "$HOME/.local" @openai/codex@latest
 ```

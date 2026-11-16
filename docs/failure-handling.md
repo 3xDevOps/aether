@@ -172,7 +172,7 @@ check; there the close goes ahead:
 
 ```
 Before closing run-d6ay38tj8j:
-  pull_request: Pull request acme/api#7 was open, not merged, when Aether last checked 2026-11-03T18:20:00Z
+  pull_request: Pull request acme/api#7 was open, not merged, when Cloudfield last checked 2026-11-03T18:20:00Z
     https://github.com/acme/api/pull/7
 Close anyway? [y/N]:
 ```

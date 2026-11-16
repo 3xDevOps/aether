@@ -74,7 +74,7 @@ func (s *Session) adopt(openTurn bool) error {
 	case openTurn:
 		// The server went away before the turn's prompt reached the keeper,
 		// whose prompt, if any, is an earlier turn's.
-		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "Aether's server restarted before this turn's prompt reached the agent. Send it again."}})
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "Cloudfield's server restarted before this turn's prompt reached the agent. Send it again."}})
 		s.emitLocked(Item{Kind: KindTurnEnd, StopReason: "interrupted"})
 		s.stateLocked(TurnState{Reason: "interrupted"})
 	default:

@@ -329,7 +329,7 @@ Enhanced agent is not running`. The log records no notice for an adoption.
 A stopped server detaches cleanly. A killed one can, rarely, record twice the
 agent output it logged in the instant before it died. A server killed
 after it recorded a new turn but before the turn's prompt reached the keeper
-ends that turn with **Turn interrupted**: `Aether's server restarted before
+ends that turn with **Turn interrupted**: `Cloudfield's server restarted before
 this turn's prompt reached the agent. Send it again.`
 
 The server cannot reattach when the keeper or the agent exited, when the agent

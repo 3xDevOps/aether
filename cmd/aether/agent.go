@@ -364,12 +364,12 @@ func agentAdd(args []string) error {
 	})
 }
 
-const codexHookNote = `Trust Cloudfield's hooks once. Standard Codex sessions load Cloudfield's inbox hooks. Codex runs a hook
-only after you trust it, so your first Standard session opens "Hooks need review": choose
-"Trust all and continue". Codex remembers this in ~/.codex/config.toml for every workspace and
-asks again only if Cloudfield's hooks change. If a subsession is your first Standard Codex session,
-open its terminal to answer. If the list shows hooks you don't recognize, choose "Review hooks"
-instead.`
+const codexHookNote = `Trust Cloudfield's hooks once. Standard Codex sessions load Cloudfield's inbox hooks.
+Codex runs a hook only after you trust it, so your first Standard session opens "Hooks need
+review": choose "Trust all and continue". Codex remembers this in ~/.codex/config.toml for
+every workspace and asks again only if Cloudfield's hooks change. If a subsession is your first
+Standard Codex session, open its terminal to answer. If the list shows hooks you don't
+recognize, choose "Review hooks" instead.`
 
 func installShippedAgent(w io.Writer, agent protocol.AgentInfo, enhanced bool) error {
 	var result protocol.AgentInstallResult

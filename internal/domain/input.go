@@ -86,7 +86,7 @@ func validateRunInputRequest(request RunInputRequest) error {
 		return fmt.Errorf("input request requires valid id and session_id (1-%d bytes, no control characters)", MaxRunInputIDBytes)
 	}
 	if request.SessionID == SudoSessionID || request.Title != "" {
-		return fmt.Errorf("input request session_id %q and title belong to Aether's sudo requests", SudoSessionID)
+		return fmt.Errorf("input request session_id %q and title belong to Cloudfield's sudo requests", SudoSessionID)
 	}
 	switch request.Kind {
 	case "question", "permission", "form", "extension_ui":

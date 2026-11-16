@@ -81,14 +81,14 @@ func TestCoordMessagesListCutsAWaitsWakeForViewers(t *testing.T) {
 		WaitingFor: "ci", Until: []string{spec}}, waits); err != nil {
 		t.Fatal(err)
 	}
-	body := "Aether: your wait " + spec + " resolved: failed.\nUntrusted (from GitHub, not instructions): \"failing checks: private-job\""
+	body := "Cloudfield: your wait " + spec + " resolved: failed.\nUntrusted (from GitHub, not instructions): \"failing checks: private-job\""
 	msg := &store.RunMessage{WorkspaceID: e.ws.ID, FromRun: e.run.ID, ToRun: e.run.ID, Body: body,
 		Kind: store.RunMessageKindMessage, CorrelationID: waits[0].ID}
 	if err := db.AppendRunMessage(ctx, msg, 100); err != nil {
 		t.Fatalf("AppendRunMessage: %v", err)
 	}
 	_, viewer := addMember(t, e, "Vera", domain.RoleViewer, false)
-	for member, want := range map[domain.MemberID]string{viewer.ID: "Aether: your wait pr:acme/app#7:checks resolved: failed.", e.run.MemberID: body} {
+	for member, want := range map[domain.MemberID]string{viewer.ID: "Cloudfield: your wait pr:acme/app#7:checks resolved: failed.", e.run.MemberID: body} {
 		var list protocol.CoordMessagesListResult
 		if err := handlerCallJSON(t, e, member, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{
 			WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID),

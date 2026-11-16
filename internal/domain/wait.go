@@ -41,7 +41,7 @@ func (w *RunWait) Text(now time.Time) string {
 		return ""
 	}
 	if w.Kind == WaitUnverified {
-		return "not verified: the wait names no condition Aether can check"
+		return "not verified: the wait names no condition Cloudfield can check"
 	}
 	text := w.Detail
 	switch {

@@ -138,7 +138,7 @@ const connectFix = "run aether github connect on your computer, or use Onboardin
 func credentialsError(err error) *prError {
 	var api *github.APIError
 	unanswered := errors.Is(err, github.ErrUnreachable) || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &api) && api.Status >= 500
-	return &prError{msg: "no usable GitHub login in your Aether home (" + err.Error() + "); " + connectFix, transient: true, noLogin: !unanswered}
+	return &prError{msg: "no usable GitHub login in your Cloudfield home (" + err.Error() + "); " + connectFix, transient: true, noLogin: !unanswered}
 }
 
 func (p *PRs) member(id domain.MemberID) *prMember {
