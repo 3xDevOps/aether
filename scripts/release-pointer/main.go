@@ -52,7 +52,7 @@ func run(args []string, now time.Time) error {
 		return err
 	}
 	if *channel == "" || *tag == "" || *manifest == "" || *out == "" || fs.NArg() != 0 {
-		return errors.New("usage: release-pointer -channel <c> -tag <tag> -manifest <file> {-current <file> | -first} [-if-above] -out <dir>")
+		return errors.New("usage: release-pointer -channel <c> -tag <tag> -manifest <file> {-current <file> | -first [-current <file>]} [-if-above] -out <dir>")
 	}
 	if *current == "" && !*first {
 		return errors.New("pass -current, the channel's pointer now, or -first, for a channel that has none yet")

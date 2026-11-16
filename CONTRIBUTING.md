@@ -517,8 +517,9 @@ gh workflow run promote.yml -f from=v0.9.0-nightly.12 -f to=beta
 ```
 
 It takes the commit and build from the source's signed manifest, requires
-green push CI for that commit, refuses a build below the channel's
-pointer, and calls `release-build.yml`, whose `release` job creates the
+green push CI for that commit, refuses a build not above the channel's
+pointer (so a second beta of the same nightly is refused: the edge image
+tag would refuse the same build), and calls `release-build.yml`, whose `release` job creates the
 annotated tag (`vX.Y.Z-beta.N` or `vX.Y.Z`, with a `build:` line) once
 every asset is built. `-f version=X.Y.Z` names another version, at least
 the current nightly base. A failed run is re-run with `gh run rerun
@@ -547,7 +548,8 @@ name a beta or stable release, never a `-nightly.N` tag: an edge orders itself
 against them by their signed build, and nightlies are pruned.
 
 A release that becomes Latest moves `ghcr.io/3xdevops/aether-edge:latest`.
-Promote moves `:beta` when it publishes a beta. Production edges follow
+Promote moves `:beta` whenever it moves `beta.json`, on a stable
+promotion too. Production edges follow
 `:stable`, which only `promote-edge.yml` moves, run by an admin at least 24
 hours after the release
 (`-f soak_override_reason='<why>'` promotes sooner):

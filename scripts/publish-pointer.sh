@@ -4,8 +4,8 @@
 # release-pointer refuse a lower (build, hotfix) and sign the new one into
 # $4, uploads it and reads it back the way updaters do. A channel without a
 # pointer needs --first; with --first, a pointer that already names this
-# exact release (a re-run of the run that wrote it) stays. With --if-above it leaves a pointer that is not
-# below the release as it is. The caller keeps $4 as the workflow artifact
+# exact release (a re-run of the run that wrote it) stays. With --if-above
+# it leaves a pointer that is not below the release as it is. The caller keeps $4 as the workflow artifact
 # pointer-<channel>, the pair an admin restores if the upload fails.
 # Every writer must run in the channels concurrency group, so no two read
 # and replace one pointer at once.
@@ -71,7 +71,10 @@ case "$assets:$first" in
 "$name $name.sig:"*)
 	gh release download channels --pattern "$name" --pattern "$name.sig" --dir "$tmp/current"
 	set -- -current "$tmp/current/$name"
-	[ -z "$first" ] || set -- -first "$@"
+	if [ -n "$first" ]; then
+		set -- -first "$@"
+		if_above=
+	fi
 	;;
 *) fail "channels holds $assets for $name; it needs both $name and $name.sig. Restore the last good pair from the pointer-$channel artifact of the run that last moved it: $(restore '<run-id>'). $expired" ;;
 esac

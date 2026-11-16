@@ -169,6 +169,10 @@ touch "$state/keep"
 run 0 --first beta v0.9.0-beta.2 "$dist"
 assert_out "beta.json already names v0.9.0-beta.2 and stays"
 refute_log "release upload"
+: >"$state/log"
+run 0 --first --if-above beta v0.9.0-beta.2 "$dist"
+assert_out "beta.json already names v0.9.0-beta.2 and stays"
+refute_log "-if-above"
 
 # An upload that fails after deleting the old .sig is repaired by uploading
 # the whole pair again.

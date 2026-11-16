@@ -997,6 +997,13 @@ jobs:
         with:
           ref: ${{ inputs.tools-commit }}
           persist-credentials: false
+      # Re-running this job alone skips promote.yml's admin checks, so
+      # whoever starts this attempt must be an admin too.
+      - name: Require an admin
+        if: inputs.promoted
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
