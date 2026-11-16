@@ -81,7 +81,10 @@ func runGUI(args []string) error {
 
 	// One checker serves both the startup nudge and the update verbs, so
 	// the dashboard reads the answer the banner already paid for.
-	checker := selfupdate.DefaultChecker()
+	checker, err := cli.NewFollowedChecker("https://github.com/"+selfupdate.Repo, time.Hour, cli.DefaultLinkChannel)
+	if err != nil {
+		return err
+	}
 	packaged := os.Getenv(selfupdate.PackagedEnv)
 	gw, err := localgw.New(localgw.Config{
 		Port:    *port,
@@ -146,7 +149,7 @@ func runGUI(args []string) error {
 // the desktop shell parses. A failed check has no reader to report to and
 // no bearing on serving the dashboard, so it stays silent; `aether update
 // --check` reports the same failure with an exit status.
-func nudgeUpdate(c *selfupdate.Checker) {
+func nudgeUpdate(c cli.ReleaseChecker) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	check, err := c.Check(ctx)

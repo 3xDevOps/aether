@@ -139,4 +139,22 @@ class UpdateCheckTest {
         for (day in 1..7) daily = answer(daily, 10 + day * DAY, line("v1.3.$day", true), 0)
         assertEquals("v1.3.7", noticeFor(daily, InstallSource.PLAY, 10 + 7 * DAY, 0)?.latest)
     }
+
+    @Test
+    fun aPlayInstallHearsOfStableReleasesOnly() {
+        val beta = answer(StoredUpdate(), 10, line("v1.3.0-beta.2", true), 0)
+        assertNull(noticeFor(beta, InstallSource.PLAY, 10 + 30 * DAY, 0))
+        assertEquals("v1.3.0-beta.2", noticeFor(beta, InstallSource.RELEASE, 10, 0)?.latest)
+    }
+
+    @Test
+    fun anAnswerIsOnlyGoodForTheConnectionThatMadeIt() {
+        val gateway = afterCheck(StoredUpdate(), 10, line("v1.3.0", true), "", 0, 0.0, VIA_GATEWAY)
+        assertEquals("v1.3.0", noticeFor(gateway, InstallSource.RELEASE, 20, 0, VIA_GATEWAY)?.latest)
+        // The member switched to Tailscale mode: the Edge server's offer is not shown there,
+        assertNull(noticeFor(gateway, InstallSource.RELEASE, 20, 0, VIA_CLI))
+        // and a check runs at once instead of waiting for the deadline.
+        assertFalse(checkDue(20, gateway, 0, VIA_GATEWAY))
+        assertTrue(checkDue(20, gateway, 0, VIA_CLI))
+    }
 }

@@ -87,6 +87,39 @@ describe('clientTarget', () => {
 })
 
 describe('serverTarget', () => {
+  it('waits on a build above its channel instead of calling the server up to date', () => {
+    const s = store()
+    s.getState().setServerUpdate(
+      serverUpdateStatus({
+        server_version: 'v0.9.0-nightly.12',
+        server_build: 412,
+        channel: 'beta',
+        latest: 'v0.9.0-beta.1',
+        latest_version: 'v0.9.0-beta.1',
+        latest_build: 380,
+        channel_wait: true,
+      }),
+    )
+    expect(serverTarget(s.getState(), Date.now())).toEqual({
+      state: 'channel_wait',
+      version: 'v0.9.0-nightly.12',
+      build: 412,
+      channel: 'beta',
+      latest: 'v0.9.0-beta.1',
+      latestBuild: 380,
+    })
+  })
+
+  it('marks an update the server scheduled itself', () => {
+    const s = store()
+    s.getState().setServerUpdate(
+      serverUpdateStatus({ update_available: true, pending: { version: 'v1.3.0', requested_by: 'server', requested_at: '2026-08-14T10:06:00Z', by_server: true } }),
+    )
+    expect(serverTarget(s.getState(), Date.now())).toMatchObject({ state: 'scheduled', byServer: true })
+    s.getState().applyServerUpdate({ phase: 'scheduled', version: 'v1.3.0', actor_id: 'server' })
+    expect(serverTarget(s.getState(), Date.now())).toMatchObject({ state: 'scheduled', byServer: true })
+  })
+
   it('puts the server first through every phase and ends on the version it was about', () => {
     const s = store()
     const now = Date.now()
@@ -229,6 +262,23 @@ describe('checkClient', () => {
     expect(serverTooOld(s.getState().update, s.getState().info?.server_version)).toBeNull()
   })
 
+  it('takes the server build a later check confirmed with its version', async () => {
+    const s = store()
+    s.setState({ info: { ...serverInfo, server_version: 'v0.9.0-nightly.10', build: 400 } })
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => ({
+        ...updateStatus(),
+        cli: { ...updateStatus().cli, version: 'v0.9.0-beta.2' },
+        cli_build: 412,
+        server_version: 'v0.9.0-beta.2',
+        server_build: 412,
+      })),
+    })
+    await checkClient(s, client)
+    expect(s.getState().info?.build).toBe(412)
+    expect(serverTooOld(s.getState().update, s.getState().info?.server_version, s.getState().info ?? undefined)).toBeNull()
+  })
+
   it('keeps a server version a hydration read while the check was out', async () => {
     const s = store()
     let answer: (status: UpdateStatus) => void = () => {}
@@ -354,5 +404,30 @@ describe('serverTooOld', () => {
     expect(serverTooOld(status('v0.8.5', 'v0.9.0'))).toBeNull()
     expect(serverTooOld(status('dev', 'v0.8.5'))).toBeNull()
     expect(serverTooOld(status('v0.9.0', ''))).toBeNull()
+  })
+
+  it('orders by signed build when both sides report one', () => {
+    const built = (client: string, cliBuild: number, server: string, serverBuild: number, extra = {}) =>
+      ({ cli: { version: client }, cli_build: cliBuild, server_version: server, server_build: serverBuild, ...extra }) as UpdateStatus
+    // Promoted beta 2 carries more merges than nightly 10 but sorts below it by version.
+    expect(serverTooOld(built('v0.9.0-beta.2', 412, 'v0.9.0-nightly.10', 405))).toEqual({
+      client: 'v0.9.0-beta.2',
+      server: 'v0.9.0-nightly.10',
+    })
+    expect(serverTooOld(built('v0.9.0-nightly.10', 405, 'v0.9.0-beta.2', 412))).toBeNull()
+    expect(serverTooOld(built('v0.9.0', 412, 'v0.9.0-beta.2', 412))).toBeNull()
+    expect(serverTooOld(built('v0.9.1', 412, 'v0.9.0', 412, { cli_hotfix: 1 }))).not.toBeNull()
+    expect(serverTooOld(built('v0.9.0', 412, 'v0.9.1', 412, { server_hotfix: 1 }))).toBeNull()
+  })
+
+  it('takes the live server.info build over the last update.check', () => {
+    const update = { cli: { version: 'v0.9.0-beta.2' }, cli_build: 412, server_version: 'v0.9.0-nightly.10', server_build: 405 } as UpdateStatus
+    expect(serverTooOld(update, 'v0.9.0-nightly.20', { build: 430 })).toBeNull()
+  })
+
+  it('falls back to versions when either side has no build', () => {
+    const update = { cli: { version: 'v0.9.0' }, cli_build: 412, server_version: 'v0.8.5' } as UpdateStatus
+    expect(serverTooOld(update)).not.toBeNull()
+    expect(serverTooOld({ ...update, cli_build: 0, server_build: 400, cli: { ...update.cli, version: 'v0.8.5' } } as UpdateStatus)).toBeNull()
   })
 })

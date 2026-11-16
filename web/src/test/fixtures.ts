@@ -902,6 +902,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     localUpdateStatus: vi.fn(async () => ({ phase: 'idle' as const })),
     serverUpdateStatus: vi.fn(async () => serverUpdateStatus()),
     serverRunLimits: vi.fn<Api['serverRunLimits']>(async () => ({ limits: {}, default: { cpus: 8, memory_bytes: 8 * 2 ** 30, pids: 4096 }, effective: { cpus: 8, memory_bytes: 8 * 2 ** 30, pids: 4096 } })),
+    serverReleaseChannelSet: vi.fn<Api['serverReleaseChannelSet']>(async (channel) => ({
+      channel,
+      previous: 'beta' as const,
+      saved: true,
+      running: { version: 'v1.2.3', build: 0 },
+      wait: false,
+    })),
     sysboxStatus: vi.fn(async () => ({ state: 'on' as const })),
     sysboxInstall: vi.fn(async () => ({ state: 'installing' as const })),
     serverUpdate: vi.fn(async () => ({

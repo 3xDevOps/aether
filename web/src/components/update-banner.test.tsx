@@ -236,6 +236,86 @@ describe('the server update banner', () => {
     ).toBeTruthy()
   })
 
+  test('a server above its channel says it stays on its build, not that it is up to date or behind', async () => {
+    const waiting = serverUpdateStatus({
+      server_version: 'v0.9.0-nightly.12',
+      server_build: 412,
+      channel: 'beta',
+      latest: 'v0.9.0-beta.1',
+      latest_version: 'v0.9.0-beta.1',
+      latest_build: 380,
+      channel_wait: true,
+    })
+    for (const self of [alice, bob]) {
+      const client = seedServer({ self, status: waiting })
+      const view = render(<UpdateHost client={client} />)
+      expect(await screen.findByText('The server stays on v0.9.0-nightly.12 (build 412) until the beta channel reaches it.')).toBeTruthy()
+      expect(screen.getByText('The beta channel is at v0.9.0-beta.1 (build 380). The server never installs an older build.')).toBeTruthy()
+      expect(screen.queryByText(/is up to date/)).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+      view.unmount()
+    }
+  })
+
+  test('the wait row names the hotfix on either side', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({
+        server_version: 'v0.9.1', server_build: 412, server_hotfix: 1, channel: 'beta',
+        latest: 'v0.9.0', latest_version: 'v0.9.0', latest_build: 412, channel_wait: true,
+      }),
+    })
+    render(<UpdateHost client={client} />)
+    expect(await screen.findByText('The server stays on v0.9.1 (build 412 hotfix 1) until the beta channel reaches it.')).toBeTruthy()
+    expect(screen.getByText('The beta channel is at v0.9.0 (build 412). The server never installs an older build.')).toBeTruthy()
+  })
+
+  test('an update the server scheduled itself is not attributed to a member', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({
+        update_available: true,
+        pending: { version: 'v1.3.0', requested_by: 'server', requested_at: '2026-08-14T10:06:00Z', by_server: true },
+      }),
+    })
+    render(<UpdateHost client={client} />)
+    expect(await screen.findByText('Scheduled by the server, applies when no session is active.')).toBeTruthy()
+  })
+
+  test('shows why the server could not schedule an update itself, and the decline note, unchanged', async () => {
+    const reason = 'preflight: release v1.3.0 needs store schema 120, this database is at 121'
+    const client = seedServer({
+      status: serverUpdateStatus({ update_available: true, schedule_error: reason, decline_note: 'the cancelled build could not be recorded: disk full' }),
+    })
+    render(<UpdateHost client={client} />)
+    expect(await screen.findByText(reason)).toBeTruthy()
+    expect(screen.getByText('The server could not schedule it by itself:')).toBeTruthy()
+    expect(screen.getByText('The server could not record the cancelled build as declined, so it may schedule it again:')).toBeTruthy()
+    expect(screen.getByText('the cancelled build could not be recorded: disk full')).toBeTruthy()
+  })
+
+  test('a cancel that could not record the build as declined says so', async () => {
+    const client = seedServer({
+      status: serverUpdateStatus({ update_available: true, pending: { version: 'v1.3.0', requested_by: alice.id, requested_at: '2026-08-14T10:06:00Z' } }),
+    })
+    client.serverUpdate = vi.fn(async () => ({ status: 'cancelled' as const, not_declined: 'store: database is locked' }))
+    render(<UpdateHost client={client} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText('The update was cancelled. The server could not record the cancelled build as declined, so it may schedule it again:')).toBeTruthy()
+    expect(screen.getByText('store: database is locked')).toBeTruthy()
+  })
+
+  test('a cancel the server refuses shows its error as returned', async () => {
+    const refusal = 'server.update: v1.3.0 is applying now and can no longer be cancelled'
+    const client = seedServer({
+      status: serverUpdateStatus({ update_available: true, pending: { version: 'v1.3.0', requested_by: alice.id, requested_at: '2026-08-14T10:06:00Z' } }),
+    })
+    client.serverUpdate = vi.fn(async () => {
+      throw new Error(refusal)
+    })
+    render(<UpdateHost client={client} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText(refusal)).toBeTruthy()
+  })
+
   test('Update when idle schedules, and the banner then offers Cancel', async () => {
     const client = seedServer()
     render(<UpdateHost client={client} />)

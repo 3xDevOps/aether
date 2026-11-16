@@ -372,12 +372,16 @@ ntfy, then turn on **Notify this device when a session needs me** in the
 dashboard's Settings ([networking.md](networking.md#in-the-android-app)).
 
 About once an hour, when you bring it to the front, the app checks for a
-release and shows a banner. **Download update** fetches the new APK; open it
-and Android installs it over the app, keeping your data. A Google Play install
-gets **Open Google Play** once the release is 7 days old. In **Aether Edge**
-mode the server refuses an older app: a screen such as `This app (v0.7.0) is
-too old for the server (v0.8.0 needs v0.8.0 or newer).` stays until you
-install the update it links.
+release and shows a banner. In **Aether Edge** mode it offers the release the
+server runs, from the gateway's `update.check`, and nothing newer until the
+server updates. In **Tailscale** mode it runs the bundled CLI's check, which
+follows the `config.json` that CLI has, and `stable` (`beta` until the first
+stable exists) when it has none. **Download update** fetches the new APK; open
+it and Android installs it over the app, keeping your data. A Google Play
+install gets **Open Google Play** once a stable release is 7 days old; Play
+carries no beta or nightly. In **Aether Edge** mode the server refuses an older
+app: a screen such as `This app (v0.7.0) is too old for the server (v0.8.0
+needs v0.8.0 or newer).` stays until you install the update it links.
 
 Android installs an APK over the app only when both carry the same signing
 key; uninstall an APK you built from a checkout first. The release key's
@@ -812,8 +816,9 @@ back never lets an older pointer in.
 aether update
 ```
 
-It installs the latest release when it is newer, after checking its
-signature, then rebuilds the desktop app if one is installed (`--no-app` skips
+It installs the newest release on the channel its default linked server
+follows (the top-level fields of `config.json`; `gui_server` does not decide)
+when that is newer, after checking its signature, then rebuilds the desktop app if one is installed (`--no-app` skips
 that). `--version <tag>` picks a release, and `--check`, with `--json` for a
 script, only reports whether a newer one exists. When this CLI is behind its
 server, it installs the server's release instead. When the server is behind
@@ -840,6 +845,10 @@ One from `v0.7.0-alpha.12` or older needs one restart by hand:
 `systemctl --user restart aether-daemon` (macOS:
 `launchctl kickstart -k gui/$(id -u)/com.aether.daemon`; Windows:
 `schtasks /End /TN aether-daemon`, then `schtasks /Run /TN aether-daemon`).
+With no linked server, or one that does not answer and was never read, the
+CLI and the desktop app follow `stable`, and `beta` until the first `stable.json`
+exists. A running desktop gateway keeps the last channel it read while the server is down; a one-shot `aether update` does not, and checks stable then. Each channel's
+pointer mark is in `update.json` beside `config.json`.
 `AETHER_NO_UPDATE_CHECK=1` turns off release checks in the CLI and dashboard.
 
 ### What an update does not change

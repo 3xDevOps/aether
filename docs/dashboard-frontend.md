@@ -7416,8 +7416,8 @@ The dashboard tracks three update targets: the **server**, **this client**
 (the `aether` binary running `aether gui`) and the **desktop shell**.
 `src/store/updates.ts` derives each target's state from the store:
 `up_to_date`, `checking`, `check_failed`, `available`, `required`,
-`scheduled`, `applying`, `restarting`, `ready_to_restart`, `failed` or
-`rolled_back`. Every surface below renders from those states:
+`scheduled`, `channel_wait`, `applying`, `restarting`, `ready_to_restart`,
+`failed` or `rolled_back`. Every surface below renders from those states:
 
 - the sidebar notice row,
 - the **Updates** dialog (`UpdateCenter` in
@@ -7434,6 +7434,38 @@ semver precedence:
 - numeric prerelease identifiers order numerically;
 - a `git describe` tail ranks just above its tag;
 - an unparseable version (`dev`, a bare commit) is never behind.
+
+That order decides only the dashboard's own comparisons, and only when a
+side reports no signed build. When the client and the server both report
+one (`cli_build` in `update.check`, `build` in `server.info`), the notice
+that the server is older than this client (`serverTooOld`) orders by
+`(build, hotfix)`, as the server's client gate does, so a beta promoted
+from a nightly is not older than that nightly.
+
+- **Release channel.** **Settings › Server** has a **Release channel**
+  section (`src/routes/settings/release-channel.tsx`) with Stable, Beta and
+  Nightly pills, shown once `server.update_status` names a `channel`. Every
+  member sees the current channel; only a super admin gets the pills.
+  Picking Nightly always asks **Switch to nightly builds?** first. Picking
+  Stable or Beta runs `server.release_channel_set` with `dry_run`, and when
+  the answer says `wait` (the running build is above that channel's newest),
+  or the channel's newest release could not be read, shows **Switch to
+  beta?** with the running and target versions and builds, or the dry run's
+  `target_error` verbatim. Anything else saves at once. Saving installs
+  nothing; a pending update the new channel does not take is cancelled and
+  the section says so. A server error shows as it came. On a nightly or beta
+  server a super admin also sees the newest beta, with the days since it
+  was cut, and the newest nightly, from `channel_pointers` in
+  `server.update_status` (each present only when the last check verified
+  that pointer, and absent after a restart until the first check). Each has
+  a **Promote** link to
+  `https://github.com/3xDevOps/aether/actions/workflows/promote.yml`. The
+  link only opens that page; its Run button promotes.
+- **Channel wait.** While `server.update_status` reports `channel_wait`, the
+  server row says the server stays on its build, with both builds, until the
+  channel reaches it, instead of "up to date" or an offer. An update the
+  server scheduled itself (`pending.by_server`) reads "Scheduled by the
+  server".
 
 The server always comes first. It updates before its clients, and a server
 that runs a newer release than a client refuses that client

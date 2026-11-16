@@ -88,7 +88,15 @@ func runUpdate(args []string) error {
 		*tag = match
 		fmt.Printf("installing %s to match the server\n", *tag)
 	} else if *tag == "" {
-		got, err := selfupdate.DefaultChecker().CheckFresh(ctx)
+		channel := func(context.Context) string { return server.channel }
+		if *force {
+			channel = cli.DefaultLinkChannel
+		}
+		checker, err := cli.NewFollowedChecker(base, time.Hour, channel)
+		if err != nil {
+			return err
+		}
+		got, err := checker.CheckFresh(ctx)
 		if err != nil {
 			return err
 		}
@@ -243,6 +251,7 @@ func checkServerSchema(ctx context.Context, base, tag, self string) error {
 type linkedServer struct {
 	reachable bool
 	version   string
+	channel   string
 	build     int
 	hotfix    int
 	admin     bool
@@ -281,7 +290,7 @@ func probeLinkedServer(ctx context.Context) linkedServer {
 	out := linkedServer{reachable: true, version: info.ServerVersion, build: info.Build, hotfix: info.Hotfix, admin: cli.ServerAdmin(info)}
 	var status protocol.ServerUpdateStatusResult
 	if err := c.Call(protocol.MethodServerUpdateStatus, struct{}{}, &status); err == nil {
-		out.capable, out.manual = status.Capable, status.ManualCommands
+		out.capable, out.manual, out.channel = status.Capable, status.ManualCommands, status.Channel
 	}
 	return out
 }
@@ -398,7 +407,11 @@ func warnShadowed(w io.Writer, self string) {
 // reportCheck prints the release check and exits 0 whatever it says: a
 // caller polling for an update wants an answer, not an exit status.
 func reportCheck(ctx context.Context, asJSON bool) error {
-	got, err := selfupdate.DefaultChecker().Check(ctx)
+	checker, err := cli.NewFollowedChecker("https://github.com/"+selfupdate.Repo, time.Hour, cli.DefaultLinkChannel)
+	if err != nil {
+		return err
+	}
+	got, err := checker.Check(ctx)
 	if err != nil {
 		return err
 	}
