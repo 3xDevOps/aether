@@ -176,8 +176,8 @@ redirect after a repository rename.
 | --- | --- | --- | --- |
 | Release repository | GitHub redirects `releases/latest`, release downloads, the API and raw file addresses of a renamed repository. The updater follows redirects (`internal/selfupdate/selfupdate.go:41-53`), as do `curl -L` in `install.sh:340` and `install.ps1` | After the rename, `Repo` and the installer defaults change to the new name | Never: the old repository name must never be reused |
 | Release files and manifest | Unchanged names | Not renamed | Never |
-| Binaries on a server or client | The updater writes over the files it finds. Every host, old or new, keeps the real files `aether` and `aether-server` | `cloudfield` and `cloudfield-server` are symlinks to them, created by the installer, by the updater, and by the binary itself when it starts and finds one missing in a directory it can write. The last case covers an install that an older updater brought straight to a release from phase 3 or later; the server, running as root, links the CLI too. On Windows, where a per-user install cannot create symlinks, `cloudfield.cmd` calls `aether.exe`. One layout everywhere means a downgrade to any old release still finds its files | Never |
-| Server unit | An old binary that returns after a failed update trial runs `systemctl restart aether-server` (`internal/serverupdate/host.go:68,96`). The unit file stays `aether-server.service` with its text unchanged, on every host | The installer, the updater and the server at start, all running as root, link `/etc/systemd/system/cloudfield-server.service` to it and reload systemd. Printed and documented `systemctl` lines say `cloudfield-server` only once that is in a stable release | Never |
+| Binaries on a server or client | The updater writes over the files it finds. Every host, old or new, keeps the real files `aether` and `aether-server` | `cloudfield` and `cloudfield-server` are symlinks to them, created when missing by the installer, by the updater, by `aether-server serve` when systemd starts it (which also links the CLI when the real `aether` is beside it), and by `aether update`, which uses the same authorization as for the binary where the directory is not the user's (`internal/macinstall`, `sudo` on Linux) and does so even when already up to date. That covers an install that an older updater brought straight to a release from phase 3 or later. A CLI that finds the link missing and cannot create it prints the exact `ln -s` line once. The server binary never creates links when run as `sudo`, `aether-internal`, `dev-exec`, `acp-keeper`, `guest` or `mcp`, which run inside sessions. On Windows, where a per-user install cannot create symlinks, `cloudfield.cmd` calls `aether.exe`. One layout everywhere means a downgrade to any old release still finds its files | Never |
+| Server unit | An old binary that returns after a failed update trial runs `systemctl restart aether-server` (`internal/serverupdate/host.go:68,96`). The unit file stays `aether-server.service` with its text unchanged, on every host | The installer, the updater and `aether-server serve` under systemd, all running as root, link `/etc/systemd/system/cloudfield-server.service` to it. The installer and the updater reload systemd; the server does not, because a reload has host-wide effects (`cmd/aether-server/main.go:537-541`), and instead warns with the exact `sudo systemctl daemon-reload` line when systemd does not resolve the name. Printed and documented `systemctl` lines say `cloudfield-server` only once that is in a stable release | Never |
 | `aether-internal` in sessions | The path is fixed when a container is created. Hook and plugin files in member homes call `/usr/local/bin/aether-internal`, and a home is shared with containers made by any server version | New containers also get `/usr/local/bin/cloudfield-internal`. Prompts name it only in a container that has it. Everything written into a home keeps calling the old path | Never |
 | `AETHER_*` read by a program | Still read | The reader takes `CLOUDFIELD_X` when set, else `AETHER_X` | Never |
 | `AETHER_*` set inside sessions | Still set, under the old name only. Readers accept both, and setting one name keeps an override such as `AETHER_X=… cmd` unambiguous | Docs name the variable `AETHER_RUN_ID` and its siblings as they are | n/a |
@@ -216,8 +216,8 @@ published release.
 
 Nothing a person sees changes. One release carries:
 
-- the updater, and each binary at start, creating the new-name symlinks
-  and the unit link;
+- the updater, the server at start and `aether update` creating the
+  new-name symlinks and the unit link;
 - the server binary answering to `cloudfield-internal`, and new containers
   getting both in-container paths;
 - the variable rule: read the new name, else the old;
@@ -292,9 +292,9 @@ the renamed repository.
 
 ### Phase 5: names inside sessions
 
-New sessions get `cloudfield/run-` branches. MCP names change as
-[decision 8](#8-names-people-see-inside-sessions) decided: the title
-only.
+New sessions get `cloudfield/run-` branches. The MCP server and tool names
+stay ([decision 8](#8-names-people-see-inside-sessions)); the connector's
+title changed in phase 1.
 
 ## The domain move
 
@@ -323,10 +323,7 @@ The edge change, one pull request:
 
 - The edge takes a list of address pairs in a new setting. The two
   existing settings keep naming the old pair, so an edge host that rolls
-  back to an older image still serves it. `edge-update.sh --rollback`
-  checks only database compatibility today (`scripts/edge-update.sh:303-312`),
-  so it gains a check: with the new setting present on the host, it
-  refuses to go below this release unless forced.
+  back to an older image still serves it.
 - A request is served by the pair its host belongs to: sign-in pages,
   connector metadata, cookies, join links, certificates
   (`cmd/aether-edge/main.go:227`) and the 421 text. No pair is preferred.
@@ -351,6 +348,13 @@ The server change, one pull request:
   for, and answers metadata in the address the client used.
 - A server that moves keeps accepting the address it moved from.
 
+The edge host's updater, in pull request 7: `edge-update.sh --rollback`
+checks only database compatibility today (`scripts/edge-update.sh:582-601`).
+With the address list set on the host, it refuses to go below the
+multi-address release unless a new flag forces it. The automatic rollback
+after a failed update is exempt: it only returns to the release that ran
+just before, and refusing it would leave a failed edge running.
+
 The edge's key does not change, and a server pins that key per edge, not per
 address (`internal/edge/agent/state.go:127`), so re-enrolling at the new
 address keeps the pin.
@@ -366,7 +370,9 @@ Each step can be undone.
    `cloudfield.ai`.
 3. Edge: deploy the multi-address release with only the old pair. Nothing
    changes.
-4. Add the new pair. Test both directions: a server enrolled at the old
+4. With pull request 7's `edge-update.sh` on the host and the
+   multi-address release past its update, add the new pair. Test both
+   directions: a server enrolled at the old
    address reached from a CLI signed in at the new one, and the reverse;
    a connector at each address against a server enrolled at the other; a
    join link and a claim code from each.
@@ -394,10 +400,10 @@ Each step can be undone.
   but would receive device tokens and connector sign-ins from every install
   that still dials it.
 - `edge.onaether.dev` and `auth.onaether.dev` stay served by the hosted
-  edge. Retiring them cuts off every server that has not moved, every CLI
-  link made there, every connector registered there and every printed join
-  link. They are retired only if the per-address counters read zero for a
-  set period, and the recommendation is not to.
+  edge. Retiring them would cut off every server that has not moved, every
+  CLI link made there, every connector registered there and every printed
+  join link, so they are not retired while the hosted edge exists
+  ([decision 7](#7-repository-names-and-the-old-domain)).
 - `team@onaether.dev` keeps receiving.
 - A self-hosted edge uses its operator's own addresses and is not affected.
 
@@ -451,12 +457,12 @@ request 943 and its eleven implementation pull requests.
   exist yet. That plan should name it `NIGHTLY_SIGNING_KEY` before its
   pull request 9 creates it.
 - Its pull requests 1, 2 and 6 rework `internal/selfupdate` and
-  `release.yml`. The updater change (pull request 2 here) lands after its 1
-  and 2. Nothing here touches `release.yml`, because no release file is
+  `release.yml`. The updater change (pull request 2 here) lands after its 1,
+  2 and 3. Nothing here touches `release.yml`, because no release file is
   renamed.
-- Its pull request 8 edits `scripts/edge-update.sh`. The two-identity
-  change goes into that pull request or directly after it, so operators
-  copy the script once.
+- Its pull requests 7 and 8 edit `promote-edge.yml` and
+  `scripts/edge-update.sh`. The two-identity change goes directly after
+  them, so operators copy the script once.
 - `v0.8.7`, the first stable, ships as Aether. Cloudfield starts with the
   `v0.9.0` line: phase 0 and phase 1 land as nightlies, and `v0.9.0` is the
   first stable that says Cloudfield
@@ -601,7 +607,8 @@ if the per-address counters show servers staying behind.
 Stated by the design and not yet tested:
 
 - systemd accepts `show` and `restart` on a unit name that is a link made
-  by hand rather than by `systemctl enable`.
+  by hand rather than by `systemctl enable`, and whether it resolves a new
+  link before a `daemon-reload`.
 - GitHub requires a second OAuth app for a second callback host.
 - A repository rename leaves the organisation's container packages and
   their Actions access unchanged.
@@ -617,13 +624,14 @@ Stated by the design and not yet tested:
 Each is one session. Phase and dependencies are in brackets.
 
 1. `docs(plans)`: this plan.
-2. `feat(selfupdate)`: the updater, and each binary at start, creates the
-   `cloudfield` and `cloudfield-server` symlinks beside the real files and
-   the `cloudfield-server.service` link when they are missing, and never
-   writes through a symlink. Tested with a direct update from a release
-   older than this one. `internal/selfupdate/update.go`,
+2. `feat(selfupdate)`: the updater, `aether-server serve` under systemd and
+   `aether update` create the `cloudfield` and `cloudfield-server` symlinks
+   beside the real files (`cloudfield.cmd` on Windows) and the
+   `cloudfield-server.service` link when they are missing, and never write
+   through a symlink. Tested with a direct update from a release older
+   than this one. `internal/selfupdate/update.go`,
    `internal/serverupdate/apply.go`, `serverupdate.go`, `host.go`,
-   `cmd/aether/update.go`, `cmd/aether/main.go`,
+   `internal/macinstall`, `cmd/aether/update.go`,
    `cmd/aether-server/update.go`, `main.go`. [0; after release-channels 1, 2 and 3;
    agreed with micro VM item 10]
 3. `feat(server)`: answer to `cloudfield-internal`; mount and reserve both
@@ -652,8 +660,9 @@ Each is one session. Phase and dependencies are in brackets.
    `internal/sshd/connector.go`, `internal/edge/agent`. [0; after 5]
 7. `feat(edge)`: `edge-update.sh` and `promote-edge.yml` accept both
    signer identities, with a manual step that makes hosts stop until the
-   script is copied again; the script's rollback refuses to go below the
-   multi-address release while the address list is set. `scripts/edge-update.sh`,
+   script is copied again; `--rollback` refuses to go below the
+   multi-address release while the address list is set, unless forced by
+   a flag. `scripts/edge-update.sh`,
    `edge-update-test.sh`, `.github/workflows/promote-edge.yml`,
    `packaging/edge/upgrade.json`, `internal/edge/edgetest/testdata/`,
    `docs/edge.md`. [0; after release-channels 6, 7 and 8]
