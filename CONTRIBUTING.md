@@ -568,14 +568,58 @@ before channels has no build and cannot take a hotfix. The hotfix moves
 already names a newer line: then it moves no pointer, and only installs
 that ask for that tag get it. Once a nightly carries the fix, promote it to
 beta too, because beta can sit at a build above the hotfix that lacks the
-fix.
+fix. A hotfix that moves a pointer waits for the `channels` concurrency
+group that every pointer writer shares. GitHub keeps one pending run per
+group, so a pending hotfix can be cancelled when another writer queues;
+re-run it with `gh run rerun <run-id>`.
 
 A push to the branch runs the branch's `ci.yml`, and the tag runs its
 `release.yml` and `release-build.yml`. A line whose base commit predates
 hotfix support needs those workflow files from `main` cherry-picked onto
-its branch first. Review the branch against the base
-(`git log -p v0.9.0..origin/release/0.9`) before tagging: the tag runs the
-branch's workflow files with the signing key.
+its branch first. Because the tag runs the branch's own workflow files with
+the signing key, no check in `main`'s scripts can guard them: the tag's
+`release.yml` decides what runs. Until the protections below exist, reading
+the branch is the only guard, so before tagging read
+`git log -p v0.9.0..origin/release/0.9 -- .github scripts`.
+
+Before the first hotfix, a repository admin sets up three protections:
+
+1. A ruleset for `release/*` like `main`'s, where only admins may create
+   branches:
+
+   ```sh
+   gh api -X POST repos/3xDevOps/aether/rulesets --input - <<'JSON'
+   {"name": "Release branches", "target": "branch", "enforcement": "active",
+    "conditions": {"ref_name": {"include": ["refs/heads/release/*"], "exclude": []}},
+    "bypass_actors": [{"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}],
+    "rules": [{"type": "creation"}, {"type": "deletion"}, {"type": "non_fast_forward"},
+      {"type": "pull_request", "parameters": {"required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": true, "require_last_push_approval": true,
+        "require_code_owner_review": false, "required_review_thread_resolution": false}},
+      {"type": "required_status_checks", "parameters": {"do_not_enforce_on_create": true,
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [{"context": "CI gate", "integration_id": 15368}]}}]}
+   JSON
+   ```
+
+2. A ruleset for `v*` tags that lets only admins and GitHub Actions
+   (`integration_id` 15368, which Promote and nightly builds tag through)
+   create, move or delete them:
+
+   ```sh
+   gh api -X POST repos/3xDevOps/aether/rulesets --input - <<'JSON'
+   {"name": "Release tags", "target": "tag", "enforcement": "active",
+    "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+    "bypass_actors": [{"actor_id": null, "actor_type": "OrganizationAdmin", "bypass_mode": "always"},
+      {"actor_id": 15368, "actor_type": "Integration", "bypass_mode": "always"}],
+    "rules": [{"type": "creation"}, {"type": "update"}, {"type": "deletion"}]}
+   JSON
+   ```
+
+3. Required reviewers on the `release` environment: **Settings →
+   Environments → release → Required reviewers**, add the maintainers who
+   release, and under **Deployment branches and tags** allow only tags
+   `v*` and the branch `main`.
 
 <details>
 <summary>Edge releases and the signing key</summary>

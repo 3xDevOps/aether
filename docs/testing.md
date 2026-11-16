@@ -908,8 +908,8 @@ tests `main` against the newest agent CLIs and the latest published release;
 its result gates nothing, so read a red nightly `CI gate` on the `main` tip
 yourself. A merge queue run re-run after its push reused it does not change
 that push's verdict: re-run the push session too. A push to a `release/X.Y`
-branch never reuses a verdict and runs every job; a hotfix release reads that
-run.
+branch never reuses a verdict and runs every job, the VM tests included; a
+hotfix release reads that run.
 
 `CI gate` is the one required check: it passes when
 every other job passed or was skipped by its own rule, and fails when any
