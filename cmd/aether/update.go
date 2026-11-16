@@ -127,12 +127,15 @@ func runUpdate(args []string) error {
 		return err
 	}
 	fmt.Printf("updating aether %s -> %s\n", version.String(), *tag)
-	replaced, err := selfupdate.Update(ctx, base, *tag)
+	replaced, err := selfUpdate(ctx, base, *tag)
 	for _, path := range replaced {
 		fmt.Printf("updated %s\n", path)
 	}
 	if err != nil {
 		return err
+	}
+	if err = linkBinaries(replaced); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
 	}
 	if len(replaced) > 1 {
 		fmt.Printf("aether-server on disk is now %s; the running server keeps its old version until you restart it: sudo systemctl restart aether-server\n", *tag)
@@ -148,6 +151,13 @@ func runUpdate(args []string) error {
 	// is where the new binary now sits.
 	return rebuildDesktopApp(replaced[0])
 }
+
+// The update and the links after it, behind variables so a test can
+// install nothing and make the links fail.
+var (
+	selfUpdate   = selfupdate.Update
+	linkBinaries = selfupdate.LinkAll
+)
 
 // The calls the hand-off makes, behind variables so a test can stand in
 // for systemd and for replacing the process.
@@ -388,6 +398,11 @@ func reportBinary() error {
 	}
 	fmt.Printf("this binary is %s\n", self)
 	warnShadowed(os.Stderr, self)
+	// An update from a release that predates the second names leaves only
+	// the real files; an update that finds nothing to install completes
+	// the layout. Only a run that installs says what it could not create,
+	// so a directory this user may not write does not repeat it each time.
+	_ = selfupdate.Link(filepath.Dir(self))
 	return nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,6 +30,10 @@ var applyUpdate = func(ctx context.Context, baseURL, tag string) ([]string, erro
 	}
 	return selfupdate.UpdateWithAuthorization(ctx, baseURL, tag)
 }
+
+// linkBinaries is selfupdate.LinkAll behind a variable, so a test can make
+// it fail and no test links the paths it hands to a stubbed applyUpdate.
+var linkBinaries = selfupdate.LinkAll
 
 // probeAccess is selfupdate.Probe behind a variable so tests can describe
 // a binary that is not the test process.
@@ -257,6 +262,10 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 		updated, err = applyUpdate(r.Context(), g.cfg.Update.BaseURL(), target)
 		if err != nil {
 			return nil, applyError(err, target)
+		}
+		// A second name that cannot be made never fails the update.
+		if err = linkBinaries(updated); err != nil {
+			slog.Warn("could not give the updated binaries their second names", "error", err)
 		}
 		g.installed.Store(&installedRelease{tag: target, paths: updated})
 	}

@@ -11,9 +11,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -28,6 +30,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/runtime/vm"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
@@ -340,6 +343,10 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 }
 
 func serve(args []string) error {
+	host := serverupdate.HostProcess()
+	if host.UnderSystemd() {
+		linkSecondNames(host)
+	}
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	configPath := fs.String("config", serversetup.DefaultConfigPath,
 		"options file; values here lose to flags passed on the command line")
@@ -361,7 +368,6 @@ func serve(args []string) error {
 	// The last update's swap record is read before the store opens: a
 	// start that has to roll back must do so before this binary migrates
 	// the database.
-	host := serverupdate.HostProcess()
 	stateDir := server.UpdateStateDir(*o.dataDir)
 	trial, err := serverupdate.Boot(stateDir, host)
 	if err != nil {
@@ -532,6 +538,43 @@ func applyConfigFile(fs *flag.FlagSet, path string, optional bool) (string, erro
 		return "", nil
 	}
 	return " from " + path, nil
+}
+
+// linkSecondNames gives this binary, the aether beside it and, as root,
+// the unit their second names when they are missing. An update from a
+// release that predates them leaves only the real files, so the first
+// start of this release under systemd completes the layout. Binaries it
+// may not link are left silently: a unit that runs as another user would
+// repeat the warning at every start, and `aether-server update` and
+// `aether update` name the command. Every process a session runs from
+// this binary dispatches before serve and links nothing.
+func linkSecondNames(host serverupdate.Host) {
+	if self, err := os.Executable(); err == nil {
+		if self, err = filepath.EvalSymlinks(self); err == nil {
+			_ = selfupdate.Link(filepath.Dir(self))
+		}
+	}
+	created, err := host.LinkUnit()
+	if err != nil {
+		slog.Warn("could not give the systemd unit its second name", "error", err)
+	}
+	// Only the start that made the link names the reload; the server never
+	// reloads systemd itself, because a daemon-reload has host-wide effects.
+	if created {
+		go func() {
+			if !unitAliasResolved() {
+				slog.Warn("systemd does not resolve " + serverupdate.UnitAlias + " to " + serversetup.ServiceName +
+					" yet; it does after: sudo systemctl daemon-reload")
+			}
+		}()
+	}
+}
+
+// unitAliasResolved reports whether systemd loads the unit's second name
+// as the server's unit.
+func unitAliasResolved() bool {
+	out, err := exec.Command("systemctl", "show", "-p", "Id", "--value", serverupdate.UnitAlias).Output()
+	return err == nil && strings.TrimSpace(string(out)) == serversetup.ServiceName+".service"
 }
 
 // warnIfUnitOutdated tells the operator when the installed systemd unit, or

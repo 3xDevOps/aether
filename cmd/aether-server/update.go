@@ -20,6 +20,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
+	"github.com/3xDevOps/Aether/internal/serversetup"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
@@ -100,6 +101,7 @@ func updateCmd(args []string) error {
 	if *channel != "" {
 		return setChannel(context.Background(), os.Stdout, baseURL, stateDir, database, *channel, *yes)
 	}
+	linkUnitAndReload()
 	unlock, err := serverupdate.Lock(stateDir)
 	if err != nil {
 		return err
@@ -117,6 +119,10 @@ func updateCmd(args []string) error {
 		prepareVMs = func(ctx context.Context) error { return installVMFiles(ctx, self, serveArgs) }
 	}
 	if target == version.Version {
+		// An update links the binaries in its swap; this run swaps nothing.
+		if err := selfupdate.Link(filepath.Dir(self)); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
+		}
 		return restartIfStale(self, *o.addr, database, prepareVMs)
 	}
 	fmt.Printf("aether-server %s -> %s\n%s/releases/tag/%s\n", version.Version, target, baseURL, target)
@@ -179,6 +185,22 @@ func installVMFiles(ctx context.Context, self string, serveArgs []string) error 
 		return fmt.Errorf("%s vm install: %w: %s", self, err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
+}
+
+// linkUnitAndReload gives the unit its second name when it is missing,
+// whether or not an update follows, and reloads systemd when it does not
+// resolve the link just made. The update goes ahead whatever this finds.
+func linkUnitAndReload() {
+	created, err := (serverupdate.Host{UnitDir: filepath.Dir(serversetup.UnitPath)}).LinkUnit()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
+	}
+	if !created || unitAliasResolved() {
+		return
+	}
+	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: systemctl daemon-reload: %v: %s\n", err, strings.TrimSpace(string(out)))
+	}
 }
 
 func step(w io.Writer, what string, do func() error) error {

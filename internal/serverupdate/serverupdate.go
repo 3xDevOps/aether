@@ -275,6 +275,11 @@ func (s *Service) incapableReason() string {
 	if err := selfupdate.CheckWritable(filepath.Dir(s.self)); err != nil {
 		return notWritable
 	}
+	if sibling, ok := selfupdate.Beside(s.self, "aether"); ok {
+		if err := selfupdate.CheckWritable(filepath.Dir(sibling)); err != nil {
+			return notWritable
+		}
+	}
 	return ""
 }
 
