@@ -104,6 +104,12 @@ jobs:
         with:
           ref: refs/heads/main
           persist-credentials: false
+      # Re-running failed jobs skips promote-policy, and this job resolves
+      # the tag and tools afresh, so whoever re-runs it must be an admin too.
+      - name: Require an admin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
