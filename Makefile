@@ -80,8 +80,8 @@ TEST_PKGS = $(filter-out $(TEST_SKIP),$(shell go list ./... | sed 's|^$(MODULE)|
 # wait on a timer or a socket overlap instead of queueing behind GOMAXPROCS.
 TEST_RACE ?= -race
 
-# checkptr, which -race turns on, off for the SQLite library's packages only;
-# every other package keeps it, a new modernc.org one included.
+# Turns off checkptr, which -race turns on, for the SQLite library's packages
+# only; every other package keeps it, a new modernc.org one included.
 SQLITE_NOCHECKPTR = \
 	-gcflags='modernc.org/sqlite/...=-d=checkptr=0' \
 	-gcflags='modernc.org/libc/...=-d=checkptr=0' \
