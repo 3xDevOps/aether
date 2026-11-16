@@ -611,8 +611,10 @@ exactly that tag (`internal/cli/update.go:16-22`, `UpdateTarget.kt:59`),
 so pruning it would leave new and gated clients a 404. Pruning therefore
 keeps the nightly a waiting server runs: the newest nightly and every
 nightly whose build is above `stable.json`'s, which covers a server
-waiting for beta too, because beta is never below stable. It prunes
-nothing while `stable.json` cannot be read and verified. Every nightly
+waiting for beta too, because beta is never below stable. It also keeps
+a nightly whose image an Edge channel tag still carries. It prunes
+nothing while `stable.json` or `nightly.json` cannot be read and
+verified. Every nightly
 since the last stable is therefore kept, so storage grows with the time
 between stables. A server that stays on a nightly at or below
 `stable.json` for 14 days, because its update check is off or its updates
@@ -657,7 +659,9 @@ It resolves the new tag, `vX.Y.Z-beta.N` (next `N` for that version) or
   as "the full suite green". The stricter choice is to also require the
   daily scheduled run that runs every job (`ci.yml:15-16`) green on that
   commit;
-- a build below the target channel's current pointer.
+- a build not above the target channel's current pointer. An equal
+  build is the same code, and promoting it again would move the pointer
+  without giving any install something to take.
 
 Its run summary states the days since the beta was cut. It then calls `release-build.yml`, which rebuilds every asset
 from that commit with the new version, runs the edge qualification and
@@ -712,19 +716,32 @@ it gains a `release/X.Y` mode. CI's push trigger (`ci.yml:4-5`) adds
 
 ## Migration
 
+Before step 1, the nightly key's public half is merged into
+`internal/selfupdate/keys.go`, so that `v0.8.7-beta.N` and `v0.8.7` carry
+it. An install without it refuses every nightly, and after step 3 only a
+hotfix, or a beta and stable promoted from a later nightly, could deliver
+it.
+
 1. Ship the channel-aware updater as `v0.8.7-beta.N`, released the old
-   way. It becomes Latest and reaches every install through
-   `/releases/latest`. Existing servers get `release_channel` `beta` from
-   its migration.
+   way, by a tag on `main`. It becomes Latest and reaches every install
+   through `/releases/latest`. Existing servers get `release_channel`
+   `beta` from its migration. This is the last release cut by a tag on
+   `main`: such a release has no build, and from step 3 no channel-aware
+   install takes one.
 2. Create the `channels` prerelease that holds the pointers. No pointer
    is published for the pre-channel beta: until a channel's first
    pointer verifies, installs on it read `/releases/latest`.
 3. Promote it to stable `v0.8.7`, with `first-pointer` set: this run
    writes the first `stable.json` and `beta.json`. The trusted signer
-   gives it `channel` and build 1 even though its commit predates them. It becomes Latest, so
-   pre-channel installs that missed step 1 still update, and new installs
-   get stable.
-4. Turn on `nightly.yml`. The first nightly is `v0.9.0-nightly.1`, build 2.
+   gives it `channel` and build 1 even though its commit predates them.
+   It becomes Latest, so pre-channel installs that missed step 1 still
+   update, and new installs get stable. A server on `v0.8.7-beta.N` has
+   no build, so it does not install `v0.8.7` by itself: a super admin
+   updates it once, and it applies updates by itself from then on.
+4. Turn on `nightly.yml`: create the `nightly` environment with the
+   nightly key, then set the repository variable `NIGHTLY_ENABLED` to
+   `true` (`NIGHTLY_PRUNE_ENABLED` for pruning). Until then every job is
+   skipped. The first nightly is `v0.9.0-nightly.1`, build 2.
 5. Switch the project's own server to nightly.
 
 From step 3, betas and nightlies are published as prereleases.
