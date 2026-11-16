@@ -367,9 +367,17 @@ Gatekeeper warn, and auto-update refuses them. Treat them as test builds.
 
 </details>
 
-Every icon Cloudfield ships is generated from `web/public/aether-mark.png`.
-After changing it, run `python3 scripts/make-icons.py` (needs `pillow` and
-`fonttools[woff]`) and commit what it writes.
+The desktop and web icons and the Play feature graphic are generated from
+`web/public/aether-mark.png`. After changing it, run
+`python3 scripts/make-icons.py` (needs `pillow` and `fonttools[woff]`) and
+commit what it writes.
+
+The Android app's launcher and notification icons are VectorDrawables in
+`android/app/src/main/res/drawable/`, generated from the Cloudfield logo set in
+the website repository (`public/cloudfield/` of `3xDevOps/aether-web`). After
+the set changes, run `python3 scripts/android-icons.py <checkout>/public/cloudfield`
+and commit what it writes. The launcher's background colour is
+`ic_launcher_background` in `android/app/src/main/res/values/colors.xml`.
 
 ## Android shell
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Regenerate the desktop, web and Android app icons from the Aether mark.
+"""Regenerate the desktop and web app icons and the Play feature graphic from
+the Aether mark.
 
 Run after web/public/aether-mark.png changes:
 
@@ -8,11 +9,12 @@ Run after web/public/aether-mark.png changes:
 Writes desktop/build/icons/ and desktop/build/icon.ico, which electron-builder
 resolves for every platform, converting the set to .icns for macOS; only
 Windows needs a prebuilt file. Writes web/public/icons/ for the web app
-manifest and the iOS home screen, android/app/src/main/res/mipmap-* for the
-phone app's launcher icon, and android/listing/feature-graphic.png for the
-Play listing. Needs `pillow`, and `fonttools[woff]` to read the dashboard's
-own woff2 type for the Play banner: the extra is brotli, which the plain
-fontTools install leaves out and woff2 cannot be decoded without.
+manifest and the iOS home screen, and android/listing/feature-graphic.png for
+the Play listing. Needs `pillow`, and `fonttools[woff]` to read the
+dashboard's own woff2 type for the Play banner: the extra is brotli, which the
+plain fontTools install leaves out and woff2 cannot be decoded without. The
+Android app's launcher and notification icons come from
+scripts/android-icons.py instead.
 
 The mark is thin light-blue line art on transparency, so it is composited onto
 a tile in the dashboard's --background color rather than shipped bare:
@@ -39,7 +41,6 @@ SOURCE = ROOT / "web" / "public" / "aether-mark.png"
 FONTS = ROOT / "web" / "public" / "fonts"
 DESKTOP_BUILD = ROOT / "desktop" / "build"
 WEB_ICONS = ROOT / "web" / "public" / "icons"
-ANDROID_RES = ROOT / "android" / "app" / "src" / "main" / "res"
 ANDROID_LISTING = ROOT / "android" / "listing"
 
 # The ground every Aether icon is drawn on, #0a0a0a. The web app manifest's
@@ -47,8 +48,6 @@ ANDROID_LISTING = ROOT / "android" / "listing"
 # installed app's splash (`web/src/app/theme-color.ts`). It is darker than the
 # dashboard's own dark `--canvas`, #141516: an icon has to read as an
 # object on a launcher rather than blend into a page.
-# android/app/src/main/res/values/colors.xml repeats it for the adaptive
-# icon's background layer, which Android fills rather than draws.
 BACKGROUND = (10, 10, 10, 255)
 CORNER_RADIUS_RATIO = 0.2237
 
@@ -73,17 +72,6 @@ MASKABLE_COVERAGE = 0.6
 # iOS renders the home-screen icon at 180px on every phone it still ships to
 # and rounds the corners itself.
 APPLE_SIZE = 180
-
-# Android density buckets and their pixels per dp.
-ANDROID_DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
-
-# A launcher icon is 48dp; an adaptive icon's layers are a 108dp canvas the
-# launcher masks and animates, of which only the central 66dp circle is
-# guaranteed to survive every mask. 0.48 puts the mark's diagonal at 63dp,
-# just inside that circle.
-ANDROID_LEGACY_DP = 48
-ANDROID_ADAPTIVE_DP = 108
-ANDROID_ADAPTIVE_COVERAGE = 0.48
 
 # Google Play's feature graphic is a fixed 1024x500 banner in JPEG or 24-bit
 # PNG with no alpha (android/listing/README.md). Play's highly-recommended
@@ -155,15 +143,6 @@ def render(mark: Image.Image, size: int, coverage: float, rounded: bool = True) 
     return tile.resize((size, size), Image.LANCZOS)
 
 
-def render_adaptive_foreground(mark: Image.Image, size: int) -> Image.Image:
-    """The mark alone on transparency: the adaptive icon's background layer is
-    a flat color the launcher parallaxes independently, so no tile here."""
-    supersampled = size * SUPERSAMPLE
-    layer = Image.new("RGBA", (supersampled, supersampled), (0, 0, 0, 0))
-    paste_mark(mark, layer, ANDROID_ADAPTIVE_COVERAGE)
-    return layer.resize((size, size), Image.LANCZOS)
-
-
 def write_desktop(mark: Image.Image) -> None:
     icons = DESKTOP_BUILD / "icons"
     icons.mkdir(parents=True, exist_ok=True)
@@ -199,23 +178,6 @@ def write_web(mark: Image.Image) -> None:
     )
 
     print(f"wrote web/public/icons/ ({2 * len(WEB_SIZES) + 1} files)")
-
-
-def write_android(mark: Image.Image) -> None:
-    """The adaptive foreground per density, plus the square tile launchers that
-    do not render adaptive icons fall back to. The two XML layer definitions
-    are hand-written resources, not generated."""
-    for bucket, scale in ANDROID_DENSITIES.items():
-        directory = ANDROID_RES / f"mipmap-{bucket}"
-        directory.mkdir(parents=True, exist_ok=True)
-
-        legacy = round(ANDROID_LEGACY_DP * scale)
-        render(mark, legacy, coverage_for(legacy)).save(directory / "ic_launcher.png")
-
-        adaptive = round(ANDROID_ADAPTIVE_DP * scale)
-        render_adaptive_foreground(mark, adaptive).save(directory / "ic_launcher_foreground.png")
-
-    print(f"wrote {ANDROID_RES.relative_to(ROOT)}/mipmap-* ({len(ANDROID_DENSITIES)} densities)")
 
 
 def load_font(path: Path, size: int) -> ImageFont.FreeTypeFont:
@@ -282,7 +244,6 @@ def main() -> None:
     mark = load_mark()
     write_desktop(mark)
     write_web(mark)
-    write_android(mark)
     write_listing(mark)
 
 
