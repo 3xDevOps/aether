@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"context"
 	"encoding/json"
 	"html"
 	"io"
@@ -113,6 +114,17 @@ func TestOriginPairsRouting(t *testing.T) {
 		if err := json.Unmarshal([]byte(body), &meta); err != nil || resp.StatusCode != http.StatusOK || meta.Resource != p.relay+edgeproto.PathUniversalMCP {
 			t.Errorf("connector metadata on %s: %s %s", p.relay, resp.Status, body)
 		}
+		resp, body = b.get(t, edgeproto.PathUniversalAuthServerMetadata)
+		var authMeta struct {
+			Issuer string `json:"issuer"`
+		}
+		if err := json.Unmarshal([]byte(body), &authMeta); err != nil || resp.StatusCode != http.StatusOK || authMeta.Issuer != p.relay+edgeproto.PathUniversalMCP {
+			t.Errorf("authorization server metadata on %s: %s %s", p.relay, resp.Status, body)
+		}
+		resp, _ = b.do(t, http.MethodPost, edgeproto.PathUniversalMCP, nil, nil)
+		if want := `Bearer resource_metadata="` + p.relay + edgeproto.PathUniversalResourceMetadata + `"`; resp.Header.Get("WWW-Authenticate") != want {
+			t.Errorf("tokenless /mcp on %s: WWW-Authenticate %q, want %q", p.relay, resp.Header.Get("WWW-Authenticate"), want)
+		}
 		resp, _ = b.get(t, edgeproto.PathUniversalMCPAuthorize+"?client_id=c")
 		if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, p.signin+edgeproto.PathMCPChoose+"?") {
 			t.Errorf("connector authorize on %s sends the browser to %q, want its own sign-in origin", p.relay, loc)
@@ -222,6 +234,34 @@ func TestOriginPairsAssertionNamesTheServersOrigin(t *testing.T) {
 		if _, err := edgeproto.VerifyConnectorAssertion(h.svc.EdgeKey(), html.UnescapeString(m[1]), p.enrolled, id,
 			q.Get("client_id"), q.Get("code_challenge"), q.Get("redirect_uri"), time.Now()); err != nil {
 			t.Errorf("assertion on %s for a server enrolled at %s: %v", p.signin, p.enrolled, err)
+		}
+	}
+}
+
+// TestOriginPairsGuard checks what a server may answer on the universal
+// paths of each pair: its forms may post only to that pair's relay
+// origin, and it may send the browser to that origin's authorization
+// path, never to the other pair's.
+func TestOriginPairsGuard(t *testing.T) {
+	h := newPairsHarness(t)
+	for _, p := range []struct{ relay, other string }{{testRelay, testRelay2}, {testRelay2, testRelay}} {
+		req := httptest.NewRequest(http.MethodGet, p.relay+edgeproto.PathUniversalMCPAuthorize, nil)
+		req = req.WithContext(context.WithValue(req.Context(), pairKey{}, h.svc.byHost[edgeproto.OriginHost(p.relay)]))
+		for _, tt := range []struct {
+			location string
+			status   int
+		}{{p.relay + edgeproto.PathUniversalMCPAuthorize, http.StatusFound}, {p.other + edgeproto.PathUniversalMCPAuthorize, http.StatusBadGateway}} {
+			w := httptest.NewRecorder()
+			g := h.svc.guard(w, req)
+			g.Header().Set("Content-Security-Policy", "default-src 'none'")
+			g.Header().Set("Location", tt.location)
+			g.WriteHeader(http.StatusFound)
+			if w.Code != tt.status {
+				t.Errorf("on %s a server sends the browser to %s: %d, want %d", p.relay, tt.location, w.Code, tt.status)
+			}
+			if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "form-action "+p.relay+" ") || strings.Contains(csp, p.other) {
+				t.Errorf("CSP on %s: %q", p.relay, csp)
+			}
 		}
 	}
 }

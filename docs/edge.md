@@ -592,10 +592,11 @@ at https://<relay host>/mcp; upgrade it ...` for a server at protocol 2.
 SQLite database. Run it with a systemd unit ([Installing](#installing)) or as the
 image `ghcr.io/3xdevops/aether-edge` ([In a container](#in-a-container)). It
 answers on two host names, written `<signin-host>` and `<relay-host>` below (such
-as `auth.example.com` and `edge.example.com`). Either a reverse proxy terminates
+as `auth.example.com` and `edge.example.com`), and on two more for each extra
+[address pair](#more-than-one-address-pair). Either a reverse proxy terminates
 TLS and passes plain HTTP to a loopback port (`--proxy-listen`; the packaged unit
 expects nginx), or the edge listens on `:443` itself with Let's Encrypt
-certificates for its two names (`--listen`, the default).
+certificates for its names (`--listen`, the default).
 
 ### Requirements
 
@@ -603,7 +604,7 @@ certificates for its two names (`--listen`, the default).
   IPv4 address. The edge limits requests by client address, so no other proxy or
   load balancer may sit between clients and the edge's own proxy.
 - Outbound HTTPS to `github.com`, `api.github.com` and Let's Encrypt.
-- Two DNS names, a GitHub OAuth app, and egress bandwidth ([Egress
+- Two DNS names and a GitHub OAuth app per address pair, and egress bandwidth ([Egress
   budget](#egress-budget)).
 
 ### GitHub OAuth app
@@ -727,7 +728,7 @@ deliberately.
 
 Put the edge and the proxy on one container network, publish only the proxy's
 ports, give the proxy a fixed address and trust that address alone, never the
-network's subnet. The proxy passes both host names to `http://aether-edge:8443`:
+network's subnet. The proxy passes every host name of every pair to `http://aether-edge:8443`:
 
 ```sh
 docker volume create aether-edge-data
@@ -867,6 +868,13 @@ to a wrong host all stay on that pair, and no pair is preferred. Sign-in cookies
 are per host, so a browser signs in on each sign-in origin separately. Device
 tokens work through every relay origin.
 
+Without a reverse proxy the edge obtains certificates for every host name of
+every pair itself. Behind one, add each pair's two host names to the proxy: a
+`server` block and a certificate each under nginx, or `|| Host(...)` terms in the
+router rule under Traefik ([`compose.yaml`](../packaging/edge/compose.yaml)).
+Probe `/healthz` and the certificate expiry on each of them
+([Monitoring](#monitoring)).
+
 A server enrolls at the relay origin it dialed. Every grant and connector
 assertion for it names that origin as issuer, whichever relay origin the client
 came in on, because the server refuses any other. Moving a server to another
@@ -912,7 +920,7 @@ Encrypt account.
    sudo apt-get install nginx certbot python3-certbot-nginx
    ```
 
-2. Get a certificate for each host name. Port 80 must be open. The deploy hook
+2. Get a certificate for each host name, those of extra pairs too. Port 80 must be open. The deploy hook
    reloads nginx after each renewal:
 
    ```sh
@@ -994,7 +1002,7 @@ exported.
 `/healthz` (`aether-edge healthcheck`) is liveness. `/readyz` (`aether-edge
 healthcheck --ready`) answers 200 when the database answers within a second, the
 public listener serves and the edge is not stopping, and 503 otherwise. From
-outside the edge's network, probe `/healthz` on both names and the certificate
+outside the edge's network, probe `/healthz` on every host name and each one's certificate
 expiry (`openssl x509 -noout -checkend 1814400`).
 
 The edge logs to the journal (`journalctl -u aether-edge`), including client

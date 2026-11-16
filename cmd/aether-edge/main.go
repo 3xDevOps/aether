@@ -223,23 +223,29 @@ func serve(args []string) (err error) {
 	return errors.Join(err, web.Shutdown(shutdownCtx), metrics.Shutdown(shutdownCtx))
 }
 
-// edgeTLS obtains certificates for exactly the edge's host names, two per
-// origin pair, with TLS-ALPN-01.
+// edgeTLS obtains certificates for exactly the edge's host names with
+// TLS-ALPN-01.
 func edgeTLS(o options) *tls.Config {
-	hosts := []string{host(o.signinOrigin), host(o.relayOrigin)}
-	for _, p := range o.morePairs {
-		hosts = append(hosts, host(p.SigninOrigin), host(p.RelayOrigin))
-	}
 	m := &autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
 		Cache:      autocert.DirCache(filepath.Join(o.dataDir, "acme")),
-		HostPolicy: autocert.HostWhitelist(hosts...),
+		HostPolicy: autocert.HostWhitelist(certHosts(o)...),
 		Email:      o.acmeEmail,
 		Client:     &acme.Client{DirectoryURL: o.acmeDirectory},
 	}
 	cfg := m.TLSConfig()
 	cfg.MinVersion = tls.VersionTLS12
 	return cfg
+}
+
+// certHosts are the host names the edge obtains certificates for: two per
+// origin pair.
+func certHosts(o options) []string {
+	hosts := []string{host(o.signinOrigin), host(o.relayOrigin)}
+	for _, p := range o.morePairs {
+		hosts = append(hosts, host(p.SigninOrigin), host(p.RelayOrigin))
+	}
+	return hosts
 }
 
 func serveHTTP(name string, srv *http.Server, ln net.Listener) error {

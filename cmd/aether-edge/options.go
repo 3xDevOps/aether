@@ -188,6 +188,9 @@ func parseOriginPairs(list, scheme, signin, relay string) ([]edge.Pair, error) {
 	var pairs []edge.Pair
 	for entry := range strings.SplitSeq(list, ",") {
 		fields := strings.Fields(entry)
+		if len(fields) == 0 {
+			return nil, fmt.Errorf("--origin-pairs %q has an empty pair: remove the extra comma", list)
+		}
 		if len(fields) != 4 {
 			return nil, fmt.Errorf("--origin-pairs: %q is not <signin origin> <relay origin> <GitHub client id> <client secret file>", strings.TrimSpace(entry))
 		}
@@ -212,7 +215,8 @@ func parseOriginPairs(list, scheme, signin, relay string) ([]edge.Pair, error) {
 			GitHub: &edge.OAuthApp{ClientID: fields[2], ClientSecret: secret}})
 	}
 	if len(pairs)+1 > edgeproto.MaxRelayOrigins {
-		return nil, fmt.Errorf("--origin-pairs names %d pairs; an edge serves at most %d", len(pairs), edgeproto.MaxRelayOrigins-1)
+		return nil, fmt.Errorf("--origin-pairs names %d pairs, which with --signin-origin and --relay-origin make %d; an edge serves at most %d pairs",
+			len(pairs), len(pairs)+1, edgeproto.MaxRelayOrigins)
 	}
 	return pairs, nil
 }
