@@ -282,10 +282,13 @@ func TestStartEndsWhenTheVMDiesDuringSetup(t *testing.T) {
 	h.guest("run-a").bootHangs = true
 	done := make(chan error, 1)
 	go func() { done <- h.engine.start(context.Background(), "run-a") }()
+	deadline := time.After(10 * time.Second)
 	for h.units.vmm("run-a") == nil {
 		select {
 		case err := <-done:
 			t.Fatalf("start ended before its VM came up: %v", err)
+		case <-deadline:
+			t.Fatal("start did not bring its VM up")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
