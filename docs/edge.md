@@ -1260,7 +1260,7 @@ on `main`, which hosts pin, so only a run of that file on `main` moves a tag.
 
 | Tag | Moved by | When |
 | --- | --- | --- |
-| `nightly` | `nightly.yml` calling `promote-edge.yml` | each nightly it publishes |
+| `nightly` | `nightly.yml` calling `promote-edge.yml` | each nightly it publishes; the tag takes only a nightly release |
 | `beta` | `promote.yml` calling `promote-edge.yml` | each time Promote moves `beta.json`, on a promotion to stable too. A hotfix moves `beta.json` only when it is above it, and never `:beta`, which follows at the next Promote |
 | `stable` | an admin dispatching `promote-edge.yml` | by hand, as below |
 
@@ -1281,7 +1281,8 @@ The run refuses, with these errors:
 
 - `release <tag> is a draft; promote only a published release`;
 - `<tag> is a <channel> release, which aether-edge:stable does not take`
-  (stable takes a stable release, or one from before channels);
+  (`stable` takes a stable release, or one from before channels; `beta` anything
+  but a nightly);
 - `<tag> was published <n> hours ago; wait until 24 hours have passed or give soak_override_reason`;
 - `ghcr.io/3xdevops/aether-edge:<tag> is <digest>, not <digest>` when the
   digest you passed is not the tag's index;

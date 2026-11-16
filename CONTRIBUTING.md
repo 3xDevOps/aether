@@ -579,7 +579,9 @@ with its minor bumped, or the core of a higher beta (after `v0.8.7`,
 `v0.9.0-nightly.1`). The `release` job in the `nightly` environment signs it
 with `AETHER_NIGHTLY_SIGNING_KEY` and moves `nightly.json`; `promote-edge.yml`
 then moves `aether-edge:nightly`. A run that finds a nightly tag its failed
-predecessor left without a release builds that tag again.
+predecessor left without a release builds that tag again, but not
+before 4 hours have passed since the later of the tag and the newest failed
+`nightly.yml` run.
 
 Before it builds, the `signing-key` job refuses a nightly key `main` does not
 trust, so a missing public key in `nightlyKeys` fails the run before

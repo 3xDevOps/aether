@@ -811,7 +811,10 @@ A pending update waiting for an idle moment applies only a release the
 server's channel takes. `--when idle` refuses any other with the message
 below; the dashboard's switch retires a pending one, recording it as failed
 with the reason, and one left pending after a switch on the host fails at
-the idle moment. `--when now` installs any release.
+the idle moment. When the switch cannot fetch a pending update's manifest to
+check it, the update stays pending (`kept`, with `kept_error` giving the
+fetch error) and is refused at its idle moment if the new channel does not
+take it. `--when now` installs any release.
 
 ```
 release preflight failed: the server no longer takes this update: v0.9.0-nightly.13 is a nightly release, which an install on beta does not take; update with --when now to install it anyway
