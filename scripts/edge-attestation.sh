@@ -7,8 +7,10 @@
 # source ref refs/heads/main, from a promote.yml or nightly.yml run, and a
 # pushed tag with
 # refs/tags/<tag>, from a release.yml run. release.yml itself signed the
-# releases from before release-build.yml. The run comes from the verified
-# certificate, so no other run of either workflow can stand in for it.
+# releases from before release-build.yml. Releases built before the
+# repository took its current name are signed under its old name,
+# 3xDevOps/aether. The run comes from the verified certificate, so no other
+# run of either workflow can stand in for it.
 set -eu
 
 if [ "$#" -ne 3 ] || { [ "$1" != verify ] && [ "$1" != qualify ]; }; then
@@ -19,7 +21,6 @@ mode="$1"
 ref="$2"
 tag="$3"
 repo="${GITHUB_REPOSITORY:?edge-attestation: GITHUB_REPOSITORY must name the repository}"
-workflows="https://github.com/$repo/.github/workflows"
 
 fail() {
 	echo "::error::$1" >&2
@@ -29,20 +30,24 @@ fail() {
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
-# Each line: the signer workflow, the source ref, and the workflows, comma
-# separated, one of which must have started the run.
-cat >"$tmp/identities" <<EOF
-release-build.yml refs/heads/main $workflows/promote.yml@refs/heads/main,$workflows/nightly.yml@refs/heads/main
-release-build.yml refs/tags/$tag $workflows/release.yml@refs/tags/$tag
-release.yml refs/tags/$tag $workflows/release.yml@refs/tags/$tag
+# Each line: the repository name signed under, the signer workflow, the
+# source ref, and the workflows, comma separated, one of which must have
+# started the run.
+for signed in "$repo" 3xDevOps/aether; do
+	workflows="https://github.com/$signed/.github/workflows"
+	cat <<EOF
+$signed release-build.yml refs/heads/main $workflows/promote.yml@refs/heads/main,$workflows/nightly.yml@refs/heads/main
+$signed release-build.yml refs/tags/$tag $workflows/release.yml@refs/tags/$tag
+$signed release.yml refs/tags/$tag $workflows/release.yml@refs/tags/$tag
 EOF
+done >"$tmp/identities"
 
 # The attestation API can answer a moment after the upload.
 verified=
 for attempt in 1 2 3; do
-	while read -r signer source caller; do
-		if gh attestation verify "oci://$ref" --repo "$repo" \
-			--signer-workflow "$repo/.github/workflows/$signer" \
+	while read -r signed signer source caller; do
+		if gh attestation verify "oci://$ref" --repo "$signed" \
+			--signer-workflow "$signed/.github/workflows/$signer" \
 			--source-ref "$source" --deny-self-hosted-runners --format json >"$tmp/verified.json" 2>"$tmp/err"; then
 			verified=$caller
 			break 2
@@ -50,7 +55,7 @@ for attempt in 1 2 3; do
 	done <"$tmp/identities"
 	[ "$attempt" = 3 ] || sleep "${EDGE_ATTESTATION_RETRY_DELAY:-10}"
 done
-[ -n "$verified" ] || fail "$ref has no attestation from release-build.yml or release.yml for $tag: $(cat "$tmp/err")"
+[ -n "$verified" ] || fail "$ref has no attestation from release-build.yml or release.yml in $repo or 3xDevOps/aether for $tag: $(cat "$tmp/err")"
 [ "$mode" = qualify ] || exit 0
 
 runs=$(jq -r --arg callers "$verified" '($callers | ascii_downcase | split(",")) as $allowed
