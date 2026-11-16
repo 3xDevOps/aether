@@ -3,11 +3,13 @@ package localops
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/user"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -251,27 +253,43 @@ func pgrepMatches(pattern string) bool {
 // starts `aether gui`. Shells built before it existed leave it unset.
 const ShellExeEnv = "AETHER_SHELL_EXE"
 
+// retiredPrefix names the directory beside it that an old app is moved to
+// before it is deleted. Nothing else creates such a directory, so one found
+// at a later start is a removal to finish.
+const retiredPrefix = ".aether-retired-"
+
+// geteuid is os.Geteuid, a variable so tests can run as root.
+var geteuid = os.Geteuid
+
+// bundleIDPattern finds CFBundleIdentifier in the XML Info.plist
+// electron-builder writes.
+var bundleIDPattern = regexp.MustCompile(`<key>CFBundleIdentifier</key>\s*<string>([^<]*)</string>`)
+
 // RetireLegacyDesktop removes the app installed under the legacy product
 // name once an app under this build's name has started: shellExe must be
 // the executable of an install of this build's name, so a development
 // `electron .`, a legacy shell or an unset shellExe removes nothing, and so
-// does a process acting for another account under sudo. A legacy location
-// is removed only when it is a real directory (not a symlink) holding the
-// app's executable, it is not also a location of this build's name, linux
-// and darwin do not see it running, and it neither holds nor sits inside
-// the running app. The data directory lives elsewhere and is never
-// touched. On windows the legacy Start Menu shortcut goes with the app; on
-// linux the renamed app's launcher already replaced the legacy one.
+// does a root process. A legacy location is removed only when it is a real
+// directory this user owns, carries this app's identity (the bundle id on
+// darwin, the CLI binding InstallDesktop writes elsewhere), is not also a
+// location of this build's name, is not seen running (linux and darwin
+// only) and neither holds nor sits inside the running app. It is moved to a
+// retiredPrefix directory beside it first: Windows refuses that rename
+// while the app runs, so a running app is left whole, and a delete that
+// fails afterwards is finished at the next start. On windows the legacy
+// Start Menu shortcut goes with the app; on linux the renamed app's
+// launcher already replaced the legacy one. The data directory lives
+// elsewhere and is never touched.
 func RetireLegacyDesktop(goos, shellExe string) error {
 	return retireLegacyDesktop(goos, LookupRealUser, shellExe)
 }
 
 func retireLegacyDesktop(goos string, lookup func() (RealUser, error), shellExe string) error {
-	if productName == legacyProductName || shellExe == "" {
+	if productName == legacyProductName || shellExe == "" || geteuid() == 0 {
 		return nil
 	}
 	ru, err := lookup()
-	if err != nil || ru.ViaSudo {
+	if err != nil {
 		return err
 	}
 	shell, err := filepath.EvalSymlinks(shellExe)
@@ -282,116 +300,86 @@ func retireLegacyDesktop(goos string, lookup func() (RealUser, error), shellExe 
 	shellApp := ""
 	for _, app := range current {
 		if sameFile(DesktopAppExe(goos, app), shell) {
-			shellApp, _ = filepath.EvalSymlinks(app)
+			shellApp, err = filepath.EvalSymlinks(app)
 			break
 		}
 	}
-	if shellApp == "" {
+	if shellApp == "" || err != nil {
 		return nil
 	}
-	legacy := userAppPaths(goos, ru, legacyProductName)
+	removeErr := func(p string, err error) error {
+		hint := removeHint(goos, p, err)
+		if hint == "" {
+			hint = " (delete it by hand to stop this message)"
+		}
+		return fmt.Errorf("localops: remove the old app %s, which %s replaces%s: %w", p, productName, hint, err)
+	}
 	var errs []error
-	var asides []string
-	for _, app := range legacy {
-		asides = append(asides, setAsideCopies(app)...)
-		resolved, ok := legacyInstall(goos, app, current, shellApp)
-		if !ok {
-			continue
+	for _, app := range userAppPaths(goos, ru, legacyProductName) {
+		retired := filepath.Join(filepath.Dir(app), retiredPrefix+filepath.Base(app))
+		if info, err := os.Lstat(retired); err != nil || !info.Mode().IsDir() || !ownedByUser(info) {
+			if !oldApp(goos, app, current, shellApp) {
+				continue
+			}
+			if err := os.Rename(app, retired); err != nil {
+				errs = append(errs, removeErr(app, err))
+				continue
+			}
 		}
-		aside, err := moveAside(goos, resolved)
-		if err != nil {
-			errs = append(errs, err)
-			continue
+		// The moved app stays until the shortcut is gone, as the mark that
+		// the next start has to finish.
+		if goos == "windows" {
+			programs, err := resolveWindowsPrograms()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("localops: resolve Start Menu Programs folder: %w", err))
+				continue
+			}
+			link := filepath.Join(programs, legacyProductName+".lnk")
+			if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				errs = append(errs, fmt.Errorf("localops: remove the old Start Menu shortcut %s: %w", link, err))
+				continue
+			}
 		}
-		asides = append(asides, aside)
-	}
-	if goos == "windows" && len(asides) > 0 && len(errs) == 0 && !anyExists(legacy) {
-		// The set-aside copies stay until the shortcut is gone, so the next
-		// start finds them and tries the shortcut again.
-		if err := removeLegacyShortcut(); err != nil {
-			return err
-		}
-	}
-	for _, aside := range asides {
-		if err := os.RemoveAll(aside); err != nil {
-			errs = append(errs, fmt.Errorf("localops: remove the old app, moved to %s%s: %w", aside, removeHint(goos, aside, err), err))
+		if err := os.RemoveAll(retired); err != nil {
+			errs = append(errs, removeErr(retired, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// legacyInstall reports whether app is an old install to remove, and its
-// resolved path, which is the one removed.
-func legacyInstall(goos, app string, current []string, shellApp string) (string, bool) {
+// oldApp reports whether app is an install of the legacy app to remove.
+func oldApp(goos, app string, current []string, shellApp string) bool {
 	info, err := os.Lstat(app)
-	if err != nil || !info.Mode().IsDir() {
-		return "", false
+	if err != nil || !info.Mode().IsDir() || !ownedByUser(info) {
+		return false
 	}
-	exe, err := os.Lstat(DesktopAppExe(goos, app))
-	if err != nil || !exe.Mode().IsRegular() {
-		return "", false
+	if !regularFile(DesktopAppExe(goos, app)) {
+		return false
+	}
+	if goos == "darwin" {
+		plist, _ := os.ReadFile(filepath.Join(app, "Contents", "Info.plist"))
+		if m := bundleIDPattern.FindSubmatch(plist); m == nil || string(m[1]) != builder.AppID {
+			return false
+		}
+	} else if !regularFile(filepath.Join(app, filepath.FromSlash(cliBindingFile))) {
+		return false
 	}
 	resolved, err := filepath.EvalSymlinks(app)
 	if err != nil || sameFile(resolved, shellApp) || within(goos, resolved, shellApp) || within(goos, shellApp, resolved) {
-		return "", false
+		return false
 	}
 	for _, c := range current {
 		if c == app || sameFile(c, resolved) {
-			return "", false
+			return false
 		}
 	}
 	// /proc reports the resolved executable, pgrep the path it was started by.
-	if DesktopAppRunning(goos, app) || DesktopAppRunning(goos, resolved) {
-		return "", false
-	}
-	return resolved, true
+	return !DesktopAppRunning(goos, app) && !DesktopAppRunning(goos, resolved)
 }
 
-// moveAside renames app into a new set-aside directory beside it and
-// returns that directory, which the caller deletes. Windows refuses to
-// rename a directory whose files a running program holds open, and
-// DesktopAppRunning cannot tell there, so a running app is left whole
-// rather than half deleted.
-func moveAside(goos, app string) (string, error) {
-	aside, err := os.MkdirTemp(filepath.Dir(app), installOldPrefix+"*")
-	if err == nil {
-		err = os.Rename(app, filepath.Join(aside, filepath.Base(app)))
-		if err != nil {
-			_ = os.Remove(aside)
-		}
-	}
-	if err != nil {
-		return "", fmt.Errorf("localops: remove the old app %s%s: %w", app, removeHint(goos, app, err), err)
-	}
-	return aside, nil
-}
-
-// setAsideCopies is the set-aside directories of app that an earlier start
-// could not delete. It matches only those holding the legacy app's own
-// directory name: on windows the parent is shared with the renamed app,
-// whose install swap sets its own copy aside under the same prefix.
-func setAsideCopies(app string) []string {
-	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(app), installOldPrefix+"*", filepath.Base(app)))
-	asides := make([]string, len(matches))
-	for i, old := range matches {
-		asides[i] = filepath.Dir(old)
-	}
-	return asides
-}
-
-func removeLegacyShortcut() error {
-	programs, err := resolveWindowsPrograms()
-	if err != nil {
-		return fmt.Errorf("localops: resolve Start Menu Programs folder: %w", err)
-	}
-	link := filepath.Join(programs, legacyProductName+".lnk")
-	if info, err := os.Lstat(link); err != nil || !info.Mode().IsRegular() {
-		return nil
-	}
-	if err := os.Remove(link); err != nil {
-		return fmt.Errorf("localops: remove the old Start Menu shortcut %s: %w", link, err)
-	}
-	return nil
+func regularFile(p string) bool {
+	info, err := os.Lstat(p)
+	return err == nil && info.Mode().IsRegular()
 }
 
 func sameFile(a, b string) bool {
@@ -411,13 +399,4 @@ func within(goos, dir, p string) bool {
 	}
 	rel, err := filepath.Rel(dir, p)
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func anyExists(paths []string) bool {
-	for _, p := range paths {
-		if _, err := os.Lstat(p); err == nil {
-			return true
-		}
-	}
-	return false
 }

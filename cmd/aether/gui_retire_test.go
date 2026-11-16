@@ -6,10 +6,12 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -92,5 +94,54 @@ func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
 	}
 	if _, err := os.Stat(exe); err != nil {
 		t.Errorf("the app that started the gateway was removed: %v; stderr: %s", err, stderr.String())
+	}
+}
+
+// The gateway hands the shell's executable to the retire step after the
+// handshake, prints its error to stderr, and leaves the variable out of
+// what it starts.
+func TestGUIRetiresTheLegacyAppAfterTheHandshake(t *testing.T) {
+	if os.Getenv("AETHER_GUI_RETIRE_HELPER") == "2" {
+		retireLegacyDesktop = func(goos, shellExe string) error {
+			return fmt.Errorf("retire %s %s, env %q", goos, shellExe, os.Getenv(localops.ShellExeEnv))
+		}
+		os.Args = []string{os.Args[0], "gui", "--json", "--port", "0"}
+		main()
+		return
+	}
+	root := t.TempDir()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGUIRetiresTheLegacyAppAfterTheHandshake$")
+	cmd.Env = append(os.Environ(),
+		"AETHER_GUI_RETIRE_HELPER=2",
+		localops.ShellExeEnv+"=/apps/cloudfield/desktop/aether-desktop",
+		"HOME="+filepath.Join(root, "home"),
+		"XDG_CONFIG_HOME="+filepath.Join(root, "config"),
+		"XDG_CACHE_HOME="+filepath.Join(root, "cache"),
+		"AETHER_CONFIG_DIR=",
+		"HTTPS_PROXY=http://127.0.0.1:1",
+		"HTTP_PROXY=http://127.0.0.1:1",
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil || !strings.HasPrefix(line, `{"url":`) {
+		t.Fatalf("first stdout line = %q, %v", line, err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, stdout)
+	_ = cmd.Wait()
+	want := `aether gui: retire linux /apps/cloudfield/desktop/aether-desktop, env ""`
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 }

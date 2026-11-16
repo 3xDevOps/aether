@@ -4,23 +4,39 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 )
 
-// fakeInstall puts an app's executable under app, so app looks installed.
+// fakeInstall puts an app's executable and identity under app, so app
+// looks like an install of this app.
 func fakeInstall(t *testing.T, goos, app string) string {
 	t.Helper()
 	exe := DesktopAppExe(goos, app)
-	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
-		t.Fatal(err)
+	identity := filepath.Join(app, filepath.FromSlash(cliBindingFile))
+	content := `{"path":"/usr/local/bin/aether"}`
+	if goos == "darwin" {
+		identity = filepath.Join(app, "Contents", "Info.plist")
+		content = infoPlist(builder.AppID)
 	}
-	if err := os.WriteFile(exe, []byte("app"), 0o755); err != nil {
-		t.Fatal(err)
+	for file, data := range map[string]string{exe: "app", identity: content} {
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(data), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return exe
+}
+
+func infoPlist(bundleID string) string {
+	return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n" +
+		"\t<key>CFBundleExecutable</key>\n\t<string>Aether</string>\n" +
+		"\t<key>CFBundleIdentifier</key>\n\t<string>" + bundleID + "</string>\n</dict>\n</plist>\n"
 }
 
 func mustExist(t *testing.T, p string) {
@@ -336,19 +352,99 @@ func TestRetireLegacyDesktopLooksUpTheUserOnlyAfterTheRename(t *testing.T) {
 	}
 }
 
-// Under sudo the process is root acting for another account, whose
-// directories it must not delete.
-func TestRetireLegacyDesktopRemovesNothingUnderSudo(t *testing.T) {
+func TestRetireLegacyDesktopRemovesNothingAsRoot(t *testing.T) {
 	renameProduct(t)
+	previous := geteuid
+	geteuid = func() int { return 0 }
+	t.Cleanup(func() { geteuid = previous })
 	f := newRetireFixture(t, "linux")
-	sudo := func() (RealUser, error) { return RealUser{Name: "u", Home: f.home, ViaSudo: true}, nil }
-	if err := retireLegacyDesktop("linux", sudo, f.renamedExe); err != nil {
+	if err := retireLegacyDesktop("linux", f.lookup, f.renamedExe); err != nil {
 		t.Fatal(err)
 	}
 	f.assertLegacyKept(t)
 }
 
-// A delete that fails after the app was moved aside names the set-aside
+// Another product called Aether has the same bundle and executable names
+// on darwin; only this app's bundle id makes it the old app. Elsewhere the
+// CLI binding InstallDesktop writes marks it.
+func TestRetireLegacyDesktopKeepsAnotherAppOfTheSameName(t *testing.T) {
+	renameProduct(t)
+	for _, tc := range []struct {
+		name, goos, file, content string
+	}{
+		{"darwin bundle id", "darwin", filepath.Join("Contents", "Info.plist"), infoPlist("com.example.aether")},
+		{"darwin binary plist", "darwin", filepath.Join("Contents", "Info.plist"), "bplist00"},
+		{"darwin no plist", "darwin", filepath.Join("Contents", "Info.plist"), ""},
+		{"linux no binding", "linux", filepath.FromSlash(cliBindingFile), ""},
+		{"windows no binding", "windows", filepath.FromSlash(cliBindingFile), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRetireFixture(t, tc.goos)
+			for _, app := range f.legacy {
+				file := filepath.Join(app, tc.file)
+				var err error
+				if tc.content == "" {
+					err = os.Remove(file)
+				} else {
+					err = os.WriteFile(file, []byte(tc.content), 0o644)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := retireLegacyDesktop(tc.goos, f.lookup, f.renamedExe); err != nil {
+				t.Fatal(err)
+			}
+			f.assertLegacyKept(t)
+		})
+	}
+}
+
+func TestOwnedByUser(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a unix account that does not own /")
+	}
+	for path, want := range map[string]bool{t.TempDir(): true, "/": false} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ownedByUser(info); got != want {
+			t.Errorf("ownedByUser(%s) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+// pgrep matches the path an app was started by: a darwin app started
+// through a symlinked Applications folder is still seen running.
+func TestRetireLegacyDesktopKeepsAnOldAppRunningByItsListedPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs pgrep")
+	}
+	if _, err := exec.LookPath("pgrep"); err != nil {
+		t.Skip("no pgrep")
+	}
+	renameProduct(t)
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "Applications")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	f := newRetireFixture(t, "darwin")
+	setMacSystemApplications(t, link)
+	app := filepath.Join(link, "Aether.app")
+	fakeInstall(t, "darwin", app)
+	startAppExe(t, DesktopAppExe("darwin", app))
+	if !waitFor(func() bool { return DesktopAppRunning("darwin", app) }) {
+		t.Fatal("the legacy app did not start")
+	}
+	if err := retireLegacyDesktop("darwin", f.lookup, f.renamedExe); err != nil {
+		t.Fatal(err)
+	}
+	mustExist(t, DesktopAppExe("darwin", app))
+}
+
+// A delete that fails after the app was moved aside names the moved
 // directory and is finished at the next start. The shortcut already went:
 // it pointed at the app's old place.
 func TestRetireLegacyDesktopRetriesAFailedDelete(t *testing.T) {
@@ -358,38 +454,33 @@ func TestRetireLegacyDesktopRetriesAFailedDelete(t *testing.T) {
 	renameProduct(t)
 	f := newRetireFixture(t, "windows")
 	locked := filepath.Join(f.legacy[0], "resources")
-	if err := os.MkdirAll(locked, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(locked, "app.asar"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(locked, 0o555); err != nil {
 		t.Fatal(err)
 	}
+	retired := filepath.Join(filepath.Dir(f.legacy[0]), retiredPrefix+"Aether Desktop")
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(retired, "resources"), 0o755) })
 	err := retireLegacyDesktop("windows", f.lookup, f.renamedExe)
-	if err == nil || !strings.Contains(err.Error(), installOldPrefix) {
-		t.Fatalf("err = %v, want the set-aside directory", err)
+	if err == nil || !strings.Contains(err.Error(), retired) || !strings.Contains(err.Error(), "window still open") {
+		t.Fatalf("err = %v, want the moved directory and the remove hint", err)
 	}
 	mustBeGone(t, f.legacy[0])
 	mustBeGone(t, f.shortcut)
-	asides, _ := filepath.Glob(filepath.Join(filepath.Dir(f.legacy[0]), installOldPrefix+"*", "Aether Desktop", "resources"))
-	if len(asides) != 1 {
-		t.Fatalf("set-aside copies = %q, want one", asides)
-	}
-	if err := os.Chmod(asides[0], 0o755); err != nil {
+	if err := os.Chmod(filepath.Join(retired, "resources"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := retireLegacyDesktop("windows", f.lookup, f.renamedExe); err != nil {
 		t.Fatal(err)
 	}
-	mustBeGone(t, filepath.Dir(filepath.Dir(asides[0])))
+	mustBeGone(t, retired)
 	mustExist(t, f.renamedExe)
 	mustExist(t, f.renamedShortcut)
 }
 
 // The renamed app's own set-aside copy from an install swap shares the
-// parent and prefix on windows; only the legacy app's is a leftover.
+// parent on windows and is never touched.
 func TestRetireLegacyDesktopKeepsTheRenamedAppsSetAsideCopy(t *testing.T) {
 	renameProduct(t)
 	f := newRetireFixture(t, "windows")
@@ -415,7 +506,7 @@ func TestRetireLegacyDesktopKeepsAShortcutWithoutAnOldApp(t *testing.T) {
 }
 
 // A shortcut that could not be removed is tried again at the next start:
-// the old app's set-aside copy stays until it is gone.
+// the moved app stays until it is gone.
 func TestRetireLegacyDesktopRetriesTheShortcut(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("needs a unix account that directory permissions apply to")
@@ -430,10 +521,9 @@ func TestRetireLegacyDesktopRetriesTheShortcut(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), f.shortcut) {
 		t.Fatalf("err = %v, want the shortcut", err)
 	}
+	retired := filepath.Join(filepath.Dir(f.legacy[0]), retiredPrefix+"Aether Desktop")
 	mustBeGone(t, f.legacy[0])
-	if got := setAsideCopies(f.legacy[0]); len(got) != 1 {
-		t.Fatalf("set-aside copies = %q, want one", got)
-	}
+	mustExist(t, retired)
 	if err := os.Chmod(f.programs, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -441,8 +531,6 @@ func TestRetireLegacyDesktopRetriesTheShortcut(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustBeGone(t, f.shortcut)
-	if got := setAsideCopies(f.legacy[0]); len(got) != 0 {
-		t.Fatalf("set-aside copies = %q, want none", got)
-	}
+	mustBeGone(t, retired)
 	mustExist(t, f.renamedShortcut)
 }
