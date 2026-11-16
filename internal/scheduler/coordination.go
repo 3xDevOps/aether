@@ -314,16 +314,6 @@ func (s *Scheduler) releaseTerminalCoordination(member domain.MemberID) {
 	s.collectStagedBridges()
 }
 
-// checkCoordinationMounts is the source-side half of mount validation for
-// the two Aether surfaces: both sources must exist, resolve without
-// surprises, and be the kind of object the container expects, and each is
-// pinned to what it resolved to so no symlink can be swapped between the
-// check and container creation.
-//
-// It is the whole check these two need. The target side is two constants
-// that runtime.ValidateMounts reserves against every caller mount (see the
-// note at the top of this file), and the sources are built by the server
-// under <data>, never named by a client or an agent.
 func cliMounts(bin string) []runtime.Mount {
 	return []runtime.Mount{
 		{HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true},
@@ -331,6 +321,16 @@ func cliMounts(bin string) []runtime.Mount {
 	}
 }
 
+// checkCoordinationMounts is the source-side half of mount validation for
+// the two Aether surfaces: both sources must exist, resolve without
+// surprises, and be the kind of object the container expects, and each is
+// pinned to what it resolved to so no symlink can be swapped between the
+// check and container creation.
+//
+// It is the whole check these two need. The target side is constants that
+// runtime.ValidateMounts reserves against every caller mount (see the
+// note at the top of this file), and the sources are built by the server
+// under <data>, never named by a client or an agent.
 func checkCoordinationMounts(mounts []runtime.Mount) error {
 	for i, m := range mounts {
 		source, err := filepath.EvalSymlinks(m.HostPath)

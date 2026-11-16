@@ -38,11 +38,10 @@ paths:
 ```
 
 The first path serves the hidden MCP entry point and the existing agent
-lifecycle hook. The other two are the agent-facing coordination CLI under its
-current and its Cloudfield name; the binary behaves the same under either. A
-container created before the second name was added has only
-`/usr/local/bin/aether-internal`, so the server's own commands and every file
-written into a member's home call that path. A
+lifecycle hook. The other two are the agent-facing coordination CLI, which
+behaves the same at either path. Containers created before this release lack
+`/usr/local/bin/cloudfield-internal`, so the server's own commands and every
+file written into a member's home call `/usr/local/bin/aether-internal`. A
 Default or Isolated session also gets the binary at `/usr/local/bin/sudo`, the
 [sudo shim](security.md#sudo-in-a-default-session). The coordination directory
 and the executable mounts are constructed by Aether, not requested by a session.
