@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Aether</string>
+    <string name="app_name">Cloudfield</string>
 
-    <string name="choice_title">Connect to Aether</string>
+    <string name="choice_title">Connect to Cloudfield</string>
     <string name="choice_current">Current connection: %1$s</string>
-    <string name="choice_edge">Aether Edge</string>
+    <string name="choice_edge">Cloudfield Edge</string>
     <string name="choice_edge_detail">Sign in with GitHub, no Tailscale needed</string>
     <string name="choice_tailscale">Tailscale</string>
     <string name="choice_tailscale_detail">Type your server\'s MagicDNS name</string>
 
-    <string name="setup_title">Aether server</string>
+    <string name="setup_title">Cloudfield server</string>
     <string name="setup_explainer">Your server hosts the dashboard on your tailnet. Enter its MagicDNS name. This phone has to be signed in to the same tailnet.</string>
     <string name="setup_label">Server name</string>
     <string name="setup_hint">my-server.tailnet-name.ts.net</string>
     <string name="setup_open">Open dashboard</string>
-    <string name="setup_privacy">The app sends nothing anywhere but your server, the Aether edge that relays to it in Aether Edge mode, and github.com, which it asks for the newest release\'s tag when the app comes to the front, about once an hour, when you tap Check for updates, and in Aether Edge mode also while the dashboard is open. Privacy policy: https://github.com/3xDevOps/cloudfield/blob/main/docs/privacy.md</string>
+    <string name="setup_privacy">The app sends nothing anywhere but your server, the edge that relays to it in Cloudfield Edge mode, and github.com, which it asks for the newest release\'s tag when the app comes to the front, about once an hour, when you tap Check for updates, and in Cloudfield Edge mode also while the dashboard is open. Privacy policy: https://github.com/3xDevOps/cloudfield/blob/main/docs/privacy.md</string>
     <string name="setup_licence">Licence: GPL-3.0, https://github.com/3xDevOps/cloudfield/blob/main/LICENSE. Open source notices: https://github.com/3xDevOps/cloudfield/blob/main/docs/notices.md</string>
 
     <string name="address_error_empty">Enter the server\'s tailnet name, for example my-server.tailnet-name.ts.net</string>
@@ -26,14 +26,14 @@
 
     <string name="connection">Connection</string>
     <string name="connection_short">Connection</string>
-    <string name="join_needs_edge">Join and claim links open in Aether Edge mode. Choose Aether Edge under Connection, then tap the link again.</string>
+    <string name="join_needs_edge">Join and claim links open in Cloudfield Edge mode. Choose Cloudfield Edge under Connection, then tap the link again.</string>
 
     <string name="gateway_stopped">The local gateway stopped</string>
     <string name="gateway_retry">Retry</string>
     <string name="renderer_killed">Android stopped the dashboard\'s renderer</string>
     <string name="renderer_crashed">The dashboard\'s renderer crashed</string>
     <string name="renderer_unresponsive">The dashboard\'s renderer stopped responding and was ended</string>
-    <string name="update_title">Aether %1$s is available.</string>
+    <string name="update_title">Cloudfield %1$s is available.</string>
     <string name="update_running">You are running %1$s.</string>
     <string name="update_play_detail">Google Play installs it. Nothing downloads until you update there.</string>
     <string name="update_release_detail">Download update fetches aether-android.apk in your browser. Open it, and Android asks you to confirm, checks it is signed like this app, and installs it over this app with your settings and sign-in.</string>
@@ -45,14 +45,14 @@
     <string name="update_check">Check for updates</string>
     <string name="update_checking">Checking for updates…</string>
     <string name="update_up_to_date">You\'re up to date (%1$s). Checked %2$s.</string>
-    <string name="update_available">Aether %1$s is available. You are running %2$s. Checked %3$s.</string>
+    <string name="update_available">Cloudfield %1$s is available. You are running %2$s. Checked %3$s.</string>
     <string name="update_not_checked">This build (%1$s) is not a release, so releases are not checked. Checked %2$s.</string>
     <string name="update_failed_at">Could not check for updates at %1$s:\n%2$s</string>
 
-    <string name="update_gate_title">Update Aether to keep using this server</string>
+    <string name="update_gate_title">Update Cloudfield to keep using this server</string>
     <string name="update_gate_detail">This app (%1$s) is too old for the server (%2$s needs %3$s or newer).</string>
-    <string name="update_gate_release">Download update fetches the APK below in your browser. Open it, and Android asks you to confirm, checks it is signed like this app, and installs it over this app with your settings and sign-in. Aether then opens past this screen.</string>
-    <string name="update_gate_play">Update Aether in Google Play. Aether then opens past this screen.</string>
+    <string name="update_gate_release">Download update fetches the APK below in your browser. Open it, and Android asks you to confirm, checks it is signed like this app, and installs it over this app with your settings and sign-in. Cloudfield then opens past this screen.</string>
+    <string name="update_gate_play">Update Cloudfield in Google Play. Cloudfield then opens past this screen.</string>
     <string name="update_gate_copy">Copy details</string>
     <string name="update_gate_copied">Copied</string>
     <string name="update_gate_checking">Checking again…</string>

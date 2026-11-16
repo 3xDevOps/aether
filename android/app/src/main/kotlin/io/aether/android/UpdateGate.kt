@@ -152,7 +152,7 @@ class UpdateGate(
     private fun copyDetails() {
         val shown = gate ?: return
         val clipboard = activity.getSystemService(ClipboardManager::class.java)
-        clipboard.setPrimaryClip(ClipData.newPlainText("Aether update", gateDetails(shown, targets())))
+        clipboard.setPrimaryClip(ClipData.newPlainText("Cloudfield update", gateDetails(shown, targets())))
         // Android 13 and newer confirm a copy themselves.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             Toast.makeText(activity, R.string.update_gate_copied, Toast.LENGTH_SHORT).show()

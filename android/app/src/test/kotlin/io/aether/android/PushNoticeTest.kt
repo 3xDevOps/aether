@@ -94,12 +94,12 @@ class PushNoticeTest {
     @Test
     fun unreadableOrHostileFieldsFallBack() {
         val unreadable = parsePush(byteArrayOf(0x00, 0x7f))
-        assertEquals("Aether", unreadable.title)
+        assertEquals("Cloudfield", unreadable.title)
         assertEquals("A session needs you.", unreadable.body)
         assertEquals("aether", unreadable.tag)
         val hostile =
             push("""{"title":1,"url":"https://evil.example/","run":"../../x","card":"a b","workspace":"a/b"}""")
-        assertEquals("Aether", hostile.title)
+        assertEquals("Cloudfield", hostile.title)
         assertNull(hostile.url)
         assertNull(hostile.run)
         assertNull(hostile.card)

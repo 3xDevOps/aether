@@ -5,9 +5,9 @@ does (see [docs/privacy.md](../../docs/privacy.md) for the same facts in
 prose). Play's form guide is at
 <https://support.google.com/googleplay/android-developer/answer/10787469>.
 
-In Tailscale mode the app itself sends nothing anywhere. In Aether Edge mode
+In Tailscale mode the app itself sends nothing anywhere. In Cloudfield Edge mode
 the bundled CLI also contacts the edge, see [Edge mode](#edge-mode). The
-dashboard it shows is Aether's own code, so under Play's rule that a webview counts when "your app is in control
+dashboard it shows is Cloudfield's own code, so under Play's rule that a webview counts when "your app is in control
 of the code/behavior delivered through that webview", what the dashboard sends
 to the member's server is declared as collected, even though the publisher
 never receives it. Declaring it cannot be held against the app; leaving it out
@@ -73,7 +73,7 @@ logs or diagnostics leave the phone).
 
 ## Edge mode
 
-Aether Edge mode adds one more recipient, the edge the publisher runs
+Cloudfield Edge mode adds one more recipient, the edge the publisher runs
 ([docs/privacy.md](../../docs/privacy.md#what-an-edge-stores)). The CLI in the
 app signs in there and relays the encrypted SSH stream, which the edge cannot
 read. Declare these in addition, **collected**, **not shared**, **required**

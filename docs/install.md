@@ -360,14 +360,15 @@ sends is in [privacy.md](privacy.md), its licences in [notices.md](notices.md).
 1. On the phone, download `aether-android.apk` from the
    [latest release](https://github.com/3xDevOps/cloudfield/releases/latest).
 2. When Android asks, allow your browser to install apps, then open the file.
-3. Choose how the app reaches your server: **Aether Edge** or **Tailscale**.
+3. Choose how the app reaches your server: **Cloudfield Edge** or **Tailscale**.
 
 | Mode | You need | How it works |
 | --- | --- | --- |
-| **Aether Edge** | A GitHub account the server lets in | The app runs its own copy of the `aether` CLI. Sign in with GitHub in the browser, pick your server, check its host key and tap **Link and pin**. A server that admits only approved devices makes the phone wait for approval ([teams.md](teams.md#through-an-edge)). |
+| **Cloudfield Edge** | A GitHub account the server lets in | The app runs its own copy of the `aether` CLI. Sign in with GitHub in the browser, pick your server, check its host key and tap **Link and pin**. A server that admits only approved devices makes the phone wait for approval ([teams.md](teams.md#through-an-edge)). |
 | **Tailscale** | The phone on the server's tailnet, and the server's dashboard on (`web-port`, see [networking.md](networking.md#the-dashboard)) | Type the server's MagicDNS name, such as `my-server.tailnet-name.ts.net`. The app opens the server's HTTPS dashboard; your tailnet login identifies you. |
 
-In **Aether Edge** mode SSH runs end to end; the edge relays encrypted bytes.
+In **Cloudfield Edge** mode SSH runs end to end; the edge relays encrypted
+bytes.
 The app keeps a device key and edge tokens in private storage, excluded from
 backups. Uninstalling the app or clearing its storage deletes the key, so the
 phone signs in as a new device and may need approval again. To switch mode or
@@ -384,15 +385,15 @@ ntfy, then turn on **Notify this device when a session needs me** in the
 dashboard's Settings ([networking.md](networking.md#in-the-android-app)).
 
 About once an hour, when you bring it to the front, the app checks for a
-release and shows a banner. In **Aether Edge** mode it offers the release the
-server runs, from the gateway's `update.check`, and nothing newer until the
+release and shows a banner. In **Cloudfield Edge** mode it offers the release
+the server runs, from the gateway's `update.check`, and nothing newer until the
 server updates. In **Tailscale** mode it runs the bundled CLI's check, which
 follows the `config.json` that CLI has, and `stable` (`beta` until the first
 stable exists) when it has none. **Download update** fetches the new APK; open
 it and Android installs it over the app, keeping your data. A Google Play
 install gets **Open Google Play** once a stable release is 7 days old; Play
-carries no beta or nightly. In **Aether Edge** mode the server refuses an older
-app: a screen such as `This app (v0.7.0) is too old for the server (v0.8.0
+carries no beta or nightly. In **Cloudfield Edge** mode the server refuses an
+older app: a screen such as `This app (v0.7.0) is too old for the server (v0.8.0
 needs v0.8.0 or newer).` stays until you install the update it links.
 
 Android installs an APK over the app only when both carry the same signing
@@ -836,7 +837,7 @@ Clients follow their server. `aether update` and the desktop app take the
 release of the channel their default linked server follows, and by default
 never one above that server; a member who cannot update the server, or
 `--force`, can ([Update a client](#update-a-client)). The Android app in
-Aether Edge mode offers the server's release; in Tailscale mode its bundled
+Cloudfield Edge mode offers the server's release; in Tailscale mode its bundled
 CLI follows its own `config.json`, and `stable` when it has none
 ([Android app](#android-app)).
 
@@ -1212,7 +1213,8 @@ to your originals, holding local edits from when it paused.
   not check the release signature.
 - The Android app is not on Google Play, needs a UnifiedPush distributor for
   notifications ([networking.md](networking.md#in-the-android-app)) and has
-  no port forwarding. Join and claim links open only in **Aether Edge** mode.
+  no port forwarding. Join and claim links open only in **Cloudfield Edge**
+  mode.
 - On Linux the desktop app runs Electron with `--no-sandbox`; the dashboard
   page still has no Node.js access.
 

@@ -19,7 +19,7 @@ request ([What an edge stores](#what-an-edge-stores)).
 
 - **Which mode you chose and, in Tailscale mode, the server name you type on
   the first screen**, in the app's private storage.
-- **In Aether Edge mode, the CLI's state**, under the app's private files
+- **In Cloudfield Edge mode, the CLI's state**, under the app's private files
   directory in `.config/aether/`: `config.json` (the servers you linked),
   `edge-device-key` (this phone's SSH private key, mode `0600`),
   `edge-tokens.json` (the edge's sign-in token for this device, mode `0600`)
@@ -82,7 +82,7 @@ request ([What an edge stores](#what-an-edge-stores)).
   sees a different member or server, or any refusal of access (a rejected
   token, a refused or removed member, a revoked or pending device); after a
   refusal nothing is saved again until a load succeeds. It is skipped above
-  1 MB. In Aether Edge mode the dashboard never saves it and deletes any
+  1 MB. In Cloudfield Edge mode the dashboard never saves it and deletes any
   copy, because another app could serve script from the gateway's loopback
   port. `localStorage` itself stays on in the app's WebView there; the app
   turns off only its HTTP cache and service workers' network loads. It is
