@@ -6,11 +6,10 @@ nightly at most every 4 hours. An admin promotes a nightly to beta and a
 beta to stable. One setting on the server picks the channel for the server
 and the apps that connect to it.
 
-**Status:** approved by the owner, 2026-11-15, except which channels
-apply updates by themselves ([Open questions](#open-questions)). The
-decisions dated 2026-11-14/15 are the owner's. Everything marked
-*Assumption* is this plan's choice and stands unless the owner changes
-it.
+**Status:** approved by the owner, 2026-11-15. The decisions dated
+2026-11-14/15 are the owner's; the one on applying updates was settled
+on 2026-11-16. Everything marked *Assumption* is this plan's choice and
+stands unless the owner changes it.
 
 ## Decisions (2026-11-14/15)
 
@@ -412,19 +411,14 @@ the host, prints the same text, and needs `--yes`. It is a flag because
 
 ### Applying updates
 
-The owner's decision: a server on nightly applies updates by itself when
-idle, "like any channel". Today no channel does: the background check
-only records the newest release (`internal/serverupdate/check.go:125`),
-and each update starts with a super admin's `server.update` `idle` or
-`now` (`internal/sshd/serverupdate.go:61`). *Assumption,* for the owner to
-confirm: on every channel, when the check
-finds a release on the server's channel above the running build, the
-server schedules it itself, exactly as `server.update` `idle` would, and
-it applies once no session is working. The narrower reading is that only
-a nightly server does this and beta and stable servers keep waiting for a
-super admin.
-
-Under either reading:
+Decided 2026-11-16: on every channel a server applies updates by itself
+when idle. When the check finds a release on the server's channel above
+the running build, the server schedules it itself, exactly as
+`server.update` `idle` would, and it applies once no session is working.
+Before channels the background check only recorded the newest release,
+and each update started with a super admin's `server.update`. One
+function decides which channels do this, `selfApplies` in
+`internal/serverupdate/autoupdate.go`.
 
 - `AETHER_NO_UPDATE_CHECK=1`, which already turns the check off, turns
   this off with it.
@@ -695,11 +689,16 @@ but an admin. *Assumption.*
 ### Hotfix
 
 1. Merge the fix to `main`. It ships in the next nightly.
-2. Cut `release/0.9` from the `v0.9.0` commit if it does not exist, and
-   cherry-pick the fix in a pull request to that branch.
+2. Cut `release/0.9` from the line's promoted stable, the `v0.9.0`
+   commit, if it does not exist, and cherry-pick the fix in a pull
+   request to that branch. The 0.8 line's promoted stable is `v0.8.7`,
+   so its first hotfix is `v0.8.8` on `release/0.8`.
 3. When the branch's push CI is green, an admin pushes `v0.9.1` on its
-   head. `release.yml` accepts a stable tag on a `release/X.Y` commit cut
-   from `vX.Y.0`, and refuses every other commit off `main`.
+   head. `release.yml` accepts a stable tag on the head of a
+   `release/X.Y` branch cut from that line's promoted stable, and
+   refuses every other commit off `main`. A tag runs the tagged commit's
+   own workflow files with the release key, so the branch needs the
+   protection `main` has before anyone tags it.
 4. Beta can sit at a build above the hotfix yet below the fix's merge, and
    its pointer outranks `(build, hotfix)`. So once a nightly carries the
    fix, the admin promotes it to beta too.
@@ -772,10 +771,3 @@ step 1; 5 to 7 must merge before step 3.
     points to), `docs/security.md`.
 
 Then the migration steps, run by an admin.
-
-## Open questions
-
-- Whether "applies updates by itself when idle, like any channel" means
-  every channel or nightly only ([Applying updates](#applying-updates)).
-  Pull request 3 builds the every-channel reading; `selfApplies` in
-  `internal/serverupdate/autoupdate.go` is the one place to change it.
