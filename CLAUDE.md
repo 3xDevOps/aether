@@ -40,6 +40,9 @@ In practice, across docs, CLI output, and dashboard copy:
 3. Keep credentials, host keys, invite codes, profile homes, transcripts, and
    runtime state outside the source tree.
 4. Prefer an end-to-end check over duplicate unit tests.
+5. Never make anything up. Paths, flags, environment variables, API fields,
+   versions, logos, measurements and citations come from the real source:
+   read it, run it, or say you do not know.
 
 ## Checks
 
