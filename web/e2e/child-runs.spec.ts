@@ -21,6 +21,17 @@ test.use({ colorScheme: 'dark' })
 const launchTimeout = 3 * 60 * 1000
 const shots = process.env.AETHER_E2E_SHOTS
 
+// A report shows once the agent's turn has ended, so this agent works for two seconds and then idles.
+const idleAgent = `i=0
+until /opt/aether/aether-server report pi --json '{"state":"working"}' >/dev/null; do
+  i=$((i + 1))
+  if [ "$i" -ge 300 ]; then exit 1; fi
+  sleep 0.1
+done
+sleep 2
+/opt/aether/aether-server report pi --json '{"state":"waiting","reason":"agent idle"}'
+sleep 600`
+
 type Run = { id: string; status: string; reason?: string; parent_run_id?: string; child_purpose?: string }
 
 // A queued child has no run yet, so run.get answers not found until it starts.
@@ -120,16 +131,18 @@ test('the sidebar folds a parent session’s subsessions and leaves out the fini
   const repo = await aether.seedRepo('sidebar-subsessions-project')
   await seedWorkspace(alice, aether.server.addr, repo, 'sidebar-subsessions-project')
   const aliceID = await memberID(alice)
-  aether.installAgent(aliceID, 'claude', 'printf "parent agent ready\\n"\nsleep 600')
-  aether.installAgent(aliceID, 'codex', 'printf "child agent ready\\n"\nsleep 600')
-  aether.giveCodexLogin(aliceID)
+  aether.installAgent(aliceID, 'claude', idleAgent)
+  // The children are Claude sessions: a Codex shim has no app-server, and its failure replaces a reported state.
+  const claudeHome = path.join(aether.server.memberHome(aliceID), '.claude')
+  mkdirSync(claudeHome, { recursive: true })
+  writeFileSync(path.join(claudeHome, '.credentials.json'), '{}\n')
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
   const { run: parent } = await alice.api.rpc<{ run: Run }>('run.launch', {
     workspace_id: workspaces[0].id, task: 'Coordinate the sidebar check', harness: 'claude', mode: 'tui',
   })
   await waitForCoordCLI(parent.id, aether.server.dataDir)
   const child = runCoordCLI<{ run_id: string }>(parent.id, [
-    'subsession', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', 'Sidebar fold check',
+    'subsession', 'start', '--harness', 'claude', '--mode', 'standard', '--purpose', 'Sidebar fold check',
     '--task', 'Wait for the parent to stop this check.', '--idempotency-key', 'sidebar-fold-check',
   ])
   await expect.poll(async () => (await runStatus(alice, child.run_id)).status, { timeout: launchTimeout }).toBe('running')
@@ -152,7 +165,7 @@ test('the sidebar folds a parent session’s subsessions and leaves out the fini
   await expect(childRow).toBeVisible()
 
   const start = (purpose: string, key: string) => runCoordCLI<{ run_id: string }>(parent.id, [
-    'subsession', 'start', '--harness', 'codex', '--mode', 'standard', '--purpose', purpose,
+    'subsession', 'start', '--harness', 'claude', '--mode', 'standard', '--purpose', purpose,
     '--task', 'Wait for the parent to stop this check.', '--idempotency-key', key,
   ])
   const failing = start('Sidebar failing check', 'sidebar-failing-check')
@@ -162,6 +175,9 @@ test('the sidebar folds a parent session’s subsessions and leaves out the fini
     await waitForCoordCLI(started.run_id, aether.server.dataDir)
   }
   await waitForCoordCLI(child.run_id, aether.server.dataDir)
+  for (const purpose of ['Sidebar fold check', 'Sidebar failing check', 'Sidebar asking check']) {
+    await expect(sidebar.getByRole('button', { name: new RegExp(`^Turn ended · ${purpose}`) })).toBeVisible({ timeout: 60_000 })
+  }
   runCoordCLI(child.run_id, ['report', '--outcome', 'success', '--summary', 'The fold works.', '--idempotency-key', 'fold-verdict'])
   runCoordCLI(failing.run_id, ['report', '--outcome', 'failure', '--summary', 'The check could not run.', '--idempotency-key', 'failing-verdict'])
   runCoordCLI(asking.run_id, ['report', '--outcome', 'needs-input', '--summary', 'Which width next?', '--idempotency-key', 'asking-question'])
