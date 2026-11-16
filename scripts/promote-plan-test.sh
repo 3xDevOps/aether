@@ -124,4 +124,18 @@ reset
 if FROM=$(printf 'v0.9.0-nightly.12\ntag=v9.9.9') TO=beta run; then fail "a two-line from was accepted"; fi
 [ ! -s "$STATE/log" ] || fail "a two-line from reached the API"
 
+# promote.yml's CI step fails when the check fails: the check is a command
+# of its own, never an argument of echo.
+step=$(awk '/name: Require green push CI for the exact commit/{f=1} f&&/run: \|/{r=1;next} f&&!r&&/run: /{sub(/^ *run: /,"");print;exit} r&&/^      - /{exit} r{print}' "$script_dir/../.github/workflows/promote.yml")
+[ -n "$step" ] || fail "promote.yml's CI step was not found"
+mkdir -p "$tmp/ci/scripts"
+printf '#!/bin/sh\necho "no green push CI for $2" >&2\nexit 1\n' >"$tmp/ci/scripts/release-ci-check.sh"
+if (cd "$tmp/ci" && GITHUB_REPOSITORY=o/r COMMIT=abc GITHUB_OUTPUT="$tmp/ci/out" bash -e -o pipefail -c "$step") 2>/dev/null; then
+	fail "promote.yml goes on after a failed CI check"
+fi
+[ ! -s "$tmp/ci/out" ] || fail "a failed CI check wrote an output: $(cat "$tmp/ci/out")"
+printf '#!/bin/sh\necho https://example.invalid/run/1\n' >"$tmp/ci/scripts/release-ci-check.sh"
+(cd "$tmp/ci" && GITHUB_REPOSITORY=o/r COMMIT=abc GITHUB_OUTPUT="$tmp/ci/out" bash -e -o pipefail -c "$step") || fail "promote.yml's CI step failed on a green check"
+grep -qx 'url=https://example.invalid/run/1' "$tmp/ci/out" || fail "CI url: $(cat "$tmp/ci/out")"
+
 echo "promote-plan tests passed"

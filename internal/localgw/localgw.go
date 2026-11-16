@@ -49,7 +49,7 @@ type Config struct {
 	// CLI is the saved link config the /local/v1 verbs operate on.
 	CLI cli.Config
 	// Update nil installs selfupdate.DefaultChecker().
-	Update *selfupdate.Checker
+	Update cli.ReleaseChecker
 	// Supervised marks a gateway the desktop shell spawned: update.apply
 	// exits the process because the shell restarts it.
 	Supervised bool

@@ -963,8 +963,9 @@ type edgeAt struct {
 	version atomic.Int64
 }
 
-func (e *edgeAt) Origin() string   { return e.origin }
-func (e *edgeAt) EdgeVersion() int { return int(e.version.Load()) }
+func (e *edgeAt) Origin() string         { return e.origin }
+func (e *edgeAt) EdgeVersion() int       { return int(e.version.Load()) }
+func (e *edgeAt) RelayOrigins() []string { return []string{e.origin} }
 
 // fakeRuns records launches, with the connector client each came via, and
 // answers the reads a run snapshot makes.

@@ -36,6 +36,9 @@ type EdgeOwner interface {
 	// while there is none. Below edgeproto.VersionHTTP the edge forwards
 	// no connector requests.
 	EdgeVersion() int
+	// RelayOrigins are the relay origins of the edge the connector takes
+	// requests at, Origin among them.
+	RelayOrigins() []string
 	// EdgeKey is the key of the edge the control connection is
 	// enrolled with, nil while there is none.
 	EdgeKey() ed25519.PublicKey

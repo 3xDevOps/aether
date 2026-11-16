@@ -103,3 +103,89 @@ func TestHTTPConnectionLimit(t *testing.T) {
 	data := edge.nextData(t)
 	t.Cleanup(func() { _ = data.CloseNow() })
 }
+
+// Each relayed request reaches Config.HTTP with the relay origin it came
+// in on, and without the header that carried it: from an edge at
+// edgeproto.VersionRelayOrigin, which sets it, an origin it announced or
+// the one the server dialed, and nothing else; from an older edge, which
+// passes a client's header through, always the origin the server dialed.
+func TestHTTPRelayOrigin(t *testing.T) {
+	const other, forged = "https://edge.example.test", "https://forged.example.test"
+	for _, tc := range []struct {
+		name    string
+		version int
+		header  string
+		// want is the origin Config.HTTP sees, "dialed" for the one the
+		// server dialed, or empty when the request is refused.
+		want string
+	}{
+		{"announced", edgeproto.VersionRelayOrigin, other, other},
+		{"dialed", edgeproto.VersionRelayOrigin, "dialed", "dialed"},
+		{"none", edgeproto.VersionRelayOrigin, "", "dialed"},
+		{"not announced", edgeproto.VersionRelayOrigin, forged, ""},
+		{"older edge", edgeproto.VersionRelayOrigin - 1, other, "dialed"},
+		{"older edge forged", edgeproto.VersionRelayOrigin - 1, forged, "dialed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := make(chan string, 1)
+			mcp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if h := r.Header.Values(edgeproto.HeaderRelayOrigin); h != nil {
+					t.Errorf("%s = %q reached the handler", edgeproto.HeaderRelayOrigin, h)
+				}
+				seen <- RelayOrigin(r.Context())
+			})
+			edge := newFakeEdge(t)
+			edge.version, edge.relayOrigins = tc.version, []string{edge.origin, other}
+			a := newAgentWith(t, Config{EdgeURL: edge.srv.URL, DataDir: t.TempDir(), SSH: newFakeSSH(), HTTP: mcp})
+			run(t, a)
+			ec := edge.nextControl(t)
+			connID := edgeproto.NewConnID()
+			edge.openKind(ec, edgeproto.KindHTTP, connID, "")
+			if r := expect[edgeproto.OpenResult](t, ec); r.Error != "" {
+				t.Fatalf("http open result %+v", r)
+			}
+			nc := websocket.NetConn(context.Background(), edge.nextData(t), websocket.MessageBinary)
+			t.Cleanup(func() { _ = nc.Close() })
+			_ = nc.SetDeadline(time.Now().Add(waitFor))
+			req, err := http.NewRequest(http.MethodGet, "http://server/mcp", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			header, want := tc.header, tc.want
+			if header == "dialed" {
+				header = edge.origin
+			}
+			if want == "dialed" {
+				want = edge.origin
+			}
+			if header != "" {
+				req.Header.Set(edgeproto.HeaderRelayOrigin, header)
+			}
+			if err = req.Write(nc); err != nil {
+				t.Fatal(err)
+			}
+			resp, err := http.ReadResponse(bufio.NewReader(nc), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if want == "" {
+				wantText := fmt.Sprintf("the edge relayed this request from %q, which is not one of the relay origins it announced: %s, %s",
+					forged, edge.origin, other)
+				if resp.StatusCode != http.StatusMisdirectedRequest || strings.TrimSpace(string(body)) != wantText {
+					t.Fatalf("answer %s %q, want 421 %q", resp.Status, body, wantText)
+				}
+				return
+			}
+			select {
+			case got := <-seen:
+				if resp.StatusCode != http.StatusOK || got != want {
+					t.Fatalf("answer %s, handler saw relay origin %q, want %q", resp.Status, got, want)
+				}
+			default:
+				t.Fatalf("answer %s %q, want the handler to see %q", resp.Status, body, want)
+			}
+		})
+	}
+}

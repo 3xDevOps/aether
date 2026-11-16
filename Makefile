@@ -271,6 +271,8 @@ test-scripts:
 	sh scripts/edge-attestation-test.sh
 	sh scripts/require-admin-test.sh
 	sh scripts/release-ci-check-test.sh
+	sh scripts/release-hotfix-test.sh
+	sh scripts/release-tag-path-test.sh
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
 	sh scripts/ci-classify-areas-test.sh

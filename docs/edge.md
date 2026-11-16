@@ -880,9 +880,34 @@ assertion for it names that origin as issuer, whichever relay origin the client
 came in on, because the server refuses any other. Moving a server to another
 address means enrolling it there. With more than one pair, the edge's `ready`
 message lists every relay origin in `relay_origins`; a server that does not know
-the field ignores it. A server whose release does not read that list accepts
-connector tokens only for its own relay origin, so its connector works only
-through the origin it enrolled at.
+the field ignores it.
+
+From edge protocol 6 the edge sends every connector request to the server with
+`Aether-Edge-Relay-Origin`, the relay origin the client sent it to, replacing
+any such header a client sends. A server at protocol 6 serves its connector at
+each relay origin its edge announced and at the one it enrolled at: metadata,
+issuer and the `resource` it requires name the origin the client used, and each
+token is bound to the URL it was issued for, so a token issued at
+`https://<relay host 1>/mcp` is refused at `https://<relay host 2>/mcp`
+(`the access token is for <url>, not <url>`), and a `resource` at any other
+origin gets `invalid_target`. An origin the edge did not announce in the
+current control connection gets `421 the edge relayed this request from
+"<origin>", which is not one of the relay origins it announced: ...`.
+
+| Edge | Server | Connector at another relay origin of the edge |
+| --- | --- | --- |
+| 6 | 6 | Works, bound to that origin |
+| 5 or below | 6 | Only the server's own relay origin, as before. The server ignores the header, which an older edge passes through from the client |
+| 6 | 5 or below | Only the server's own relay origin; `resource` at another gets `invalid_target`. The server ignores the header |
+
+Update the edge to protocol 6 before adding a pair. `MinVersion` stays 1, so
+no version refuses another. Tokens are stored with the URL they were issued
+for, so they survive a server restart, an edge restart and a reconnect. While
+the edge stops serving an origin, its tokens reach nothing; they work again,
+within their lifetimes, once the edge serves it again. A server that enrolls at
+another relay origin of the same edge keeps accepting tokens issued at the one
+it left while the edge speaks protocol 6 and announces it; below 6 it accepts
+only the origin it enrolled at.
 
 `/metrics` counts per address: `aether_edge_servers_by_origin{origin}` (servers
 holding a control channel by the relay origin they enrolled at),

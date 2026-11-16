@@ -1,6 +1,7 @@
 package edgeagent
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -42,6 +43,10 @@ type fakeEdge struct {
 	controls chan *edgeControl
 	data     chan *websocket.Conn
 	hellos   chan edgeproto.Hello
+	// version, when set, replaces edgeproto.Version in the challenge;
+	// relayOrigins is Ready.RelayOrigins.
+	version      int
+	relayOrigins []string
 
 	mu      sync.Mutex
 	tickets map[string]string
@@ -102,7 +107,7 @@ func (e *fakeEdge) control(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	nonce := make([]byte, edgeproto.NonceSize)
 	_, _ = rand.Read(nonce)
-	writeMsg(e.t, c, edgeproto.Challenge{Version: edgeproto.Version, Nonce: nonce, Origin: e.origin})
+	writeMsg(e.t, c, edgeproto.Challenge{Version: cmp.Or(e.version, edgeproto.Version), Nonce: nonce, Origin: e.origin})
 	_, data, err := c.Read(ctx)
 	if err != nil {
 		return
@@ -127,7 +132,7 @@ func (e *fakeEdge) control(w http.ResponseWriter, r *http.Request) {
 		e.t.Errorf("enrollment signature: %v", err)
 		return
 	}
-	writeMsg(e.t, c, edgeproto.Ready{ServerID: id, State: e.state, EdgeKey: e.pub})
+	writeMsg(e.t, c, edgeproto.Ready{ServerID: id, State: e.state, EdgeKey: e.pub, RelayOrigins: e.relayOrigins})
 	ec := &edgeControl{t: e.t, c: c, serverID: id, msgs: make(chan edgeproto.Message, 64)}
 	select {
 	case e.controls <- ec:

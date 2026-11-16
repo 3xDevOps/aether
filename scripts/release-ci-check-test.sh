@@ -7,6 +7,7 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 mkdir -p "$tmp/bin" "$tmp/api"
 export GH_FIXTURES="$tmp/api"
 export TEST_SHA=0123456789abcdef0123456789abcdef01234567
+export TEST_BRANCH=main
 export PATH="$tmp/bin:$PATH"
 
 cat >"$tmp/bin/gh" <<'EOF'
@@ -16,7 +17,7 @@ set -eu
 shift
 case "$*" in
 "repos/3xDevOps/aether/actions/workflows/ci.yml") file=workflow ;;
-"--paginate --slurp repos/3xDevOps/aether/actions/workflows/42/runs?event=push&branch=main&head_sha=$TEST_SHA&per_page=100") file=pages ;;
+"--paginate --slurp repos/3xDevOps/aether/actions/workflows/42/runs?event=push&branch=$TEST_BRANCH&head_sha=$TEST_SHA&per_page=100") file=pages ;;
 repos/3xDevOps/aether/actions/runs/*) file="run-${1##*/}" ;;
 *) echo "unexpected API request: $*" >&2; exit 91 ;;
 esac
@@ -45,7 +46,8 @@ reset_fixture() {
 check_accept() {
 	label=$1
 	expected_id=$2
-	if ! sh "$script_dir/release-ci-check.sh" 3xDevOps/aether "$TEST_SHA" >"$tmp/out" 2>"$tmp/err"; then
+	shift 2
+	if ! sh "$script_dir/release-ci-check.sh" "$@" 3xDevOps/aether "$TEST_SHA" >"$tmp/out" 2>"$tmp/err"; then
 		printf 'FAIL: %s was rejected\n' "$label" >&2
 		cat "$tmp/err" >&2
 		exit 1
@@ -164,5 +166,28 @@ reject_fixture 'detail substituted a different run'
 reset_fixture
 printf 'null\n' >"$GH_FIXTURES/run-101.json"
 reject_fixture 'malformed latest attempt'
+
+# A hotfix reads the push runs of its release/X.Y branch, and only those.
+reset_fixture
+export TEST_BRANCH=release/0.9
+jq '.head_branch = "release/0.9"' "$tmp/base.json" >"$GH_FIXTURES/run-101.json"
+jq '[{total_count:1, workflow_runs:[.]}]' "$GH_FIXTURES/run-101.json" >"$GH_FIXTURES/pages.json"
+check_accept 'exact release branch push' 101 --branch release/0.9
+export TEST_BRANCH=main
+check_reject 'release branch run without --branch' 3xDevOps/aether "$TEST_SHA"
+grep -q 'no complete, trusted exact-commit main CI run set' "$tmp/err" || { cat "$tmp/err" >&2; exit 1; }
+export TEST_BRANCH=release/0.9
+reset_fixture
+jq '[{total_count:1, workflow_runs:[.]}]' "$tmp/base.json" >"$GH_FIXTURES/pages.json"
+check_reject 'main run for a release branch' --branch release/0.9 3xDevOps/aether "$TEST_SHA"
+grep -q 'no complete, trusted exact-commit release/0.9 CI run set' "$tmp/err" || { cat "$tmp/err" >&2; exit 1; }
+jq '.head_branch = "release/0.9"' "$tmp/base.json" | jq '[{total_count:1, workflow_runs:[.]}]' >"$GH_FIXTURES/pages.json"
+check_reject 'attempt detail on main for a release branch' --branch release/0.9 3xDevOps/aether "$TEST_SHA"
+grep -q 'latest exact-commit release/0.9 CI run/attempt' "$tmp/err" || { cat "$tmp/err" >&2; exit 1; }
+export TEST_BRANCH=main
+for branch in main release/0.9.1 release/v0.9 release/09.1 'release/0.9&branch=main' feature/x ''; do
+	check_reject "branch $branch" --branch "$branch" 3xDevOps/aether "$TEST_SHA"
+done
+check_reject '--branch without a value' --branch
 
 printf '%s\n' 'release CI authorization tests passed'
