@@ -167,13 +167,18 @@ func TestConnectorAtEveryRelayOrigin(t *testing.T) {
 }
 
 // backOnline waits until the restarted edge holds s's control channel
-// again. The server's own status file can still say connected from before
-// the restart until its agent notices the old connection ended.
+// again and s's agent has made that session live. The server's own status
+// file can still say connected from before the restart until its agent
+// notices the old connection ended, and the relay counts the server online
+// as it sends Ready, before the agent has read it.
 func backOnline(t *testing.T, h *harness, s *serverNode) {
 	t.Helper()
 	eventually(t, "server back on the restarted edge", func() error {
-		if !h.relay().Online(s.id) {
-			return errors.New("not online")
+		switch {
+		case !h.relay().Online(s.id):
+			return errors.New("not online at the edge")
+		case !s.agent.Connected():
+			return errors.New("online at the edge, but the agent has not read Ready yet")
 		}
 		return nil
 	})
