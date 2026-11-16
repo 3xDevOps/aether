@@ -702,6 +702,9 @@ but an admin. *Assumption.*
 4. Beta can sit at a build above the hotfix yet below the fix's merge, and
    its pointer outranks `(build, hotfix)`. So once a nightly carries the
    fix, the admin promotes it to beta too.
+   A hotfix that moves `beta.json` does not move the Edge `:beta` image:
+   a run started by a tag cannot sign as `promote-edge.yml` on `main`,
+   which hosts pin. `:beta` follows at that Promote.
 
 `scripts/release-ci-check.sh` reads only push runs on `main` (`:31-32`), so
 it gains a `release/X.Y` mode. CI's push trigger (`ci.yml:4-5`) adds
