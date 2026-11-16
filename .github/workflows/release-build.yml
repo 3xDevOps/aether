@@ -41,7 +41,10 @@ on:
         type: string
         default: ''
       pointer-if-above:
-        description: Channel whose pointer to move to this release only when the release is above it, after pointer; empty for none
+        description: >-
+          Channels, space-separated and in order, whose pointers to move to this
+          release only when the release is above each, after pointer; empty for
+          none
         type: string
         default: ''
       first-pointer:
@@ -61,7 +64,7 @@ on:
         description: Index digest of ghcr.io/3xdevops/aether-edge:<tag>
         value: ${{ jobs.edge-manifest.outputs.digest }}
       pointer-if-above-names-release:
-        description: true when the pointer-if-above channel's pointer names this release, moved by this run or an earlier attempt
+        description: true when every pointer-if-above channel's pointer names this release, moved by this run or an earlier attempt
         value: ${{ jobs.release.outputs.pointer-if-above-names-release }}
     secrets:
       AETHER_RELEASE_SIGNING_KEY:
@@ -131,14 +134,16 @@ jobs:
             [ "$form" = "$CHANNEL" ] || fail "channel $CHANNEL does not match $TAG"
             ;;
           esac
-          for pointer in "$POINTER" "$POINTER_IF_ABOVE"; do
-            case $pointer in '' | nightly | beta | stable) ;; *) fail "pointer $pointer is not nightly, beta or stable" ;; esac
-          done
-          [ -z "$POINTER" ] || [ "$POINTER" != "$POINTER_IF_ABOVE" ] || fail "pointer and pointer-if-above both name $POINTER"
-          if [ "$CHANNEL" = nightly ] || [ "$POINTER" = nightly ] || [ "$POINTER_IF_ABOVE" = nightly ]; then
+          case $POINTER in '' | nightly | beta | stable) ;; *) fail "pointer $POINTER is not nightly, beta or stable" ;; esac
+          [[ $POINTER_IF_ABOVE =~ ^((nightly|beta|stable)( (nightly|beta|stable))*)?$ ]] ||
+            fail "pointer-if-above '$POINTER_IF_ABOVE' is not a space-separated list of nightly, beta and stable"
+          read -ra if_above <<<"$POINTER_IF_ABOVE"
+          [ "$(printf '%s\n' "$POINTER" "${if_above[@]}" | grep -c .)" = "$(printf '%s\n' "$POINTER" "${if_above[@]}" | grep . | sort -u | wc -l)" ] ||
+            fail "pointer '$POINTER' and pointer-if-above '$POINTER_IF_ABOVE' name a channel twice"
+          if [ "$CHANNEL" = nightly ] || [ "$POINTER" = nightly ] || [[ " $POINTER_IF_ABOVE " == *" nightly "* ]]; then
             fail "this workflow signs with the release key, which never signs a nightly; nightly releases and nightly.json wait for the nightly environment and key that nightly.yml adds (release channels plan, pull request 9)"
           fi
-          for pointer in "$POINTER" "$POINTER_IF_ABOVE"; do
+          for pointer in "$POINTER" "${if_above[@]}"; do
             case $pointer:$CHANNEL in
             :* | stable:stable | beta:beta | beta:stable) ;;
             *) fail "a ${CHANNEL:-pre-channel} release cannot be named by $pointer.json" ;;
@@ -1146,7 +1151,7 @@ jobs:
           if-no-files-found: ignore
           overwrite: true
           retention-days: 90
-      - name: Move the channel pointer the release is above
+      - name: Move the channel pointers the release is above
         id: if-above
         if: inputs.pointer-if-above != ''
         env:
@@ -1157,20 +1162,33 @@ jobs:
         run: |
           first=()
           if [ "$FIRST_POINTER" = true ]; then first=(--first); fi
-          mkdir "$RUNNER_TEMP/pointer-$POINTER_IF_ABOVE"
-          sh scripts/publish-pointer.sh "${first[@]}" --if-above "$POINTER_IF_ABOVE" "$TAG" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/pointer-$POINTER_IF_ABOVE"
-          # Also when an earlier attempt moved it: the pointer
-          # publish-pointer.sh just verified, or wrote, names this tag.
+          names=true
           mkdir "$RUNNER_TEMP/if-above-now"
-          gh release download channels --pattern "$POINTER_IF_ABOVE.json" --dir "$RUNNER_TEMP/if-above-now"
-          if [ "$(jq -r .tag "$RUNNER_TEMP/if-above-now/$POINTER_IF_ABOVE.json")" = "$TAG" ]; then
-            echo "names=true" >> "$GITHUB_OUTPUT"
-          fi
+          read -ra if_above <<<"$POINTER_IF_ABOVE"
+          for channel in "${if_above[@]}"; do
+            mkdir "$RUNNER_TEMP/pointer-$channel"
+            sh scripts/publish-pointer.sh "${first[@]}" --if-above "$channel" "$TAG" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/pointer-$channel"
+            # Also when an earlier attempt moved it: the pointer
+            # publish-pointer.sh just verified, or wrote, names this tag.
+            gh release download channels --pattern "$channel.json" --dir "$RUNNER_TEMP/if-above-now"
+            if [ "$(jq -r .tag "$RUNNER_TEMP/if-above-now/$channel.json")" != "$TAG" ]; then names=false; fi
+          done
+          echo "names=$names" >> "$GITHUB_OUTPUT"
+      # Only beta and stable can be listed: this workflow never signs
+      # nightly.json.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: ${{ !cancelled() && inputs.pointer-if-above != '' }}
+        if: ${{ !cancelled() && contains(format(' {0} ', inputs.pointer-if-above), ' stable ') }}
         with:
-          name: pointer-${{ inputs.pointer-if-above }}
-          path: ${{ runner.temp }}/pointer-${{ inputs.pointer-if-above }}/
+          name: pointer-stable
+          path: ${{ runner.temp }}/pointer-stable/
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 90
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() && contains(format(' {0} ', inputs.pointer-if-above), ' beta ') }}
+        with:
+          name: pointer-beta
+          path: ${{ runner.temp }}/pointer-beta/
           if-no-files-found: ignore
           overwrite: true
           retention-days: 90
