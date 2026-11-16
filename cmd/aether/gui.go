@@ -121,7 +121,10 @@ func runGUI(args []string) error {
 		}
 		fmt.Println(string(line))
 		_ = os.Stdout.Sync()
-		retireLegacyDesktop(os.Getenv(localops.ShellExeEnv))
+		// stdout is the shell's protocol; the next start retries.
+		if err := localops.RetireLegacyDesktop(runtime.GOOS, os.Getenv(localops.ShellExeEnv)); err != nil {
+			fmt.Fprintf(os.Stderr, "aether gui: %v\n", err)
+		}
 	} else {
 		fmt.Println(url)
 		if !*urlOnly {
@@ -145,23 +148,6 @@ func runGUI(args []string) error {
 		os.Exit(code)
 	}
 	return nil
-}
-
-// retireLegacyDesktop removes the app installed under the old product name
-// once the shell at shellExe, an install under the new one, has started. A
-// failure goes to stderr, because stdout is the shell's protocol, and the
-// next start tries again.
-func retireLegacyDesktop(shellExe string) {
-	if shellExe == "" {
-		return
-	}
-	ru, err := localops.LookupRealUser()
-	if err == nil {
-		err = localops.RetireLegacyDesktop(runtime.GOOS, ru, shellExe)
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "aether gui: %v\n", err)
-	}
 }
 
 // nudgeUpdate prints one line naming the command when a newer release

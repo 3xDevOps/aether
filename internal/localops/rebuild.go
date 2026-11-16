@@ -81,7 +81,7 @@ func InstalledDesktopApps(goos string, ru RealUser) []string {
 	return apps
 }
 
-// userAppPaths is desktopAppPaths for one product name and ru's account.
+// userAppPaths is appPathsNamed for ru's account.
 func userAppPaths(goos string, ru RealUser, name string) []string {
 	xdg := os.Getenv("XDG_DATA_HOME")
 	if ru.ViaSudo {
@@ -90,9 +90,9 @@ func userAppPaths(goos string, ru RealUser, name string) []string {
 	return appPathsNamed(goos, name, ru.Home, xdg, os.Getenv("LOCALAPPDATA"))
 }
 
-// desktopAppPaths lists the candidate install locations for goos, most
-// likely first: this build's product name, then the legacy one. It mirrors
-// desktopLayout; an empty list means this OS has no desktop app at all.
+// appPathsNamed lists the candidate install locations of the app named
+// name for goos, most likely first. It mirrors desktopLayout; an empty list
+// means this OS has no desktop app at all.
 //
 // The unix branches join with path and test for a leading slash
 // themselves, because path/filepath answers for the machine running the
@@ -102,14 +102,6 @@ func userAppPaths(goos string, ru RealUser, name string) []string {
 // still the linux and darwin layouts when a Windows runner asks. The
 // windows branch keeps filepath, which is that OS's own rule on the only
 // machine where those paths can exist.
-func desktopAppPaths(goos, home, xdgData, localAppData string) []string {
-	var paths []string
-	for _, name := range productNames() {
-		paths = append(paths, appPathsNamed(goos, name, home, xdgData, localAppData)...)
-	}
-	return paths
-}
-
 func appPathsNamed(goos, name, home, xdgData, localAppData string) []string {
 	switch goos {
 	case "linux":
@@ -262,23 +254,33 @@ const ShellExeEnv = "AETHER_SHELL_EXE"
 // RetireLegacyDesktop removes the app installed under the legacy product
 // name once an app under this build's name has started: shellExe must be
 // the executable of an install of this build's name, so a development
-// `electron .`, a legacy shell or an unset shellExe removes nothing. A
-// legacy location is removed only when it is a real directory (not a
-// symlink) holding the app's executable, the app is not running, and it
-// neither holds nor sits inside the running app. The data directory lives
-// elsewhere and is never touched. On windows the legacy Start Menu
-// shortcut goes once no legacy app is left; on linux the renamed app's
-// launcher already replaced the legacy one.
-func RetireLegacyDesktop(goos string, ru RealUser, shellExe string) error {
+// `electron .`, a legacy shell or an unset shellExe removes nothing, and so
+// does a process acting for another account under sudo. A legacy location
+// is removed only when it is a real directory (not a symlink) holding the
+// app's executable, it is not also a location of this build's name, linux
+// and darwin do not see it running, and it neither holds nor sits inside
+// the running app. The data directory lives elsewhere and is never
+// touched. On windows the legacy Start Menu shortcut goes with the app; on
+// linux the renamed app's launcher already replaced the legacy one.
+func RetireLegacyDesktop(goos, shellExe string) error {
+	return retireLegacyDesktop(goos, LookupRealUser, shellExe)
+}
+
+func retireLegacyDesktop(goos string, lookup func() (RealUser, error), shellExe string) error {
 	if productName == legacyProductName || shellExe == "" {
 		return nil
+	}
+	ru, err := lookup()
+	if err != nil || ru.ViaSudo {
+		return err
 	}
 	shell, err := filepath.EvalSymlinks(shellExe)
 	if err != nil {
 		return nil
 	}
+	current := userAppPaths(goos, ru, productName)
 	shellApp := ""
-	for _, app := range userAppPaths(goos, ru, productName) {
+	for _, app := range current {
 		if sameFile(DesktopAppExe(goos, app), shell) {
 			shellApp, _ = filepath.EvalSymlinks(app)
 			break
@@ -289,15 +291,22 @@ func RetireLegacyDesktop(goos string, ru RealUser, shellExe string) error {
 	}
 	legacy := userAppPaths(goos, ru, legacyProductName)
 	var errs []error
+	retired := false
 	for _, app := range legacy {
-		if !legacyInstall(goos, app, shellApp) {
+		if removeLeftovers(goos, app, &errs) {
+			retired = true
+		}
+		resolved, ok := legacyInstall(goos, app, current, shellApp)
+		if !ok {
 			continue
 		}
-		if err := retireApp(goos, app); err != nil {
+		if err := retireApp(goos, resolved); err != nil {
 			errs = append(errs, err)
+			continue
 		}
+		retired = true
 	}
-	if goos == "windows" && len(errs) == 0 && !anyExists(legacy) {
+	if goos == "windows" && retired && len(errs) == 0 && !anyExists(legacy) {
 		if err := removeLegacyShortcut(); err != nil {
 			errs = append(errs, err)
 		}
@@ -305,27 +314,38 @@ func RetireLegacyDesktop(goos string, ru RealUser, shellExe string) error {
 	return errors.Join(errs...)
 }
 
-func legacyInstall(goos, app, shellApp string) bool {
+// legacyInstall reports whether app is an old install to remove, and its
+// resolved path, which is the one removed.
+func legacyInstall(goos, app string, current []string, shellApp string) (string, bool) {
 	info, err := os.Lstat(app)
 	if err != nil || !info.Mode().IsDir() {
-		return false
+		return "", false
 	}
 	exe, err := os.Lstat(DesktopAppExe(goos, app))
 	if err != nil || !exe.Mode().IsRegular() {
-		return false
+		return "", false
 	}
 	resolved, err := filepath.EvalSymlinks(app)
 	if err != nil || sameFile(resolved, shellApp) || within(goos, resolved, shellApp) || within(goos, shellApp, resolved) {
-		return false
+		return "", false
+	}
+	for _, c := range current {
+		if c == app || sameFile(c, resolved) {
+			return "", false
+		}
 	}
 	// /proc reports the resolved executable, pgrep the path it was started by.
-	return !DesktopAppRunning(goos, app) && !DesktopAppRunning(goos, resolved)
+	if DesktopAppRunning(goos, app) || DesktopAppRunning(goos, resolved) {
+		return "", false
+	}
+	return resolved, true
 }
 
 // retireApp moves app aside before deleting it. Windows refuses to rename a
 // directory whose files a running program holds open, and DesktopAppRunning
 // cannot tell there, so a running app is left whole rather than half
-// deleted.
+// deleted. A delete that fails after the move leaves the app in a set-aside
+// directory beside it, which removeLeftovers retries at the next start.
 func retireApp(goos, app string) error {
 	aside, err := os.MkdirTemp(filepath.Dir(app), installOldPrefix+"*")
 	if err == nil {
@@ -341,6 +361,25 @@ func retireApp(goos, app string) error {
 		return fmt.Errorf("localops: remove the old app, moved to %s%s: %w", aside, removeHint(goos, aside, err), err)
 	}
 	return nil
+}
+
+// removeLeftovers deletes the set-aside directories an earlier retireApp
+// could not, and reports whether there were any. It matches only those
+// holding the legacy app's own directory name: on windows the parent is
+// shared with the renamed app, whose install swap sets its own copy aside
+// under the same prefix.
+func removeLeftovers(goos, app string, errs *[]error) bool {
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(app), installOldPrefix+"*", filepath.Base(app)))
+	if err != nil {
+		return false
+	}
+	for _, old := range matches {
+		aside := filepath.Dir(old)
+		if err := os.RemoveAll(aside); err != nil {
+			*errs = append(*errs, fmt.Errorf("localops: remove the old app, moved to %s%s: %w", aside, removeHint(goos, aside, err), err))
+		}
+	}
+	return len(matches) > 0
 }
 
 func removeLegacyShortcut() error {

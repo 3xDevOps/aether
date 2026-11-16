@@ -24,8 +24,10 @@ func renameProduct(t *testing.T) {
 	t.Cleanup(func() { productName = previous })
 }
 
-func TestDesktopAppPathsListTheRenamedAppThenTheLegacyOne(t *testing.T) {
-	renameProduct(t)
+func TestAppPathsNamedForEitherName(t *testing.T) {
+	both := func(goos, home, xdg, local string) []string {
+		return append(appPathsNamed(goos, "Cloudfield", home, xdg, local), appPathsNamed(goos, "Aether", home, xdg, local)...)
+	}
 	setMacSystemApplications(t, "/Applications")
 	for goos, want := range map[string][]string{
 		"linux": {
@@ -37,13 +39,13 @@ func TestDesktopAppPathsListTheRenamedAppThenTheLegacyOne(t *testing.T) {
 			"/Applications/Aether.app", "/home/u/Applications/Aether.app",
 		},
 	} {
-		if got := desktopAppPaths(goos, "/home/u", "/data/xdg", ""); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		if got := both(goos, "/home/u", "/data/xdg", ""); strings.Join(got, "\n") != strings.Join(want, "\n") {
 			t.Errorf("%s = %q, want %q", goos, got, want)
 		}
 	}
 	local := t.TempDir()
 	want := []string{filepath.Join(local, "Programs", "Cloudfield Desktop"), filepath.Join(local, "Programs", "Aether Desktop")}
-	if got := desktopAppPaths("windows", "", "", local); strings.Join(got, "\n") != strings.Join(want, "\n") {
+	if got := both("windows", "", "", local); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("windows = %q, want %q", got, want)
 	}
 }

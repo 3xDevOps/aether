@@ -1,4 +1,4 @@
-//go:build linux || darwin
+//go:build linux
 
 package main
 
@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -29,13 +28,7 @@ func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
 	}
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
-	var app string
-	if runtime.GOOS == "darwin" {
-		app = filepath.Join(home, "Applications", "Aether.app")
-	} else {
-		app = filepath.Join(home, ".local", "share", "aether", "desktop")
-	}
-	exe := localops.DesktopAppExe(runtime.GOOS, app)
+	exe := localops.DesktopAppExe("linux", filepath.Join(home, ".local", "share", "aether", "desktop"))
 	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
 		t.Fatal(err)
 	}
