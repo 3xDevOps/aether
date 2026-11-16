@@ -87,7 +87,7 @@ export function SlackSection({ client }: { client: Api }) {
     return read()
   }))
 
-  const bot = code?.bot || status?.bot || 'the Cloudfield bot'
+  const bot = code?.bot || status?.bot || 'the Aether bot'
   const team = code?.team || status?.team
   let help: ReactNode = error ? null : 'Reading Slack…'
   let control: ReactNode

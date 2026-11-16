@@ -91,7 +91,7 @@ next:
        sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
   2. on your computer, install Aether if it is not there yet (Windows: docs/install.md):
        curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client
-  3. on your computer: in the Aether app's Connect step choose Cloudfield relay, sign in
+  3. on your computer: in the Aether app's Connect step choose Aether relay, sign in
      with GitHub and paste the claim link above; in a terminal:
        aether login
        aether link --claim <server id>-<secret>

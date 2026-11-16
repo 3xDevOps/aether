@@ -182,7 +182,7 @@ describe('notification settings', () => {
       const user = userEvent.setup()
       const client = show({ kind: 'off' }, { configured: true, connected: false, error: 'invalid_auth', link })
 
-      expect((await screen.findByText('Linked to Slack user U123.', { exact: false })).textContent).toContain('the Cloudfield bot')
+      expect((await screen.findByText('Linked to Slack user U123.', { exact: false })).textContent).toContain('the Aether bot')
       expect(screen.getByText('The server is not connected to Slack: invalid_auth')).toBeDefined()
 
       vi.mocked(client.slackStatus).mockResolvedValue({ configured: true, connected: false, error: 'invalid_auth' })

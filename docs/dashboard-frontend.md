@@ -318,8 +318,8 @@ app, which badges itself.
 
 ### Sidebar
 
-The sidebar (`sidebar.tsx`) is a `nav` named "Cloudfield", 260px wide by
-default and resizable from 220px to 400px; older saved widths are clamped. `Mod+B`, the
+The sidebar (`sidebar.tsx`) is a `nav` named "Cloudfield", 260px wide by default
+and resizable from 220px to 400px; older saved widths are clamped. `Mod+B`, the
 **Hide sidebar** button in its header and Enter on its splitter hide it
 completely; the content view's header then shows **Open sidebar** at its left
 edge. Hiding or showing it hands focus to the control that reverses it. From
@@ -999,9 +999,9 @@ secondary icon button to its right, which keeps the workspace switcher's
 room), or the top bar's first row while the sidebar is hidden; under 768px the
 **Assistant** tab of the [phone tab bar](#phone-layout) replaces it; keeping
 it out of the top bar's row leaves that row to the header destinations),
-`Mod+Shift+Space`, the palette's **Ask Cloudfield**, a secondary
-**Ask Cloudfield** in the board's empty states, and **Stuck? Ask Cloudfield** under each onboarding
-step.
+`Mod+Shift+Space`, the palette's **Ask Cloudfield**, a secondary **Ask
+Cloudfield** in the board's empty states, and **Stuck? Ask Cloudfield** under
+each onboarding step.
 
 ### Landmarks and headers
 
@@ -2719,7 +2719,7 @@ form and Launch, outside the scrolling form, so the keyboard cannot hide it;
 past 40% of the screen it scrolls. So a quick task is three steps: **New**,
 type, Launch.
 
-**Share to Cloudfield.** Opening `/?new=1&prompt=<encodeURIComponent(text)>`, or
+**Sharing from another app.** Opening `/?new=1&prompt=<encodeURIComponent(text)>`, or
 the gateway URL with `&new=1&prompt=...` through an edge, opens New session
 with the text as its task. It is the entry point for sharing from another
 app, so the text only fills the form. At load, before any route is written to
