@@ -1252,6 +1252,7 @@ updater does the rest.
   ```sh
   curl -fsSL -o edge-update.sh https://raw.githubusercontent.com/3xDevOps/Aether/<release-tag>/scripts/edge-update.sh
   sudo install -m 0755 edge-update.sh /usr/local/sbin/aether-edge-update
+  sudo aether-edge-update --check
   ```
 
 `sudo aether-edge-update --rollback` returns to the previous release. If that

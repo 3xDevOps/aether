@@ -64,14 +64,21 @@ while [ $# -gt 0 ]; do
 done
 [ "$restore_backup$drop_pairs" = 00 ] || [ "$mode" = rollback ] || usage
 
-# CLOUDFIELD_X wins over AETHER_X when it is not empty (internal/envname).
+# Prints the name in effect of setting EDGE_$1: CLOUDFIELD_EDGE_$1 when it
+# is not empty, else AETHER_EDGE_$1. Messages name it, so an operator
+# changes the variable that counts.
+setting() {
+	eval "[ -n \"\${CLOUDFIELD_EDGE_$1:-}\" ]" && echo "CLOUDFIELD_EDGE_$1" || echo "AETHER_EDGE_$1"
+}
+
+# CLOUDFIELD_X wins over AETHER_X when it is not empty.
 config="${CLOUDFIELD_EDGE_UPDATE_CONFIG:-${AETHER_EDGE_UPDATE_CONFIG:-/etc/aether-edge-update.env}}"
 # shellcheck disable=SC1090 # the operator's settings
 [ ! -f "$config" ] || . "$config"
 channel="${channel_flag:-${CLOUDFIELD_EDGE_UPDATE_CHANNEL:-${AETHER_EDGE_UPDATE_CHANNEL:-stable}}}"
 case "$channel" in
 nightly | beta | stable | latest) ;;
-*) die "the channel is nightly, beta, stable or latest, got '$channel'; set AETHER_EDGE_UPDATE_CHANNEL in $config or pass --channel" ;;
+*) die "the channel is nightly, beta, stable or latest, got '$channel'; set $(setting UPDATE_CHANNEL) in $config or pass --channel" ;;
 esac
 state_dir="${CLOUDFIELD_EDGE_UPDATE_STATE:-${AETHER_EDGE_UPDATE_STATE:-/var/lib/aether-edge-update}}"
 releases="$state_dir/releases"
@@ -84,10 +91,10 @@ public_wait="${CLOUDFIELD_EDGE_UPDATE_PUBLIC_WAIT:-${AETHER_EDGE_UPDATE_PUBLIC_W
 
 for n in "$server_wait" "$public_wait" "${tolerance%\%}"; do
 	case "$n" in
-	'' | *[!0-9]*) die "AETHER_EDGE_UPDATE_SERVER_WAIT and AETHER_EDGE_UPDATE_PUBLIC_WAIT take whole seconds and AETHER_EDGE_UPDATE_SERVER_TOLERANCE a count or a percentage such as 10%; got '$server_wait', '$public_wait' and '$tolerance'" ;;
+	'' | *[!0-9]*) die "$(setting UPDATE_SERVER_WAIT) and $(setting UPDATE_PUBLIC_WAIT) take whole seconds and $(setting UPDATE_SERVER_TOLERANCE) a count or a percentage such as 10%; got '$server_wait', '$public_wait' and '$tolerance'" ;;
 	esac
 done
-[ -n "$relay_url" ] || die "AETHER_EDGE_UPDATE_RELAY_URL is not set; set it in $config to the edge's relay origin, such as https://edge.example.com"
+[ -n "$relay_url" ] || die "$(setting UPDATE_RELAY_URL) is not set; set it in $config to the edge's relay origin, such as https://edge.example.com"
 
 command -v jq >/dev/null || die "jq not found; install it (docs/edge.md, \"Installing the updater\")"
 
@@ -639,12 +646,14 @@ refuse_restore() {
 	die "$prev_version cannot run the database $cur_version migrated, so this rollback restores $prev_backup, taken $(date -u -d "@$taken" +%Y-%m-%dT%H:%M:%SZ), $((($(date +%s) - taken) / 86400)) days ago. Every account, device, sign-in and server change since then is lost. Run aether-edge-update --rollback --restore-backup to roll back anyway; nothing changed"
 }
 
-# Prints the address pairs the edge's Compose service lists beyond its
-# first, in AETHER_EDGE_ORIGIN_PAIRS or its CLOUDFIELD_ name.
+# Prints the name of the setting in the edge's Compose service environment
+# that lists address pairs beyond the first, CLOUDFIELD_EDGE_ORIGIN_PAIRS
+# or AETHER_EDGE_ORIGIN_PAIRS, or nothing when neither is set.
 origin_pairs() {
 	cfg="$(compose config --format json)" || die "docker compose config failed in $compose_dir; nothing changed"
 	printf '%s\n' "$cfg" | jq -r --arg s "$service" '.services[$s].environment // {}
-		| [.CLOUDFIELD_EDGE_ORIGIN_PAIRS, .AETHER_EDGE_ORIGIN_PAIRS] | map(select(. != null and . != "")) | .[0] // ""'
+		| if (.CLOUDFIELD_EDGE_ORIGIN_PAIRS // "") != "" then "CLOUDFIELD_EDGE_ORIGIN_PAIRS"
+		elif (.AETHER_EDGE_ORIGIN_PAIRS // "") != "" then "AETHER_EDGE_ORIGIN_PAIRS" else "" end'
 }
 
 # Exits 0 when image $1 speaks edge protocol 6 or later: it is from the
@@ -659,7 +668,7 @@ rollback() {
 	if [ "$drop_pairs" = 0 ]; then
 		pairs="$(origin_pairs)" || exit 1
 		if [ -n "$pairs" ] && ! serves_pairs "$prev_digest"; then
-			die "$service lists more address pairs in AETHER_EDGE_ORIGIN_PAIRS, and $prev_version ($prev_digest) reports no edge protocol 6 or later in version --json, so it serves only the first pair and every server enrolled at another loses the edge. Remove AETHER_EDGE_ORIGIN_PAIRS from $compose_dir first, or run aether-edge-update --rollback --drop-origin-pairs to roll back anyway; nothing changed"
+			die "$service lists more address pairs in $pairs, and $prev_version ($prev_digest) reports no edge protocol 6 or later in version --json, so it serves only the first pair and every server enrolled at another loses the edge. Remove $pairs from $compose_dir first, or run aether-edge-update --rollback --drop-origin-pairs to roll back anyway; nothing changed"
 		fi
 	fi
 	cur="$(current_digest)"
