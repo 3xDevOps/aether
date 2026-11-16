@@ -186,9 +186,7 @@ func TestRetireLegacyDesktopFollowsASymlinkedShell(t *testing.T) {
 	renameProduct(t)
 	f := newRetireFixture(t, "linux")
 	link := filepath.Join(t.TempDir(), "cloudfield")
-	if err := os.Symlink(f.renamedExe, link); err != nil {
-		t.Fatal(err)
-	}
+	symlink(t, f.renamedExe, link)
 	if err := retireLegacyDesktop("linux", f.lookup, link); err != nil {
 		t.Fatal(err)
 	}
@@ -209,9 +207,7 @@ func TestRetireLegacyDesktopKeepsWhatIsNotAnOldInstall(t *testing.T) {
 		}
 		elsewhere := t.TempDir()
 		fakeInstall(t, "linux", elsewhere)
-		if err := os.Symlink(elsewhere, f.legacy[0]); err != nil {
-			t.Fatal(err)
-		}
+		symlink(t, elsewhere, f.legacy[0])
 		if err := retireLegacyDesktop("linux", f.lookup, f.renamedExe); err != nil {
 			t.Fatal(err)
 		}
@@ -238,9 +234,7 @@ func TestRetireLegacyDesktopKeepsWhatIsNotAnOldInstall(t *testing.T) {
 		if err := os.RemoveAll(legacyParent); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(filepath.Dir(f.renamed[0]), legacyParent); err != nil {
-			t.Fatal(err)
-		}
+		symlink(t, filepath.Dir(f.renamed[0]), legacyParent)
 		if err := retireLegacyDesktop("linux", f.lookup, f.renamedExe); err != nil {
 			t.Fatal(err)
 		}
@@ -280,9 +274,7 @@ func TestRetireLegacyDesktopKeepsARunningOldApp(t *testing.T) {
 	if err := os.Rename(share, target); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(target, share); err != nil {
-		t.Fatal(err)
-	}
+	symlink(t, target, share)
 	legacyExe := DesktopAppExe("linux", f.legacy[0])
 	if err := os.Remove(legacyExe); err != nil {
 		t.Fatal(err)
@@ -427,9 +419,7 @@ func TestRetireLegacyDesktopKeepsAnOldAppRunningByItsListedPath(t *testing.T) {
 	renameProduct(t)
 	target := t.TempDir()
 	link := filepath.Join(t.TempDir(), "Applications")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
+	symlink(t, target, link)
 	f := newRetireFixture(t, "darwin")
 	setMacSystemApplications(t, link)
 	app := filepath.Join(link, "Aether.app")
@@ -565,20 +555,20 @@ func TestRetireLegacyDesktopKeepsAnOldFolderHoldingTheRunningApp(t *testing.T) {
 }
 
 func TestWithin(t *testing.T) {
+	folds := runtime.GOOS == "darwin" || runtime.GOOS == "windows"
 	for _, tc := range []struct {
-		goos, dir, p string
-		want         bool
+		dir, p string
+		want   bool
 	}{
-		{"linux", "/a/b", "/a/b/c", true},
-		{"linux", "/a/b", "/a/b", false},
-		{"linux", "/a/b", "/a/bc", false},
-		{"linux", "/a/b/c", "/a/b", false},
-		{"linux", "/A/b", "/a/b/c", false},
-		{"darwin", "/Applications/Aether.app", "/applications/aether.app/Contents", true},
-		{"windows", "/Programs/Aether Desktop", "/programs/aether desktop/x", true},
+		{"/a/b", "/a/b/c", true},
+		{"/a/b", "/a/b", false},
+		{"/a/b", "/a/bc", false},
+		{"/a/b/c", "/a/b", false},
+		{"/A/b", "/a/b/c", folds},
 	} {
-		if got := within(tc.goos, tc.dir, tc.p); got != tc.want {
-			t.Errorf("within(%s, %q, %q) = %v, want %v", tc.goos, tc.dir, tc.p, got, tc.want)
+		dir, p := filepath.FromSlash(tc.dir), filepath.FromSlash(tc.p)
+		if got := within(dir, p); got != tc.want {
+			t.Errorf("within(%q, %q) = %v, want %v", dir, p, got, tc.want)
 		}
 	}
 }
@@ -595,9 +585,7 @@ func TestRetireLegacyDesktopRetriesOnlyARealDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	retired := filepath.Join(filepath.Dir(f.legacy[0]), retiredPrefix+"desktop")
-	if err := os.Symlink(elsewhere, retired); err != nil {
-		t.Fatal(err)
-	}
+	symlink(t, elsewhere, retired)
 	if err := os.RemoveAll(f.legacy[0]); err != nil {
 		t.Fatal(err)
 	}
@@ -622,4 +610,16 @@ func TestRetireLegacyDesktopUsesTheProcessHome(t *testing.T) {
 	}
 	mustBeGone(t, f.legacy[0])
 	mustExist(t, f.renamedExe)
+}
+
+// symlink skips the test where Windows lets only administrators and
+// developer mode create symlinks.
+func symlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("cannot create a symlink here: %v", err)
+		}
+		t.Fatal(err)
+	}
 }

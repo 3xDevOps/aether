@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -358,7 +359,7 @@ func oldApp(goos, app string, current []string, shellApp string) bool {
 		return false
 	}
 	resolved, err := filepath.EvalSymlinks(app)
-	if err != nil || sameFile(resolved, shellApp) || within(goos, resolved, shellApp) || within(goos, shellApp, resolved) {
+	if err != nil || sameFile(resolved, shellApp) || within(resolved, shellApp) || within(shellApp, resolved) {
 		return false
 	}
 	for _, c := range current {
@@ -384,10 +385,11 @@ func sameFile(a, b string) bool {
 	return err == nil && os.SameFile(ai, bi)
 }
 
-// within reports whether p is inside dir. darwin and windows file systems
-// ignore case by default.
-func within(goos, dir, p string) bool {
-	if goos != "linux" {
+// within reports whether p is inside dir, by the host's rules, because
+// both are paths on this machine: filepath.Rel already ignores case on
+// windows, and darwin's default file system ignores it too.
+func within(dir, p string) bool {
+	if runtime.GOOS == "darwin" {
 		dir, p = strings.ToLower(dir), strings.ToLower(p)
 	}
 	rel, err := filepath.Rel(dir, p)
