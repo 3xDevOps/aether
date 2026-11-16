@@ -76,27 +76,28 @@ else
 fi
 EOF
 # release-pointer itself is tested in Go; this one records how it was run,
-# refuses when $STATE/refuse exists, and with -if-above writes nothing when
-# $STATE/keep exists.
+# refuses when $STATE/refuse exists, and with -if-above, or -first beside a
+# current pointer, writes nothing when $STATE/keep exists.
 cat >"$bin/release-pointer" <<'EOF'
 #!/bin/sh
 set -eu
 echo "release-pointer $*" >>"$STATE/log"
 [ ! -f "$STATE/refuse" ] || { echo "release-pointer: refusing" >&2; exit 1; }
+keeps= first= current=
 while [ "$#" -gt 0 ]; do
 	case $1 in
-	-if-above | -first)
-		[ "$1" != -if-above ] || [ ! -f "$STATE/keep" ] || exit 0
-		shift
-		continue
-		;;
-	-channel) channel=$2 ;;
-	-tag) tag=$2 ;;
-	-current) cp "$2" "$STATE/current-seen" ;;
-	-out) out=$2 ;;
+	-if-above) keeps=1 ;;
+	-first) first=1 ;;
+	-channel) channel=$2 && shift ;;
+	-tag) tag=$2 && shift ;;
+	-current) cp "$2" "$STATE/current-seen" && current=1 && shift ;;
+	-out) out=$2 && shift ;;
+	-manifest) shift ;;
 	esac
-	shift 2
+	shift
 done
+[ -z "$first" ] || [ -z "$current" ] || keeps=1
+[ -z "$keeps" ] || [ ! -f "$STATE/keep" ] || exit 0
 echo "$channel $tag" >"$out/$channel.json"
 echo "sig $tag" >"$out/$channel.json.sig"
 EOF
@@ -154,9 +155,24 @@ grep -qF -- "-manifest $dist/aether-release.json" "$state/log"
 reset
 echo "beta v0.9.0-beta.1" >"$state/assets/beta.json"
 echo "sig v0.9.0-beta.1" >"$state/assets/beta.json.sig"
+touch "$state/refuse"
 run 1 --first beta v0.9.0-beta.2 "$dist"
-assert_out "channels already has beta.json; first-pointer is only for a channel without one"
+grep -qF -- "-first -current" "$state/log"
 refute_log "release upload"
+
+# A re-run of the run that wrote the first pointer, which release-pointer
+# finds naming this release, keeps it and succeeds.
+reset
+echo "beta v0.9.0-beta.2" >"$state/assets/beta.json"
+echo "sig v0.9.0-beta.2" >"$state/assets/beta.json.sig"
+touch "$state/keep"
+run 0 --first beta v0.9.0-beta.2 "$dist"
+assert_out "beta.json already names v0.9.0-beta.2 and stays"
+refute_log "release upload"
+: >"$state/log"
+run 0 --first --if-above beta v0.9.0-beta.2 "$dist"
+assert_out "beta.json already names v0.9.0-beta.2 and stays"
+refute_log "-if-above"
 
 # An upload that fails after deleting the old .sig is repaired by uploading
 # the whole pair again.

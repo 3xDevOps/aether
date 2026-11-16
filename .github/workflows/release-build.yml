@@ -45,9 +45,24 @@ on:
         type: string
         default: ''
       first-pointer:
-        description: The pointer channel has never had a pointer, and this run publishes its first; only for that migration step
+        description: The pointer channels have never had a pointer, and this run publishes their first; only for that migration step
         type: boolean
         default: false
+      promoted:
+        description: >-
+          promote.yml is rebuilding a released commit under a new tag: the
+          release job creates the tag once every asset is built, and the images
+          are not tagged with the commit again, so those tags keep naming its
+          first build
+        type: boolean
+        default: false
+    outputs:
+      edge-digest:
+        description: Index digest of ghcr.io/3xdevops/aether-edge:<tag>
+        value: ${{ jobs.edge-manifest.outputs.digest }}
+      pointer-if-above-names-release:
+        description: true when the pointer-if-above channel's pointer names this release, moved by this run or an earlier attempt
+        value: ${{ jobs.release.outputs.pointer-if-above-names-release }}
     secrets:
       AETHER_RELEASE_SIGNING_KEY:
         required: false
@@ -75,6 +90,7 @@ env:
   HOTFIX: ${{ inputs.hotfix }}
   POINTER: ${{ inputs.pointer }}
   POINTER_IF_ABOVE: ${{ inputs.pointer-if-above }}
+  PROMOTED: ${{ inputs.promoted }}
 
 jobs:
   # Every other job needs this one, so no input reaches a build, a tag or
@@ -129,6 +145,7 @@ jobs:
             esac
           done
           [ "$FIRST_POINTER" = false ] || [ -n "$POINTER" ] || fail "first-pointer needs pointer"
+          [ "$PROMOTED" = false ] || [ -n "$CHANNEL" ] || fail "a promoted release needs a channel"
 
   # Each architecture runs the exact image it publishes on a native headless
   # Ubuntu host. No QEMU or host-installed Chromium changes the sandbox proof.
@@ -383,8 +400,8 @@ jobs:
           images: ghcr.io/3xdevops/aether-edge
           tags: |
             type=raw,value=${{ inputs.tag }}
-            type=raw,value=${{ inputs.commit }}
-            type=raw,value=sha-${{ steps.commit.outputs.short }}
+            type=raw,value=${{ inputs.commit }},enable=${{ !inputs.promoted }}
+            type=raw,value=sha-${{ steps.commit.outputs.short }},enable=${{ !inputs.promoted }}
       - name: Publish the release manifest
         id: publish
         env:
@@ -827,8 +844,10 @@ jobs:
           image=ghcr.io/3xdevops/aether-standard
           # Preserve metadata-action's seven-character sha- tag convention.
           short=${COMMIT:0:7}
+          tags=("$TAG" "$COMMIT" "sha-$short")
+          if [ "$PROMOTED" = true ]; then tags=("$TAG"); fi
           docker buildx imagetools create \
-            --tag "$image:$TAG" --tag "$image:$COMMIT" --tag "$image:sha-$short" \
+            "${tags[@]/#/--tag=$image:}" \
             "$image:$TAG-amd64" "$image:$TAG-arm64"
           digest=$(docker buildx imagetools inspect "$image:$TAG" --format '{{.Manifest.Digest}}')
           test -n "$digest"
@@ -840,7 +859,9 @@ jobs:
         run: |
           image=ghcr.io/3xdevops/aether-standard
           short=${COMMIT:0:7}
-          for tag in "$TAG" "$COMMIT" "sha-$short"; do
+          tags=("$TAG" "$COMMIT" "sha-$short")
+          if [ "$PROMOTED" = true ]; then tags=("$TAG"); fi
+          for tag in "${tags[@]}"; do
             tagged=$(docker buildx imagetools inspect "$image:$tag" --format '{{.Manifest.Digest}}')
             test "$tagged" = "$DIGEST"
           done
@@ -956,6 +977,8 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      pointer-if-above-names-release: ${{ steps.if-above.outputs.names }}
     steps:
       - name: Require the tools commit to be on main
         env:
@@ -974,6 +997,13 @@ jobs:
         with:
           ref: ${{ inputs.tools-commit }}
           persist-credentials: false
+      # Re-running this job alone skips promote.yml's admin checks, so
+      # whoever starts this attempt must be an admin too.
+      - name: Require an admin
+        if: inputs.promoted
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/require-admin.sh "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
@@ -1051,6 +1081,13 @@ jobs:
             echo "::error::images.json is $size bytes, above 64 KiB"
             exit 1
           fi
+      # Only now, so a run that fails earlier leaves no tag; a re-run finds
+      # the tag it created and goes on.
+      - name: Create the release tag
+        if: inputs.promoted
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/create-release-tag.sh "$TAG" "$COMMIT" "$BUILD"
       - name: Require the tag to name the built commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1110,14 +1147,25 @@ jobs:
           overwrite: true
           retention-days: 90
       - name: Move the channel pointer the release is above
+        id: if-above
         if: inputs.pointer-if-above != ''
         env:
           GH_TOKEN: ${{ github.token }}
           AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
           RELEASE_POINTER: ${{ runner.temp }}/release-pointer
+          FIRST_POINTER: ${{ inputs.first-pointer }}
         run: |
+          first=()
+          if [ "$FIRST_POINTER" = true ]; then first=(--first); fi
           mkdir "$RUNNER_TEMP/pointer-$POINTER_IF_ABOVE"
-          sh scripts/publish-pointer.sh --if-above "$POINTER_IF_ABOVE" "$TAG" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/pointer-$POINTER_IF_ABOVE"
+          sh scripts/publish-pointer.sh "${first[@]}" --if-above "$POINTER_IF_ABOVE" "$TAG" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/pointer-$POINTER_IF_ABOVE"
+          # Also when an earlier attempt moved it: the pointer
+          # publish-pointer.sh just verified, or wrote, names this tag.
+          mkdir "$RUNNER_TEMP/if-above-now"
+          gh release download channels --pattern "$POINTER_IF_ABOVE.json" --dir "$RUNNER_TEMP/if-above-now"
+          if [ "$(jq -r .tag "$RUNNER_TEMP/if-above-now/$POINTER_IF_ABOVE.json")" = "$TAG" ]; then
+            echo "names=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ !cancelled() && inputs.pointer-if-above != '' }}
         with:

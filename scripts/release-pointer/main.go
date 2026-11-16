@@ -2,14 +2,17 @@
 // a release whose signed manifest it is given:
 //
 //	release-pointer -channel beta -tag v0.9.0-beta.2 \
-//	  -manifest dist/aether-release.json {-current current/beta.json | -first} [-if-above] -out <dir>
+//	  -manifest dist/aether-release.json {-current current/beta.json | -first [-current ...]} [-if-above] -out <dir>
 //
 // It verifies the manifest and the current pointer against the keys this
 // build trusts, refuses to name a lower (build, hotfix) than the current
 // pointer does, signs with AETHER_RELEASE_SIGNING_KEY, and verifies its own
 // output the way an updater will. A channel without a current pointer
 // needs -first, so a pointer deleted by a failed upload or by hand is never
-// silently replaced with a lower one. With -if-above it writes nothing, and
+// silently replaced with a lower one. -first beside -current is the re-run
+// of the run that wrote that first pointer: it succeeds without writing
+// when the current pointer names exactly this release, and refuses any
+// other. With -if-above it writes nothing, and
 // succeeds, unless the release is above the current pointer: promoting to
 // stable moves beta.json only then. scripts/publish-pointer.sh runs it.
 package main
@@ -49,10 +52,10 @@ func run(args []string, now time.Time) error {
 		return err
 	}
 	if *channel == "" || *tag == "" || *manifest == "" || *out == "" || fs.NArg() != 0 {
-		return errors.New("usage: release-pointer -channel <c> -tag <tag> -manifest <file> {-current <file> | -first} [-if-above] -out <dir>")
+		return errors.New("usage: release-pointer -channel <c> -tag <tag> -manifest <file> {-current <file> | -first [-current <file>]} [-if-above] -out <dir>")
 	}
-	if (*current == "") == !*first {
-		return errors.New("pass exactly one of -current, the channel's pointer now, and -first, for a channel that has none yet")
+	if *current == "" && !*first {
+		return errors.New("pass -current, the channel's pointer now, or -first, for a channel that has none yet")
 	}
 	switch *channel {
 	case selfupdate.ChannelNightly, selfupdate.ChannelBeta, selfupdate.ChannelStable:
@@ -82,6 +85,12 @@ func run(args []string, now time.Time) error {
 			return err
 		}
 		switch {
+		case *first && (cur.Tag != p.Tag || cur.Commit != p.Commit || cur.Mark() != p.Mark()):
+			return fmt.Errorf("%s already names %s at %s; first-pointer is only for a channel without a pointer, or the re-run of the run that wrote %s",
+				selfupdate.PointerName(p.Channel), cur.Tag, cur.Mark(), p.Tag)
+		case *first:
+			fmt.Printf("%s already names %s at %s\n", selfupdate.PointerName(p.Channel), p.Tag, p.Mark())
+			return nil
 		case below(p.Mark(), cur.Mark()) && !*ifAbove:
 			return fmt.Errorf("%s names %s at %s; refusing to move it down to %s at %s",
 				selfupdate.PointerName(p.Channel), cur.Tag, cur.Mark(), p.Tag, p.Mark())
