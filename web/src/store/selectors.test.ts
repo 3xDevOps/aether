@@ -264,8 +264,10 @@ describe('a subsession outcome is for its parent only', () => {
     expect(ids(woken.children)).toEqual(['done'])
   })
 
-  it('keeps a finished subsession listed when its parent is not', () => {
+  it('keeps a finished subsession listed when its parent is not, or when it has sessions of its own', () => {
     expect(ids(withoutSettled(listedRuns(workspace.id, input([done]).ctx)))).toEqual(['done'])
+    const leaf = record({ id: 'leaf', parent_run_id: 'done' })
+    expect(ids(withoutSettled(listedRuns(workspace.id, input([parent('waiting'), done, leaf]).ctx))).sort()).toEqual(['done', 'lead', 'leaf'])
   })
 
   it('treats a detached subsession as a session of its own', () => {

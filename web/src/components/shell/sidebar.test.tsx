@@ -274,6 +274,11 @@ describe('run rows', () => {
     fireEvent.click(runList().getByRole('button', { name: 'Hide finished' }))
     expect(runList().queryByText('reported check')).toBeNull()
 
+    act(() => useStore.getState().navigate('run', { runId: 'run_stopped' }))
+    expect(runList().getByRole('button', { name: /stopped check/ }).getAttribute('aria-current')).toBe('page')
+    expect(runList().queryByText('reported check')).toBeNull()
+    expect(runList().getByRole('button', { name: '2 finished' })).toBeDefined()
+
     fireEvent.click(runList().getByRole('button', { name: 'Collapse 3 subsessions' }))
     expect(runList().queryByRole('button', { name: '2 finished' })).toBeNull()
     expect(runList().queryByText('failed check')).toBeNull()

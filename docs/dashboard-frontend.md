@@ -464,10 +464,10 @@ session), and `u` opens the next session that needs you, oldest first.
 A Finished or Failed row does not recede while no member has opened its session
 since it finished (`finish_unopened`, see [Session state](#session-state)): its title
 keeps the text colour and its accessible name says "Not opened yet" before
-the age. A finished subsession nested under its parent follows the same rule. Once
+the age. A finished subsession listed under its parent follows the same rule. Once
 any member opens the session, the row recedes in every member's dashboard.
 
-Every unarchived subsession is indented beneath its parent and joined to it
+Every subsession in the list is indented beneath its parent and joined to it
 by tree connectors: a vertical trunk under the parent's status dot and a
 horizontal wire into each subsession row
 ([Styles](styles.md#shell-palette-and-focus)). A subsession that finished
@@ -475,8 +475,8 @@ with nothing left for a person leaves the list: one that reported success
 (**Finished: reported to its parent**) or ended `completed`, `merged` or
 `abandoned`, such as one its parent stopped. Its parent's last nested line
 counts them (**3 finished**) and lists them in place until **Hide finished**,
-for this browser session only; the parent's count and its Details
-(**Subsessions**) still include them. One that failed, was interrupted or
+for this browser session only; the one that is open lists there regardless.
+The parent's count and its Details (**Subsessions**) still include them. One that failed, was interrupted or
 needs you stays listed, and a finished one returns while it works again. The
 session stays open either way (`settled` in `src/store/selectors.ts`). **Mine** also filters
 these subsessions under Working and Finished; Needs you keeps the whole tree
@@ -1637,7 +1637,8 @@ In a flat session list (`run-list.tsx`) a root lists its subsessions
 under it with a toggle naming the count (**Show 2 subsessions
 **). Subsessions start shown, and a folded one that needs you still shows. Nested rows add the model to the
 agent. **All workspaces** leaves out the finished subsessions the sidebar
-does (`withoutSettled`), from its rows and its count.
+does (`withoutSettled`), from its rows and its count, except one with
+sessions under it.
 
 A card (`run-card.tsx`, on the `Card` primitive) has three parts:
 

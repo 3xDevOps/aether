@@ -157,10 +157,14 @@ export function runTrees(rows: RunRow[]): RunTree[] {
 /** A subsession that finished with nothing left for a person: its result went to its parent, which still lists it. */
 const settled = (row: RunRow) => row.group === 'finished' && !endedBadly(row.state)
 
-/** `rows` without the settled subsessions whose parent is among them. */
+/** `rows` without the settled subsessions whose parent is among them; one with sessions of its own stays, so they keep their place. */
 export function withoutSettled<T extends RunRow>(rows: T[]): T[] {
   const parents = runParents(rows)
-  return rows.filter((row) => !(parents.has(runKey(row)) && settled(row)))
+  const withChildren = new Set(parents.values())
+  return rows.filter((row) => {
+    const key = runKey(row)
+    return !parents.has(key) || withChildren.has(key) || !settled(row)
+  })
 }
 
 /** Every child run below `rootIDs`, nearest first. */

@@ -240,6 +240,7 @@ function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) 
 
   const shown = expanded ? tree.children : tree.children.filter((child) => child.needsYou)
   const finished = expanded ? settled : []
+  const openID = useStore((s) => settled.find((row) => isRunRoute(s.route, row.run.id))?.run.id)
   return (
     <>
       <RunRowItem
@@ -267,7 +268,7 @@ function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) 
               </Button>
             </li>
           )}
-          {settledShown && finished.map((child) => (
+          {finished.filter((child) => settledShown || child.run.id === openID).map((child) => (
             <li key={child.run.id} className={connectors}>
               <RunRowItem tree={{ ...child, children: [] }} />
             </li>
