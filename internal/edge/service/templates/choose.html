@@ -5,13 +5,13 @@
 {{range $.Data.Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">
 {{end}}<input type="hidden" name="server" value="{{.ID}}">
 <input type="hidden" name="edge_assertion" value="{{.Assertion}}">
-<strong>{{.Name}}</strong> <code>{{.ID}}</code>, {{.Role}}, {{if eq .AccessPolicy "account"}}signing in is enough{{else}}asks for a code from <code>aether mcp</code>{{end}}
-<button type="submit">Continue with {{.Name}}</button>
+<p><strong>{{.Name}}</strong> <code>{{.ID}}</code>, {{.Role}}, {{if eq .AccessPolicy "account"}}signing in is enough{{else}}asks for a code from <code>aether mcp</code>{{end}}</p>
+<button type="submit" class="primary wide">Continue with {{.Name}}</button>
 </form></li>
 {{end}}</ul>
 {{else}}<p class="error">None of your servers can take this connection.</p>{{end}}
-{{if .Data.Other}}<p>Not available:</p>
-<ul>
+{{if .Data.Other}}<p class="note">Not available:</p>
+<ul class="choices unavailable">
 {{range .Data.Other}}<li>{{.Name}} <code>{{.ID}}</code>: {{.Reason}}</li>
 {{end}}</ul>{{end}}
 {{template "bottom" .}}{{end}}

@@ -344,7 +344,7 @@ func TestPagesRender(t *testing.T) {
 		"/servers":  "No servers yet",
 		"/devices":  "laptop",
 		"/account":  "Delete this account",
-		"/edge.css": "--fg",
+		"/edge.css": "--canvas",
 	} {
 		resp, page := b.get(t, path)
 		if resp.StatusCode != http.StatusOK || !strings.Contains(page, want) {
@@ -382,7 +382,7 @@ func TestJoinPage(t *testing.T) {
 	if resp.Header.Get("Referrer-Policy") != "no-referrer" || resp.Header.Get("Cache-Control") != "no-store" {
 		t.Errorf("join page headers = %v", resp.Header)
 	}
-	for path, want := range map[string]string{"/join.js": "location.replace", "/edge.css": "--fg"} {
+	for path, want := range map[string]string{"/join.js": "location.replace", "/edge.css": "--canvas"} {
 		if resp, body := b.get(t, path); resp.StatusCode != http.StatusOK || !strings.Contains(body, want) {
 			t.Errorf("GET %s on the relay origin: %s\n%s", path, resp.Status, body)
 		}
