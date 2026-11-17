@@ -594,7 +594,7 @@ reset "a filesystem that refuses symlinks warns and installs"
 STUB_LN_FAIL=1 sh "$script" --role client >"$out" 2>&1 || fail "installer exited non-zero"
 [ -x "$bindir/aether" ] || fail "the CLI was not installed"
 [ ! -e "$bindir/cloudfield" ] && [ ! -L "$bindir/cloudfield" ] || fail "a cloudfield appeared anyway"
-printed "aether install: warning: ln: failed to create symbolic link '$bindir/cloudfield': Operation not permitted; aether works as before. To add the name: ln -s aether '$bindir/cloudfield'"
+printed "aether install: warning: ln: failed to create symbolic link '$bindir/cloudfield': Operation not permitted; aether works as before"
 printed "  aether link <server-host>      # on a tailnet: the server's tailnet name"
 
 # --- AETHER_ROLE=client is the same as --role client ---------------------

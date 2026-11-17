@@ -140,11 +140,7 @@ func runUpdate(args []string) error {
 		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
 	}
 	if len(replaced) > 1 {
-		service := serversetup.ServiceName
-		if serversetup.UnitAliasResolves() {
-			service = strings.TrimSuffix(serversetup.UnitAlias, ".service")
-		}
-		fmt.Printf("aether-server on disk is now %s; the running server keeps its old version until you restart it: sudo systemctl restart %s\n", *tag, service)
+		fmt.Printf("aether-server on disk is now %s; the running server keeps its old version until you restart it: sudo systemctl restart %s\n", *tag, serversetup.RestartUnit())
 		if offerSysbox(ctx, "/etc/os-release", dockerRuntimes) {
 			fmt.Println("Let agents use Docker inside sessions: sudo aether-server sysbox install (or Settings → Server in the dashboard)")
 		}

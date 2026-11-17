@@ -56,7 +56,7 @@ func TestUpdateApplyCarriesTheServerRestart(t *testing.T) {
 	}
 
 	// Once systemd resolves the unit's second name, the line uses it.
-	unitAliasResolves = func() bool { return true }
+	restartUnit = func() string { return "cloudfield-server" }
 	rec = do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (%v): %s", rec.Code, err, rec.Body)

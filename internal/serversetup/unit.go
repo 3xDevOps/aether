@@ -31,6 +31,15 @@ const RestartCommand = "systemctl restart " + ServiceName
 // systemctl enable refuses an alias, so enabling keeps ServiceName.
 const UnitAlias = "cloudfield-server.service"
 
+// RestartUnit is the unit name to print in a restart line: UnitAlias
+// when systemd resolves it, else ServiceName.
+func RestartUnit() string {
+	if UnitAliasResolves() {
+		return strings.TrimSuffix(UnitAlias, ".service")
+	}
+	return ServiceName
+}
+
 // UnitAliasResolves reports whether systemd loads UnitAlias as the
 // server's unit, which takes the link and a systemd that has read it.
 func UnitAliasResolves() bool {

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -370,17 +369,14 @@ func (g *Gateway) localUpdateStatus(_ *http.Request, _ []byte) (any, *protocol.E
 func restartCommand(updated []string) string {
 	for _, path := range updated {
 		if filepath.Base(path) == "aether-server" {
-			if unitAliasResolves() {
-				return "sudo systemctl restart " + strings.TrimSuffix(serversetup.UnitAlias, ".service")
-			}
-			return "sudo systemctl restart " + serversetup.ServiceName
+			return "sudo systemctl restart " + restartUnit()
 		}
 	}
 	return ""
 }
 
-// unitAliasResolves is a variable so no test asks the host's systemd.
-var unitAliasResolves = serversetup.UnitAliasResolves
+// restartUnit is a variable so no test asks the host's systemd.
+var restartUnit = serversetup.RestartUnit
 
 // checkRelease runs the release check, mapping an unreachable GitHub to
 // the same code every other unavailable dependency uses.

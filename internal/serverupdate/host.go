@@ -44,11 +44,11 @@ type Host struct {
 	UnitDir string
 }
 
-// LinkUnit makes serversetup.UnitAlias in UnitDir a link to the server's unit file
-// when the unit file is there and nothing holds the name, and reports
-// whether it did. A name held by anything else is left as it is and is no
-// error. It never reloads systemd: a daemon-reload acts on every unit of
-// the host.
+// LinkUnit makes serversetup.UnitAlias in UnitDir a link to the server's
+// unit file when the unit file is there and nothing holds the name, and
+// reports whether it did. A name held by anything else is left as it is and
+// is no error. It never reloads systemd: a daemon-reload acts on every unit
+// of the host.
 func (h Host) LinkUnit() (bool, error) {
 	if h.UnitDir == "" {
 		return false, nil
