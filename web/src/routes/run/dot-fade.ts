@@ -13,6 +13,7 @@ const RING_RADIUS = 46
 const CALM_FEATHER = 12
 const SPRING = 0.065
 const DAMPING = 0.86
+const FRAME_INTERVAL_MS = 100
 
 type Point = { x: number; y: number }
 type Layers = [SVGSVGElement, SVGSVGElement, SVGSVGElement]
@@ -45,7 +46,9 @@ export function useDotFade(ref: RefObject<HTMLElement | null>) {
     if (reducedMotion || !strip || !matrix || !light || !reach) return
 
     let frame = 0
+    let timer = 0
     let lastFrame = 0
+    let lastPaint = -Infinity
     let client: Point | undefined
     let tap: Point | undefined
     let pointer: (Point & { time: number }) | undefined
@@ -100,7 +103,9 @@ export function useDotFade(ref: RefObject<HTMLElement | null>) {
     }
     const destroy = () => {
       cancelAnimationFrame(frame)
+      window.clearTimeout(timer)
       frame = 0
+      timer = 0
       lastFrame = 0
       layers?.forEach((svg) => svg.remove())
       layers = undefined
@@ -109,10 +114,17 @@ export function useDotFade(ref: RefObject<HTMLElement | null>) {
       matrix.removeAttribute('data-dot-grid-active')
     }
     const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(paint)
+      if (frame || timer) return
+      const delay = Math.max(0, FRAME_INTERVAL_MS - (performance.now() - lastPaint))
+      if (delay === 0) frame = requestAnimationFrame(paint)
+      else timer = window.setTimeout(() => {
+        timer = 0
+        frame = requestAnimationFrame(paint)
+      }, delay)
     }
     const paint = (now: number) => {
       frame = 0
+      lastPaint = now
       if (!layers && !client && !tap && !pointer) return
       const rect = matrix.getBoundingClientRect()
       if (!rect.width || !rect.height) return
