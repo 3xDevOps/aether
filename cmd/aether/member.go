@@ -9,8 +9,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/3xDevOps/Aether/internal/attribution"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/attribution"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func init() {

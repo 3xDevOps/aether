@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/gitengine"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/gitengine"
 )
 
 // lazyGit wraps the git engine so the first touch of a workspace's repo -

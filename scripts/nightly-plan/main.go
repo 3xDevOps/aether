@@ -54,7 +54,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 // pruneAge is how long a nightly's release and images are kept.

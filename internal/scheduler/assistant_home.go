@@ -12,8 +12,8 @@ import (
 	"slices"
 	"syscall"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/harness"
 )
 
 // assistantSignIns are the sign-in files of the assistant's agents, the only

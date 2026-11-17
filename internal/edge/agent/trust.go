@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strconv"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // FetchEdgeInfo asks the edge at edgeURL, its relay origin, for the key it

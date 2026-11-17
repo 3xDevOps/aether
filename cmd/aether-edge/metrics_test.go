@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/edge/relay"
-	edge "github.com/3xDevOps/Aether/internal/edge/service"
+	"github.com/3xDevOps/cloudfield/internal/edge/relay"
+	edge "github.com/3xDevOps/cloudfield/internal/edge/service"
 )
 
 // TestReadiness follows /readyz and healthcheck --ready through a life:

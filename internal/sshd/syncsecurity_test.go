@@ -28,10 +28,10 @@ import (
 	"golang.org/x/crypto/ssh"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/overlay"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/overlay"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // hostileSync is a client that speaks the aether-sync wire protocol by

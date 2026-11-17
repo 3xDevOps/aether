@@ -9,10 +9,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	githubservice "github.com/3xDevOps/Aether/internal/github"
-	mirrorservice "github.com/3xDevOps/Aether/internal/mirror"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	githubservice "github.com/3xDevOps/cloudfield/internal/github"
+	mirrorservice "github.com/3xDevOps/cloudfield/internal/mirror"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // The provider boundary supplies a private organization repository readable by

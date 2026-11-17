@@ -14,7 +14,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/cloudfield/internal/ptyhost"
 )
 
 // codexToken is a Codex token whose claims name account.

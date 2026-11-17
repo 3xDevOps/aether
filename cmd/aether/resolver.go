@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/3xDevOps/Aether/internal/envname"
+	"github.com/3xDevOps/cloudfield/internal/envname"
 )
 
 // resolvConfEnv names a resolv.conf the pure-Go resolver reads instead of

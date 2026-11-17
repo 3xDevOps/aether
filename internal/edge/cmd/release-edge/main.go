@@ -16,9 +16,9 @@ import (
 	"slices"
 	"strings"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	edgestore "github.com/3xDevOps/cloudfield/internal/edge/store"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 const upgradePath = "packaging/edge/upgrade.json"

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/cli"
 )
 
 // isolateGitConfig points git at a scratch global config and no system

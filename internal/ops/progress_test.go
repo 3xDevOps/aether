@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 var checkedLongAgo = time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)

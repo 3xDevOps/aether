@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/coord"
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/coord"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // A direct report the scheduler cannot apply is an error the agent sees; an

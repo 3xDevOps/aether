@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/devexec"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/devexec"
 )
 
 // ErrExecUnavailable means execution identity or its terminal cannot be proved.

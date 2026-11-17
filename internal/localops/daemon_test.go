@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/syncd"
-	"github.com/3xDevOps/Aether/internal/testhome"
+	"github.com/3xDevOps/cloudfield/internal/syncd"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
 )
 
 func TestDaemonInstallAndStatus(t *testing.T) {

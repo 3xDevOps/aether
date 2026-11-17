@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/testhome"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
 )
 
 const userSSHConfig = "ServerAliveInterval 60\n\nHost bastion\n  HostName bastion.example.com\n  User ops\n\nHost *\n  ProxyJump bastion\n"

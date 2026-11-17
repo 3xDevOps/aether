@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate/releasetest"
 )
 
 func asset(body []byte) selfupdate.Asset {

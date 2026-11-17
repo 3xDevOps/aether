@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/gitengine"
-	mirrorservice "github.com/3xDevOps/Aether/internal/mirror"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/gitengine"
+	mirrorservice "github.com/3xDevOps/cloudfield/internal/mirror"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/scheduler"
 )
 
 func workspaceImportGit(t *testing.T, dir string, args ...string) string {

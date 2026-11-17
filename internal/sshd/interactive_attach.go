@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/ptyhost"
 )
 
 // interactiveControlQueueSize bounds control replies for one attach. A

@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/reachability"
-	"github.com/3xDevOps/Aether/internal/serversetup"
-	"github.com/3xDevOps/Aether/internal/sysbox"
+	edgeagent "github.com/3xDevOps/cloudfield/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/reachability"
+	"github.com/3xDevOps/cloudfield/internal/serversetup"
+	"github.com/3xDevOps/cloudfield/internal/sysbox"
 )
 
 // answers builds the stdin an operator would type: one line per prompt, in

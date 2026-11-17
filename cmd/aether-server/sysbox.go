@@ -8,8 +8,8 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/sysbox"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/sysbox"
 )
 
 // Seams for setup_test.go and install_test.go: nothing else installs a

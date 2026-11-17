@@ -10,8 +10,8 @@ import (
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/devexec"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/devexec"
 )
 
 func (d *Docker) prepareUser(ctx context.Context, id ID, user, home string, sudo bool) error {

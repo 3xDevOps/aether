@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate/releasetest"
 )
 
 // nightly.yml hands the nightly key to this tool under keyEnv. It signs

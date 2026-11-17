@@ -10,9 +10,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/3xDevOps/Aether/internal/guest"
-	"github.com/3xDevOps/Aether/internal/guest/home"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/guest"
+	"github.com/3xDevOps/cloudfield/internal/guest/home"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 )
 
 // share is one host path the monitor binds into the VM's virtio-fs share

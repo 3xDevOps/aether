@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // The second origin pair of a two-pair edge in tests, with its own OAuth

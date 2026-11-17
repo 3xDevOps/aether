@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/collab"
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/collab"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 func init() {

@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/envname"
+	"github.com/3xDevOps/cloudfield/internal/envname"
 )
 
 // Config is the local linked-server configuration written by `aether link`.

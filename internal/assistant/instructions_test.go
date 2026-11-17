@@ -9,7 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/cloudfield/internal/mcpbridge"
 )
 
 // bridgeTools lists the tools the assistant's MCP bridge serves.

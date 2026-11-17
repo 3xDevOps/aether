@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/cloudfield/internal/mcpbridge"
 )
 
 // mcp runs the in-container MCP bridge. It is deliberately absent from the

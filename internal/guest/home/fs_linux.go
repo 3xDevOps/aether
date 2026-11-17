@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
-	"github.com/3xDevOps/Aether/internal/guest/guestpb"
+	"github.com/3xDevOps/cloudfield/internal/guest/guestpb"
 )
 
 const (

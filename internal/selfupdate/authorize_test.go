@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/macinstall"
+	"github.com/3xDevOps/cloudfield/internal/macinstall"
 )
 
 // release serves body as this platform's asset of v1.3.0 under the

@@ -15,8 +15,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
 )
 
 // newWatcher is replaced by tests that need the kernel to refuse a watcher.

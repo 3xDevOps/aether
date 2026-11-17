@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // HeaderForwardedFor is the header a reverse proxy in front of the edge

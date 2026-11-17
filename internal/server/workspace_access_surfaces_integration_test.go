@@ -16,12 +16,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/assistant/tools"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
-	"github.com/3xDevOps/Aether/internal/ops"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/assistant/tools"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/mcpbridge"
+	"github.com/3xDevOps/cloudfield/internal/ops"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
 )
 
 type probe struct {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 // tagServer publishes tag as the latest signed release, counting how

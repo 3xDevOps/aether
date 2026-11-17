@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // localLinkReset leaves the SSH key under ~/.ssh and the linked clone alone:

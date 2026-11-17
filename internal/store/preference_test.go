@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 func addPreference(t *testing.T, db *DB, member domain.MemberID, text string) Preference {

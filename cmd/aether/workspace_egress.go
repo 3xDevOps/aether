@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 const workspaceEnvEgressUsage = "usage: aether workspace env egress list [--workspace <name-or-id>]\n" +

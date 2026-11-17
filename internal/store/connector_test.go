@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // A connector authorized before consent-time scopes keeps every scope it

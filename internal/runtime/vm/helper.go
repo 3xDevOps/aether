@@ -5,8 +5,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/guest"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/guest"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 )
 
 type helper interface {

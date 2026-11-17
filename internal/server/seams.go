@@ -1,10 +1,10 @@
 package server
 
 import (
-	"github.com/3xDevOps/Aether/internal/gitengine"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
-	"github.com/3xDevOps/Aether/internal/scheduler"
-	"github.com/3xDevOps/Aether/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/gitengine"
+	"github.com/3xDevOps/cloudfield/internal/ptyhost"
+	"github.com/3xDevOps/cloudfield/internal/scheduler"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
 )
 
 // Compile-time assertions that the Wave 1 providers satisfy the

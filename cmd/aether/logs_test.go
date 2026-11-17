@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/acphost"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func acpFrame(t *testing.T, seq int64, it acphost.Item) protocol.ACPFrame {

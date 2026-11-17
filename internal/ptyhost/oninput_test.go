@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // TestOnInputReportsFirstKeystrokeOnce pins the hook the server turns into

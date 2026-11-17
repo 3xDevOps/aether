@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // The git remote URL and every wire call carry workspace IDs; a user-supplied

@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/testhome"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
 )
 
 func TestEnsureIdentityCreatesDefaultKeyPair(t *testing.T) {

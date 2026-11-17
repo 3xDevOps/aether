@@ -23,7 +23,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/3xDevOps/Aether/internal/codexapp"
+	"github.com/3xDevOps/cloudfield/internal/codexapp"
 )
 
 // The test binary also plays the codex-app-server command and the fake

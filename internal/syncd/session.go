@@ -10,8 +10,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // runSession drives one connected session over the events subsystem

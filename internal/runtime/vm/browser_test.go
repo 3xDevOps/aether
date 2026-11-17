@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/vmimage"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/vmimage"
 )
 
 const testBrowserImage = "ghcr.io/3xdevops/aether-browser:v1"

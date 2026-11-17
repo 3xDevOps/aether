@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/events"
 )
 
 // claudeSessionID is the harness session ID both fixtures carry.

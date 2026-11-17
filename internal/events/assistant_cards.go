@@ -1,6 +1,6 @@
 package events
 
-import "github.com/3xDevOps/Aether/internal/domain"
+import "github.com/3xDevOps/cloudfield/internal/domain"
 
 // TypeAssistantCards says a member's assistant approval cards changed: one
 // was raised, decided, expired or withdrawn. It carries no card; a reader

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
-	profilesvc "github.com/3xDevOps/Aether/internal/profile"
-	"github.com/3xDevOps/Aether/internal/rootfs"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/harness"
+	profilesvc "github.com/3xDevOps/cloudfield/internal/profile"
+	"github.com/3xDevOps/cloudfield/internal/rootfs"
 )
 
 // HomeEntry is one immediate child of a directory in a member's home. Kind is

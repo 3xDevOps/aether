@@ -2,10 +2,10 @@
 //
 // Release builds set these values via:
 //
-//	-ldflags "-X github.com/3xDevOps/Aether/internal/version.Version=v1.2.3 \
-//	          -X github.com/3xDevOps/Aether/internal/version.Commit=abc1234 \
-//	          -X github.com/3xDevOps/Aether/internal/version.Build=412 \
-//	          -X github.com/3xDevOps/Aether/internal/version.Hotfix=0"
+//	-ldflags "-X github.com/3xDevOps/cloudfield/internal/version.Version=v1.2.3 \
+//	          -X github.com/3xDevOps/cloudfield/internal/version.Commit=abc1234 \
+//	          -X github.com/3xDevOps/cloudfield/internal/version.Build=412 \
+//	          -X github.com/3xDevOps/cloudfield/internal/version.Hotfix=0"
 package version
 
 import (

@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // originChange is one parsed `aether workspace origin` command line: the

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/push"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/push"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 // DigestSourceName names watch notices in a member's digest.

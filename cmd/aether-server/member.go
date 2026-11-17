@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/server"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/server"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 const memberUsage = "usage: aether-server member role <member-id> <viewer|collaborator|admin|super_admin> [--config <file>]"

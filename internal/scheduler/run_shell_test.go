@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/ptyhost"
 )
 
 func TestEnsureRunShellTabStartsBashInWorkspace(t *testing.T) {

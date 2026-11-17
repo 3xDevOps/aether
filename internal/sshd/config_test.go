@@ -13,12 +13,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/memberhome"
-	profilesvc "github.com/3xDevOps/Aether/internal/profile"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/harness"
+	"github.com/3xDevOps/cloudfield/internal/memberhome"
+	profilesvc "github.com/3xDevOps/cloudfield/internal/profile"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 func TestConfigRPCAuthorizationAndOwnLifecycle(t *testing.T) {

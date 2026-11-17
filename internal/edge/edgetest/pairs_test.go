@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/edge/relay"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/edge/relay"
 )
 
 // An edge that starts serving a second origin pair keeps serving the

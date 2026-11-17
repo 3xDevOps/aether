@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeclient "github.com/3xDevOps/cloudfield/internal/edge/client"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // The layers of the path to a server through an edge, as EdgePathError

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/control"
-	"github.com/3xDevOps/Aether/internal/coord"
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/control"
+	"github.com/3xDevOps/cloudfield/internal/coord"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 type coordWakeAdmission struct {

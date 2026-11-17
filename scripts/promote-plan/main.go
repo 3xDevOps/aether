@@ -30,7 +30,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 // migrationSource is the one pre-channel release Promote takes: the

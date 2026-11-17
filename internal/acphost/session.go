@@ -15,7 +15,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // ErrClosed is returned once the agent connection has ended.

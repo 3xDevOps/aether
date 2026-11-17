@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/secretscan"
+	"github.com/3xDevOps/cloudfield/internal/secretscan"
 )
 
 // defaultIgnores are the gitignore-style patterns Aether applies to a

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // SignIn records a completed sign-in: it creates the account keyed by

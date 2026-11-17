@@ -12,8 +12,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 // MaxRequestBody bounds ordinary API request bodies.

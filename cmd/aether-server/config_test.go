@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/server"
-	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/cloudfield/internal/server"
+	"github.com/3xDevOps/cloudfield/internal/serversetup"
 )
 
 func TestApplyConfigFilePrecedence(t *testing.T) {

@@ -1,6 +1,6 @@
 package events
 
-import "github.com/3xDevOps/Aether/internal/domain"
+import "github.com/3xDevOps/cloudfield/internal/domain"
 
 const (
 	TypeCoordMessage      Type = "coord.message"

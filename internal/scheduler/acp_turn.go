@@ -8,9 +8,9 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
-	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/acphost"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // The dashboard matches these reason prefixes (web/src/lib/needs-you.ts).

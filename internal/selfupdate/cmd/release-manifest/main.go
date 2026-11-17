@@ -33,7 +33,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 // keyEnv holds the std-base64 32-byte ed25519 seed releases are signed with.

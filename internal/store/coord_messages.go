@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 var ErrInvalidCursor = errors.New("invalid page cursor")

@@ -19,8 +19,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/shellquote"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/shellquote"
 )
 
 // LinkRepo points repo's `aether` git remote at the workspace and saves

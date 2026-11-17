@@ -5,7 +5,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func TestAttachEndCloseMapsRevocationReasons(t *testing.T) {

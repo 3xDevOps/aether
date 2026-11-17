@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/testhome"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
 )
 
 // writeTestFile is a tiny os.WriteFile wrapper shared by the git-backed

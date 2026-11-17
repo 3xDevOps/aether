@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/mirror"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/mirror"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 func TestWorkspaceDeletionRefusesUnfinishedRunsWithoutStoppingThem(t *testing.T) {

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/localops"
+	"github.com/3xDevOps/cloudfield/internal/localops"
 )
 
 // stubRebuild points rebuildDesktopAppTo at script, claims an app is

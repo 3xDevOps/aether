@@ -9,9 +9,9 @@ import (
 	"os/signal"
 	"runtime"
 
-	"github.com/3xDevOps/Aether/internal/dictation"
-	containerruntime "github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/server"
+	"github.com/3xDevOps/cloudfield/internal/dictation"
+	containerruntime "github.com/3xDevOps/cloudfield/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/server"
 )
 
 const dictationUsage = "usage: aether-server dictation <install [--gpu]|status|remove> [--config <file>]"

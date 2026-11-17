@@ -15,10 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/edge/relay"
-	edge "github.com/3xDevOps/Aether/internal/edge/service"
-	"github.com/3xDevOps/Aether/internal/version"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/edge/relay"
+	edge "github.com/3xDevOps/cloudfield/internal/edge/service"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 // metricsHandler serves the relay's counters in the Prometheus text

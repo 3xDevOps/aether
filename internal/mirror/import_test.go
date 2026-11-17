@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/gitengine"
-	"github.com/3xDevOps/Aether/internal/store/storetest"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/gitengine"
+	"github.com/3xDevOps/cloudfield/internal/store/storetest"
 )
 
 func importGit(t *testing.T, dir string, args ...string) string {

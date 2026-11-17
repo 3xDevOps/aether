@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/3xDevOps/Aether/internal/fallback"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	templatesvc "github.com/3xDevOps/Aether/internal/templates"
+	"github.com/3xDevOps/cloudfield/internal/fallback"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	templatesvc "github.com/3xDevOps/cloudfield/internal/templates"
 )
 
 // ContractVersion is the version of the ops' inputs and results; it rises

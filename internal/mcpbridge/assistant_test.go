@@ -13,8 +13,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/3xDevOps/Aether/internal/assistant/tools"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/assistant/tools"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // rpcServer answers the assistant socket's calls from canned results per

@@ -3,8 +3,8 @@ package sshd
 import (
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/scheduler"
 )
 
 func TestRunShellErrorsMapToWireCodes(t *testing.T) {

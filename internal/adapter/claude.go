@@ -3,8 +3,8 @@ package adapter
 import (
 	"encoding/json"
 
-	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/events"
 )
 
 // maxDetail bounds AgentEventPayload.Detail: it is a human-readable

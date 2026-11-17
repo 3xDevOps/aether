@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/codexapp"
-	"github.com/3xDevOps/Aether/internal/codexapp/codexmock"
+	"github.com/3xDevOps/cloudfield/internal/codexapp"
+	"github.com/3xDevOps/cloudfield/internal/codexapp/codexmock"
 )
 
 type statusChange struct {

@@ -12,7 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/3xDevOps/Aether/desktop"
+	"github.com/3xDevOps/cloudfield/desktop"
 )
 
 // legacyProduct builds as an app whose electron-builder.yml still names it

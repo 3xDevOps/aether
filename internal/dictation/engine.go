@@ -23,8 +23,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	containerruntime "github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/sysstats"
+	containerruntime "github.com/3xDevOps/cloudfield/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/sysstats"
 )
 
 // Transcriber turns PCM16 mono 16 kHz samples into text.

@@ -3,8 +3,8 @@ package sshd
 import (
 	"context"
 
-	"github.com/3xDevOps/Aether/internal/cost"
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/cost"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // CostService is the seam for token rollups and workspace budgets.

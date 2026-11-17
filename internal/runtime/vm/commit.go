@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/vmimage"
+	"github.com/3xDevOps/cloudfield/internal/vmimage"
 )
 
 const (

@@ -1,6 +1,6 @@
 package events
 
-import "github.com/3xDevOps/Aether/internal/domain"
+import "github.com/3xDevOps/cloudfield/internal/domain"
 
 // TypeRunWaitChanged tells readers of a run to read its wait conditions
 // again: one changed state or delivery.

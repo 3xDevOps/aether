@@ -1,6 +1,6 @@
 package events
 
-import "github.com/3xDevOps/Aether/internal/domain"
+import "github.com/3xDevOps/cloudfield/internal/domain"
 
 // TypeWatchChanged tells a watch's owner to read it again. NotificationID
 // is set when the change recorded a notice. It is published under

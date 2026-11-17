@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/assistant"
+	"github.com/3xDevOps/cloudfield/internal/assistant"
 )
 
 // Result is one agent run of one scenario.

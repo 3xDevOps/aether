@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
 )
 
 // unconverted are the AETHER_ variables still read under their old name

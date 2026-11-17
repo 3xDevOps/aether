@@ -1,6 +1,6 @@
 package events
 
-import "github.com/3xDevOps/Aether/internal/domain"
+import "github.com/3xDevOps/cloudfield/internal/domain"
 
 // TypeServerUpdate reports an admin-triggered update of the server's own
 // binaries. It is a privileged act like a settings change, so it is

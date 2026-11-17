@@ -15,9 +15,9 @@ import (
 	"slices"
 	"strings"
 
-	profilesvc "github.com/3xDevOps/Aether/internal/profile"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/secretscan"
+	profilesvc "github.com/3xDevOps/cloudfield/internal/profile"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/secretscan"
 )
 
 func init() {

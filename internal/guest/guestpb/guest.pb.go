@@ -2027,7 +2027,7 @@ const file_guest_proto_rawDesc = "" +
 	"\x04Thaw\x12\x1c.aether.guest.v1.ThawRequest\x1a\x1a.aether.guest.v1.ThawReply\x12[\n" +
 	"\rFreezeSession\x12%.aether.guest.v1.FreezeSessionRequest\x1a#.aether.guest.v1.FreezeSessionReply\x12@\n" +
 	"\x04Sync\x12\x1c.aether.guest.v1.SyncRequest\x1a\x1a.aether.guest.v1.SyncReply\x12I\n" +
-	"\aBrowser\x12\x1f.aether.guest.v1.BrowserRequest\x1a\x1d.aether.guest.v1.BrowserReplyB3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
+	"\aBrowser\x12\x1f.aether.guest.v1.BrowserRequest\x1a\x1d.aether.guest.v1.BrowserReplyB7Z5github.com/3xDevOps/cloudfield/internal/guest/guestpbb\x06proto3"
 
 var (
 	file_guest_proto_rawDescOnce sync.Once

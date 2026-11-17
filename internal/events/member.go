@@ -1,6 +1,6 @@
 package events
 
-import "github.com/3xDevOps/Aether/internal/domain"
+import "github.com/3xDevOps/cloudfield/internal/domain"
 
 // TypeMemberChanged reports a change to a member's display name. Members are
 // server-wide and the timeline is per workspace, so it is published once per

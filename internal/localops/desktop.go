@@ -18,8 +18,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/3xDevOps/Aether/desktop"
-	"github.com/3xDevOps/Aether/internal/envname"
+	"github.com/3xDevOps/cloudfield/desktop"
+	"github.com/3xDevOps/cloudfield/internal/envname"
 )
 
 // DesktopApp is an installed desktop shell.

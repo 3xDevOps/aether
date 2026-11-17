@@ -1,6 +1,6 @@
 package events
 
-import "github.com/3xDevOps/Aether/internal/domain"
+import "github.com/3xDevOps/cloudfield/internal/domain"
 
 // TypeWorkspaceAccess reports that a member was granted or revoked a
 // workspace, or became its owner. It is published in that workspace.

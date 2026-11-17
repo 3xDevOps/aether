@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/cloudfield/internal/coordhooks"
 )
 
 func hookInstallFixture(t *testing.T, path, content string) {

@@ -1,6 +1,6 @@
 package protocol
 
-import "github.com/3xDevOps/Aether/internal/domain"
+import "github.com/3xDevOps/cloudfield/internal/domain"
 
 // WorkspaceMirrorParams addresses a workspace mirror.
 type WorkspaceMirrorParams struct {

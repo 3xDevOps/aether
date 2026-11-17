@@ -15,7 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // recorder is an origin that answers nothing and records the

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/ops"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/ops"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // Every method an op the assistant offers calls has a tier here, and the

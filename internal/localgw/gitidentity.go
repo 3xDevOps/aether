@@ -3,8 +3,8 @@ package localgw
 import (
 	"net/http"
 
-	"github.com/3xDevOps/Aether/internal/localops"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/localops"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // localGitIdentity reports this machine's git identity so the onboarding

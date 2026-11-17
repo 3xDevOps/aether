@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/cloudfield/internal/coordhooks"
 )
 
 func TestOpenCodeInstallationVersionBoundaries(t *testing.T) {

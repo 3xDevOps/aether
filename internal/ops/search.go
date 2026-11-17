@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // search and fetch take OpenAI's exact deep research shapes, which ChatGPT

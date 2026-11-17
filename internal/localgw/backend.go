@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/webgate"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	edgeclient "github.com/3xDevOps/cloudfield/internal/edge/client"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/webgate"
 )
 
 // sshBackend proxies the Backend surface onto one lazily dialed SSH connection.

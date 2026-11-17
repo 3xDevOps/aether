@@ -13,7 +13,7 @@
 // unparseable line as opaque PTY output, never an error.
 package adapter
 
-import "github.com/3xDevOps/Aether/internal/events"
+import "github.com/3xDevOps/cloudfield/internal/events"
 
 // Adapter translates one harness's structured output into typed event
 // payloads. Implementations are line consumers fed by the Manager through

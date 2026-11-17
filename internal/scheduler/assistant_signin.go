@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // ErrAssistantSignInChanged means an agent's sign-in in the assistant home

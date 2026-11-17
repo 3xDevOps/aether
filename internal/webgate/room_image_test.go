@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 const roomImageTestPath = "/api/v1/run/run/messages/message/attachments/0"

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	cliprofile "github.com/3xDevOps/Aether/internal/cli/profile"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/shellquote"
+	cliprofile "github.com/3xDevOps/cloudfield/internal/cli/profile"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/shellquote"
 )
 
 func init() {

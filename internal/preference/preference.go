@@ -16,10 +16,10 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/secretscan"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/secretscan"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 // MaxText is the longest preference, in characters.

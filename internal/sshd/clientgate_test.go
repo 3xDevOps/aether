@@ -15,14 +15,14 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/localgw"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
-	"github.com/3xDevOps/Aether/internal/testhome"
-	"github.com/3xDevOps/Aether/internal/version"
-	"github.com/3xDevOps/Aether/internal/webgate"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/localgw"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate/releasetest"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
+	"github.com/3xDevOps/cloudfield/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/webgate"
 )
 
 func TestParseClientBanner(t *testing.T) {

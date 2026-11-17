@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/jsonc"
+	"github.com/3xDevOps/cloudfield/internal/jsonc"
 )
 
 // configVariables hold a JSON config object the agent merges over its own,

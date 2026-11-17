@@ -1495,7 +1495,7 @@ const file_home_proto_rawDesc = "" +
 	"\x05Write\x12!.aether.guest.v1.HomeWriteRequest\x1a\x1f.aether.guest.v1.HomeWriteReply\x12L\n" +
 	"\x05Fsync\x12\".aether.guest.v1.HomeHandleRequest\x1a\x1f.aether.guest.v1.HomeErrnoReply\x12N\n" +
 	"\aRelease\x12\".aether.guest.v1.HomeHandleRequest\x1a\x1f.aether.guest.v1.HomeErrnoReply\x12L\n" +
-	"\x06Statfs\x12 .aether.guest.v1.HomeNodeRequest\x1a .aether.guest.v1.HomeStatfsReplyB3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
+	"\x06Statfs\x12 .aether.guest.v1.HomeNodeRequest\x1a .aether.guest.v1.HomeStatfsReplyB7Z5github.com/3xDevOps/cloudfield/internal/guest/guestpbb\x06proto3"
 
 var (
 	file_home_proto_rawDescOnce sync.Once

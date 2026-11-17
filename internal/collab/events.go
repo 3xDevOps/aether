@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 func (s *Service) publishProtected(ctx context.Context, run *domain.Run, actor domain.MemberID) error {

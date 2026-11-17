@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // serveHTTP serves the requests of one http connection, opened on s, with
