@@ -168,7 +168,7 @@ const pairs: [fg: string, bg: string, min: number][] = [
   ['control-border', 'raised', 3],
   ...['canvas', 'chrome', 'raised', 'hover', 'hover-chrome', 'selection'].map((bg): [string, string, number] => ['focus-ring', bg, 3]),
   ['icon-faint', 'canvas', 3],
-  ...['claude', 'pi', 'omp', 'gemini', 'cursor', 'antigravity'].map((agent): [string, string, number] => [`agent-${agent}`, 'canvas', 3]),
+  ...['claude', 'pi', 'omp', 'cursor'].map((agent): [string, string, number] => [`agent-${agent}`, 'canvas', 3]),
 ]
 
 describe.each([

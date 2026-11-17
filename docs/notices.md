@@ -113,6 +113,8 @@ from:
 | oh-my-pi | oh-my-pi | [`packages/collab-web/public/favicon.svg` at v18.20.3](https://github.com/can1357/oh-my-pi/blob/v18.20.3/packages/collab-web/public/favicon.svg), drawn in one colour instead of its gradient | [MIT](https://github.com/can1357/oh-my-pi/blob/v18.20.3/LICENSE), with the repository |
 | OpenCode | OpenCode | the frame of [`opencode-logo-transparent-dark.svg`](https://opencode.ai/brand/files/opencode-logo-transparent-dark.svg) from [opencode.ai/brand](https://opencode.ai/brand) | none stated |
 | GitHub Copilot CLI | Invertocat, GitHub | [Primer Octicons 19.42.0 `mark-github-24`](https://cdn.jsdelivr.net/npm/@primer/octicons@19.42.0/build/svg/mark-github-24.svg) | [MIT](https://cdn.jsdelivr.net/npm/@primer/octicons@19.42.0/LICENSE) |
+| Gemini CLI | Gemini CLI icon, Google | [`gemini-cli-icon_full-color.svg`](https://geminicli.com/brandassets/gemini-cli-icon_full-color.svg), and the one path of [`gemini-cli-icon_monotone_on_dark.svg`](https://geminicli.com/brandassets/gemini-cli-icon_monotone_on_dark.svg), from the [Gemini CLI brand kit](https://geminicli.com/brand-kit/) | none stated; the kit's [guidelines](https://geminicli.com/brandassets/gemini_cli_logo_icon_guidelines.pdf) apply |
+| Antigravity CLI | Antigravity icon, Google | [`antigravity-icon__full-color.svg`](https://antigravity.google/assets/image/brand/antigravity-icon__full-color.svg), and the path of [`antigravity-icon__one-color.svg`](https://antigravity.google/assets/image/brand/antigravity-icon__one-color.svg), from Google's [press assets](https://antigravity.google/press) | none stated |
 | Cursor CLI | Cursor cube | `General Logos/Cube/SVG/CUBE_2D_LIGHT.svg` in the kit on [cursor.com/brand](https://cursor.com/brand) | none stated |
 
 Simple Icons is CC0, but its
@@ -123,9 +125,15 @@ only ever take the text colour; OpenCode's mark also keeps its 4:5
 proportions. GitHub retired the Copilot head in early 2026 and shows Copilot
 with its Invertocat
 ([GitHub brand: Copilot](https://brand.github.com/brand-identity/copilot)).
-Google makes its product icons "ask first"
-([Google brand guidance](https://about.google/brand-resource-center/guidance/)),
-so Gemini CLI and Antigravity CLI show their initial instead.
+Google's brand guidance lists product icons under "Ask first"
+([Google brand guidance](https://about.google/brand-resource-center/guidance/)).
+The Gemini CLI guidelines say its assets "should not ever be altered" and
+that the icon "is for where the brand has to be separated from the product
+name"; the Antigravity press page gives files and no terms. So neither icon
+is redrawn or tinted with an agent colour. In colour, the dashboard shows
+Google's full-colour files as served, in `web/public/agents/`. Where every
+glyph is one colour, it draws the path of Google's own one-colour file in
+that row's colour.
 
 The terminal uses [xterm.js](https://github.com/xtermjs/xterm.js), including its
 fit, search and web-links addons, under the
