@@ -247,7 +247,7 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 		a.recordBeats(sctx, s)
 		close(recorded)
 	}()
-	err = a.serve(sctx, s)
+	err = a.serve(ctx, sctx, s)
 	// The disconnected status the caller writes must land after the last
 	// heartbeat.
 	stop()
@@ -458,22 +458,18 @@ func (a *Agent) pushDirectory(ctx context.Context, s *session) {
 	}
 }
 
-func (a *Agent) serve(ctx context.Context, s *session) error {
+func (a *Agent) serve(run, ctx context.Context, s *session) error {
 	for {
 		m, err := readMessage(ctx, s.c, a.idleTimeout)
 		if err != nil {
 			return fmt.Errorf("control connection: %w", err)
 		}
-		// Ending Run's context closes the relayed connections, and the edge
-		// can send an open in their place before ctx, derived from it, ends.
-		// Their slots are freed only as those connections finish closing,
-		// so answering it could refuse it as over the limit; unanswered, the
-		// edge holds it for the server's return.
-		a.mu.Lock()
-		runCtx := a.runCtx
-		a.mu.Unlock()
-		if err := runCtx.Err(); err != nil {
-			return err
+		// Ending run closes the relayed connections, and the edge can send
+		// an open in their place before ctx, derived from run, ends. Their
+		// slots free only as they finish closing, so an answer could refuse
+		// it as over the limit; unanswered, the edge holds it.
+		if err := run.Err(); err != nil {
+			return fmt.Errorf("control connection: server stopping: %w", err)
 		}
 		switch m := m.(type) {
 		case edgeproto.Ping:
