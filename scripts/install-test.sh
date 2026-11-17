@@ -830,7 +830,7 @@ chmod 0555 "$sysbin"
 ran "sudo cp"
 ran "sudo mv -f $sysbin/.aether-server.install."
 printed "installed $sysbin/aether-server"
-ran "sudo ln -s aether-server $sysbin/cloudfield-server"
+ran "sudo ln -sn aether-server $sysbin/cloudfield-server"
 [ "$(readlink "$sysbin/cloudfield-server")" = aether-server ] || fail "$sysbin/cloudfield-server is not a link to aether-server"
 
 reset "--bin-dir wins over the client role"

@@ -721,7 +721,7 @@ for pair in aether:cloudfield aether-server:cloudfield-server; do
 	if [ ! -e "${BIN_DIR}/${target}" ] || [ -e "$link" ] || [ -L "$link" ]; then
 		continue
 	fi
-	if ! ln_err="$($sudo ln -s "$target" "$link" 2>&1)"; then
+	if ! ln_err="$($sudo ln -sn "$target" "$link" 2>&1)"; then
 		say "warning: ${ln_err}; ${target} works as before. To add the name: ${sudo:+sudo }ln -s ${target} '${link}'"
 	fi
 done
