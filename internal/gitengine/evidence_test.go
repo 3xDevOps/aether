@@ -308,6 +308,12 @@ func TestRunDeletionPrunesEvidenceOnceInTheBackground(t *testing.T) {
 	if writeErr := os.WriteFile(failGC, nil, 0o600); writeErr != nil {
 		t.Fatal(writeErr)
 	}
+	// A loaded machine can space the removals wider than the test's short
+	// debounce, so the burst runs under a debounce it cannot outlast and the
+	// test then fires the one prune it scheduled.
+	e.mu.Lock()
+	e.evidencePruneDelay = time.Hour
+	e.mu.Unlock()
 	for _, packet := range packets {
 		if removeErr := e.RemoveEvidence(ctx, "ws1", packet); removeErr != nil {
 			t.Fatalf("RemoveEvidence(%s) with a failing gc: %v", packet, removeErr)
@@ -316,6 +322,10 @@ func TestRunDeletionPrunesEvidenceOnceInTheBackground(t *testing.T) {
 	if removeErr := e.RemoveRunHistory(ctx, "run-delete"); removeErr != nil {
 		t.Fatalf("RemoveRunHistory: %v", removeErr)
 	}
+	e.mu.Lock()
+	e.evidencePruneDelay = 20 * time.Millisecond
+	e.evidencePrunes["ws1"].timer.Reset(0)
+	e.mu.Unlock()
 	waitUntil("the failed prune", func() bool {
 		e.mu.Lock()
 		defer e.mu.Unlock()
