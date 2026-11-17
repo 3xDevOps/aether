@@ -63,7 +63,8 @@
   --space-12: 48px;
 
   --gutter: 24px;
-  --column: 720px;
+  --column: 880px;
+  --measure: 68ch;
   --panel: 440px;
   --control-height: 40px;
   --input-height: 44px;
@@ -120,6 +121,7 @@ body {
 }
 
 p, ul, dl, table, form { margin: 0 0 var(--space-4); }
+main > p, .note, .empty, .danger-zone p { max-width: var(--measure); }
 
 a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
 
@@ -135,6 +137,8 @@ code {
   border: 1px solid var(--seam);
   border-radius: var(--radius-chip);
   padding: 0 var(--space-1);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 h1, h2 { font-family: var(--font-title); font-weight: 600; line-height: 1.2; letter-spacing: 0; overflow-wrap: anywhere; }
@@ -354,7 +358,9 @@ input[name='user_code'] {
 .list tbody tr { transition: background-color var(--duration-hover) var(--ease-hover); }
 .list tbody tr:hover { background: var(--hover); }
 .list td form { margin: 0; }
-.list th:first-child, .list td:first-child { width: 40%; }
+.list td:first-child { min-width: 13.5rem; }
+.list code.sub { white-space: nowrap; }
+.list td[data-label='Status'] { white-space: nowrap; }
 .list .action { padding-block: 6px; text-align: right; width: 1%; white-space: nowrap; }
 .list .name { display: block; font-weight: 600; overflow-wrap: anywhere; }
 .list .sub { display: block; }
