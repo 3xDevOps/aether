@@ -15,12 +15,12 @@ import (
 	"github.com/3xDevOps/Aether/desktop"
 )
 
-// renameProduct builds as an app whose electron-builder.yml names it
-// Cloudfield.
-func renameProduct(t *testing.T) {
+// legacyProduct builds as an app whose electron-builder.yml still names it
+// Aether, as every release before the rename did.
+func legacyProduct(t *testing.T) {
 	t.Helper()
 	previous := productName
-	productName = "Cloudfield"
+	productName = legacyProductName
 	t.Cleanup(func() { productName = previous })
 }
 
@@ -54,7 +54,6 @@ func TestAppPathsNamedForEitherName(t *testing.T) {
 // and the dashboard's Update rebuild it; once the renamed app is in place,
 // that one is.
 func TestInstalledDesktopAppFindsEitherName(t *testing.T) {
-	renameProduct(t)
 	home := filepath.ToSlash(t.TempDir())
 	system := filepath.ToSlash(t.TempDir())
 	setMacSystemApplications(t, system)
@@ -85,7 +84,6 @@ func TestInstallDesktopLinuxPutsARenamedAppBesideTheLegacyOne(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("linux layout uses unix permissions")
 	}
-	renameProduct(t)
 	home := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", "")
 	data := filepath.Join(home, ".local", "share")
@@ -127,7 +125,6 @@ func TestInstallDesktopLinuxPutsARenamedAppBesideTheLegacyOne(t *testing.T) {
 }
 
 func TestInstallDesktopDarwinPutsARenamedAppBesideTheLegacyOne(t *testing.T) {
-	renameProduct(t)
 	system := t.TempDir()
 	setMacSystemApplications(t, system)
 	home := t.TempDir()
@@ -152,7 +149,6 @@ func TestInstallDesktopDarwinPutsARenamedAppBesideTheLegacyOne(t *testing.T) {
 }
 
 func TestDesktopLayoutWindowsNamesTheRenamedApp(t *testing.T) {
-	renameProduct(t)
 	local := t.TempDir()
 	programs := t.TempDir()
 	t.Setenv("LOCALAPPDATA", local)
@@ -170,7 +166,6 @@ func TestDesktopLayoutWindowsNamesTheRenamedApp(t *testing.T) {
 }
 
 func TestBuiltDesktopAppFindsTheRenamedBundle(t *testing.T) {
-	renameProduct(t)
 	dist := t.TempDir()
 	want := filepath.Join(dist, "mac-arm64", "Cloudfield.app")
 	if err := os.MkdirAll(want, 0o755); err != nil {
@@ -228,7 +223,6 @@ func TestDesktopAppRunningUnderEitherName(t *testing.T) {
 	if _, err := exec.LookPath("pgrep"); err != nil {
 		t.Skip("no pgrep")
 	}
-	renameProduct(t)
 	for _, name := range []string{"Aether", "Cloudfield"} {
 		bundle := filepath.Join(t.TempDir(), name+".app")
 		if DesktopAppRunning("darwin", bundle) {
@@ -282,9 +276,9 @@ func TestLinuxLauncherFollowsElectronBuilder(t *testing.T) {
 	if desktopName == "" || executable == "" {
 		t.Fatalf("electron-builder.yml sets desktopName %q and linux.executableName %q; it must set both", desktopName, executable)
 	}
-	for _, renamed := range []bool{false, true} {
-		if renamed {
-			renameProduct(t)
+	for _, legacy := range []bool{false, true} {
+		if legacy {
+			legacyProduct(t)
 		}
 		home := t.TempDir()
 		t.Setenv("XDG_DATA_HOME", "")
@@ -325,7 +319,6 @@ func TestDesktopAppExePerOS(t *testing.T) {
 // The Windows helper starts the app the swap put in place: beside a legacy
 // app, the renamed one.
 func TestSwappedInAppIsTheRenamedAppBesideTheLegacyOne(t *testing.T) {
-	renameProduct(t)
 	programs := filepath.Join(t.TempDir(), "Programs")
 	renamed := filepath.Join(programs, "Cloudfield Desktop")
 	for _, current := range []string{filepath.Join(programs, "Aether Desktop"), renamed} {

@@ -50,8 +50,8 @@ if [ "${GUI_INTERRUPTS:-0}" = 1 ] && [ "${1:-}" = gui ]; then
 	exit 130
 fi
 printf 'aether %s\n' "$*" >>"$CMD_LOG"
-echo "installed /home/tester/.local/share/aether/desktop"
-echo "open it from your application menu as Aether"
+echo "installed /home/tester/.local/share/cloudfield/desktop"
+echo "open it from your application menu as Cloudfield"
 EOF
 
 # Stands in for the real binary. A completed setup writes the systemd unit,
@@ -493,7 +493,7 @@ ran "aether gui build"
 not_ran "aether-server setup"
 printed "This machine is a client"
 printed "$quickstart"
-printed "  open Aether from your applications to link your server, or in a terminal:"
+printed "  open Cloudfield from your applications to link your server, or in a terminal:"
 printed "  aether link <server-host>      # on a tailnet: the server's tailnet name"
 ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
 plain

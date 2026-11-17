@@ -532,7 +532,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           aether gui build
           desktop-file-validate ~/.local/share/applications/aether-desktop.desktop
-          test -x ~/.local/share/aether/desktop/aether-desktop
+          test -x ~/.local/share/cloudfield/desktop/aether-desktop
       # Proves the app builds on a machine with no Node at all: with node,
       # npm and npx off PATH, the CLI has to download its own copy into the
       # cache directory and build with that. The directories that carry node
@@ -572,7 +572,7 @@ jobs:
             { echo "no Node was downloaded into ~/.cache/aether/node" >&2; exit 1; }
           find ~/.cache/aether/node -type f -name node -perm -u+x | grep -q . ||
             { echo "the downloaded Node has no executable node" >&2; exit 1; }
-          test -x ~/.local/share/aether/desktop/aether-desktop
+          test -x ~/.local/share/cloudfield/desktop/aether-desktop
       - uses: actions/cache/save@v4
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:

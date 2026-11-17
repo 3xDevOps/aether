@@ -129,7 +129,6 @@ func (f retireFixture) assertLegacyKept(t *testing.T) {
 }
 
 func TestRetireLegacyDesktopRemovesTheOldAppOnceTheRenamedOneRuns(t *testing.T) {
-	renameProduct(t)
 	for _, goos := range []string{"linux", "darwin", "windows"} {
 		t.Run(goos, func(t *testing.T) {
 			f := newRetireFixture(t, goos)
@@ -150,6 +149,7 @@ func TestRetireLegacyDesktopRemovesTheOldAppOnceTheRenamedOneRuns(t *testing.T) 
 }
 
 func TestRetireLegacyDesktopIsANoOpUnderTheLegacyName(t *testing.T) {
+	legacyProduct(t)
 	f := newRetireFixture(t, "linux")
 	if err := retireLegacyDesktop("linux", f.lookup, DesktopAppExe("linux", f.legacy[0])); err != nil {
 		t.Fatal(err)
@@ -161,7 +161,6 @@ func TestRetireLegacyDesktopIsANoOpUnderTheLegacyName(t *testing.T) {
 // shell does not set the variable, a legacy or development shell is not
 // such an install, and neither is a path that does not exist.
 func TestRetireLegacyDesktopNeedsTheRenamedShell(t *testing.T) {
-	renameProduct(t)
 	for _, goos := range []string{"linux", "darwin", "windows"} {
 		t.Run(goos, func(t *testing.T) {
 			f := newRetireFixture(t, goos)
@@ -183,7 +182,6 @@ func TestRetireLegacyDesktopNeedsTheRenamedShell(t *testing.T) {
 }
 
 func TestRetireLegacyDesktopFollowsASymlinkedShell(t *testing.T) {
-	renameProduct(t)
 	f := newRetireFixture(t, "linux")
 	link := filepath.Join(t.TempDir(), "cloudfield")
 	symlink(t, f.renamedExe, link)
@@ -199,7 +197,6 @@ func TestRetireLegacyDesktopFollowsASymlinkedShell(t *testing.T) {
 // also resolve to), a directory without the app's executable, and a
 // directory that resolves to the running app.
 func TestRetireLegacyDesktopKeepsWhatIsNotAnOldInstall(t *testing.T) {
-	renameProduct(t)
 	t.Run("symlink", func(t *testing.T) {
 		f := newRetireFixture(t, "linux")
 		if err := os.RemoveAll(f.legacy[0]); err != nil {
@@ -246,7 +243,6 @@ func TestRetireLegacyDesktopReportsAFailedRemoval(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("needs a unix account that directory permissions apply to")
 	}
-	renameProduct(t)
 	f := newRetireFixture(t, "linux")
 	parent := filepath.Dir(f.legacy[0])
 	if err := os.Chmod(parent, 0o555); err != nil {
@@ -267,7 +263,6 @@ func TestRetireLegacyDesktopKeepsARunningOldApp(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("reads /proc")
 	}
-	renameProduct(t)
 	f := newRetireFixture(t, "linux")
 	target := filepath.Join(t.TempDir(), "share")
 	share := filepath.Dir(filepath.Dir(f.legacy[0]))
@@ -292,7 +287,6 @@ func TestRetireLegacyDesktopKeepsARunningOldApp(t *testing.T) {
 // A Windows app that could not be removed keeps its Start Menu shortcut, so
 // it can still be started.
 func TestRetireLegacyDesktopKeepsTheShortcutOfAnAppStillInstalled(t *testing.T) {
-	renameProduct(t)
 	f := newRetireFixture(t, "windows")
 	if err := os.Remove(DesktopAppExe("windows", f.legacy[0])); err != nil {
 		t.Fatal(err)
@@ -307,6 +301,7 @@ func TestRetireLegacyDesktopKeepsTheShortcutOfAnAppStillInstalled(t *testing.T) 
 // With one product name the legacy and current locations are the same
 // list, so an app in one location must not make the other a legacy one.
 func TestRetireLegacyDesktopIsANoOpUnderTheLegacyNameInEveryLocation(t *testing.T) {
+	legacyProduct(t)
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	xdg := filepath.Join(root, "xdg")
@@ -332,10 +327,12 @@ func TestRetireLegacyDesktopIsANoOpUnderTheLegacyNameInEveryLocation(t *testing.
 
 func TestRetireLegacyDesktopLooksUpTheUserOnlyAfterTheRename(t *testing.T) {
 	failing := func() (RealUser, error) { return RealUser{}, errors.New("no home") }
-	if err := retireLegacyDesktop("linux", failing, "/some/shell"); err != nil {
-		t.Fatalf("under the legacy name: %v", err)
-	}
-	renameProduct(t)
+	t.Run("legacy", func(t *testing.T) {
+		legacyProduct(t)
+		if err := retireLegacyDesktop("linux", failing, "/some/shell"); err != nil {
+			t.Fatalf("under the legacy name: %v", err)
+		}
+	})
 	if err := retireLegacyDesktop("linux", failing, ""); err != nil {
 		t.Fatalf("without a shell: %v", err)
 	}
@@ -345,7 +342,6 @@ func TestRetireLegacyDesktopLooksUpTheUserOnlyAfterTheRename(t *testing.T) {
 }
 
 func TestRetireLegacyDesktopRemovesNothingAsRoot(t *testing.T) {
-	renameProduct(t)
 	previous := geteuid
 	geteuid = func() int { return 0 }
 	t.Cleanup(func() { geteuid = previous })
@@ -360,7 +356,6 @@ func TestRetireLegacyDesktopRemovesNothingAsRoot(t *testing.T) {
 // on darwin; only this app's bundle id makes it the old app. Elsewhere the
 // CLI binding InstallDesktop writes marks it.
 func TestRetireLegacyDesktopKeepsAnotherAppOfTheSameName(t *testing.T) {
-	renameProduct(t)
 	for _, tc := range []struct {
 		name, goos, file, content string
 	}{
@@ -416,7 +411,6 @@ func TestRetireLegacyDesktopKeepsAnOldAppRunningByItsListedPath(t *testing.T) {
 	if _, err := exec.LookPath("pgrep"); err != nil {
 		t.Skip("no pgrep")
 	}
-	renameProduct(t)
 	target := t.TempDir()
 	link := filepath.Join(t.TempDir(), "Applications")
 	symlink(t, target, link)
@@ -441,7 +435,6 @@ func TestRetireLegacyDesktopRetriesAFailedDelete(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("needs a unix account that directory permissions apply to")
 	}
-	renameProduct(t)
 	f := newRetireFixture(t, "windows")
 	locked := filepath.Join(f.legacy[0], "resources")
 	if err := os.WriteFile(filepath.Join(locked, "app.asar"), nil, 0o644); err != nil {
@@ -472,7 +465,6 @@ func TestRetireLegacyDesktopRetriesAFailedDelete(t *testing.T) {
 // The renamed app's own set-aside copy from an install swap shares the
 // parent on windows and is never touched.
 func TestRetireLegacyDesktopKeepsTheRenamedAppsSetAsideCopy(t *testing.T) {
-	renameProduct(t)
 	f := newRetireFixture(t, "windows")
 	aside := filepath.Join(filepath.Dir(f.renamed[0]), installOldPrefix+"swap", "Cloudfield Desktop")
 	exe := fakeInstall(t, "windows", aside)
@@ -484,7 +476,6 @@ func TestRetireLegacyDesktopKeepsTheRenamedAppsSetAsideCopy(t *testing.T) {
 
 // A machine that never had the legacy app keeps whatever Aether.lnk it has.
 func TestRetireLegacyDesktopKeepsAShortcutWithoutAnOldApp(t *testing.T) {
-	renameProduct(t)
 	f := newRetireFixture(t, "windows")
 	if err := os.RemoveAll(f.legacy[0]); err != nil {
 		t.Fatal(err)
@@ -501,7 +492,6 @@ func TestRetireLegacyDesktopRetriesTheShortcut(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("needs a unix account that directory permissions apply to")
 	}
-	renameProduct(t)
 	f := newRetireFixture(t, "windows")
 	if err := os.Chmod(f.programs, 0o555); err != nil {
 		t.Fatal(err)
@@ -528,7 +518,6 @@ func TestRetireLegacyDesktopRetriesTheShortcut(t *testing.T) {
 // An old app installed again after a removal that did not finish keeps its
 // shortcut while the earlier copy is deleted.
 func TestRetireLegacyDesktopKeepsTheShortcutOfAReinstalledApp(t *testing.T) {
-	renameProduct(t)
 	f := newRetireFixture(t, "windows")
 	retired := filepath.Join(filepath.Dir(f.legacy[0]), retiredPrefix+"Aether Desktop")
 	fakeInstall(t, "windows", retired)
@@ -542,7 +531,6 @@ func TestRetireLegacyDesktopKeepsTheShortcutOfAReinstalledApp(t *testing.T) {
 // XDG_DATA_HOME inside the old app's folder puts the running renamed app
 // inside it; the old folder then stays.
 func TestRetireLegacyDesktopKeepsAnOldFolderHoldingTheRunningApp(t *testing.T) {
-	renameProduct(t)
 	f := newRetireFixture(t, "linux")
 	xdg := filepath.Join(f.legacy[0], "x")
 	t.Setenv("XDG_DATA_HOME", xdg)
@@ -577,7 +565,6 @@ func TestWithin(t *testing.T) {
 // finish: a symlink is neither followed nor removed. Its owner is checked
 // too, which a test cannot set up without a second account.
 func TestRetireLegacyDesktopRetriesOnlyARealDirectory(t *testing.T) {
-	renameProduct(t)
 	f := newRetireFixture(t, "linux")
 	elsewhere := t.TempDir()
 	keep := filepath.Join(elsewhere, "keep")
@@ -601,7 +588,6 @@ func TestRetireLegacyDesktopUsesTheProcessHome(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("needs a unix account that is not root")
 	}
-	renameProduct(t)
 	f := newRetireFixture(t, "linux")
 	t.Setenv("HOME", f.home)
 	t.Setenv("SUDO_USER", "no-such-account-for-this-test")

@@ -18,6 +18,10 @@ param(
 # cannot update itself on Windows. Releases that include the feature behave differently, so
 # do not move this to a newer tag.
 $OldShellTag = 'v0.7.0-alpha.16'
+# The newest release whose desktop app is named Aether. This build installs
+# Cloudfield beside it and removes it once Cloudfield has started, so do not
+# move this to a newer tag.
+$LegacyNameTag = 'v0.8.7'
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -56,7 +60,8 @@ $taskName = 'aether-daemon'
 $exeAsset = "aether-windows-$Arch.exe"
 $zipAsset = "aether-desktop-windows-$Arch.zip"
 $programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs, [Environment+SpecialFolderOption]::DoNotVerify)
-$shortcut = Join-Path $programs 'Aether.lnk'
+$shortcut = Join-Path $programs 'Cloudfield.lnk'
+$legacyShortcut = Join-Path $programs 'Aether.lnk'
 $proxy = $null
 
 function Invoke-Native([string]$Exe, [string[]]$Arguments, [int]$TimeoutSec = 300) {
@@ -405,9 +410,46 @@ function Invoke-App([string]$Mode, [int]$Port, [int]$TimeoutSec = 180) {
 
 function Assert-ReleaseResources([string]$Path, [string]$What) {
     $info = (Get-Item -LiteralPath $Path).VersionInfo
-    Assert ($info.ProductName -eq 'Aether' -and $info.CompanyName -eq '3xDevOps' -and $info.FileVersion -eq '0.5.1.0') "$What carries the release VERSIONINFO ($($info.CompanyName) / $($info.ProductName) / $($info.FileVersion))"
+    Assert ($info.ProductName -eq 'Cloudfield' -and $info.CompanyName -eq '3xDevOps' -and $info.FileVersion -eq '0.5.1.0') "$What carries the release VERSIONINFO ($($info.CompanyName) / $($info.ProductName) / $($info.FileVersion))"
     $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Path))
     Assert ($text.Contains('requestedExecutionLevel') -and $text.Contains('io.aether.client')) "$What carries the release application manifest"
+}
+
+# GitHub's release downloads answer 5xx now and then.
+function Get-ReleaseAsset([string]$Tag, [string]$Name, [string]$OutFile) {
+    for ($try = 1; ; $try++) {
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$Tag/$Name" -OutFile $OutFile
+            return
+        } catch {
+            if ($try -eq 3) { throw }
+            Write-Host "downloading $Name of $Tag failed (try $try of 3): $($_.Exception.Message)"
+            Start-Sleep -Seconds (30 * $try)
+        }
+    }
+}
+
+# The removal renames the old app to .aether-retired-<name> beside it,
+# deletes Aether.lnk, then deletes the renamed folder: done once all three
+# are gone.
+function Wait-Retired([string]$App, [int]$TimeoutSec) {
+    $retired = Join-Path (Split-Path -Parent $App) ('.aether-retired-' + (Split-Path -Leaf $App))
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    while ((Test-Path -LiteralPath $App) -or (Test-Path -LiteralPath $retired) -or (Test-Path -LiteralPath $legacyShortcut)) {
+        if ([DateTime]::UtcNow -gt $deadline) { return $false }
+        Start-Sleep -Milliseconds 500
+    }
+    return $true
+}
+
+# An Electron app's helper processes run its own executable and can outlive
+# the window for a moment.
+function Wait-NoProcessUnder([string]$Dir, [int]$TimeoutSec = 30) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    while (@(Get-Process -Name 'aether-desktop' -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -like "$Dir\*" }).Count -gt 0) {
+        if ([DateTime]::UtcNow -gt $deadline) { throw "aether-desktop processes under $Dir did not exit in ${TimeoutSec}s." }
+        Start-Sleep -Milliseconds 250
+    }
 }
 
 function Start-Mirror {
@@ -650,7 +692,7 @@ exit 1
     $mirrorPort = Start-Mirror
     $installed = New-Sandbox 'real' -Empty
     $cliDir = Split-Path -Parent $installed
-    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
+    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Cloudfield Desktop\aether-desktop.exe'
     $appDir = Split-Path -Parent $desktop
     Use-Release $oldRelease
     Invoke-Installer $mirrorPort @{}
@@ -705,7 +747,7 @@ exit 1
     Write-Host '=== aether update from a terminal while the desktop app runs ==='
     $installed = New-Sandbox 'terminal'
     $cliDir = Split-Path -Parent $installed
-    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
+    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Cloudfield Desktop\aether-desktop.exe'
     $appDir = Split-Path -Parent $desktop
     $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $DesktopZip + '"')) 600
     Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) 'the old desktop app is installed'
@@ -740,30 +782,21 @@ exit 1
     Invoke-Installer $mirrorPort @{ Role = 'none' }
     Use-Release $newRelease
     Assert ((Get-Hash $installed) -eq $oldHash) 'scripts/install.ps1 -Role none installed the old CLI at the default path'
-    Assert (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop'))) 'no desktop app is installed'
+    $apps = @('Cloudfield', 'Aether' | ForEach-Object { Join-Path $env:LOCALAPPDATA "Programs\$_ Desktop" })
+    Assert (-not ($apps | Where-Object { Test-Path -LiteralPath $_ })) 'no desktop app is installed'
     $only = Invoke-Native $installed @('update') 600
     Assert ($only.Code -eq 0) 'aether update succeeds on a CLI-only install'
     Assert ((Get-Hash $installed) -eq $newHash) 'the CLI-only install is the new build'
-    Assert (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop'))) 'aether update installed no desktop app'
+    Assert (-not ($apps | Where-Object { Test-Path -LiteralPath $_ })) 'aether update installed no desktop app'
     Assert (-not (Get-LastError)) 'no desktop build error was recorded'
 
     Write-Host "=== the $OldShellTag desktop shell with the new CLI ==="
     $oldShellDir = Join-Path $root 'old-shell'
     New-Item -ItemType Directory -Path $oldShellDir -Force | Out-Null
-    $oldShellZip = Join-Path $oldShellDir "aether-desktop-windows-$Arch.zip"
-    # GitHub's release downloads answer 5xx now and then.
-    for ($try = 1; ; $try++) {
-        try {
-            Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$OldShellTag/aether-desktop-windows-$Arch.zip" -OutFile $oldShellZip
-            break
-        } catch {
-            if ($try -eq 3) { throw }
-            Write-Host "downloading the $OldShellTag shell failed (try $try of 3): $($_.Exception.Message)"
-            Start-Sleep -Seconds (30 * $try)
-        }
-    }
+    $oldShellZip = Join-Path $oldShellDir $zipAsset
+    Get-ReleaseAsset $OldShellTag $zipAsset $oldShellZip
     $installed = New-Sandbox 'oldshell'
-    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
+    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Cloudfield Desktop\aether-desktop.exe'
     $appDir = Split-Path -Parent $desktop
     $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $oldShellZip + '"')) 600
     Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) "the $OldShellTag desktop app is installed"
@@ -798,7 +831,7 @@ exit 1
 
     Write-Host '=== the new desktop shell with the latest published CLI ==='
     $installed = New-Sandbox 'newshell'
-    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
+    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Cloudfield Desktop\aether-desktop.exe'
     $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $newZip + '"')) 600
     Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) 'the new desktop app is installed'
     Copy-Item -LiteralPath $PublishedCli -Destination $installed -Force
@@ -811,6 +844,88 @@ exit 1
     Assert ($probe.Code -eq 0) "the new shell shows the dashboard of the published $PublishedTag CLI"
     Stop-App $app
     Assert-NoNewDetections 'after the shell and CLI pairings'
+
+    Write-Host "=== the $LegacyNameTag app, named Aether, updated with Update now ==="
+    $legacyDir = Join-Path $root 'legacy-name'
+    New-Item -ItemType Directory -Path $legacyDir -Force | Out-Null
+    $legacyCli = Join-Path $legacyDir 'aether.exe'
+    $legacyZip = Join-Path $legacyDir $zipAsset
+    Get-ReleaseAsset $LegacyNameTag $exeAsset $legacyCli
+    Get-ReleaseAsset $LegacyNameTag $zipAsset $legacyZip
+    $installed = New-Sandbox 'rename'
+    $legacyApp = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop'
+    $legacyDesktop = Join-Path $legacyApp 'aether-desktop.exe'
+    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Cloudfield Desktop\aether-desktop.exe'
+    $appDir = Split-Path -Parent $desktop
+    $programsDir = Split-Path -Parent $appDir
+    # The old release installs its app under its own name, bound to the CLI
+    # at this path. Then the old build of this checkout takes that path, so
+    # Update now runs in a v0.8.7 shell but in this branch's gateway, not
+    # v0.8.7's.
+    Copy-Item -LiteralPath $legacyCli -Destination $installed -Force
+    $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $legacyZip + '"')) 600
+    Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $legacyDesktop)) "the $LegacyNameTag CLI installed its app in Programs\Aether Desktop"
+    Assert (Test-Path -LiteralPath $legacyShortcut -PathType Leaf) "the $LegacyNameTag CLI created Aether.lnk"
+    Assert (-not (Test-Path -LiteralPath $appDir)) 'no Cloudfield app is installed yet'
+    Copy-Item -LiteralPath $OldCli -Destination $installed -Force
+    $port = Get-FreePort
+    $app = Start-App $legacyShortcut $legacyDesktop (Join-Path $root 'Electron-legacy') $port
+    $appId = $app.Id
+    $sidecar = Get-Held (Wait-Sidecar $app $installed)
+    $probe = Invoke-App 'probe' $port
+    Assert ($probe.Code -eq 0) "the $LegacyNameTag app shows the dashboard of the CLI it runs"
+    Assert (Test-Path -LiteralPath $legacyDesktop) "a sidecar started by the $LegacyNameTag app removes nothing"
+    $clicked = Invoke-App 'click' $port 300
+    Assert ($clicked.Out -match 'clicked Update now') "Update now was clicked in the $LegacyNameTag app"
+    $relaunched = Wait-Relaunch $desktop $appId
+    Write-Host "ok: the update started the renamed app (pid $($relaunched.Id)) from $appDir"
+    Assert ($app.WaitForExit(30000)) "the $LegacyNameTag app exited"
+    Assert ($sidecar.WaitForExit(30000)) "the $LegacyNameTag app's sidecar exited"
+    Assert ((Get-Content -Raw -LiteralPath (Join-Path $appDir 'new-release-marker.txt')).Trim() -eq $NewVersion) 'Programs\Cloudfield Desktop holds the new release'
+    Assert ((Get-Hash $installed) -eq $newHash) 'the CLI the renamed app runs is the new build'
+    Assert (-not (Get-LastError)) 'no desktop build error was recorded'
+    $null = Wait-Sidecar $relaunched $installed
+    Assert (Wait-Retired $legacyApp 60) 'the first start of the renamed app removed Programs\Aether Desktop, its set-aside copy and Aether.lnk'
+    Assert (@(Get-ChildItem -LiteralPath $programsDir -Force -Filter '.aether-retired-*').Count -eq 0) 'no set-aside copy is left'
+    $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+    Assert ($link.TargetPath -ieq $desktop) 'Cloudfield.lnk targets the renamed app'
+    Stop-App $relaunched
+
+    Write-Host "=== the renamed app started while the $LegacyNameTag app runs ==="
+    $installed = New-Sandbox 'rename-running'
+    $legacyApp = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop'
+    $legacyDesktop = Join-Path $legacyApp 'aether-desktop.exe'
+    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Cloudfield Desktop\aether-desktop.exe'
+    Copy-Item -LiteralPath $legacyCli -Destination $installed -Force
+    $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $legacyZip + '"')) 600
+    Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $legacyDesktop)) "the $LegacyNameTag app is installed"
+    Copy-Item -LiteralPath $NewCli -Destination $installed -Force
+    $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $newZip + '"')) 600
+    Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) 'the renamed app is installed beside it'
+    Assert ((Test-Path -LiteralPath $legacyDesktop) -and (Test-Path -LiteralPath $legacyShortcut)) 'installing the renamed app removed nothing'
+    # Separate data directories, so both apps run at once; in normal use they
+    # share %APPDATA%\aether-desktop and the second one quits on the
+    # single-instance lock. This shows only that Windows refuses to rename
+    # the folder of a running app, so its removal waits for the next start.
+    $legacy = Start-App $legacyDesktop $legacyDesktop (Join-Path $root 'Electron-legacy') (Get-FreePort)
+    $null = Wait-Sidecar $legacy $installed
+    $port = Get-FreePort
+    $renamed = Start-App $desktop $desktop $electron $port
+    $null = Wait-Sidecar $renamed $installed
+    $probe = Invoke-App 'probe' $port
+    Assert ($probe.Code -eq 0) "the renamed app shows the dashboard while the $LegacyNameTag app runs"
+    # The removal runs right after the handshake, beside the dashboard.
+    Start-Sleep -Seconds 5
+    $legacy.Refresh()
+    Assert (-not $legacy.HasExited -and (Test-Path -LiteralPath $legacyDesktop) -and (Test-Path -LiteralPath $legacyShortcut)) "the running $LegacyNameTag app and Aether.lnk were left whole"
+    Stop-App $renamed
+    Stop-App $legacy
+    Wait-NoProcessUnder $legacyApp
+    $renamed = Start-App $shortcut $desktop $electron (Get-FreePort)
+    $null = Wait-Sidecar $renamed $installed
+    Assert (Wait-Retired $legacyApp 60) "the next start of the renamed app removed the $LegacyNameTag app and Aether.lnk once it had quit"
+    Stop-App $renamed
+    Assert-NoNewDetections 'after the rename from Aether'
 
     $preferences = Get-MpPreference
     if ((Get-MpComputerStatus).RealTimeProtectionEnabled -ne $true) { throw 'Defender realtime protection was turned off during the scenario.' }

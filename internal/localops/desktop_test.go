@@ -29,7 +29,7 @@ func TestInstallDesktopLinuxRegistersLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A leftover from an earlier install must be replaced, not merged.
-	stale := filepath.Join(home, ".local", "share", "aether", "desktop", "old.so")
+	stale := filepath.Join(home, ".local", "share", "cloudfield", "desktop", "old.so")
 	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestInstallDesktopLinuxRegistersLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InstallDesktop: %v", err)
 	}
-	wantApp := filepath.Join(home, ".local", "share", "aether", "desktop")
+	wantApp := filepath.Join(home, ".local", "share", "cloudfield", "desktop")
 	if app.App != wantApp {
 		t.Fatalf("App = %q, want %q", app.App, wantApp)
 	}
@@ -84,8 +84,8 @@ func TestInstallDesktopWindowsPreservesCLI(t *testing.T) {
 	t.Setenv("APPDATA", roaming)
 	programs := filepath.Join(home, "redirected Start & 日本", "Programs")
 	setWindowsProgramsResolver(t, func() (string, error) { return programs, nil })
-	launcher := filepath.Join(programs, "Aether.lnk")
-	guessedLauncher := filepath.Join(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "Aether.lnk")
+	launcher := filepath.Join(programs, "Cloudfield.lnk")
+	guessedLauncher := filepath.Join(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "Cloudfield.lnk")
 	cliDir := filepath.Join(local, "Programs", "Aether")
 	if err := os.MkdirAll(cliDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestInstallDesktopWindowsPreservesCLI(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := filepath.Join(local, "Programs", "Aether Desktop"); app.App != want {
+		if want := filepath.Join(local, "Programs", "Cloudfield Desktop"); app.App != want {
 			t.Fatalf("desktop location = %q, want %q", app.App, want)
 		}
 		if app.Launcher != launcher {
@@ -173,10 +173,10 @@ func TestDesktopLayoutWindowsUsesProgramsKnownFolder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if want := filepath.Join(local, "Programs", "Aether Desktop"); app.App != want {
+			if want := filepath.Join(local, "Programs", "Cloudfield Desktop"); app.App != want {
 				t.Fatalf("desktop location = %q, want %q", app.App, want)
 			}
-			if want := filepath.Join(tc.programs, "Aether.lnk"); app.Launcher != want {
+			if want := filepath.Join(tc.programs, "Cloudfield.lnk"); app.Launcher != want {
 				t.Fatalf("launcher = %q, want %q", app.Launcher, want)
 			}
 		})
@@ -236,7 +236,7 @@ func TestDesktopLayoutHonorsXDGDataHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if app.App != filepath.Join("/data", "aether", "desktop") || app.Launcher != filepath.Join("/data", "applications", "aether-desktop.desktop") {
+	if app.App != filepath.Join("/data", "cloudfield", "desktop") || app.Launcher != filepath.Join("/data", "applications", "aether-desktop.desktop") {
 		t.Fatalf("layout = %+v", app)
 	}
 }
@@ -248,8 +248,8 @@ func TestDesktopLayoutDarwinPrefersSystemApplications(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(system, "Aether.app")
-	if app.App != want || app.Launcher != want || app.Superseded != filepath.Join("/Users/u", "Applications", "Aether.app") {
+	want := filepath.Join(system, "Cloudfield.app")
+	if app.App != want || app.Launcher != want || app.Superseded != filepath.Join("/Users/u", "Applications", "Cloudfield.app") {
 		t.Fatalf("layout = %+v, want %s", app, want)
 	}
 	if entries, _ := os.ReadDir(system); len(entries) != 0 {
@@ -274,8 +274,8 @@ func TestDesktopLayoutDarwinFallsBackToHomeApplications(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join("/Users/u", "Applications", "Aether.app")
-	if app.App != want || app.Launcher != want || app.Superseded != filepath.Join(system, "Aether.app") {
+	want := filepath.Join("/Users/u", "Applications", "Cloudfield.app")
+	if app.App != want || app.Launcher != want || app.Superseded != filepath.Join(system, "Cloudfield.app") {
 		t.Fatalf("layout = %+v, want %s", app, want)
 	}
 }
@@ -287,7 +287,7 @@ func builtBundle(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Join(built, "Contents", "MacOS"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(built, "Contents", "MacOS", "Aether"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(built, "Contents", "MacOS", "Cloudfield"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return built
@@ -297,7 +297,7 @@ func TestInstallDesktopDarwinReplacesTheHomeCopy(t *testing.T) {
 	system := t.TempDir()
 	setMacSystemApplications(t, system)
 	home := t.TempDir()
-	stale := filepath.Join(home, "Applications", "Aether.app", "Contents", "old")
+	stale := filepath.Join(home, "Applications", "Cloudfield.app", "Contents", "old")
 	if err := os.MkdirAll(stale, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -306,13 +306,13 @@ func TestInstallDesktopDarwinReplacesTheHomeCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InstallDesktop: %v", err)
 	}
-	if want := filepath.Join(system, "Aether.app"); app.App != want {
+	if want := filepath.Join(system, "Cloudfield.app"); app.App != want {
 		t.Fatalf("App = %q, want %q", app.App, want)
 	}
-	if _, statErr := os.Stat(filepath.Join(app.App, "Contents", "MacOS", "Aether")); statErr != nil {
+	if _, statErr := os.Stat(filepath.Join(app.App, "Contents", "MacOS", "Cloudfield")); statErr != nil {
 		t.Fatal(statErr)
 	}
-	if _, statErr := os.Stat(filepath.Join(home, "Applications", "Aether.app")); !os.IsNotExist(statErr) {
+	if _, statErr := os.Stat(filepath.Join(home, "Applications", "Cloudfield.app")); !os.IsNotExist(statErr) {
 		t.Fatalf("the ~/Applications copy survived: %v", statErr)
 	}
 }
@@ -325,7 +325,7 @@ func TestInstallDesktopDarwinReportsAnUnremovableSystemCopy(t *testing.T) {
 		t.Skip("root writes anywhere")
 	}
 	system := t.TempDir()
-	stale := filepath.Join(system, "Aether.app")
+	stale := filepath.Join(system, "Cloudfield.app")
 	if err := os.MkdirAll(stale, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestInstallDesktopDarwinReportsAnUnremovableSystemCopy(t *testing.T) {
 
 	_, err := InstallDesktop("darwin", home, DesktopFrom(builtBundle(t)), "/opt/aether/aether", nil)
 	if err == nil {
-		t.Fatal("a surviving second Aether.app was not reported")
+		t.Fatal("a surviving second Cloudfield.app was not reported")
 	}
 	for _, want := range []string{stale, "sudo rm -rf"} {
 		if !strings.Contains(err.Error(), want) {
@@ -346,7 +346,7 @@ func TestInstallDesktopDarwinReportsAnUnremovableSystemCopy(t *testing.T) {
 		}
 	}
 	// The install itself went through: the fallback bundle is complete.
-	if _, statErr := os.Stat(filepath.Join(home, "Applications", "Aether.app", "Contents", "MacOS", "Aether")); statErr != nil {
+	if _, statErr := os.Stat(filepath.Join(home, "Applications", "Cloudfield.app", "Contents", "MacOS", "Cloudfield")); statErr != nil {
 		t.Fatal(statErr)
 	}
 }
@@ -378,7 +378,7 @@ func TestDesktopLayoutIgnoresRelativeXDGDataHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join("/home/u", ".local", "share", "aether", "desktop"); app.App != want {
+	if want := filepath.Join("/home/u", ".local", "share", "cloudfield", "desktop"); app.App != want {
 		t.Fatalf("App = %q, want %q", app.App, want)
 	}
 }
@@ -396,14 +396,14 @@ func TestDesktopLayoutWindowsRejectsRelativeLocalAppData(t *testing.T) {
 
 func TestBuiltDesktopAppFindsArchSuffixedOutput(t *testing.T) {
 	dist := t.TempDir()
-	for _, dir := range []string{"linux-arm64-unpacked", filepath.Join("mac-arm64", "Aether.app"), "win-unpacked"} {
+	for _, dir := range []string{"linux-arm64-unpacked", filepath.Join("mac-arm64", "Cloudfield.app"), "win-unpacked"} {
 		if err := os.MkdirAll(filepath.Join(dist, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for goos, want := range map[string]string{
 		"linux":   "linux-arm64-unpacked",
-		"darwin":  filepath.Join("mac-arm64", "Aether.app"),
+		"darwin":  filepath.Join("mac-arm64", "Cloudfield.app"),
 		"windows": "win-unpacked",
 	} {
 		got, err := builtDesktopApp(goos, dist)

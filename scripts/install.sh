@@ -900,7 +900,7 @@ server)
 	;;
 client)
 	if [ "$gui_built" = yes ]; then
-		link_steps "open Aether from your applications to link your server, or in a terminal:" "<server-host>"
+		link_steps "open Cloudfield from your applications to link your server, or in a terminal:" "<server-host>"
 	else
 		link_steps "link your server:" "<server-host>"
 	fi

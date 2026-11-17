@@ -239,14 +239,14 @@ func buildAndInstall(buildDir, zipPath string, source bool, mode buildMode, note
 		if strings.HasPrefix(app.App, home+string(filepath.Separator)) {
 			// The per-user folder is hidden in Finder, so the sidebar's
 			// Applications entry would show nothing.
-			_, _ = fmt.Fprintln(notes, "open it from Spotlight as Aether (~/Applications is hidden in Finder; this account cannot write to /Applications)")
+			_, _ = fmt.Fprintln(notes, "open it from Spotlight as Cloudfield (~/Applications is hidden in Finder; this account cannot write to /Applications)")
 		} else {
-			_, _ = fmt.Fprintln(notes, "open it from your Applications folder or Spotlight as Aether")
+			_, _ = fmt.Fprintln(notes, "open it from your Applications folder or Spotlight as Cloudfield")
 		}
 	case "windows":
-		_, _ = fmt.Fprintf(notes, "launcher %s\nopen it from the Start Menu as Aether\n", app.Launcher)
+		_, _ = fmt.Fprintf(notes, "launcher %s\nopen it from the Start Menu as Cloudfield\n", app.Launcher)
 	default:
-		_, _ = fmt.Fprintf(notes, "launcher %s\nopen it from your application menu as Aether\n", app.Launcher)
+		_, _ = fmt.Fprintf(notes, "launcher %s\nopen it from your application menu as Cloudfield\n", app.Launcher)
 	}
 	return nil
 }
