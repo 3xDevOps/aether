@@ -85,8 +85,9 @@ func TestConnectorLongCallsLeaveConnections(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	client := newConnectorClient(t)
-	hold := make(chan struct{})
-	s := &serverNode{h: h, dir: t.TempDir(), policy: edgeproto.PolicyAccount, client: client, addr: "127.0.0.1:0", launchHold: hold}
+	started, release := make(chan struct{}, edgeproto.MaxHTTPConnsPerServer), make(chan struct{})
+	s := &serverNode{h: h, dir: t.TempDir(), policy: edgeproto.PolicyAccount, client: client, addr: "127.0.0.1:0",
+		launchStarted: started, launchRelease: release}
 	s.start()
 	t.Cleanup(func() { s.stop() })
 	al := h.login(alice)[0]
@@ -116,7 +117,7 @@ func TestConnectorLongCallsLeaveConnections(t *testing.T) {
 	// The server admits one launch at a time, so the launcher holds the
 	// first and the rest wait behind it, each on its own connection.
 	select {
-	case <-hold:
+	case <-started:
 	case got := <-answers:
 		t.Fatalf("a launch meant to wait ended: %s", got)
 	case <-time.After(10 * time.Second):
@@ -134,5 +135,5 @@ func TestConnectorLongCallsLeaveConnections(t *testing.T) {
 		t.Fatalf("a launch inside the bound of long calls ended: %s", got)
 	default:
 	}
-	close(hold)
+	close(release)
 }
