@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
 	"slices"
@@ -113,5 +114,50 @@ func TestDNSRelayAnswersFromTheHostsResolver(t *testing.T) {
 		if got, err := lookupVia(network, netip.AddrPortFrom(loopback, port).String(), time.Second); err == nil {
 			t.Errorf("a relay for VMs answered a host process over %s: %v", network, got)
 		}
+	}
+}
+
+func TestDNSRelayLimitsEachVM(t *testing.T) {
+	r := &dnsRelay{allowed: vmSubnet, perVM: map[netip.Addr]int{}}
+	a, b := netip.MustParseAddr("10.200.0.6"), netip.MustParseAddr("10.200.0.10")
+	for range dnsMaxPerVM {
+		if !r.take(a) {
+			t.Fatal("a VM was refused a query below its limit")
+		}
+	}
+	if r.take(a) {
+		t.Error("a VM took more than its share of the relay")
+	}
+	if !r.take(b) {
+		t.Error("one VM's queries kept another VM from the relay")
+	}
+	r.release(a)
+	if !r.take(a) {
+		t.Error("a released slot was not given back")
+	}
+	if r.take(netip.MustParseAddr("192.168.1.5")) || r.take(netip.Addr{}) {
+		t.Error("the relay took a client outside the VM range")
+	}
+}
+
+func TestDNSRelayAnswersServfailWhenNoUpstreamDoes(t *testing.T) {
+	gone, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := gone.Addr().(*net.TCPAddr).AddrPort()
+	_ = gone.Close()
+	loopback := netip.MustParseAddr("127.0.0.1")
+	r, err := listenDNS(loopback, netip.MustParsePrefix("127.0.0.0/8"), func() []netip.AddrPort { return []netip.AddrPort{dead} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.close()
+	udpPort, _ := r.ports()
+	start := time.Now()
+	_, err = lookupVia("udp", netip.AddrPortFrom(loopback, udpPort).String(), 4*time.Second)
+	var dnsErr *net.DNSError
+	if !errors.As(err, &dnsErr) || dnsErr.IsTimeout || time.Since(start) > time.Second {
+		t.Errorf("a lookup no upstream answers = %v after %s, want a prompt server failure", err, time.Since(start))
 	}
 }

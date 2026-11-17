@@ -171,7 +171,7 @@ table inet {{.Table}} {
 		iifname "{{.Taps}}*" ip daddr { 169.254.0.0/16, 100.100.100.200, 168.63.129.16 } drop
 	}
 	chain dns {
-		type nat hook prerouting priority dstnat; policy accept;
+		type nat hook prerouting priority dstnat - 1; policy accept;
 		iifname "{{.Taps}}*" ip daddr {{.Proxy}} udp dport 53 dnat ip to {{.Proxy}}:{{.DNSUDP}}
 		iifname "{{.Taps}}*" ip daddr {{.Proxy}} tcp dport 53 dnat ip to {{.Proxy}}:{{.DNSTCP}}
 	}
@@ -182,6 +182,8 @@ table inet {{.Table}} {
 		iifname "{{.EgressTaps}}*" reject
 		iifname "{{.Taps}}*" ip daddr {{.Proxy}} udp dport {{.DNSUDP}} meta mark set meta mark | {{.Mark}} accept
 		iifname "{{.Taps}}*" ip daddr {{.Proxy}} tcp dport {{.DNSTCP}} meta mark set meta mark | {{.Mark}} accept
+		ip daddr {{.Proxy}} udp dport {{.DNSUDP}} drop
+		ip daddr {{.Proxy}} tcp dport {{.DNSTCP}} drop
 	}
 	chain forward {
 		type filter hook forward priority filter - 1; policy accept;

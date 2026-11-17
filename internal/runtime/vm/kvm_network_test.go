@@ -339,6 +339,7 @@ func TestKVMNetwork(t *testing.T) {
 		t.Errorf("behind a default-deny INPUT the proxy refused run-vmnet-c: %s", got)
 	}
 	expect("behind a default-deny INPUT an open VM reaches the host", probe(t, e, "run-vmnet-a", "dial "+hostPort), false)
+	expect("behind a default-deny INPUT an open VM resolves", probe(t, e, "run-vmnet-a", "resolve relay.aether.test"), true)
 	if out, denyErr := exec.Command("iptables", append([]string{"-D"}, deny...)...).CombinedOutput(); denyErr != nil {
 		t.Fatalf("iptables -D %v: %v: %s", deny, denyErr, out)
 	}

@@ -10,7 +10,10 @@ import (
 	"net/netip"
 	"os"
 	"slices"
+	"sync"
 	"time"
+
+	"golang.org/x/net/dns/dnsmessage"
 )
 
 const (
@@ -21,7 +24,10 @@ const (
 	// dnsMaxServers is how many resolv.conf servers glibc reads.
 	dnsMaxServers = 3
 	dnsMaxQueries = 1024
-	dnsHeaderLen  = 12
+	// dnsMaxPerVM keeps one VM from taking every slot: Docker gives each
+	// container a resolver of its own.
+	dnsMaxPerVM  = 64
+	dnsHeaderLen = 12
 )
 
 // dnsRelay answers session VMs' DNS queries from the host's own resolvers,
@@ -34,7 +40,10 @@ type dnsRelay struct {
 	tcp       net.Listener
 	allowed   netip.Prefix
 	upstreams func() []netip.AddrPort
-	slots     chan struct{}
+
+	mu       sync.Mutex
+	inFlight int
+	perVM    map[netip.Addr]int
 }
 
 // listenDNS starts a relay on addr, at ports of the kernel's choosing so no
@@ -50,7 +59,7 @@ func listenDNS(addr netip.Addr, allowed netip.Prefix, upstreams func() []netip.A
 		_ = udp.Close()
 		return nil, fmt.Errorf("vm runtime: DNS relay: %w", err)
 	}
-	r := &dnsRelay{udp: udp, tcp: tcp, allowed: allowed, upstreams: upstreams, slots: make(chan struct{}, dnsMaxQueries)}
+	r := &dnsRelay{udp: udp, tcp: tcp, allowed: allowed, upstreams: upstreams, perVM: map[netip.Addr]int{}}
 	go r.serveUDP()
 	go r.serveTCP()
 	return r, nil
@@ -65,18 +74,28 @@ func (r *dnsRelay) close() {
 	_ = r.tcp.Close()
 }
 
-func (r *dnsRelay) admits(addr netip.AddrPort) bool {
-	return r.allowed.Contains(addr.Addr().Unmap())
+// take holds one of the relay's query slots for client; a full relay
+// drops the query, which the guest's resolver retries.
+func (r *dnsRelay) take(client netip.Addr) bool {
+	if !r.allowed.Contains(client) {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.inFlight >= dnsMaxQueries || r.perVM[client] >= dnsMaxPerVM {
+		return false
+	}
+	r.inFlight++
+	r.perVM[client]++
+	return true
 }
 
-// take holds one of the relay's query slots; a full relay drops the query,
-// which the guest's resolver retries.
-func (r *dnsRelay) take() bool {
-	select {
-	case r.slots <- struct{}{}:
-		return true
-	default:
-		return false
+func (r *dnsRelay) release(client netip.Addr) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.inFlight--
+	if r.perVM[client]--; r.perVM[client] == 0 {
+		delete(r.perVM, client)
 	}
 }
 
@@ -87,15 +106,19 @@ func (r *dnsRelay) serveUDP() {
 		if errors.Is(err, net.ErrClosed) {
 			return
 		}
-		client, ok := from.(*net.UDPAddr)
-		if err != nil || !ok || n < dnsHeaderLen || !r.admits(client.AddrPort()) || !r.take() {
+		addr, ok := from.(*net.UDPAddr)
+		if err != nil || !ok || n < dnsHeaderLen {
+			continue
+		}
+		client := addr.AddrPort().Addr().Unmap()
+		if !r.take(client) {
 			continue
 		}
 		query := slices.Clone(buf[:n])
 		go func() {
-			defer func() { <-r.slots }()
+			defer r.release(client)
 			if reply := r.exchange("udp", query); reply != nil {
-				_, _ = r.udp.WriteTo(reply, client)
+				_, _ = r.udp.WriteTo(reply, addr)
 			}
 		}()
 	}
@@ -112,13 +135,14 @@ func (r *dnsRelay) serveTCP() {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		client, ok := c.RemoteAddr().(*net.TCPAddr)
-		if !ok || !r.admits(client.AddrPort()) || !r.take() {
+		addr, _ := c.RemoteAddr().(*net.TCPAddr)
+		client := addr.AddrPort().Addr().Unmap()
+		if !r.take(client) {
 			_ = c.Close()
 			continue
 		}
 		go func() {
-			defer func() { <-r.slots }()
+			defer r.release(client)
 			defer func() { _ = c.Close() }()
 			for {
 				_ = c.SetDeadline(time.Now().Add(4 * dnsTimeout))
@@ -135,7 +159,8 @@ func (r *dnsRelay) serveTCP() {
 	}
 }
 
-// exchange asks each upstream in turn and returns the first answer, or nil.
+// exchange answers SERVFAIL when no upstream answers, as Docker's resolver
+// does, so the guest fails at once rather than after its own retries.
 func (r *dnsRelay) exchange(network string, query []byte) []byte {
 	for _, server := range r.upstreams() {
 		reply, err := exchangeWith(network, server, query)
@@ -144,7 +169,31 @@ func (r *dnsRelay) exchange(network string, query []byte) []byte {
 		}
 		slog.Debug("vm runtime: DNS relay upstream", "server", server, "network", network, "error", err)
 	}
-	return nil
+	return servfail(query)
+}
+
+func servfail(query []byte) []byte {
+	var p dnsmessage.Parser
+	h, err := p.Start(query)
+	if err != nil {
+		return nil
+	}
+	q, err := p.Question()
+	if err != nil {
+		return nil
+	}
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{
+		ID: h.ID, Response: true, OpCode: h.OpCode, RecursionDesired: h.RecursionDesired,
+		RecursionAvailable: true, RCode: dnsmessage.RCodeServerFailure,
+	})
+	if b.StartQuestions() != nil || b.Question(q) != nil {
+		return nil
+	}
+	out, err := b.Finish()
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 func exchangeWith(network string, server netip.AddrPort, query []byte) ([]byte, error) {

@@ -143,6 +143,8 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 tcp dport 53 dnat ip to 10.200.0.1:%d`, tcp),
 		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 udp dport %d meta mark set meta mark | 0x1000000 accept`, udp),
 		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 tcp dport %d meta mark set meta mark | 0x1000000 accept`, tcp),
+		fmt.Sprintf("ip daddr 10.200.0.1 udp dport %d drop", udp),
+		"type nat hook prerouting priority dstnat - 1;",
 		`iifname "aethervm*" meta nfproto ipv6 drop`,
 		`iifname "aethervm*" fib saddr . iif oif missing drop`,
 		`meta l4proto { tcp, udp } th dport 53 accept`,

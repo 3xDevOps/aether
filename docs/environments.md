@@ -393,9 +393,10 @@ What changes:
   query to the first three servers in the host's `/etc/resolv.conf`, as
   Docker's embedded DNS server does for containers. A VM so resolves what
   the host resolves, through a loopback stub such as systemd-resolved's
-  `127.0.0.53`, Tailscale's MagicDNS or a VPN's resolver. The host's
-  upstream DNS servers also stay reachable on port 53, even at a
-  link-local address.
+  `127.0.0.53`, Tailscale's MagicDNS or a VPN's resolver. Lookups fail
+  while the server restarts. The host's upstream DNS servers also stay
+  reachable on port 53, even at a link-local address: a VM started before
+  v0.9.0-beta.2 keeps querying them until it next starts cold.
 - A session with [egress control](#egress-control) gets the tap
   `aethervme<n>`, no DNS servers, and reaches only the egress proxy at
   `10.200.0.1:3128`. That address is on the dummy link `aether-vmproxy`; the
