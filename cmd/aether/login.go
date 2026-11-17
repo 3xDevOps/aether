@@ -36,9 +36,11 @@ func edgeClient(edgeURL string) (*edgeclient.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	linked, err := cli.LinkedEdges()
-	if err != nil {
-		return nil, err
+	var linked []string
+	if edgeURL == "" {
+		if linked, err = cli.LinkedEdges(); err != nil {
+			return nil, err
+		}
 	}
 	return edgeclient.Choose(dir, edgeURL, linked)
 }

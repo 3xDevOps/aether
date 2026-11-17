@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -469,5 +470,16 @@ func TestChooseEdgeKeepsTheLinkedHostedAddress(t *testing.T) {
 	}
 	if c, perr := chooseEdge("https://edge.example"); perr != nil || c.URL() != "https://edge.example" {
 		t.Fatalf("an edge named: %v, %v", c, perr)
+	}
+	// A named edge needs no readable config.
+	path, err := cli.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, perr := chooseEdge("https://edge.example"); perr != nil || c.URL() != "https://edge.example" {
+		t.Fatalf("an edge named, with a config that does not parse: %v, %v", c, perr)
 	}
 }

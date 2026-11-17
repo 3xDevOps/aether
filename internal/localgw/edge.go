@@ -126,9 +126,11 @@ func chooseEdge(edgeURL string) (*edgeclient.Client, *protocol.Error) {
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
-	linked, err := cli.LinkedEdges()
-	if err != nil {
-		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	var linked []string
+	if edgeURL == "" {
+		if linked, err = cli.LinkedEdges(); err != nil {
+			return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+		}
 	}
 	client, err := edgeclient.Choose(dir, edgeURL, linked)
 	if err != nil {

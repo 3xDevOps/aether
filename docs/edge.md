@@ -99,7 +99,8 @@ join links. To move it, at a quiet time:
    https://edge.onaether.dev`, and a status that exits 0 with
    `edge         https://edge.onaether.dev`, `connection   connected since
    <time>; the edge last answered <n>s ago` and `edge key     SHA256:<fingerprint>`.
-   `curl -s https://edge.cloudfield.ai/v1/edge` shows the same fingerprint.
+   `curl -fsS -H 'Aether-Edge-Version: 6' https://edge.cloudfield.ai/v1/edge`
+   shows the same fingerprint.
 2. Move. The server keeps running:
 
    ```sh
