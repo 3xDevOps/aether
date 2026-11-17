@@ -176,6 +176,12 @@ No flag skips a check: below protocol 6, or without the old address announced,
 a moved server accepts connector tokens only for its new address, and every
 connector registered at the old one stops working.
 
+An edge key is public, so the key check catches a wrong address, not an
+impostor that copies the key. The new address's TLS certificate is what
+authenticates it, as for the address the server first enrolled at. After the
+move the pin still refuses any other key there until an operator runs
+`edge trust`.
+
 After the move:
 
 - The edge key stays pinned and the owner stays: the server keeps both per edge
