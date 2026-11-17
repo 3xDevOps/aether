@@ -423,7 +423,7 @@ func (w *wsaEnv) connectorSession(t *testing.T, name string) *mcp.ClientSession 
 				return perr
 			}
 			return json.Unmarshal(result, out)
-		}, func(ops.Scope) bool { return true })
+		}, func(ops.Scope) bool { return true }, nil)
 	})
 }
 

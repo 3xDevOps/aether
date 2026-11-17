@@ -17,6 +17,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -101,11 +102,67 @@ const MetaErrorCode = "aether/error_code"
 // about 50 seconds.
 const toolTimeout = 40 * time.Second
 
+// LongCalls bounds how many of a server's connector tool calls run past
+// After at once, so calls that wait cannot hold every connection the edge
+// has to the server. A call that reaches After with Max others already
+// past it is cancelled and told to call again.
+type LongCalls struct {
+	After time.Duration
+	Max   int
+
+	mu   sync.Mutex
+	long int
+}
+
+// errLongCalls is the cancellation cause of a call LongCalls ended.
+type errLongCalls struct {
+	after time.Duration
+	max   int
+}
+
+func (e errLongCalls) Error() string {
+	return fmt.Sprintf("ended after %s: this server already runs %d connector calls longer than that, the most it runs at once; call again shortly",
+		e.after, e.max)
+}
+
+// watch returns ctx, cancelled with errLongCalls if the call is over the
+// bound at After, and the func that ends the watch when the call returns.
+func (l *LongCalls) watch(ctx context.Context) (context.Context, func()) {
+	if l == nil {
+		return ctx, func() {}
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	var long, done bool
+	t := time.AfterFunc(l.After, func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		switch {
+		case done:
+		case l.long >= l.Max:
+			cancel(errLongCalls{after: l.After, max: l.Max})
+		default:
+			l.long++
+			long = true
+		}
+	})
+	return ctx, func() {
+		t.Stop()
+		l.mu.Lock()
+		done = true
+		if long {
+			l.long--
+		}
+		l.mu.Unlock()
+		cancel(nil)
+	}
+}
+
 // calls are an op's two ways to call: read for lookups, act for what the op
 // does under its scope.
 type calls struct {
 	read, act Call
 	surface   Surface
+	long      *LongCalls
 }
 
 // Op is one operation. Destructive and OpenWorld are its MCP hints, read
@@ -173,9 +230,17 @@ func opOf[In any](name, title string, scope Scope, idempotent bool, next, does s
 				ctx, cancel = context.WithTimeout(ctx, budget)
 				defer cancel()
 			}
+			ctx, unwatch := c.long.watch(ctx)
+			defer unwatch()
 			stripIDPrefixes(&in)
 			summary, out, err := run(ctx, c, in)
 			if err != nil {
+				var ended errLongCalls
+				if errors.As(context.Cause(ctx), &ended) {
+					perr := &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
+					errors.As(err, &perr)
+					err = &protocol.Error{Code: perr.Code, Data: perr.Data, Message: ended.Error() + ": " + perr.Message}
+				}
 				return failed(hinted(err, next)), nil, nil
 			}
 			if m, ok := out.(map[string]any); ok && !o.ReadOnly() {
@@ -309,17 +374,17 @@ var Ops = slices.Concat(readOps, launchOps, changesOps, writeOps, controlOps, ac
 
 // RegisterConnector adds to srv the ops a ChatGPT or Claude connector
 // serves whose scope is granted, so tools/list shows none the connector
-// cannot call.
-func RegisterConnector(srv *mcp.Server, call Call, granted func(Scope) bool) {
-	register(srv, Connector, call, func(o Op) bool { return o.Scope != "" && granted(o.Scope) })
+// cannot call. long, when set, bounds the calls that run long.
+func RegisterConnector(srv *mcp.Server, call Call, granted func(Scope) bool, long *LongCalls) {
+	register(srv, Connector, call, long, func(o Op) bool { return o.Scope != "" && granted(o.Scope) })
 }
 
 // RegisterAssistant adds to srv every op the assistant offers.
 func RegisterAssistant(srv *mcp.Server, call Call) {
-	register(srv, Assistant, call, func(o Op) bool { return o.Tier != TierNone })
+	register(srv, Assistant, call, nil, func(o Op) bool { return o.Tier != TierNone })
 }
 
-func register(srv *mcp.Server, s Surface, call Call, offered func(Op) bool) {
+func register(srv *mcp.Server, s Surface, call Call, long *LongCalls, offered func(Op) bool) {
 	for _, o := range Ops {
 		if !offered(o) {
 			continue
@@ -338,7 +403,7 @@ func register(srv *mcp.Server, s Surface, call Call, offered func(Op) bool) {
 		annotations := &mcp.ToolAnnotations{ReadOnlyHint: o.ReadOnly(), DestructiveHint: new(o.Destructive),
 			IdempotentHint: o.Idempotent, OpenWorldHint: new(o.OpenWorld)}
 		o.add(srv, &mcp.Tool{Name: o.Name, Title: o.Title, Description: o.description(s), Annotations: annotations},
-			calls{read: declared(ScopeRead), act: declared(o.Scope), surface: s}, o)
+			calls{read: declared(ScopeRead), act: declared(o.Scope), surface: s, long: long}, o)
 	}
 }
 

@@ -734,12 +734,14 @@ type serverNode struct {
 	services sshd.Services
 	// reviewer is the server's edge-reviewer option.
 	reviewer bool
-	addr     string
-	db       *store.DB
-	bus      *events.InProc
-	ssh      *sshd.Server
-	agent    *edgeagent.Agent
-	stop     func()
+	// launchHold is the launcher's hold.
+	launchHold chan struct{}
+	addr       string
+	db         *store.DB
+	bus        *events.InProc
+	ssh        *sshd.Server
+	agent      *edgeagent.Agent
+	stop       func()
 }
 
 func (h *harness) newServer(policy edgeproto.AccessPolicy) *serverNode {
@@ -787,7 +789,7 @@ func (s *serverNode) start() {
 	hostKeyPath := filepath.Join(s.dir, "ssh", "host_ed25519_key")
 	runs := sshd.RunController(noRuns{})
 	if s.client != nil {
-		runs = launcher{db: db}
+		runs = launcher{db: db, hold: s.launchHold}
 	}
 	srv, err := sshd.New(sshd.Config{
 		Addr: s.addr, HostKeyPath: hostKeyPath, Store: db, Bus: bus,
