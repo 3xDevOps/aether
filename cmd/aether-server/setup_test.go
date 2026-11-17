@@ -219,7 +219,7 @@ func TestAskServerOptionsPrefersTailscale(t *testing.T) {
 		},
 		"named tailnet, no": {named, []string{"", "", "no", "2", "yes"}, edgeOn,
 			[]string{"Answer no to use Cloudfield's relay",
-				"\nSetup turns on the edge, Cloudfield's relay at https://edge.onaether.dev, run by the Cloudfield project.\n",
+				"\nSetup turns on the edge, Cloudfield's relay at https://edge.cloudfield.ai, run by the Cloudfield project.\n",
 				"client IP addresses", `aether-server config set edge-url ""`},
 		},
 		"unreadable tailnet": {
@@ -560,14 +560,34 @@ func TestAskServerOptionsTurnsTheEdgeOnWithoutTailscale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if values["edge-url"] != edgeagent.DefaultURL {
-		t.Errorf("edge-url = %q, want %s without Tailscale", values["edge-url"], edgeagent.DefaultURL)
+	if want := "https://edge.cloudfield.ai"; values["edge-url"] != want {
+		t.Errorf("edge-url = %q, want %s without Tailscale", values["edge-url"], want)
 	}
 	for _, want := range []string{"Tailscale is not installed", "run by the Cloudfield project", "host name, host key and IP address",
 		"client IP addresses", `aether-server config set edge-url ""`} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("setup does not say %q:\n%s", want, out.String())
 		}
+	}
+}
+
+// A server set up at the hosted edge's first address keeps it when setup
+// runs again: only `aether-server edge move` changes it.
+func TestAskServerOptionsKeepsTheFormerHostedAddress(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	if err := serversetup.WriteConfig(path, map[string]string{"edge-url": "https://edge.onaether.dev"}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "2", "yes")), path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["edge-url"] != "https://edge.onaether.dev" {
+		t.Errorf("edge-url = %q, want the configured https://edge.onaether.dev", values["edge-url"])
+	}
+	if want := "Cloudfield's relay at\nhttps://edge.onaether.dev, run by the Cloudfield project."; !strings.Contains(out.String(), want) {
+		t.Errorf("setup does not say %q:\n%s", want, out.String())
 	}
 }
 
@@ -919,6 +939,15 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 	}
 	if !strings.HasSuffix(out.String(), `sudo aether-server edge claim-code --config '/srv/it'\''s here/server.conf'`+"\n"+claim+mcpStep(5)) {
 		t.Errorf("want the claim command to name the config install wrote, shell-quoted:\n%s", out.String())
+	}
+
+	out.Reset()
+	o = optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": "https://edge.onaether.dev"})
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), claim) {
+		t.Errorf("want no --edge for the hosted edge's first address, which a client reaches at its default:\n%s", out.String())
 	}
 
 	out.Reset()

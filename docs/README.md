@@ -12,7 +12,7 @@ the [quickstart](quickstart.md).
 | Client | What you use to reach a server: the `aether` CLI (Linux, macOS, Windows), the desktop app, or the Android app. | [install.md](install.md) |
 | Dashboard | The web app for sessions, agents, files and settings. The desktop app, `aether gui` and the Android app show it, and the server can host it on a tailnet. | [networking.md](networking.md#the-dashboard) |
 | Tailnet | A private network made with Tailscale. On a tailnet the server can sign people in by their Tailscale login and host the dashboard. | [networking.md](networking.md) |
-| Edge | A relay with GitHub sign-in that servers and clients both dial out to, so neither needs an open port. The project runs one at `https://edge.onaether.dev`, and you can run your own. | [edge.md](edge.md) |
+| Edge | A relay with GitHub sign-in that servers and clients both dial out to, so neither needs an open port. The project runs one at `https://edge.cloudfield.ai`, and you can run your own. | [edge.md](edge.md) |
 | Claim link | The link `aether-server setup` prints. Whoever uses it first, in the desktop app or with `aether link --claim`, becomes the server's super admin. | [quickstart.md](quickstart.md#2-start-the-server) |
 | Member | A person with an account on a server. Each member has a role: viewer, collaborator (the default), admin or super admin. | [teams.md](teams.md#roles) |
 | Super admin | A member with the super admin role: admin in every workspace, and the only one who manages members, roles and the server itself. The first person to link a fresh server becomes one. | [teams.md](teams.md#roles) |

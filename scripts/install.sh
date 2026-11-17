@@ -741,7 +741,7 @@ run_server_setup() {
 	fi
 	if [ "$have_tty" = no ]; then
 		die "installed ${replaced}, but did not set up the server: aether-server setup asks questions and there is no terminal. Set it up with flags instead:
-  ${setup_sudo:+sudo }aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>"
+  ${setup_sudo:+sudo }aether-server install --edge-url https://edge.cloudfield.ai --edge-access <account|approved-devices>"
 	fi
 	echo
 	say "running aether-server setup"

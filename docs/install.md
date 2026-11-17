@@ -25,7 +25,7 @@ Android app all connect to that server.
 | Android app | Android | The dashboard on a phone. | [`aether-android.apk`](#android-app) |
 
 Clients reach the server over SSH, port 2222 by default. Without a direct or
-Tailscale route they go through the edge, a relay at `https://edge.onaether.dev`
+Tailscale route they go through the edge, a relay at `https://edge.cloudfield.ai`
 that both sides dial out to after a GitHub sign-in ([edge.md](edge.md)).
 
 ```mermaid
@@ -166,7 +166,7 @@ in `/usr/local/bin` that would run first.
 - `--role server` with no terminal installs the binaries, then exits 1 with
   the command that sets the server up from flags
   ([First boot](#first-boot)):
-  `sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>`.
+  `sudo aether-server install --edge-url https://edge.cloudfield.ai --edge-access <account|approved-devices>`.
 - When `sudo` fails, for example because it needs a password and there is no
   terminal, the script exits 1. If it was installing `aether` alone, as on
   macOS or with `--client`, it names the install that needs no `sudo`:
@@ -434,9 +434,9 @@ Setup starts nothing; it ends on `next:`: start the service, then on your
 machine link it. On a tailnet that is `aether link <MagicDNS name>`, or
 **Tailscale** in the app's Connect step; through the edge, `aether login` and
 `aether link --claim <code>`, or **Cloudfield relay** with the claim link; with
-neither, `aether link <this-host>:2222`. When the edge is not
-`https://edge.onaether.dev`, both client commands carry `--edge <url>`, because
-a claim code names no edge.
+neither, `aether link <this-host>:2222`. When the edge is not the project's,
+at `https://edge.cloudfield.ai` or `https://edge.onaether.dev`, both client
+commands carry `--edge <url>`, because a claim code names no edge.
 
 ```sh
 sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
@@ -451,7 +451,7 @@ With the edge on, a first SSH key must come from the server itself or an SSH
 tunnel ([networking.md](networking.md#the-first-admin)).
 
 For automation, `aether-server install` writes the same files from flags,
-such as `--edge-url https://edge.onaether.dev --edge-access approved-devices`.
+such as `--edge-url https://edge.cloudfield.ai --edge-access approved-devices`.
 It installs Sysbox unless you pass `--sysbox=false` or
 `--session-runtime vm`, turns the edge on only with `--edge-url`, and issues
 no claim code. With Tailscale on the host, the first tailnet login becomes the

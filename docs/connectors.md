@@ -810,7 +810,7 @@ with `aether mcp revoke`.
 
 | Message | Fix |
 | --- | --- |
-| `connector.code: this server has no edge (edge-url is empty), and ChatGPT and Claude reach a connector only through one; an admin turns it on with: sudo aether-server config set edge-url https://edge.onaether.dev, then sudo systemctl restart aether-server` | Turn the edge on |
+| `connector.code: this server has no edge (edge-url is empty), and ChatGPT and Claude reach a connector only through one; an admin turns it on with: sudo aether-server config set edge-url https://edge.cloudfield.ai, then sudo systemctl restart aether-server` | Turn the edge on |
 | `connector.code: this server is not connected to its edge at <edge-url>; an admin sees why with: sudo aether-server edge status` | Fix the edge connection |
 | `connector.code needs an approved device, a member SSH key or a tailnet connection; this connection signed in with device "<label>", which is registered` | An admin approves your device, or run `aether mcp` from an approved one |
 | `method not found: connector.code; the server is older than this CLI, and an admin updates it with aether server update` | Update the server |

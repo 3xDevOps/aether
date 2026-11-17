@@ -24,7 +24,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const edgeUsage = "usage: aether-server edge <status|claim-code [--admin <member id>]|trust|leave> [--config <file>]"
+const edgeUsage = "usage: aether-server edge <status|claim-code [--admin <member id>]|trust|move <address>|leave> [--config <file>]"
 
 const serviceLogNext = "next\tsudo systemctl status aether-server; sudo journalctl -u aether-server -n 50 --no-pager"
 
@@ -87,7 +87,14 @@ func edgeCmd(args []string) error {
 	if len(args) == 0 {
 		return errors.New(edgeUsage)
 	}
-	sub := args[0]
+	sub, args := args[0], args[1:]
+	var target string
+	if sub == "move" {
+		if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+			return errors.New(edgeUsage)
+		}
+		target, args = args[0], args[1:]
+	}
 	var admin *string
 	var extra func(*flag.FlagSet)
 	if sub == "claim-code" {
@@ -95,7 +102,7 @@ func edgeCmd(args []string) error {
 			admin = fs.String("admin", "", "the id of an existing admin member the claim binds the claiming account to, to restore an admin who can no longer reach the server")
 		}
 	}
-	o, configPath, rest, err := loadOptions("edge "+sub, args[1:], extra)
+	o, configPath, rest, err := loadOptions("edge "+sub, args, extra)
 	if err != nil {
 		return err
 	}
@@ -114,10 +121,12 @@ func edgeCmd(args []string) error {
 		return edgeClaimCode(os.Stdout, *o.dataDir, edgeURL, domain.MemberID(*admin))
 	case "trust":
 		return edgeTrust(os.Stdout, os.Stdin, *o.dataDir, edgeURL)
+	case "move":
+		return edgeMove(os.Stdout, *o.dataDir, edgeURL, target, configPath)
 	case "leave":
 		return edgeLeave(os.Stdout, *o.dataDir, edgeURL, configPath)
 	default:
-		return fmt.Errorf("unknown edge command %q (want status, claim-code, trust, or leave)", sub)
+		return fmt.Errorf("unknown edge command %q (want status, claim-code, trust, move, or leave)", sub)
 	}
 }
 
@@ -387,6 +396,34 @@ func edgeTrust(w io.Writer, in io.Reader, dataDir, edgeURL string) error {
 	} else {
 		_, _ = fmt.Fprintf(w, "owner with this key: %s\n", describeAccount(*owner))
 	}
+	return nil
+}
+
+// edgeMove moves the server to target, another relay address of the edge
+// it is enrolled with, once edgeagent.Agent.Move found the move safe.
+func edgeMove(w io.Writer, dataDir, edgeURL, target, configPath string) error {
+	hostKey, err := sshd.LoadOrCreateHostKey(server.HostKeyPath(dataDir))
+	if err != nil {
+		return err
+	}
+	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: edgeURL, DataDir: dataDir, HostKey: hostKey})
+	if err != nil {
+		return err
+	}
+	to, err := agent.Move(context.Background(), target)
+	if err != nil {
+		return err
+	}
+	pinned, err := edgeagent.OpenState(dataDir).PinnedKey()
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "enrolled at %s, an address of the same edge (edge key %s, still pinned); the edge announces %s too, so links and connectors made there keep working\n",
+		to, edgeproto.EdgeKeyFingerprint(pinned), edgeURL)
+	if err := configSet(w, configPath, "edge-url", to); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "to move back:\n  %saether-server edge move %s%s\n", sudoPrefix(), edgeURL, configFlag(configPath))
 	return nil
 }
 

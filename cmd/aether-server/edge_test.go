@@ -78,7 +78,7 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 		t.Fatalf("status of a server that never connected = %v, want %v", err, errNotConnected)
 	}
 	for _, want := range []string{id, edgeproto.EdgeKeyFingerprint(pub), "valid for 30 min, until ", "5 attempts left", "edge access  approved-devices",
-		"connector    https://edge.onaether.dev/mcp/" + id + "  (add it to ChatGPT or Claude; get a code: aether mcp)\n",
+		"connector    https://edge.cloudfield.ai/mcp/" + id + "  (add it to ChatGPT or Claude; get a code: aether mcp)\n",
 		"connection   never connected: no server using " + dir + " has recorded an attempt to reach the edge\n",
 		"why          the service is not running, is still starting, exits during startup, or started before edge-url was set and needs a restart\n",
 		"next         sudo systemctl status aether-server; sudo journalctl -u aether-server -n 50 --no-pager"} {
@@ -107,7 +107,7 @@ func TestEdgeStatusReportsAStaleConnection(t *testing.T) {
 		{"fresh", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now.Add(-5 * time.Second)},
 			[]string{"connection   connected since", "the edge last answered 5s ago"}, nil},
 		{"universal connector", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now, Protocol: edgeproto.VersionUniversalMCP},
-			[]string{"connector    https://edge.onaether.dev/mcp/", "universal    https://edge.onaether.dev/mcp  (the connector URL for members with a GitHub account linked; aether mcp prints each member's)"}, nil},
+			[]string{"connector    https://edge.cloudfield.ai/mcp/", "universal    https://edge.cloudfield.ai/mcp  (the connector URL for members with a GitHub account linked; aether mcp prints each member's)"}, nil},
 		{"hung", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now.Add(-3 * time.Minute)},
 			[]string{"connection   stale: reported connected since", "no answer from the edge for 3m0s (limit 40s)", "next         sudo systemctl status aether-server"}, errNotConnected},
 		{"killed", edgeagent.Status{Connected: true, Since: since, PID: gone.Process.Pid, Heartbeat: now},
@@ -225,6 +225,29 @@ func TestEdgeIsOffUnlessConfigured(t *testing.T) {
 	}
 	if *o.edgeAccess != accessPolicyValue(edgeproto.PolicyApprovedDevices) {
 		t.Fatalf("edge-access = %q from a config without it, want approved-devices", *o.edgeAccess)
+	}
+}
+
+// edge move takes the address before its flags, and moves nothing
+// before the server has pinned its edge's key, which is what shows the
+// new address is the same edge.
+func TestEdgeMoveNeedsAPinnedKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "server.conf")
+	values := map[string]string{"data-dir": dir, "edge-url": "https://edge.onaether.dev"}
+	if err := serversetup.WriteConfig(path, values); err != nil {
+		t.Fatal(err)
+	}
+	if err := edgeCmd([]string{"move", "--config", path}); err == nil || err.Error() != edgeUsage {
+		t.Errorf("move without an address: %v, want the usage", err)
+	}
+	err := edgeCmd([]string{"move", "https://edge.cloudfield.ai", "--config", path})
+	if want := "no edge key is pinned for https://edge.onaether.dev yet, so nothing shows that https://edge.cloudfield.ai is the same edge; " +
+		"start the server, let it connect once, and run edge move again"; err == nil || err.Error() != want {
+		t.Errorf("move without a pinned key: %v, want %q", err, want)
+	}
+	if got, err := serversetup.Load(path); err != nil || got["edge-url"] != "https://edge.onaether.dev" {
+		t.Errorf("config after a refused move: %v, %v", got, err)
 	}
 }
 

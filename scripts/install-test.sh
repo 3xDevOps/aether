@@ -482,7 +482,7 @@ $guard env AETHER_TTY="$tmp/no-such-tty" sh "$script" --role server >"$out" 2>&1
 [ "$status" != 0 ] || fail "installer exited 0 without setting up the server"
 not_ran "aether-server setup"
 [ -x "$bindir/aether-server" ] || fail "the server binary was not installed"
-printed "sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>"
+printed "sudo aether-server install --edge-url https://edge.cloudfield.ai --edge-access <account|approved-devices>"
 not_printed "This machine is your Aether server"
 
 # --- --role client: aether gui build runs --------------------------------

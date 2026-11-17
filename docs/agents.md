@@ -9,7 +9,7 @@ Cloudfield's terms: the **server** is the Linux machine where agents run
 (`aether-server`); this computer is a **client** (`aether`). A **workspace** is
 one repository on the server. A **session** is one agent working on one task in its
 own sandbox (a container or virtual machine), on its own git branch. The **edge** is a relay at
-`https://edge.onaether.dev` that the server and clients dial out to, so neither
+`https://edge.cloudfield.ai` that the server and clients dial out to, so neither
 needs an open port. The [glossary](README.md#concepts) has the rest.
 
 `aether <command> --help` prints any command's usage, flags and an example.
@@ -107,7 +107,7 @@ ssh <user>@<host> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfi
 With the edge, pass the access policy the human chose:
 
 ```sh
-ssh <user>@<host> 'sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>'
+ssh <user>@<host> 'sudo aether-server install --edge-url https://edge.cloudfield.ai --edge-access <account|approved-devices>'
 ssh <user>@<host> 'sudo systemctl daemon-reload && sudo systemctl enable --now aether-server'
 ssh <user>@<host> "timeout 300 sh -c 'until sudo aether-server edge status >/dev/null; do sleep 5; done'"
 ssh <user>@<host> 'sudo aether-server edge claim-code'
@@ -144,7 +144,7 @@ Then claim the server, which makes the human its administrator:
 aether link --claim <claim code>
 ```
 
-It ends with `linked to server <server id> through edge.onaether.dev as <name>
+It ends with `linked to server <server id> through edge.cloudfield.ai as <name>
 (admin)`. If the code expired, `sudo aether-server edge claim-code` on the
 server prints a new one.
 

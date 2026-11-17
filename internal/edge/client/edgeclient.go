@@ -26,8 +26,18 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
 
-// DefaultURL is the relay origin of the edge the project runs.
-const DefaultURL = "https://edge.onaether.dev"
+// DefaultURL is the relay origin new setups use for the edge the project
+// runs. FormerURL is that edge's first relay origin, which it keeps
+// serving for the servers and clients set up there.
+const (
+	DefaultURL = "https://edge.cloudfield.ai"
+	FormerURL  = "https://edge.onaether.dev"
+)
+
+// Hosted reports whether origin is a relay origin of the edge the
+// project runs. A client that names no edge dials DefaultURL, which
+// reaches a server enrolled at either.
+func Hosted(origin string) bool { return origin == DefaultURL || origin == FormerURL }
 
 const (
 	requestTimeout  = 30 * time.Second

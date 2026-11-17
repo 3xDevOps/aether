@@ -3,8 +3,10 @@
 An **edge** is a relay that lets members reach a server through a public host
 name with a GitHub sign-in. The server and the client both dial out to it, so
 a laptop reaches a server with no Tailscale, no open router port and no SSH
-key to copy. The project runs one at `https://edge.onaether.dev`, and
-`aether-edge` runs your own.
+key to copy. The project runs one at `https://edge.cloudfield.ai`, and
+`aether-edge` runs your own. Servers set up before that address existed use
+the same edge at `https://edge.onaether.dev`, which keeps working
+([Moving to another address of the edge](#moving-to-another-address-of-the-edge)).
 
 - [Using an edge](#using-an-edge) is for members and server administrators.
 - [Running your own edge](#running-your-own-edge) is for operators.
@@ -36,22 +38,24 @@ keys, invite codes and `aether gui` keep working beside the edge.
 | Owner | The account that claimed the server at the edge |
 | Invitation | A GitHub account that may join with a role. Its join link carries a secret the server checks and the edge never sees |
 
-On the project's edge, `https://auth.onaether.dev` serves sign-in and the
-Devices, Servers and Account pages, and `https://edge.onaether.dev` is the relay,
-the name you configure clients and servers with. A path asked for on the wrong
-host gets `421 Misdirected Request`.
+On the project's edge, `https://auth.cloudfield.ai` serves sign-in and the
+Devices, Servers and Account pages, and `https://edge.cloudfield.ai` is the relay,
+the name you configure clients and servers with. It serves the same accounts
+and servers at its first pair, `https://auth.onaether.dev` and
+`https://edge.onaether.dev`. A path asked for on the wrong host gets
+`421 Misdirected Request`.
 
 ### Turning it on
 
 The edge is off until you turn it on. `aether-server setup` turns on
-`https://edge.onaether.dev` when the host has no Tailscale or you turn tailnet
+`https://edge.cloudfield.ai` when the host has no Tailscale or you turn tailnet
 sign-in off, and prints what the edge can see. With tailnet sign-in on, it asks
 `Turn on the edge too`, defaulting to no. Otherwise use
 `aether-server install --edge-url <url> --edge-access <policy>` (it refuses
 `--edge-url` without `--edge-access`), or the config keys:
 
 ```sh
-sudo aether-server config set edge-url https://edge.onaether.dev
+sudo aether-server config set edge-url https://edge.cloudfield.ai
 sudo aether-server config set edge-access approved-devices
 sudo aether-server config set edge-url ""     # off
 sudo systemctl restart aether-server          # apply the change
@@ -72,6 +76,55 @@ sudo aether-server edge trust                 # compare the key with the one the
 sudo systemctl restart aether-server
 sudo aether-server edge claim-code --admin <member id>   # or, from a super admin's linked terminal: aether edge connect
 ```
+
+### Moving to another address of the edge
+
+The project's edge answers at `https://edge.cloudfield.ai`, which new setups
+use, and at `https://edge.onaether.dev`. Updates never change `edge-url` in
+`/etc/aether/server.conf`, and `aether-server setup` keeps it, so a server set
+up at `https://edge.onaether.dev` stays there, with its links, connectors and
+join links. To move it:
+
+```sh
+sudo aether-server edge move https://edge.cloudfield.ai
+sudo systemctl restart aether-server
+```
+
+`edge move <address>` works for any edge that serves
+[more than one address pair](#more-than-one-address-pair). It enrolls at the
+current address, then at the new one, and writes `edge-url` only when every
+check passes; otherwise it prints the refusal and changes nothing. Each
+enrollment takes over the running server's control connection, which the
+server dials again within seconds.
+
+| Check | Refusal |
+| --- | --- |
+| The address is another one | `edge-url already is <url>` |
+| The server has pinned its edge's key | `no edge key is pinned for <url> yet, so nothing shows that <address> is the same edge; start the server, let it connect once, and run edge move again` |
+| The edge speaks edge protocol 6 or later | `<url> speaks edge protocol <n>; a server moved to <address> would accept connector tokens only for that address, so connectors registered at <url> would stop working. Moving needs edge protocol 6 or later: the edge's operator upgrades it` |
+| The edge announces both addresses | `the edge at <url> announces the relay addresses <list>; moving needs both <url> and <address> among them: the edge's operator adds the address first` |
+| The new address presents the pinned key | `<address> presents edge key <fingerprint>, but this server pinned <fingerprint> for its edge at <url>, which announced it: another edge answers there. edge move only changes the address of one edge; changing edges is in docs/edge.md#turning-it-on` |
+
+No flag skips a check: below protocol 6, or without the old address announced,
+a moved server accepts connector tokens only for its new address, and every
+connector registered at the old one stops working.
+
+After the move:
+
+- The edge key stays pinned and the owner stays: the server keeps both per edge
+  key, not per address.
+- `aether-server edge status` names the new address and the connector URLs at
+  it.
+- Connectors registered at the old address keep working while the edge
+  announces it. The Claude and ChatGPT listings stay at
+  `https://edge.onaether.dev/mcp`.
+- CLI and device links, join links and claim codes made at the old address keep
+  working: the edge relays a client at either address to a server enrolled at
+  either.
+- A server binary put back to a release below edge protocol 6 enrolls at the
+  new address, but accepts connector tokens only for it, so connectors
+  registered at the old address fail until the server is updated or moved back.
+- To move back, run `sudo aether-server edge move <old address>` and restart.
 
 ### Server id and claiming
 
@@ -147,7 +200,7 @@ unreadable because it ran without `sudo`:
 
 ```
 the edge is off: edge-url is empty in /etc/aether/server.conf; turn it on with:
-  sudo aether-server config set edge-url https://edge.onaether.dev
+  sudo aether-server config set edge-url https://edge.cloudfield.ai
 ```
 
 When the edge's key changed, the server keeps retrying and logs this. Run `edge
@@ -171,7 +224,7 @@ aether logout             # revokes this device's token at the edge and deletes 
 
 Confirm only a code you started. `--edge <url>` takes the relay origin; without
 it commands use the one edge this machine is signed in to, else
-`https://edge.onaether.dev`. The device key `edge-device-key` and the token file
+`https://edge.cloudfield.ai`. The device key `edge-device-key` and the token file
 `edge-tokens.json` live in the client's config directory with mode 0600.
 `aether servers` shows the access policy the edge reports; the server enforces
 its own.
@@ -181,7 +234,7 @@ you: it opens no browser, prints one JSON line, then waits for you to confirm
 and prints a second:
 
 ```
-{"state":"pending","edge":"https://edge.onaether.dev","signin_origin":"https://edge.onaether.dev","user_code":"<code>","verification_uri":"https://edge.onaether.dev/device","expires_at":"<RFC 3339 time>"}
+{"state":"pending","edge":"https://edge.cloudfield.ai","signin_origin":"https://edge.cloudfield.ai","user_code":"<code>","verification_uri":"https://edge.cloudfield.ai/device","expires_at":"<RFC 3339 time>"}
 {"state":"signed_in",...,"account":{...},"device":{"id":"<device id>","label":"<label>","key":"<public key>"}}
 ```
 
@@ -341,7 +394,7 @@ Recovering a GitHub account ends the attacker's use of it for new sign-ins and
 nothing else. Devices the attacker signed in keep their tokens, which do not
 expire, and stay on every server until revoked.
 
-1. Sign in on the edge's Devices page (`https://auth.onaether.dev/devices` on the
+1. Sign in on the edge's Devices page (`https://auth.cloudfield.ai/devices` on the
    project's edge) and revoke every device you do not recognize.
 2. On each server, run `aether device list` and `aether device revoke
    <device-id>` for each unknown device. On the machine, `sudo aether-server
@@ -398,7 +451,7 @@ connect` or [Console recovery](#console-recovery).
 
 #### Deleting an account
 
-Only the Account page deletes an account (`https://auth.onaether.dev/account` on
+Only the Account page deletes an account (`https://auth.cloudfield.ai/account` on
 the project's edge). It lists the servers the account owns and belongs to, and
 needs a GitHub sign-in in this browser from the last 5 minutes plus the account's
 login typed back. Otherwise it is refused with `deleting an account needs a

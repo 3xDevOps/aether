@@ -60,7 +60,7 @@ Setup decides how your computer reaches the server. **Tailscale** is the
 simplest: on a host where Tailscale runs, Enter at the tailnet question picks
 it, and people link by this host's tailnet name with their tailnet login
 ([networking.md](networking.md#tailscale)). Otherwise setup turns on the
-**edge**, a relay the Cloudfield project runs at `https://edge.onaether.dev`.
+**edge**, a relay the Cloudfield project runs at `https://edge.cloudfield.ai`.
 The server and your computer both dial out to it, so neither needs an open port.
 SSH runs end to end through it: the edge cannot read your traffic, but sees
 host names, IP addresses and who signs in ([edge.md](edge.md));
@@ -84,7 +84,7 @@ Setup ends with the commands left for you. With the edge on, it prints a claim
 link first:
 
 ```
-claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid for 30 min, until 2026-10-25 15:04 UTC, 5 attempts)
+claim link: aether://claim?edge=https%3A%2F%2Fedge.cloudfield.ai&server=<server id>#<secret> (valid for 30 min, until 2026-10-25 15:04 UTC, 5 attempts)
 
 next:
   1. start the server on this machine:
@@ -135,7 +135,7 @@ there must not ask for a password), run the steps non-interactively:
 
 ```sh
 ssh <user>@<server> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --role none'
-ssh <user>@<server> 'sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>'
+ssh <user>@<server> 'sudo aether-server install --edge-url https://edge.cloudfield.ai --edge-access <account|approved-devices>'
 ssh <user>@<server> 'sudo systemctl daemon-reload && sudo systemctl enable --now aether-server'
 ssh <user>@<server> "timeout 300 sh -c 'until sudo aether-server edge status >/dev/null; do sleep 5; done'"
 ssh <user>@<server> 'sudo aether-server edge claim-code'
@@ -173,7 +173,7 @@ Or in a terminal:
 
 It worked if the step shows **Connected**, or `aether link` ends with `linked
 to <server>` and your role, such as `linked to server <server id> through
-edge.onaether.dev as <your name> (super_admin)`.
+edge.cloudfield.ai as <your name> (super_admin)`.
 
 `aether status` shows where you are:
 
@@ -539,7 +539,7 @@ foreground server with Ctrl-C, then `sudo systemctl start aether-server`.
 | `writing the unit and the config file needs root; re-run with sudo` | Run `sudo aether-server setup`. |
 | `Docker does not answer: ...`, then `Continue without Docker` | Install or start Docker on the server (`sudo systemctl start docker`), then run setup again. |
 | `cli: dial <host>:2222: dial tcp <ip>:2222: connect: connection refused` | The server is not running, or the port is blocked. On the server, run `sudo systemctl enable --now aether-server` and check `systemctl status aether-server`. Open TCP 2222, or use the edge. |
-| `not signed in to edge.onaether.dev; run: aether login --edge https://edge.onaether.dev` | Run `aether login`, then link again. |
+| `not signed in to edge.cloudfield.ai; run: aether login --edge https://edge.cloudfield.ai` | Run `aether login`, then link again. |
 | `edgeproto: claim code must look like <26-character server id>-xxxxxxxxxxxxxxxx` | The code was cut short. Copy the whole `<server id>-<secret>`, or pass the claim link in single quotes: `aether link --claim '<claim link>'`. |
 | `claim code is wrong`, `claim code expired` or `claim code has no attempts left` | On the server, `sudo aether-server edge claim-code` prints a new link. |
 | `... refused: server is not connected to the edge (HTTP 503)` | On the server, `sudo aether-server edge status` says why: the service is stopped, still starting, or cannot reach the edge. |
