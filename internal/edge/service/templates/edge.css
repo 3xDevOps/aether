@@ -125,10 +125,11 @@ p, ul, dl, table, form { margin: 0 0 var(--space-4); }
 main > p:not(.error, .warning, .empty), .note, .danger-zone p { max-width: var(--measure); }
 
 /* A page with one task (sign in, a code, a result, an error) is one narrow
-   centred column; lists and the account page keep the full width. */
-main:not(:has(.list, .choices, .danger-zone, .empty, .panel.full)), .top:not(:has(nav)) { max-width: var(--panel); margin-inline: auto; }
-main:has(.usercode) { max-width: var(--panel-wide); margin-inline: auto; }
-.top:has(nav) + main { margin-inline: 0; }
+   column, centred when signed out; lists and the account page keep the full
+   width. */
+main:not(:has(.list, .choices, .danger-zone, .empty, .panel.full)), .top:not(:has(nav)) { max-width: var(--panel); }
+main:has(.usercode) { max-width: var(--panel-wide); }
+.top:not(:has(nav)), .top:not(:has(nav)) + main { margin-inline: auto; }
 main > .panel:only-of-type { max-width: none; }
 
 a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
