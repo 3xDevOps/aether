@@ -21,9 +21,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/3xDevOps/Aether/docs"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/templates"
+	"github.com/3xDevOps/cloudfield/docs"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/templates"
 )
 
 const (

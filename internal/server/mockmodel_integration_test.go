@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/3xDevOps/Aether/internal/coordhooks"
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/coordhooks"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // mockModel stands in for a vendor's model API: streaming Anthropic

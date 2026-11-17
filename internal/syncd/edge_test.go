@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/cli"
 )
 
 const testServerID = "wqc4lsjvzdzrwq3k5dabdtajwj"

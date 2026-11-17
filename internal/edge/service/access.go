@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	edgestore "github.com/3xDevOps/cloudfield/internal/edge/store"
 )
 
 // Client is the device and account behind a device token.

@@ -3,7 +3,7 @@ package ptyhost
 import (
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 func TestSessionKeyConstructorsAndRun(t *testing.T) {

@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
-	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate/releasetest"
+	"github.com/3xDevOps/cloudfield/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 func (e *env) updateNow(t *testing.T, p protocol.ServerUpdateParams) error {

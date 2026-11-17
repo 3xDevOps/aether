@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/3xDevOps/Aether/internal/children"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/sshd"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/children"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 // Child runs attach to the scheduler, the git engine and the launch

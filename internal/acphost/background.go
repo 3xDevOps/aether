@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
 )
 
 // autonomousQuiet ends an autonomous turn whose agent reports no result for

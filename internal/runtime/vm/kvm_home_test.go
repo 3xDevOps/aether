@@ -21,9 +21,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/3xDevOps/Aether/internal/guest/guestpb"
-	"github.com/3xDevOps/Aether/internal/guest/home"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/guest/guestpb"
+	"github.com/3xDevOps/cloudfield/internal/guest/home"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 )
 
 const sessionUser = "1000:1000"

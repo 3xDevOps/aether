@@ -23,7 +23,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // fakeProvider is GitHub's OAuth and user API. It checks the PKCE

@@ -23,8 +23,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 type event struct {

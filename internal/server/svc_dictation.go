@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/dictation"
+	"github.com/3xDevOps/cloudfield/internal/dictation"
 )
 
 func init() {

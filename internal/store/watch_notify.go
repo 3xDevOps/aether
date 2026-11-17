@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 const watchNotificationColumns = `n.id, n.watch_id, w.member_id, n.condition, n.dedup_key, n.title, n.body, n.link,

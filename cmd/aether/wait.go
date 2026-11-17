@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func init() {

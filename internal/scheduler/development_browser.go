@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/browser"
-	"github.com/3xDevOps/Aether/internal/control"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/browser"
+	"github.com/3xDevOps/cloudfield/internal/control"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // ErrBrowserInspectUnsupported means the run's companion was created from an

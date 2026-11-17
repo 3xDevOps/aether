@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 const runSwitchUsage = "usage: aether session switch <session-id> --mode standard|enhanced"

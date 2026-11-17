@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 // SlackService is the seam for the server's Slack bot. Satisfied by

@@ -5,8 +5,8 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 const memberGitUsage = "usage: aether member git [--name <name>] [--email <email>] [member-id]"

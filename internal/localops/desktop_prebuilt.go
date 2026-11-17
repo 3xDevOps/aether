@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 // ErrNoPrebuiltDesktop reports a release that publishes no prebuilt desktop

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/vmimage"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/vmimage"
 )
 
 func terminalSpec() runtime.Spec {

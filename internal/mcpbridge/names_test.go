@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/coordhooks"
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/coordhooks"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // Tests name the command themselves, whatever container runs them.

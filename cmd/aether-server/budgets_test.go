@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/cloudfield/internal/serversetup"
 )
 
 func TestBudgetFlagsRejectInvalidValuesBeforeConfigWrites(t *testing.T) {

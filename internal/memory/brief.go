@@ -9,10 +9,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/3xDevOps/Aether/internal/coordhooks"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/coordhooks"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 // Brief is what a launching run of member's learns from team memory: the

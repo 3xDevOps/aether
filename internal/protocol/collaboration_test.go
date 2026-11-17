@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 func TestRoomMessageFromStorePreservesTimestampPrecisionAndActorSnapshot(t *testing.T) {

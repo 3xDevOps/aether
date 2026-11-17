@@ -11,9 +11,9 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/3xDevOps/Aether/internal/attribution"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/attribution"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // timelinePageSize is how much history one request asks for; the command

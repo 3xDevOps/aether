@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // The list output must carry the workspace ID: it is what git remote URLs

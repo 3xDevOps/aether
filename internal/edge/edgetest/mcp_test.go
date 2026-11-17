@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 const connectorCSP = "sandbox allow-forms; default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"

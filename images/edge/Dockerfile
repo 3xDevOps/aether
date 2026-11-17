@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
       case "$n" in ''|*[!0-9]*) echo "RELEASE_BUILD and RELEASE_HOTFIX must be non-negative integers, got '$RELEASE_BUILD' and '$RELEASE_HOTFIX'" >&2; exit 1 ;; esac; \
     done && \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
-      -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=${version:-dev} -X github.com/3xDevOps/Aether/internal/version.Commit=${commit:-unknown} -X github.com/3xDevOps/Aether/internal/version.Build=$RELEASE_BUILD -X github.com/3xDevOps/Aether/internal/version.Hotfix=$RELEASE_HOTFIX" \
+      -ldflags "-s -w -X github.com/3xDevOps/cloudfield/internal/version.Version=${version:-dev} -X github.com/3xDevOps/cloudfield/internal/version.Commit=${commit:-unknown} -X github.com/3xDevOps/cloudfield/internal/version.Build=$RELEASE_BUILD -X github.com/3xDevOps/cloudfield/internal/version.Hotfix=$RELEASE_HOTFIX" \
       -o /out/aether-edge ./cmd/aether-edge && \
     mkdir -p /out/state && mkdir -m 0700 /out/state/aether-edge
 

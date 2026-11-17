@@ -1,6 +1,6 @@
 package server
 
-import "github.com/3xDevOps/Aether/internal/version"
+import "github.com/3xDevOps/cloudfield/internal/version"
 
 const browserImageRepo = "ghcr.io/3xdevops/aether-browser"
 

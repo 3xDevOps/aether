@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // While a session's VM does not run, as when it sleeps or after it ended,

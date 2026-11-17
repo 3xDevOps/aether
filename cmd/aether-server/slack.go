@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/3xDevOps/Aether/internal/serversetup"
-	"github.com/3xDevOps/Aether/internal/slack"
+	"github.com/3xDevOps/cloudfield/internal/serversetup"
+	"github.com/3xDevOps/cloudfield/internal/slack"
 )
 
 const slackUsage = "usage: aether-server slack <setup|remove> [--config <file>]"

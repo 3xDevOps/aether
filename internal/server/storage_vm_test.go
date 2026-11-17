@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/disk"
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/disk"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // A session VM's disks and saved state belong to its session, the VMs that

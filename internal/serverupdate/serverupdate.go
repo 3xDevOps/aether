@@ -32,12 +32,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 // ErrIncapable is returned when this server process cannot update itself.

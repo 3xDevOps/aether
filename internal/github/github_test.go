@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/cloudfield/internal/memberhome"
 )
 
 const testToken = "gho_test_only_native_credential"

@@ -14,11 +14,11 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/permissions"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/permissions"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 // scopedWorld is a scoped server with the seeded super admin's workspace

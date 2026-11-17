@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 var testNow = time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)

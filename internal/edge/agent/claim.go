@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // claimAttempt checks a claim code the client of the claim connection

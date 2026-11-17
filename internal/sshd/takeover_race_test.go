@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/control"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/control"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func awaitTakeoverLease(t *testing.T, e *testEnv, ready func(control.Snapshot, bool) bool) {

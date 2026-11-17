@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/sshd"
-	"github.com/3xDevOps/Aether/internal/store/storetest"
+	edgeagent "github.com/3xDevOps/cloudfield/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/store/storetest"
 )
 
 // Environment of the server process TestKilledServerStatusIsStale starts.

@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeclient "github.com/3xDevOps/cloudfield/internal/edge/client"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // edgeDomain is the domain of the logical host names git remotes use for

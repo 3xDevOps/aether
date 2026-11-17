@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
-	"github.com/3xDevOps/Aether/internal/control"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/permissions"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/cloudfield/internal/acphost"
+	"github.com/3xDevOps/cloudfield/internal/control"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/permissions"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/scheduler"
 )
 
 func init() {

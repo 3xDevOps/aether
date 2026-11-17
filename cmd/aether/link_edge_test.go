@@ -18,10 +18,10 @@ import (
 	"github.com/coder/websocket"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/testhome"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	edgeclient "github.com/3xDevOps/cloudfield/internal/edge/client"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
 )
 
 // listingEdge is a signed-in edge that lists one server, named prod, and

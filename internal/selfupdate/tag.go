@@ -3,7 +3,7 @@ package selfupdate
 import (
 	"regexp"
 
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 // releaseTag matches a published Aether release tag: "v" plus a semver

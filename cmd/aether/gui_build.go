@@ -13,11 +13,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/3xDevOps/Aether/desktop"
-	"github.com/3xDevOps/Aether/internal/envname"
-	"github.com/3xDevOps/Aether/internal/localops"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/desktop"
+	"github.com/3xDevOps/cloudfield/internal/envname"
+	"github.com/3xDevOps/cloudfield/internal/localops"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 // buildEvent is one line of `aether gui build --json`: the phase that just

@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 // nodeVersion is the Node.js release `aether gui build` downloads when this

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // costSchemaVersion is the slice position of the cost migration. The

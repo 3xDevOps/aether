@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // State describes execution, independently of outstanding input requests.

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 func TestCoordReportSupersessionFollowsRunLifecycle(t *testing.T) {

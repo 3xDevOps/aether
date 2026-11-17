@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 // releaseServer serves tag's manifest, signed by a key the test trusts,

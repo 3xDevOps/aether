@@ -14,10 +14,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/shellquote"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/harness"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/shellquote"
 )
 
 // ErrGitHubNotLoggedIn reports that gh in the member's environment

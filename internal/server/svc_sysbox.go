@@ -1,6 +1,6 @@
 package server
 
-import "github.com/3xDevOps/Aether/internal/sysbox"
+import "github.com/3xDevOps/cloudfield/internal/sysbox"
 
 // The admin-triggered Sysbox install. Once it ends the Docker runtime asks
 // the daemon again, so the next container follows what the install left.

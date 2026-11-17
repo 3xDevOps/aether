@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // A server whose first admin joined with an SSH key has members and no

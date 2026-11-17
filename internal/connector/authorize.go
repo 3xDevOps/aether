@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/ops"
-	"github.com/3xDevOps/Aether/internal/sshd"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/ops"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
 )
 
 const (

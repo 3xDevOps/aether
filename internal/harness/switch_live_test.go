@@ -17,7 +17,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/cloudfield/internal/acphost"
 )
 
 // liveAgent drives one agent's terminal CLI in print mode, which reads and

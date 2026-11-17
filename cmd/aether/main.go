@@ -12,9 +12,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/3xDevOps/Aether/docs"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/docs"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 func main() {

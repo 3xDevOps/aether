@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/envname"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/shellquote"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/envname"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/harness"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/shellquote"
 )
 
 var ErrNotSwitchable = errors.New("scheduler: this agent cannot move a running session between Standard and Enhanced")

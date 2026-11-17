@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 func digest(c string) string { return "sha256:" + strings.Repeat(c, 64) }

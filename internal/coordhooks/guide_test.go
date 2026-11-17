@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // A Background run ends with its turn, so whatever its role it is never

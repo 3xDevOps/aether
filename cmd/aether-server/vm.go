@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/envname"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/server"
-	"github.com/3xDevOps/Aether/internal/serversetup"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/envname"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/server"
+	"github.com/3xDevOps/cloudfield/internal/serversetup"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 const vmUsage = "usage: aether-server vm install [--config <file>]"

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 var savedChoices = protocol.LaunchDefaultsResult{Revision: 4, Defaults: protocol.LaunchDefaults{

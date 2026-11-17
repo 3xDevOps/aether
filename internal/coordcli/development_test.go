@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func TestDevelopmentRejectsIdentityAndMalformedParametersBeforeDial(t *testing.T) {

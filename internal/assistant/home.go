@@ -3,7 +3,7 @@ package assistant
 import (
 	"context"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // SignIn stops the member's session and runs start, which begins a sign-in

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func publishControl(t *testing.T, found *protocol.RunPullRequest) (*protocol.Client, map[string]*fakeReply) {

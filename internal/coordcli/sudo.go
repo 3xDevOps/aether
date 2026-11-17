@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 const sudoUsage = "usage: sudo [-u user] [-E] [-H] [-n] [--] command [args...]"

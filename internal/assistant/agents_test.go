@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func listed(name string, login bool) protocol.AgentInfo {

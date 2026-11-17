@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 func scanProfileSnapshot(row interface{ Scan(...any) error }) (*domain.ProfileSnapshot, error) {

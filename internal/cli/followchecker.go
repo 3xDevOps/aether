@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 // ReleaseChecker is what the update paths ask of a release checker.

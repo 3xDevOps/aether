@@ -13,11 +13,11 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/attribution"
-	"github.com/3xDevOps/Aether/internal/domain"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/attribution"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 // deviceIDExtension and deviceKeyExtension carry the edge device a

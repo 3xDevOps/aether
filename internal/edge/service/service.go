@@ -22,8 +22,8 @@ import (
 
 	"golang.org/x/oauth2"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	edgestore "github.com/3xDevOps/cloudfield/internal/edge/store"
 )
 
 // Config configures a Service. Client ids and secrets come from the

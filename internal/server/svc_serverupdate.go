@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"path/filepath"
 
-	"github.com/3xDevOps/Aether/internal/serverupdate"
+	"github.com/3xDevOps/cloudfield/internal/serverupdate"
 )
 
 // Server self-update: the admin-triggered swap of the server's own

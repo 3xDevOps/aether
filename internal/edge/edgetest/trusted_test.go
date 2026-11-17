@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	edgeclient "github.com/3xDevOps/cloudfield/internal/edge/client"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // nonLoopback returns an IPv4 address of this machine that is not

@@ -13,11 +13,11 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	cliprofile "github.com/3xDevOps/Aether/internal/cli/profile"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/scheduler"
+	cliprofile "github.com/3xDevOps/cloudfield/internal/cli/profile"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/scheduler"
 )
 
 // profileAgentScript is the profile-lifecycle fake agent: it records what

@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 const generalDiscovery = `No live capabilities are assumed. Run aether-internal status inside a session

@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // SudoRunner runs a run's sudo command and reports its exit code. A

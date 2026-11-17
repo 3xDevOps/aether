@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/scheduler"
 )
 
 // TestIntegrationAssistantApprovalRule drives an approval rule through the

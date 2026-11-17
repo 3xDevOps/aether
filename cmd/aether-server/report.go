@@ -9,9 +9,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // reportBudget is the whole time the reporter may spend, from the first

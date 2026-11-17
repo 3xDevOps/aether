@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // coordSchemaVersion is the migration slot that adds the v3 coordination

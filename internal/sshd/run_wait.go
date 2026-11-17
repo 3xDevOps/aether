@@ -8,11 +8,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/permissions"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/watch"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/permissions"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/watch"
 )
 
 // RunWaitService reads and cancels the conditions runs wait on. Satisfied

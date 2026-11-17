@@ -1,6 +1,6 @@
 package profile
 
-import "github.com/3xDevOps/Aether/internal/secretscan"
+import "github.com/3xDevOps/cloudfield/internal/secretscan"
 
 // Finding is one scanner hit in a candidate profile file.
 type Finding struct {

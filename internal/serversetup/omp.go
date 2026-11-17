@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 // OMPBroker is the oh-my-pi release whose auth broker holds and refreshes

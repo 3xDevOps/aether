@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/memberhome"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/scheduler"
-	"github.com/3xDevOps/Aether/internal/signing"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/memberhome"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/scheduler"
+	"github.com/3xDevOps/cloudfield/internal/signing"
 )
 
 func TestGitHubConnectIsMemberScoped(t *testing.T) {

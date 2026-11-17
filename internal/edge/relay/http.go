@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // connectorCSP sandboxes every forwarded response. The relay origin also

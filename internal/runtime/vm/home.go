@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/guest/home"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/guest/home"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 )
 
 // checkouts lists a spec's checkout and extra worktrees, in Docker's order.

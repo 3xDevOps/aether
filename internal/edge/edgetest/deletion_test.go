@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // waitEdgeOwner waits until the edge records u as the owner of s, or no

@@ -3,8 +3,8 @@ package cli
 import (
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 func TestServerAdminFollowsTheServersRoleModel(t *testing.T) {

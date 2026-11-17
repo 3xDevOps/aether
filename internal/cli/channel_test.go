@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func TestSessionStreamSurfacesRemoteExitFailureAfterOutput(t *testing.T) {

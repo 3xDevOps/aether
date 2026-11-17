@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // ErrDropped ends a wire stream whose subscriber buffer overflowed. The

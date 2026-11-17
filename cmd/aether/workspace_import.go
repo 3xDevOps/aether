@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/localops"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/shellquote"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/localops"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/shellquote"
 )
 
 const workspaceImportUsage = "usage: aether workspace import <path|url> [--name <name>]"

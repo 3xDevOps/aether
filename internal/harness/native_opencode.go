@@ -6,9 +6,9 @@ import (
 	"path"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/coordhooks"
-	"github.com/3xDevOps/Aether/internal/jsonc"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/coordhooks"
+	"github.com/3xDevOps/cloudfield/internal/jsonc"
 )
 
 const openCodeNativeLauncherName = "opencode-native-launch.sh"

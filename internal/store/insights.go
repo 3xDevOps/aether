@@ -10,7 +10,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // InsightsStore records the measurements insights.get reads and aggregates

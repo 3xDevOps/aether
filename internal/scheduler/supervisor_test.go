@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/shellquote"
+	"github.com/3xDevOps/cloudfield/internal/shellquote"
 )
 
 // TestSupervisorSwapsItsChild drives the real supervisor script on a PTY

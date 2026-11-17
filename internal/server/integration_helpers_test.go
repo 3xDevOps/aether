@@ -14,10 +14,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/acphost"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func waitCoordSocket(t *testing.T, dir string) string {

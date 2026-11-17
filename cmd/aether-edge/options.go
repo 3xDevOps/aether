@@ -15,9 +15,9 @@ import (
 
 	"golang.org/x/crypto/acme"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/edge/relay"
-	edge "github.com/3xDevOps/Aether/internal/edge/service"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/edge/relay"
+	edge "github.com/3xDevOps/cloudfield/internal/edge/service"
 )
 
 // options is the edge's configuration. Every option is a flag whose

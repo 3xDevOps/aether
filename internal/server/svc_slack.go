@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/3xDevOps/Aether/internal/push"
-	"github.com/3xDevOps/Aether/internal/slack"
-	"github.com/3xDevOps/Aether/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/push"
+	"github.com/3xDevOps/cloudfield/internal/slack"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
 )
 
 // The Slack bot, once an admin stored its tokens with `aether-server

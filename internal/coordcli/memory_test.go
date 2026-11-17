@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/coordhooks"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/coordhooks"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func memoryResult(t *testing.T, v any) protocol.Response {

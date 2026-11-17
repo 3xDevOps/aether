@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
 )
 
 // A tailnet identity that first connects after the upgrade, with no edge

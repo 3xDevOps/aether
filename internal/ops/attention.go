@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func attention(ctx context.Context, read Call, workspaceID string) ([]protocol.AttentionItem, error) {

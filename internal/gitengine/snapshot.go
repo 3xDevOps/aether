@@ -13,9 +13,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/3xDevOps/Aether/internal/disk"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/rootfs"
+	"github.com/3xDevOps/cloudfield/internal/disk"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/rootfs"
 )
 
 // snapshotStoreSuffix names the per-run object store that holds diff

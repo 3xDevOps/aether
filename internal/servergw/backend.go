@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/sshd"
-	"github.com/3xDevOps/Aether/internal/webgate"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/webgate"
 )
 
 // backend is one identified member's in-process view of the server.

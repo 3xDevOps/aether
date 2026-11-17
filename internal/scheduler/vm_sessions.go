@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/harness"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 )
 
 // vmSessionRuntime runs each session in its own VM (runtime/vm), whose file

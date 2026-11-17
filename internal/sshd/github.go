@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	githubservice "github.com/3xDevOps/Aether/internal/github"
-	mirrorservice "github.com/3xDevOps/Aether/internal/mirror"
-	"github.com/3xDevOps/Aether/internal/permissions"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	githubservice "github.com/3xDevOps/cloudfield/internal/github"
+	mirrorservice "github.com/3xDevOps/cloudfield/internal/mirror"
+	"github.com/3xDevOps/cloudfield/internal/permissions"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func init() {

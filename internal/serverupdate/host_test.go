@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/store/storetest"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/store/storetest"
 )
 
 // A service built the way anything but cmd/aether-server builds it - no

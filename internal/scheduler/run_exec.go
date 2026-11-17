@@ -5,9 +5,9 @@ import (
 	"crypto/rand"
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/control"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/control"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 )
 
 // ErrRunPaused refuses a new process in a frozen container. Unlike the

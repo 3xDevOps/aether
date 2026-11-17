@@ -12,7 +12,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // ErrorBody is the failure envelope every endpoint answers with, carrying

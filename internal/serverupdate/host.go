@@ -10,8 +10,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/serversetup"
 )
 
 // Host carries the three things a self-update does to the machine it runs

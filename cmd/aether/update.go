@@ -15,13 +15,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/envname"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/shellquote"
-	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/envname"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/shellquote"
+	"github.com/3xDevOps/cloudfield/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 func init() {

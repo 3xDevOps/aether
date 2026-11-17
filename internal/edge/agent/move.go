@@ -9,8 +9,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeclient "github.com/3xDevOps/cloudfield/internal/edge/client"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // Move checks that target is another relay origin of the edge this server

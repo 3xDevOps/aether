@@ -18,7 +18,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/3xDevOps/Aether/internal/guest/guestpb"
+	"github.com/3xDevOps/cloudfield/internal/guest/guestpb"
 )
 
 // Every bound keeps a VM, any process of which can call the service, from

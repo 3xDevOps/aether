@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
-	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/acphost/acpmock"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 )
 
 func newSwitchDocker(t *testing.T) *runtime.Docker {

@@ -7,7 +7,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // statusStreamEnded (1012, service restart) tells a client the event

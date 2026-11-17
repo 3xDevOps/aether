@@ -13,8 +13,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/rootfs"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/rootfs"
 )
 
 // scratchGitMu serializes first-time initialization of server-owned scratch

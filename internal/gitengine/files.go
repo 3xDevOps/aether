@@ -18,8 +18,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/rootfs"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/rootfs"
 )
 
 // ErrInvalidPath identifies a client-supplied path that cannot be read or

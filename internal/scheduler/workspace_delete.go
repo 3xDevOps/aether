@@ -6,7 +6,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 func (s *Scheduler) workspaceLock(id domain.WorkspaceID) *sync.RWMutex {

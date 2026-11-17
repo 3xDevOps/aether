@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // ErrTransient marks a PRSource failure that may pass, such as GitHub

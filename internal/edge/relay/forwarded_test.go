@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // echoAddr answers with the client address the handler sees.

@@ -14,7 +14,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 // sendTimeout bounds a message's turn request once it is sent.

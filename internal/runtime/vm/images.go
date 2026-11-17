@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 
-	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/vmimage"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/vmimage"
 )
 
 // checkLifetime bounds an image check's VM, which a server crash would

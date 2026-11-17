@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 func TestNewerOrdersByBuildThenSemver(t *testing.T) {

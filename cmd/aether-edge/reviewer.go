@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	edge "github.com/3xDevOps/Aether/internal/edge/service"
+	edge "github.com/3xDevOps/cloudfield/internal/edge/service"
 )
 
 // reviewerCmd writes a reviewer account file with a new random

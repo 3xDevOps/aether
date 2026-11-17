@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/webgate"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/webgate"
 )
 
 // apiStubBackend fakes the linked server for handler tests: canned call

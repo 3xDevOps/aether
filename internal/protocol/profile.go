@@ -1,6 +1,6 @@
 package protocol
 
-import "github.com/3xDevOps/Aether/internal/domain"
+import "github.com/3xDevOps/cloudfield/internal/domain"
 
 // Profile control-channel method names. Kept out of the main method const
 // block so later waves can add profile RPCs without colliding on that file.

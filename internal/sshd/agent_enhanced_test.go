@@ -8,10 +8,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/memberhome"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/harness"
+	"github.com/3xDevOps/cloudfield/internal/memberhome"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func installInHome(t *testing.T, homes *memberhome.Manager, member domain.MemberID, files ...string) {

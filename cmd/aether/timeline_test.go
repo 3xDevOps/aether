@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/testhome"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
 )
 
 // TestTimelineDetailIsPrintable pins that agent-authored event text is

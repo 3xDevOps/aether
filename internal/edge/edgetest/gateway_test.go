@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/localgw"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/testhome"
-	"github.com/3xDevOps/Aether/internal/webgate"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/localgw"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
+	"github.com/3xDevOps/cloudfield/internal/webgate"
 )
 
 // gatewayPost posts one request to the local gateway with its token.

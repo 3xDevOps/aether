@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/envname"
+	"github.com/3xDevOps/cloudfield/internal/envname"
 )
 
 // Repo is the GitHub repository releases are published from.

@@ -12,10 +12,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/browser"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/browser"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 type sweptBrowserRuntime struct {

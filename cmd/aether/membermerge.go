@@ -10,8 +10,8 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 const memberMergeUsage = "usage: aether member merge start | aether member merge <code> [--keep <member-id>] [--keep-admin] [--yes] |\n" +

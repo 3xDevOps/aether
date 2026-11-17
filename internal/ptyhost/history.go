@@ -19,7 +19,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 const (

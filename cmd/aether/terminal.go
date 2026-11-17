@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 var terminalTabName = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)

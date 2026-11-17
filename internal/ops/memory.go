@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 type memoryAddInput struct {

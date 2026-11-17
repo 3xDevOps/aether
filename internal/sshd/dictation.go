@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/dictation"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/permissions"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/dictation"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/permissions"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // DictationService is the seam for server-side dictation. Satisfied by

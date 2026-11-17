@@ -5,7 +5,7 @@ syntax = "proto3";
 
 package aether.guest.v1;
 
-option go_package = "github.com/3xDevOps/Aether/internal/guest/guestpb";
+option go_package = "github.com/3xDevOps/cloudfield/internal/guest/guestpb";
 
 service Guest {
   rpc Info(InfoRequest) returns (InfoReply);

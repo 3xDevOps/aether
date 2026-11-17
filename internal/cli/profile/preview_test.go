@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/harness"
-	profilesvc "github.com/3xDevOps/Aether/internal/profile"
+	"github.com/3xDevOps/cloudfield/internal/harness"
+	profilesvc "github.com/3xDevOps/cloudfield/internal/profile"
 )
 
 // writeAll writes every profile-relative path in files under root and

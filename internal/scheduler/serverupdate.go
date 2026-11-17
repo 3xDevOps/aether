@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // UpdateTicker is the poll loop's view of the server self-update service

@@ -8,7 +8,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // defaultCols/defaultRows are the geometry of a terminal whose header

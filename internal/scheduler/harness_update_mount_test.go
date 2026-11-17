@@ -13,10 +13,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/harness"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 )
 
 // The test binary stands in for the server's package-exchange subcommand,

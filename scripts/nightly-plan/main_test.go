@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate/releasetest"
 )
 
 var now = time.Date(2026, 12, 20, 10, 0, 0, 0, time.UTC)

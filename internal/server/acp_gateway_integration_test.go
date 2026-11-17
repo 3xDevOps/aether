@@ -18,14 +18,14 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
-	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/scheduler"
-	"github.com/3xDevOps/Aether/internal/servergw"
-	"github.com/3xDevOps/Aether/internal/sshd"
-	"github.com/3xDevOps/Aether/internal/webgate"
+	"github.com/3xDevOps/cloudfield/internal/acphost"
+	"github.com/3xDevOps/cloudfield/internal/acphost/acpmock"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/scheduler"
+	"github.com/3xDevOps/cloudfield/internal/servergw"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/webgate"
 )
 
 // enhancedServer's "fake" agent serves ACP through the acpmock agent seeded

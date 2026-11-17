@@ -1756,7 +1756,7 @@ const file_git_proto_rawDesc = "" +
 	"\bReadFile\x12 .aether.guest.v1.ReadFileRequest\x1a\x1a.aether.guest.v1.FileChunk0\x01\x12O\n" +
 	"\tWriteFile\x12\x1f.aether.guest.v1.WriteFileChunk\x1a\x1f.aether.guest.v1.WriteFileReply(\x01\x12I\n" +
 	"\bFileDiff\x12 .aether.guest.v1.FileDiffRequest\x1a\x1b.aether.guest.v1.PatchReply\x12B\n" +
-	"\x04Sync\x12\x1a.aether.guest.v1.SyncChunk\x1a\x1a.aether.guest.v1.SyncChunk(\x010\x01B3Z1github.com/3xDevOps/Aether/internal/guest/guestpbb\x06proto3"
+	"\x04Sync\x12\x1a.aether.guest.v1.SyncChunk\x1a\x1a.aether.guest.v1.SyncChunk(\x010\x01B7Z5github.com/3xDevOps/cloudfield/internal/guest/guestpbb\x06proto3"
 
 var (
 	file_git_proto_rawDescOnce sync.Once

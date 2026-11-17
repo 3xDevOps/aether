@@ -17,11 +17,11 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store/storetest"
+	"github.com/3xDevOps/cloudfield/internal/acphost/acpmock"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/store/storetest"
 )
 
 // The restart acceptance harness: an Enhanced run must keep working through
@@ -147,7 +147,7 @@ func newSoakEnv(ctx context.Context, t *testing.T) *soakEnv {
 	}
 	buildSoakBinary(t, "./cmd/aether-server", e.binA, "")
 	buildSoakBinary(t, "./cmd/aether-server", e.binB,
-		"-X github.com/3xDevOps/Aether/internal/version.Version="+soakVersionB)
+		"-X github.com/3xDevOps/cloudfield/internal/version.Version="+soakVersionB)
 	copyExecutable(t, e.binA, e.installed)
 	e.keyPath, e.signer = writeClientKey(t)
 	if err := os.MkdirAll(e.dataDir, 0o700); err != nil {

@@ -7,9 +7,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/serverupdate"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/serverupdate"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 // followChannel finds the newest release on the server's release channel,

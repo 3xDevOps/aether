@@ -7,8 +7,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/memberhome"
 )
 
 // SaveTerminalImage persists image bytes in the member home the target

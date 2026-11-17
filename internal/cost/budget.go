@@ -3,9 +3,9 @@ package cost
 import (
 	"errors"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 // ErrBudgetExceeded is why a new run was refused: the workspace is at

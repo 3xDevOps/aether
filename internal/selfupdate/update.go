@@ -13,7 +13,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/macinstall"
+	"github.com/3xDevOps/cloudfield/internal/macinstall"
 )
 
 // adminInstaller installs one staged file through the platform's

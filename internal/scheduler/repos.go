@@ -7,8 +7,8 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/mirror"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/mirror"
 )
 
 type extraCapture struct {

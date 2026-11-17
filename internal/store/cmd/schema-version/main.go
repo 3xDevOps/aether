@@ -5,7 +5,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 func main() { fmt.Println(store.SchemaVersion()) }

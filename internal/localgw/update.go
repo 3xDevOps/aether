@@ -10,12 +10,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/localops"
-	"github.com/3xDevOps/Aether/internal/macinstall"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/localops"
+	"github.com/3xDevOps/cloudfield/internal/macinstall"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 // applyUpdate is selfupdate.UpdateWithAuthorization behind a variable

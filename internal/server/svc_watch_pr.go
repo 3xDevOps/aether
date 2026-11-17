@@ -3,8 +3,8 @@ package server
 import (
 	"errors"
 
-	"github.com/3xDevOps/Aether/internal/github"
-	"github.com/3xDevOps/Aether/internal/watch"
+	"github.com/3xDevOps/cloudfield/internal/github"
+	"github.com/3xDevOps/cloudfield/internal/watch"
 )
 
 // Pull request watches: the watch service svc_watch.go builds reads pull

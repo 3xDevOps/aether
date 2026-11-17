@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 // start is a release hosts upgrade from, with the build its image records.

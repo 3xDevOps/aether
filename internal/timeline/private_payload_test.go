@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
 )
 
 // A private assistant notice must reach only its recipient through a stored-log

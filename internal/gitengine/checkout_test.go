@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 func runCheckoutGit(t *testing.T, dir string, args ...string) string {

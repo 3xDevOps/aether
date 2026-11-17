@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/envname"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/envname"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 // OptOutEnv disables the release check when set to a non-empty value.

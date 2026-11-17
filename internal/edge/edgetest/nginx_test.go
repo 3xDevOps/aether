@@ -27,10 +27,10 @@ import (
 	"testing"
 	"time"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/edge/relay"
-	edge "github.com/3xDevOps/Aether/internal/edge/service"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/edge/relay"
+	edge "github.com/3xDevOps/cloudfield/internal/edge/service"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // nginxIdle is how long the test holds a relayed connection silent: past

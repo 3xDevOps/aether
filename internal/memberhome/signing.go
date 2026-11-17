@@ -12,8 +12,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/rootfs"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/rootfs"
 )
 
 // The container mounts the home as $HOME. Only the public half of the

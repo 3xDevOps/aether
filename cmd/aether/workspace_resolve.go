@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // resolveWorkspace maps a user-supplied workspace name or ID to the ID every

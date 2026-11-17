@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // maxTracked bounds the keys a limiter remembers. When it is full, a new

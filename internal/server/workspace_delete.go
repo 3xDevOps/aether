@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/gitengine"
-	"github.com/3xDevOps/Aether/internal/mirror"
-	"github.com/3xDevOps/Aether/internal/scheduler"
-	"github.com/3xDevOps/Aether/internal/secretstore"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/gitengine"
+	"github.com/3xDevOps/cloudfield/internal/mirror"
+	"github.com/3xDevOps/cloudfield/internal/scheduler"
+	"github.com/3xDevOps/cloudfield/internal/secretstore"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 type workspaceDeletion struct {

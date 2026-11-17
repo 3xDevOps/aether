@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/sshd"
-	"github.com/3xDevOps/Aether/internal/webgate"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/webgate"
 )
 
 // identityTimeout bounds the WhoIs lookup a request waits on, so a

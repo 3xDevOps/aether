@@ -15,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/disk"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/guest"
+	"github.com/3xDevOps/cloudfield/internal/disk"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/guest"
 )
 
 // maxVMPackBytes bounds one pack of a snapshot, whose input is bounded by

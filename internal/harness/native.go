@@ -5,8 +5,8 @@ import (
 	"path"
 	"slices"
 
-	"github.com/3xDevOps/Aether/internal/coordhooks"
-	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/coordhooks"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
 )
 
 // NativeLaunch is one run's server-owned native mailbox integration. It is

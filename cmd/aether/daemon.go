@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	"github.com/3xDevOps/Aether/internal/localops"
-	"github.com/3xDevOps/Aether/internal/syncd"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	"github.com/3xDevOps/cloudfield/internal/localops"
+	"github.com/3xDevOps/cloudfield/internal/syncd"
 )
 
 func init() {

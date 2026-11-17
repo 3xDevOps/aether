@@ -13,11 +13,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	edgeclient "github.com/3xDevOps/cloudfield/internal/edge/client"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 func init() {

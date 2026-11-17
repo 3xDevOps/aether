@@ -410,14 +410,14 @@ jobs:
       - name: Client packages build and vet
         shell: bash
         run: |
-          pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
+          pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/cloudfield/')
           mapfile -t packages <<< "$pkgs"
           go build ./cmd/aether
           go vet ./cmd/aether "${packages[@]}"
       - name: Client unit tests
         shell: bash
         run: |
-          pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/Aether/')
+          pkgs=$(go list -deps ./cmd/aether | grep '^github.com/3xDevOps/cloudfield/')
           mapfile -t packages <<< "$pkgs"
           go test ./cmd/aether "${packages[@]}"
       # Saved before Defender is armed: archiving under its realtime scan

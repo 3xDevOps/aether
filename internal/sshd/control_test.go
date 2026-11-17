@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/control"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/scheduler"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/control"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/scheduler"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 func controlClient(t *testing.T, e *testEnv) *protocol.Client {

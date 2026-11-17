@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // SlackLink is the Slack account a member linked to the server's bot with

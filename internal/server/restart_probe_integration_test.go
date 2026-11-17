@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/acphost"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // history reads every item the run's log holds, oldest first.

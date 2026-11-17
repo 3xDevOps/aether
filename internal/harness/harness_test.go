@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
 	"github.com/pelletier/go-toml/v2"
 )
 

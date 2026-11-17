@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/3xDevOps/Aether/internal/guest/guestpb"
+	"github.com/3xDevOps/cloudfield/internal/guest/guestpb"
 )
 
 // fixture is a member home beside a file outside it, served as share 0

@@ -13,8 +13,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
 )
 
 func awaitWatchPatch(t *testing.T, e *Engine, diffs events.Subscription, run domain.RunID, addedLine string) {

@@ -8,10 +8,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/ptyhost"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 )
 
 func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error {

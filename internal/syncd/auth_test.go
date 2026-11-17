@@ -12,7 +12,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
-	"github.com/3xDevOps/Aether/internal/testhome"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
 )
 
 // The daemon shares the CLI's key discovery: a locked id_ed25519 next to

@@ -74,7 +74,7 @@ aarch64 | arm64) goarch=arm64 ;;
 *) die "unsupported target architecture: $machine" ;;
 esac
 
-MODULE=github.com/3xDevOps/Aether
+MODULE=github.com/3xDevOps/cloudfield
 VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 

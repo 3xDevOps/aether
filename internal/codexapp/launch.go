@@ -21,7 +21,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
 )
 
 // socketPath is where a run's app-server listens. Codex links it to its own

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	cliprofile "github.com/3xDevOps/Aether/internal/cli/profile"
-	"github.com/3xDevOps/Aether/internal/testhome"
+	cliprofile "github.com/3xDevOps/cloudfield/internal/cli/profile"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
 )
 
 // A push refuses while a scanner finding in a file the member wrote is

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/memberhome"
-	"github.com/3xDevOps/Aether/internal/runtime"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/memberhome"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 func TestSaveEnvironmentRefusesWithoutARunningTerminal(t *testing.T) {

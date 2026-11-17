@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 const memoryUsage = `usage: aether memory <command> [--workspace <name-or-id>] [options]

@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/guest"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/guest"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 )
 
 // dictationPort is the vsock port the helper serves the engine's socket on.

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 func TestMemberNamesReturnsAFailedMemberList(t *testing.T) {

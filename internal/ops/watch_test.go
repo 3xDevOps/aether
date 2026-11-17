@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 var testWatch = protocol.Watch{ID: "w-1", Target: protocol.WatchTarget{Kind: protocol.WatchTargetRun, RunID: "run-1"}, TargetTitle: injection,

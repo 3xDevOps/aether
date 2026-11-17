@@ -17,11 +17,11 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/harness"
-	profilesvc "github.com/3xDevOps/Aether/internal/profile"
-	"github.com/3xDevOps/Aether/internal/rootfs"
-	"github.com/3xDevOps/Aether/internal/secretscan"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/harness"
+	profilesvc "github.com/3xDevOps/cloudfield/internal/profile"
+	"github.com/3xDevOps/cloudfield/internal/rootfs"
+	"github.com/3xDevOps/cloudfield/internal/secretscan"
 )
 
 const (

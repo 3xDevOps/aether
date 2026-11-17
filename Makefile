@@ -5,7 +5,7 @@
 # release` also builds the dashboard, which needs Bun and Node, and the
 # Android APK, which needs Docker.
 
-MODULE  := github.com/3xDevOps/Aether
+MODULE  := github.com/3xDevOps/cloudfield
 # Both reach shell command lines - the linker flags here, the Windows resource
 # arguments in `release` - and a git tag may legally contain a quote, a
 # semicolon or a $. CI builds a pull request's own head with its own tags, so

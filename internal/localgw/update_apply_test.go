@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/localops"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/localops"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 func TestUpdateApplyCarriesTheServerRestart(t *testing.T) {

@@ -22,11 +22,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/oauth2"
 
-	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
-	"github.com/3xDevOps/Aether/internal/connector"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/acphost/acpmock"
+	"github.com/3xDevOps/cloudfield/internal/connector"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
 )
 
 // localEdge stands in for a connected edge at origin, which is all

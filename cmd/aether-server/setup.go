@@ -16,11 +16,11 @@ import (
 	"syscall"
 	"time"
 
-	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
-	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/reachability"
-	"github.com/3xDevOps/Aether/internal/serversetup"
+	edgeagent "github.com/3xDevOps/cloudfield/internal/edge/agent"
+	edgeclient "github.com/3xDevOps/cloudfield/internal/edge/client"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/reachability"
+	"github.com/3xDevOps/cloudfield/internal/serversetup"
 	"golang.org/x/term"
 )
 

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/browser"
-	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/cloudfield/internal/browser"
+	"github.com/3xDevOps/cloudfield/internal/runtime"
 	"github.com/moby/moby/client"
 )
 

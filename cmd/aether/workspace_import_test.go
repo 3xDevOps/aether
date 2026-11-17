@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/testhome"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/testhome"
 )
 
 func TestWorkspaceImportRefusesBeforeDialing(t *testing.T) {

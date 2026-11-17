@@ -15,7 +15,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/cloudfield/internal/selfupdate"
 )
 
 // InstallCommand installs dictation; error messages name it.

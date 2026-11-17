@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/ptyhost"
 )
 
 func TestNativeSilentWorkingHeartbeat(t *testing.T) {

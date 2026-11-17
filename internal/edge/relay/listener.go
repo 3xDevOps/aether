@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"sync"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // Listener wraps the public listener ln for the edge's HTTPS server. An

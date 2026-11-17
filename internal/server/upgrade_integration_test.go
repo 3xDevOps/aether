@@ -22,10 +22,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/sshd"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	edgeagent "github.com/3xDevOps/cloudfield/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/sshd"
 )
 
 // mainSchemaVersion is the schema version of a database written by main,

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/acphost/acpmock"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 const continuedOnAda = "Your previous turn stopped because Grace revoked access to their account. The session continues on Ada's account. Continue the task where you stopped."

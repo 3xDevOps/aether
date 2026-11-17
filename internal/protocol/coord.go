@@ -3,7 +3,7 @@ package protocol
 import (
 	"fmt"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // Coordination wire v3.

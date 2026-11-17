@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/memberhome"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/memberhome"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // stubBackend records control calls; the streaming surfaces are never

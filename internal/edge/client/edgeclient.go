@@ -23,7 +23,7 @@ import (
 	"time"
 	"unicode"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
 )
 
 // DefaultURL is the relay origin new setups use for the edge the project

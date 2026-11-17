@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/memberhome"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

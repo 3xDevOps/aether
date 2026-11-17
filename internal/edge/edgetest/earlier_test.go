@@ -14,10 +14,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/3xDevOps/Aether/internal/cli"
-	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/cli"
+	edgeagent "github.com/3xDevOps/cloudfield/internal/edge/agent"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // TestServerVerifiesGrants plays a compromised or buggy edge that sends

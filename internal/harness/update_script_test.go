@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/cloudfield/internal/agentstatus"
 )
 
 func TestMain(m *testing.M) {

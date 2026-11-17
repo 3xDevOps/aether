@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
-	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
-	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/watch"
+	"github.com/3xDevOps/cloudfield/internal/acphost"
+	"github.com/3xDevOps/cloudfield/internal/acphost/acpmock"
+	"github.com/3xDevOps/cloudfield/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/watch"
 )
 
 func newNoticeService(t *testing.T) (*Service, events.Subscription) {

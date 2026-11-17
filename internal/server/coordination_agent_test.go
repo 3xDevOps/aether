@@ -11,12 +11,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/mcpbridge"
-	"github.com/3xDevOps/Aether/internal/ops"
+	"github.com/3xDevOps/cloudfield/internal/mcpbridge"
+	"github.com/3xDevOps/cloudfield/internal/ops"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/3xDevOps/Aether/internal/coordtransport"
-	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/cloudfield/internal/coordtransport"
+	"github.com/3xDevOps/cloudfield/internal/protocol"
 )
 
 // The coordination E2E's fake agent edits a shared file the radar sees and,

@@ -3,7 +3,7 @@ package protocol
 import (
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/store"
 )
 
 // RoomMessageKind and RoomMessageState mirror the durable store vocabulary

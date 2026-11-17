@@ -20,32 +20,32 @@ linters:
             - "**/internal/edge/relay/**"
             - "**/internal/edge/store/**"
           deny:
-            - pkg: github.com/3xDevOps/Aether/internal/sshd$
+            - pkg: github.com/3xDevOps/cloudfield/internal/sshd$
               desc: the edge reaches a server only through internal/edge/proto
-            - pkg: github.com/3xDevOps/Aether/internal/sshd/
+            - pkg: github.com/3xDevOps/cloudfield/internal/sshd/
               desc: the edge reaches a server only through internal/edge/proto
-            - pkg: github.com/3xDevOps/Aether/internal/store$
+            - pkg: github.com/3xDevOps/cloudfield/internal/store$
               desc: the edge keeps its own state in internal/edge/store
-            - pkg: github.com/3xDevOps/Aether/internal/store/
+            - pkg: github.com/3xDevOps/cloudfield/internal/store/
               desc: the edge keeps its own state in internal/edge/store
-            - pkg: github.com/3xDevOps/Aether/internal/server$
+            - pkg: github.com/3xDevOps/cloudfield/internal/server$
               desc: the edge reaches a server only through internal/edge/proto
-            - pkg: github.com/3xDevOps/Aether/internal/server/
+            - pkg: github.com/3xDevOps/cloudfield/internal/server/
               desc: the edge reaches a server only through internal/edge/proto
-            - pkg: github.com/3xDevOps/Aether/internal/cli$
+            - pkg: github.com/3xDevOps/cloudfield/internal/cli$
               desc: the edge reaches a client only through internal/edge/proto
-            - pkg: github.com/3xDevOps/Aether/internal/cli/
+            - pkg: github.com/3xDevOps/cloudfield/internal/cli/
               desc: the edge reaches a client only through internal/edge/proto
-            - pkg: github.com/3xDevOps/Aether/internal/localgw$
+            - pkg: github.com/3xDevOps/cloudfield/internal/localgw$
               desc: the edge reaches a client only through internal/edge/proto
-            - pkg: github.com/3xDevOps/Aether/internal/localgw/
+            - pkg: github.com/3xDevOps/cloudfield/internal/localgw/
               desc: the edge reaches a client only through internal/edge/proto
         edge-proto:
           list-mode: lax
           files:
             - "**/internal/edge/proto/**"
           deny:
-            - pkg: github.com/3xDevOps/Aether/
+            - pkg: github.com/3xDevOps/cloudfield/
               desc: the wire contract is shared by every peer and depends on nothing in this repository
     govet:
       enable:

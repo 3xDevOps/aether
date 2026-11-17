@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/cloudfield/internal/domain"
 )
 
 // MaxAssistantPromptKeys bounds the accepted prompt keys kept per member.

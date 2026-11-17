@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/store/storetest"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/cloudfield/internal/events"
+	"github.com/3xDevOps/cloudfield/internal/store"
+	"github.com/3xDevOps/cloudfield/internal/store/storetest"
+	"github.com/3xDevOps/cloudfield/internal/version"
 )
 
 // trialEnv is a swap as an update leaves it: the release's binaries in

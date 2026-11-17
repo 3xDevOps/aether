@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/netip"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
-	"github.com/3xDevOps/Aether/internal/edge/relay"
-	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
+	edgeproto "github.com/3xDevOps/cloudfield/internal/edge/proto"
+	"github.com/3xDevOps/cloudfield/internal/edge/relay"
+	edgestore "github.com/3xDevOps/cloudfield/internal/edge/store"
 )
 
 // RelayConfig is the configuration of the relay that serves beside s: the
