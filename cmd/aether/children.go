@@ -14,12 +14,12 @@ func init() {
 	register(command{
 		name:  "subsessions",
 		short: "turn subsessions, or one agent for them, on or off, or list a session's subsessions",
-		usage: "aether subsessions [on|off] [--agent <agent> [--account <member-id>]]\n" +
-			"aether subsessions <session-id>",
-		example: "aether subsessions off\n" +
-			"aether subsessions off --agent codex\n" +
-			"aether subsessions off --agent claude --account mem-3j2sxtk2zk\n" +
-			"aether subsessions run-d6ay38tj8j",
+		usage: "cloudfield subsessions [on|off] [--agent <agent> [--account <member-id>]]\n" +
+			"cloudfield subsessions <session-id>",
+		example: "cloudfield subsessions off\n" +
+			"cloudfield subsessions off --agent codex\n" +
+			"cloudfield subsessions off --agent claude --account mem-3j2sxtk2zk\n" +
+			"cloudfield subsessions run-d6ay38tj8j",
 		run: runChildren,
 	})
 }
@@ -40,7 +40,7 @@ func runChildren(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 || (*account != "" && *agent == "") || (*agent != "" && on == nil) {
-		return fmt.Errorf("usage: aether subsessions [on|off] [--agent <agent> [--account <member-id>]]\n   or: aether subsessions <session-id>")
+		return fmt.Errorf("usage: cloudfield subsessions [on|off] [--agent <agent> [--account <member-id>]]\n   or: cloudfield subsessions <session-id>")
 	}
 	var p protocol.ChildSettingsParams
 	if *agent != "" {

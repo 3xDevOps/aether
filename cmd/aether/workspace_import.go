@@ -16,7 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
-const workspaceImportUsage = "usage: aether workspace import <path|url> [--name <name>]"
+const workspaceImportUsage = "usage: cloudfield workspace import <path|url> [--name <name>]"
 
 func workspaceImport(args []string) error {
 	fs := newFlagSet("workspace import")

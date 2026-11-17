@@ -10,15 +10,15 @@ func init() {
 	register(command{
 		name:    "reopen",
 		short:   "reopen a finished session that still keeps its sandbox",
-		usage:   "aether reopen <session-id>",
-		example: "aether reopen run-d6ay38tj8j",
+		usage:   "cloudfield reopen <session-id>",
+		example: "cloudfield reopen run-d6ay38tj8j",
 		run:     runReopen,
 	})
 }
 
 func runReopen(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether reopen <session-id>")
+		return fmt.Errorf("usage: cloudfield reopen <session-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.RunResult

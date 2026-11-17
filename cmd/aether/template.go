@@ -16,13 +16,13 @@ func init() {
 	register(command{
 		name:  "template",
 		short: "list, save, or delete a workspace's task templates",
-		usage: "aether template list [--workspace <name>]\n" +
-			"aether template save <name> --agent <agent> --task \"<task>\" [--param <name=value>]... [--workspace <name>]\n" +
+		usage: "cloudfield template list [--workspace <name>]\n" +
+			"cloudfield template save <name> --agent <agent> --task \"<task>\" [--param <name=value>]... [--workspace <name>]\n" +
 			"    [--mode standard|enhanced|background] [--model <model>] [--effort <level>] [--budget <usd>]\n" +
-			"aether template delete <name> [--workspace <name>]",
-		example: "aether template list\n" +
-			"aether template save nightly-audit --agent claude --task \"audit {{area}} for bugs\" --param area=api\n" +
-			"aether template delete nightly-audit",
+			"cloudfield template delete <name> [--workspace <name>]",
+		example: "cloudfield template list\n" +
+			"cloudfield template save nightly-audit --agent claude --task \"audit {{area}} for bugs\" --param area=api\n" +
+			"cloudfield template delete nightly-audit",
 		run: runTemplate,
 	})
 }
@@ -93,10 +93,10 @@ func templateSave(args []string) error {
 	fs.Var(params, "param", "default for a task parameter, name=value (repeatable)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether template save <name> --agent <name> --task \"...\" [--mode] [--model] [--effort] [--param k=v] [--budget] [--workspace]", err)
+		return fmt.Errorf("%w\nusage: cloudfield template save <name> --agent <name> --task \"...\" [--mode] [--model] [--effort] [--param k=v] [--budget] [--workspace]", err)
 	}
 	if name == "" || *task == "" || *agent == "" {
-		return fmt.Errorf("usage: aether template save <name> --agent <name> --task \"...\" [--mode] [--model] [--effort] [--param k=v] [--budget] [--workspace]")
+		return fmt.Errorf("usage: cloudfield template save <name> --agent <name> --task \"...\" [--mode] [--model] [--effort] [--param k=v] [--budget] [--workspace]")
 	}
 	wireMode, err := parseLaunchMode(*mode)
 	if err != nil {
@@ -139,10 +139,10 @@ func templateDelete(args []string) error {
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether template delete <name> [--workspace]", err)
+		return fmt.Errorf("%w\nusage: cloudfield template delete <name> [--workspace]", err)
 	}
 	if name == "" {
-		return fmt.Errorf("usage: aether template delete <name> [--workspace]")
+		return fmt.Errorf("usage: cloudfield template delete <name> [--workspace]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		wsID, err := resolveWorkspace(c, *workspace)

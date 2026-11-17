@@ -16,7 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const memoryUsage = `usage: aether memory <command> [--workspace <name-or-id>] [options]
+const memoryUsage = `usage: cloudfield memory <command> [--workspace <name-or-id>] [options]
 
 Every member reads every note. Only a member note's owner or an admin may
 pin, unpin, remove or replace it. Put -- before text that starts with a
@@ -42,20 +42,20 @@ func init() {
 	register(command{
 		name:  "memory",
 		short: "search, add, pin and remove the team memory notes sessions read",
-		usage: "aether memory ls [--workspace <name>] [--kind <kind>] [--file <path>] [--all] [--limit <n>]\n" +
-			"aether memory search [--workspace <name>] [--kind <kind>] [--file <path>] [--all] [--limit <n>] <words...>\n" +
-			"aether memory show [--workspace <name>] <id>\n" +
-			"aether memory add [--workspace <name>] --kind <kind> [--pin] [--me] [--file <path>]... [--supersedes <id>] <text...>\n" +
-			"aether memory pin [--workspace <name>] [--me] <id>\n" +
-			"aether memory unpin [--workspace <name>] <id>\n" +
-			"aether memory rm [--workspace <name>] <id>\n" +
-			"aether memory rm [--workspace <name>] --run <session-id>\n" +
-			"aether memory brief [--workspace <name>] [--member <member>]",
-		example: "aether memory ls\n" +
-			"aether memory search --workspace app migrations\n" +
-			"aether memory add --kind convention --file go.mod Run go mod tidy before committing\n" +
-			"aether memory show <id>\n" +
-			"aether memory brief",
+		usage: "cloudfield memory ls [--workspace <name>] [--kind <kind>] [--file <path>] [--all] [--limit <n>]\n" +
+			"cloudfield memory search [--workspace <name>] [--kind <kind>] [--file <path>] [--all] [--limit <n>] <words...>\n" +
+			"cloudfield memory show [--workspace <name>] <id>\n" +
+			"cloudfield memory add [--workspace <name>] --kind <kind> [--pin] [--me] [--file <path>]... [--supersedes <id>] <text...>\n" +
+			"cloudfield memory pin [--workspace <name>] [--me] <id>\n" +
+			"cloudfield memory unpin [--workspace <name>] <id>\n" +
+			"cloudfield memory rm [--workspace <name>] <id>\n" +
+			"cloudfield memory rm [--workspace <name>] --run <session-id>\n" +
+			"cloudfield memory brief [--workspace <name>] [--member <member>]",
+		example: "cloudfield memory ls\n" +
+			"cloudfield memory search --workspace app migrations\n" +
+			"cloudfield memory add --kind convention --file go.mod Run go mod tidy before committing\n" +
+			"cloudfield memory show <id>\n" +
+			"cloudfield memory brief",
 		run: runMemory,
 	})
 }
@@ -97,10 +97,10 @@ func parseMemory(args []string) (memoryCall, error) {
 			return nil, usage(err)
 		}
 		if name == "ls" && len(words) > 0 {
-			return nil, usage(errors.New("ls takes no words; use aether memory search"))
+			return nil, usage(errors.New("ls takes no words; use cloudfield memory search"))
 		}
 		if name == "search" && len(words) == 0 {
-			return nil, usage(errors.New("search needs words; aether memory ls lists the newest notes"))
+			return nil, usage(errors.New("search needs words; cloudfield memory ls lists the newest notes"))
 		}
 		return func(c *protocol.Client, w io.Writer) error {
 			ws, err := resolveWorkspace(c, *workspace)

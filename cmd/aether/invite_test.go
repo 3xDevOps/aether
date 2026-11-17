@@ -38,7 +38,7 @@ func TestParseInviteArgs(t *testing.T) {
 		},
 		{args: []string{"--github", "octocat", "--ttl", "60"}, wantErr: "--ttl applies to a one-time invite code"},
 		{args: []string{"--role", "admin"}, wantErr: "--role applies to --github and --email"},
-		{args: []string{"--github", "octocat", "extra"}, wantErr: "usage: aether invite"},
+		{args: []string{"--github", "octocat", "extra"}, wantErr: "usage: cloudfield invite"},
 	} {
 		got, ttl, ws, err := parseInviteArgs(tc.args)
 		if tc.wantErr != "" {

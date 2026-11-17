@@ -29,14 +29,14 @@ func init() {
 	register(command{
 		name:  "link",
 		short: "connect to a server and save local config",
-		usage: "aether link <host:port> [--invite <code>] [--key <path>] [flags]\n" +
-			"aether link <server-id> [--addr <host[:port]>] [flags]\n" +
-			"aether link <join-link> [flags]\n" +
-			"aether link --from-edge <server-id> [--yes] [flags]\n" +
-			"aether link --claim <link|code> [flags]",
-		example: "aether link devbox.example.com:2222 --invite <code>\n" +
-			"aether link --claim <claim-link> --repo ~/src/app\n" +
-			"aether link --from-edge <server-id>",
+		usage: "cloudfield link <host:port> [--invite <code>] [--key <path>] [flags]\n" +
+			"cloudfield link <server-id> [--addr <host[:port]>] [flags]\n" +
+			"cloudfield link <join-link> [flags]\n" +
+			"cloudfield link --from-edge <server-id> [--yes] [flags]\n" +
+			"cloudfield link --claim <link|code> [flags]",
+		example: "cloudfield link devbox.example.com:2222 --invite <code>\n" +
+			"cloudfield link --claim <claim-link> --repo ~/src/app\n" +
+			"cloudfield link --from-edge <server-id>",
 		flags: true,
 		run:   runLink,
 	})
@@ -71,7 +71,7 @@ type linkOptions struct {
 	direct    string
 }
 
-const linkUsage = "usage: aether link <addr | server id> [--invite] [--key] [--name] [--repo] [--workspace] [--edge] [--addr]\n" +
+const linkUsage = "usage: cloudfield link <addr | server id> [--invite] [--key] [--name] [--repo] [--workspace] [--edge] [--addr]\n" +
 	"       aether link <join link> [--addr] [--name] [--repo] [--workspace]\n" +
 	"       aether link --from-edge <server id> [--yes] [--edge] [--addr] [--name] [--repo] [--workspace]\n" +
 	"       aether link --claim <code | claim link> [--edge] [--addr] [--name] [--repo] [--workspace]"
@@ -83,8 +83,8 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 	repo := fs.String("repo", "", "local git repository to add the aether remote to")
 	workspace := fs.String("workspace", "", "workspace name or id for the git remote")
 	keyFlag := fs.String("key", "", "SSH private key to authenticate with (default ~/.ssh/id_ed25519); saved in the config for later commands")
-	claim := fs.String("claim", "", "claim code or claim link printed by aether-server setup; claims the server through the edge and links it")
-	fromEdge := fs.String("from-edge", "", "server id from aether servers to link: shows its name and host key and asks before pinning it")
+	claim := fs.String("claim", "", "claim code or claim link printed by cloudfield-server setup; claims the server through the edge and links it")
+	fromEdge := fs.String("from-edge", "", "server id from cloudfield servers to link: shows its name and host key and asks before pinning it")
 	yes := fs.Bool("yes", false, "with --from-edge: skip the confirmation, having compared the id with the one the server's admin gave you")
 	edge := fs.String("edge", "", edgeFlagUsage)
 	direct := fs.String("addr", "", "for an edge link: SSH address, host[:port], to try before the edge")

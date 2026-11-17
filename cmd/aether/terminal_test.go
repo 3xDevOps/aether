@@ -19,7 +19,7 @@ func TestTerminalUsageRejectsMalformedSubcommands(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			err := runTerminal(args)
-			if err == nil || !strings.Contains(err.Error(), "usage: aether terminal") {
+			if err == nil || !strings.Contains(err.Error(), "usage: cloudfield terminal") {
 				t.Fatalf("runTerminal(%v) = %v, want usage error", args, err)
 			}
 		})

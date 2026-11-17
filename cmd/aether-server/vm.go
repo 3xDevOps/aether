@@ -20,7 +20,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
-const vmUsage = "usage: aether-server vm install [--config <file>]"
+const vmUsage = "usage: cloudfield-server vm install [--config <file>]"
 
 // kvmDevice is a seam for install_test.go: no test host is promised KVM.
 var kvmDevice = "/dev/kvm"

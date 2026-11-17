@@ -13,12 +13,12 @@ func init() {
 	register(command{
 		name:  "schedule",
 		short: "list, set, or delete the cron rules that fire task templates",
-		usage: "aether schedule list [--workspace <name>]\n" +
-			"aether schedule set <template> \"<cron>\" [--workspace <name>]\n" +
-			"aether schedule delete <template> [--workspace <name>]",
-		example: "aether schedule list\n" +
-			"aether schedule set nightly-audit \"0 3 * * *\"\n" +
-			"aether schedule delete nightly-audit",
+		usage: "cloudfield schedule list [--workspace <name>]\n" +
+			"cloudfield schedule set <template> \"<cron>\" [--workspace <name>]\n" +
+			"cloudfield schedule delete <template> [--workspace <name>]",
+		example: "cloudfield schedule list\n" +
+			"cloudfield schedule set nightly-audit \"0 3 * * *\"\n" +
+			"cloudfield schedule delete nightly-audit",
 		run: runSchedule,
 	})
 }
@@ -68,7 +68,7 @@ func scheduleSet(args []string) error {
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	rest, err := parseTwoArgs(fs, args)
 	if err != nil {
-		return fmt.Errorf("usage: aether schedule set <template> \"<cron>\" [--workspace]\ncron is standard five-field syntax or an @descriptor, in UTC")
+		return fmt.Errorf("usage: cloudfield schedule set <template> \"<cron>\" [--workspace]\ncron is standard five-field syntax or an @descriptor, in UTC")
 	}
 	template, spec := rest[0], rest[1]
 	return withControl(func(c *protocol.Client) error {
@@ -93,10 +93,10 @@ func scheduleDelete(args []string) error {
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	template, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether schedule delete <template> [--workspace]", err)
+		return fmt.Errorf("%w\nusage: cloudfield schedule delete <template> [--workspace]", err)
 	}
 	if template == "" {
-		return fmt.Errorf("usage: aether schedule delete <template> [--workspace]")
+		return fmt.Errorf("usage: cloudfield schedule delete <template> [--workspace]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		wsID, err := resolveWorkspace(c, *workspace)

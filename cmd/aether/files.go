@@ -12,22 +12,22 @@ func init() {
 	register(command{
 		name:  "files",
 		short: "read workspace and session files",
-		usage: "aether files ls <workspace|session-id> [path]\n" +
-			"aether files cat <workspace|session-id> <path>",
-		example: "aether files ls app\n" +
-			"aether files cat run-d6ay38tj8j README.md",
+		usage: "cloudfield files ls <workspace|session-id> [path]\n" +
+			"cloudfield files cat <workspace|session-id> <path>",
+		example: "cloudfield files ls app\n" +
+			"cloudfield files cat run-d6ay38tj8j README.md",
 		run: runFiles,
 	})
 }
 
 func runFiles(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: aether files ls <workspace|session> [path] | aether files cat <workspace|session> <path>")
+		return fmt.Errorf("usage: cloudfield files ls <workspace|session> [path] | cloudfield files cat <workspace|session> <path>")
 	}
 	switch args[0] {
 	case "ls":
 		if len(args) < 2 || len(args) > 3 {
-			return fmt.Errorf("usage: aether files ls <workspace|session> [path]")
+			return fmt.Errorf("usage: cloudfield files ls <workspace|session> [path]")
 		}
 		path := ""
 		if len(args) == 3 {
@@ -36,11 +36,11 @@ func runFiles(args []string) error {
 		return filesList(args[1], path)
 	case "cat":
 		if len(args) != 3 {
-			return fmt.Errorf("usage: aether files cat <workspace|session> <path>")
+			return fmt.Errorf("usage: cloudfield files cat <workspace|session> <path>")
 		}
 		return filesCat(args[1], args[2])
 	default:
-		return fmt.Errorf("usage: aether files ls <workspace|session> [path] | aether files cat <workspace|session> <path>")
+		return fmt.Errorf("usage: cloudfield files ls <workspace|session> [path] | cloudfield files cat <workspace|session> <path>")
 	}
 }
 

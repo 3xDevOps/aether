@@ -23,10 +23,10 @@ func init() {
 	register(command{
 		name:  "gui",
 		short: "serve the dashboard locally with full SSH authority; `gui build` installs the desktop app",
-		usage: "aether gui [--port <port>] [--url] [--json] [--server <name>]\n" +
-			"aether gui build [--build-dir <dir>] [--json] [--source] [--zip <file>]",
-		example: "aether gui --url\n" +
-			"aether gui build",
+		usage: "cloudfield gui [--port <port>] [--url] [--json] [--server <name>]\n" +
+			"cloudfield gui build [--build-dir <dir>] [--json] [--source] [--zip <file>]",
+		example: "cloudfield gui --url\n" +
+			"cloudfield gui build",
 		flags: true,
 		run:   runGUI,
 	})
@@ -44,7 +44,7 @@ func runGUI(args []string) error {
 	port := fs.Int("port", 0, "loopback port to bind (0 picks an ephemeral one)")
 	urlOnly := fs.Bool("url", false, "print the gateway URL instead of opening a browser")
 	jsonOut := fs.Bool("json", false, "print one JSON line with the URL and address, then keep serving")
-	server := fs.String("server", "", "named server profile from aether link --name (default: the top-level link)")
+	server := fs.String("server", "", "named server profile from cloudfield link --name (default: the top-level link)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

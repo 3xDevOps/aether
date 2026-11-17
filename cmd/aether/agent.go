@@ -19,23 +19,23 @@ func init() {
 	register(command{
 		name:  "agent",
 		short: "manage agents: add, list, models, login, remove",
-		usage: "aether agent list [--json]\n" +
-			"aether agent models <name> [--account <member-id>] [--refresh] [--json]\n" +
-			"aether agent login <name>\n" +
-			"aether agent add <name> [--enhanced] [--standard <argv>] [--background <argv>] [--acp <argv>] [--acp-mode <id>] [--login <path>]\n" +
-			"aether agent remove <name>",
-		example: "aether agent list --json\n" +
-			"aether agent models claude --refresh\n" +
-			"aether agent login claude\n" +
-			"aether agent add codex --enhanced\n" +
-			"aether agent remove codex",
+		usage: "cloudfield agent list [--json]\n" +
+			"cloudfield agent models <name> [--account <member-id>] [--refresh] [--json]\n" +
+			"cloudfield agent login <name>\n" +
+			"cloudfield agent add <name> [--enhanced] [--standard <argv>] [--background <argv>] [--acp <argv>] [--acp-mode <id>] [--login <path>]\n" +
+			"cloudfield agent remove <name>",
+		example: "cloudfield agent list --json\n" +
+			"cloudfield agent models claude --refresh\n" +
+			"cloudfield agent login claude\n" +
+			"cloudfield agent add codex --enhanced\n" +
+			"cloudfield agent remove codex",
 		run: runAgent,
 	})
 }
 
 func runAgent(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether agent <add|list|models|login|remove>")
+		return fmt.Errorf("usage: cloudfield agent <add|list|models|login|remove>")
 	}
 	switch args[0] {
 	case "add":
@@ -55,7 +55,7 @@ func runAgent(args []string) error {
 
 func agentRemove(args []string) error {
 	if len(args) != 1 || args[0] == "" {
-		return fmt.Errorf("usage: aether agent remove <name>")
+		return fmt.Errorf("usage: cloudfield agent remove <name>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var result protocol.AgentRemoveResult
@@ -78,7 +78,7 @@ func agentRemove(args []string) error {
 func agentList(args []string) error {
 	jsonOut := len(args) == 1 && args[0] == "--json"
 	if len(args) > 0 && !jsonOut {
-		return fmt.Errorf("usage: aether agent list [--json]")
+		return fmt.Errorf("usage: cloudfield agent list [--json]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var list protocol.AgentListResult
@@ -142,7 +142,7 @@ func printAgents(w io.Writer, agents []protocol.AgentInfo) error {
 }
 
 func agentModels(args []string) error {
-	const usage = "usage: aether agent models <name> [--account <member-id>] [--refresh] [--json]"
+	const usage = "usage: cloudfield agent models <name> [--account <member-id>] [--refresh] [--json]"
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return errors.New(usage)
 	}
@@ -233,7 +233,7 @@ func parseAgentAdd(args []string) (agentAddOptions, error) {
 	var login stringList
 	fs.Var(&login, "login", "file whose presence shows the agent is logged in, such as ~/.cursor/auth.json (repeatable)")
 	enhanced := fs.Bool("enhanced", false, "also install the shipped agent's enhanced-mode adapter")
-	const usage = "usage: aether agent add <name> [--enhanced] [--standard <argv>] [--background <argv>] [--acp <argv>] [--acp-mode <id>] [--login <path>]"
+	const usage = "usage: cloudfield agent add <name> [--enhanced] [--standard <argv>] [--background <argv>] [--acp <argv>] [--acp-mode <id>] [--login <path>]"
 	name, err := parseLeadingArg(fs, args)
 	if err != nil {
 		return agentAddOptions{}, fmt.Errorf("%w\n%s", err, usage)

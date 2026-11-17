@@ -10,15 +10,15 @@ func init() {
 	register(command{
 		name:    "archive",
 		short:   "hide a finished session from the board without deleting its history",
-		usage:   "aether archive <session-id>",
-		example: "aether archive run-d6ay38tj8j",
+		usage:   "cloudfield archive <session-id>",
+		example: "cloudfield archive run-d6ay38tj8j",
 		run:     func(args []string) error { return setArchived(args, true) },
 	})
 	register(command{
 		name:    "unarchive",
-		short:   "restore an archived session to the board and default aether sessions",
-		usage:   "aether unarchive <session-id>",
-		example: "aether unarchive run-d6ay38tj8j",
+		short:   "restore an archived session to the board and default cloudfield sessions",
+		usage:   "cloudfield unarchive <session-id>",
+		example: "cloudfield unarchive run-d6ay38tj8j",
 		run:     func(args []string) error { return setArchived(args, false) },
 	})
 }
@@ -29,7 +29,7 @@ func setArchived(args []string, archive bool) error {
 		verb = "unarchive"
 	}
 	if len(args) != 1 {
-		return fmt.Errorf("usage: aether %s <session-id>", verb)
+		return fmt.Errorf("usage: cloudfield %s <session-id>", verb)
 	}
 	runID := args[0]
 	return withControl(func(c *protocol.Client) error {

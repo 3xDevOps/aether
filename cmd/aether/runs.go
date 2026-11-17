@@ -22,12 +22,12 @@ import (
 func init() {
 	register(command{
 		name:  "sessions",
-		short: "list sessions (--needs-you: sessions that need you; --archived: only archived), or show one: aether sessions <session-id>",
-		usage: "aether sessions [--needs-you|--archived] [--json]\n" +
-			"aether sessions <session-id> [--json]",
-		example: "aether sessions --json\n" +
-			"aether sessions --needs-you\n" +
-			"aether sessions run-d6ay38tj8j --json",
+		short: "list sessions (--needs-you: sessions that need you; --archived: only archived), or show one: cloudfield sessions <session-id>",
+		usage: "cloudfield sessions [--needs-you|--archived] [--json]\n" +
+			"cloudfield sessions <session-id> [--json]",
+		example: "cloudfield sessions --json\n" +
+			"cloudfield sessions --needs-you\n" +
+			"cloudfield sessions run-d6ay38tj8j --json",
 		flags: true,
 		run:   runRuns,
 	})
@@ -395,7 +395,7 @@ func runRuns(args []string) error {
 	if runID == "" && fs.NArg() == 1 {
 		runID = fs.Arg(0)
 	} else if fs.NArg() > 0 {
-		return fmt.Errorf("usage: aether sessions [--needs-you|--archived] [--json]\n   or: aether sessions <session-id> [--json]")
+		return fmt.Errorf("usage: cloudfield sessions [--needs-you|--archived] [--json]\n   or: cloudfield sessions <session-id> [--json]")
 	}
 	if *onlyNeedsYou && *archived {
 		return fmt.Errorf("aether sessions: --needs-you and --archived cannot be used together")

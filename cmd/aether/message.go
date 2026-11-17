@@ -14,17 +14,17 @@ func init() {
 	register(command{
 		name:  "message",
 		short: "send a message to a session's agent (- reads it from stdin)",
-		usage: "aether message <session-id> <message...>\n" +
-			"aether message <session-id> -",
-		example: "aether message run-d6ay38tj8j run the tests again\n" +
-			"aether message run-d6ay38tj8j -",
+		usage: "cloudfield message <session-id> <message...>\n" +
+			"cloudfield message <session-id> -",
+		example: "cloudfield message run-d6ay38tj8j run the tests again\n" +
+			"cloudfield message run-d6ay38tj8j -",
 		run: runMessage,
 	})
 }
 
 func runMessage(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: aether message <session-id> <message...>|-")
+		return fmt.Errorf("usage: cloudfield message <session-id> <message...>|-")
 	}
 	text, err := stdinText(strings.Join(args[1:], " "), "message", os.Stdin)
 	if err != nil {

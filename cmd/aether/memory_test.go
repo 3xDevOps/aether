@@ -91,7 +91,7 @@ func TestParseMemoryRejectsBadInputBeforeAnyRPC(t *testing.T) {
 		args []string
 		want string
 	}{
-		{nil, "usage: aether memory"},
+		{nil, "usage: cloudfield memory"},
 		{[]string{"forget"}, `unknown memory command "forget"`},
 		{[]string{"add", "no kind"}, "--kind is required"},
 		{[]string{"add", "--kind", "gotcha"}, "the note text is required"},

@@ -16,15 +16,15 @@ func init() {
 	register(command{
 		name:  "mcp",
 		short: "add the linked server to ChatGPT or Claude as a custom connector, or revoke one",
-		usage: "aether mcp\n" +
-			"aether mcp code\n" +
-			"aether mcp revoke <connector-id>",
-		example: "aether mcp",
+		usage: "cloudfield mcp\n" +
+			"cloudfield mcp code\n" +
+			"cloudfield mcp revoke <connector-id>",
+		example: "cloudfield mcp",
 		run:     runMCP,
 	})
 }
 
-const mcpUsage = "usage: aether mcp [code | revoke <connector id>]"
+const mcpUsage = "usage: cloudfield mcp [code | revoke <connector id>]"
 
 func runMCP(args []string) error {
 	switch {

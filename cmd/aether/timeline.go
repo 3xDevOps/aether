@@ -24,8 +24,8 @@ func init() {
 	register(command{
 		name:    "timeline",
 		short:   "show a workspace's history, filterable and exportable as JSONL",
-		usage:   "aether timeline [<session-id>] [--workspace <name>] [--member <member>] [--type <types>] [--limit <n>] [--jsonl]",
-		example: "aether timeline run-d6ay38tj8j --limit 50",
+		usage:   "cloudfield timeline [<session-id>] [--workspace <name>] [--member <member>] [--type <types>] [--limit <n>] [--jsonl]",
+		example: "cloudfield timeline run-d6ay38tj8j --limit 50",
 		flags:   true,
 		run:     runTimeline,
 	})
@@ -49,7 +49,7 @@ func runTimeline(args []string) error {
 	positional = append(positional, fs.Args()...)
 	switch {
 	case len(positional) > 1, len(positional) == 1 && *run != "":
-		return errors.New("usage: aether timeline [<session-id>] [flags]; name the session once, as an argument or with --run")
+		return errors.New("usage: cloudfield timeline [<session-id>] [flags]; name the session once, as an argument or with --run")
 	case len(positional) == 1:
 		*run = positional[0]
 	}

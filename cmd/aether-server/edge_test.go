@@ -539,13 +539,13 @@ func TestSubcommandHelpExitsZero(t *testing.T) {
 		return
 	}
 	for args, want := range map[string]string{
-		"--help":                "usage: aether-server <command>",
-		"help":                  "usage: aether-server <command>",
-		"help edge":             "usage: aether-server edge status",
+		"--help":                "usage: cloudfield-server <command>",
+		"help":                  "usage: cloudfield-server <command>",
+		"help edge":             "usage: cloudfield-server edge status",
 		"edge --help":           "exits 0\nwhen connected, 3 when not connected yet",
-		"device approve --help": "usage: aether-server device approve <code>",
-		"config -h":             "usage: aether-server config show",
-		"sysbox --help":         "usage: aether-server sysbox status",
+		"device approve --help": "usage: cloudfield-server device approve <code>",
+		"config -h":             "usage: cloudfield-server config show",
+		"sysbox --help":         "usage: cloudfield-server sysbox status",
 	} {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestSubcommandHelpExitsZero$")
 		cmd.Env = append(os.Environ(), "AETHER_SERVER_HELP_ARGS="+args)

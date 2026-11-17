@@ -25,8 +25,8 @@ func init() {
 	register(command{
 		name:    "changes",
 		short:   "show session changes since a cursor",
-		usage:   "aether changes [--since <cursor>] [--run <session-id> | --workspace <name>] [--kinds <kinds>] [--limit <n>] [--follow]",
-		example: "aether changes --run run-d6ay38tj8j --kinds reports --follow",
+		usage:   "cloudfield changes [--since <cursor>] [--run <session-id> | --workspace <name>] [--kinds <kinds>] [--limit <n>] [--follow]",
+		example: "cloudfield changes --run run-d6ay38tj8j --kinds reports --follow",
 		flags:   true,
 		run:     runChanges,
 	})
@@ -44,7 +44,7 @@ func runChanges(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return errors.New("usage: aether changes [flags]; name the session with --run")
+		return errors.New("usage: cloudfield changes [flags]; name the session with --run")
 	}
 	return withControl(func(c *protocol.Client) error {
 		params := protocol.ChangesListParams{Cursor: *since, RunID: *run, Kinds: splitTypes(*kinds), Limit: *limit}

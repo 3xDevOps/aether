@@ -18,7 +18,7 @@ func parseWorkspaceOriginArgs(args []string) (originChange, error) {
 	fs := newFlagSet("workspace origin")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	clear := fs.Bool("clear", false, "forget the workspace's upstream")
-	usage := fmt.Errorf("usage: aether workspace origin [--workspace <name-or-id>] [<url>|--clear]")
+	usage := fmt.Errorf("usage: cloudfield workspace origin [--workspace <name-or-id>] [<url>|--clear]")
 	if err := fs.Parse(args); err != nil {
 		return originChange{}, fmt.Errorf("%w\n%s", err, usage)
 	}
