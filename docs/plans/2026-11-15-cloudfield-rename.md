@@ -6,8 +6,8 @@ keeps running, keeps reaching its edge, and still finds its update.
 
 **Status:** approved by the owner, 2026-11-16. The rename and the new
 domain are the owner's decisions of 2026-11-15; the choices under
-[Decisions](#decisions-2026-11-16) are the owner's of 2026-11-16. Phase 0
-is being built.
+[Decisions](#decisions-2026-11-16) are the owner's of 2026-11-16. Phase 0,
+phase 1 and the code of phase 2 are merged; phases 3 to 5 are being built.
 
 ## The rule
 
@@ -465,12 +465,10 @@ request 943 and its eleven implementation pull requests.
 - Its pull requests 7 and 8 edit `promote-edge.yml` and
   `scripts/edge-update.sh`. The two-identity change goes directly after
   them, so operators copy the script once.
-- `v0.8.7`, the first stable, ships as Aether. Cloudfield starts with the
-  `v0.9.0` line: phase 0 and phase 1 land as nightlies, and `v0.9.0` is the
-  first stable that says Cloudfield
-  ([decision 11](#11-first-release-and-directory-listings)). Phase 3 needs
-  phase 0 in a stable release, so it lands on `main` after `v0.9.0` and
-  ships in `v0.10.0`; `v0.9.1` would be a hotfix cut from `release/0.9`.
+- As released: `v0.8.7`, the first stable, already carries phase 0 and
+  the phase 1 copy, so it says Cloudfield (its dashboard title, for one).
+  Because phase 0 is in that stable release, phase 3 lands on `main` in the
+  `v0.9.0` line.
 - Its pull requests 4 and 11 add dashboard copy and docs that say Aether.
   The phase 1 sweep runs after them, and the name check keeps later ones
   clean.
@@ -600,7 +598,8 @@ if the per-address counters show servers staying behind.
 ### 11. First release and directory listings
 
 - `v0.9.0` is the first release that says Cloudfield. `v0.8.7`, the first
-  stable, ships as Aether.
+  stable, ships as Aether. As released, `v0.8.7` already says Cloudfield:
+  phase 1 merged before it was cut.
 - The Claude and ChatGPT listings are resubmitted with the new name, title
   and description at phase 1, keeping the old connector address. Each
   directory re-reviews on a lead time the project does not control.
@@ -746,6 +745,10 @@ Each is one session. Phase and dependencies are in brackets.
     `scripts/update-smoke.ps1`, and the app paths in `docs/install.md`.
     `desktop/package.json` is unchanged, so the data directory stays
     `aether-desktop`. Design review. [1; after 9 and 9b are released]
+    As built (#1010): install locations follow the product name
+    (`~/.local/share/cloudfield/desktop`, `Cloudfield.app`,
+    `%LOCALAPPDATA%\Programs\Cloudfield Desktop`); the data directory
+    stays `aether-desktop` for every install.
 14. `feat(android)`: app name, strings, launcher and notification icons,
     Play listing. `android/app/src/main/res/`, `android/listing/`. Design
     review. [1]
@@ -766,9 +769,20 @@ Each is one session. Phase and dependencies are in brackets.
     `edge move` refuses or warns unless the edge negotiates protocol 6 or
     later and announces both addresses: otherwise the moved server accepts
     connector tokens only for the address it is enrolled at.
+    As built (#1003): `edge move` refuses, with no override, when the
+    target presents a different edge key than the pin, when no key is
+    pinned, below protocol 6, or when the edge does not announce both
+    addresses. It does not prove the target holds the edge's private key:
+    the handshake carries no edge signature, and the target's TLS
+    certificate authenticates it as at first enrolment. A proof needs an
+    edge protocol change and is the owner's decision.
     [2; after steps 1 to 4 of the switch]
 18. `feat(cli)`: installers create the new command names and the unit
-    link; printed `systemctl` lines use the new name. `scripts/install.sh`,
+    link; printed `systemctl` lines use the new name. As built: systemd
+    refuses `systemctl enable` on an alias name, so every `enable` line
+    keeps `aether-server`, and `journalctl -u` keeps it too. Only `restart`
+    and `status` lines print `cloudfield-server`, and only where systemd
+    resolves the link. `scripts/install.sh`,
     `install.ps1`, `internal/macinstall`, `cmd/aether-server/install.go`,
     `internal/localgw/update.go`. [3; after 2, 3 and 4 are in a stable
     release, and after release-channels 1]
