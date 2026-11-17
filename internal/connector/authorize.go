@@ -571,14 +571,14 @@ var consentTemplate = template.Must(template.New("consent").Funcs(template.FuncM
 --duration-hover:150ms;--ease-hover:cubic-bezier(0.25,0.1,0.25,1);
 --duration-press:150ms;--duration-release:130ms;--ease-press:cubic-bezier(0.16,1,0.3,1);--scale-press:0.97;
 --font-sans:system-ui,sans-serif;
---font-code:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+--font-code:ui-monospace,'SF Mono',Menlo,'Cascadia Mono',Consolas,'Liberation Mono','DejaVu Sans Mono',monospace;
 --panel:480px;--gutter:24px;
 color-scheme:dark}
 *,*::before,*::after{box-sizing:border-box}
 html{background:var(--canvas);color:var(--text);font:400 16px/1.55 var(--font-sans);-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{max-width:calc(var(--panel) + 2 * var(--gutter));margin:0 auto;padding:40px var(--gutter);overflow-wrap:anywhere}
-.brand{display:block;width:142px;height:28px;margin-bottom:24px}
-.brand svg{display:block;width:142px;height:28px}
+.brand{display:block;width:162px;height:32px;margin-bottom:24px}
+.brand svg{display:block;width:162px;height:32px}
 main{padding:24px;border:1px solid var(--seam);border-radius:var(--radius-panel);background:var(--raised);box-shadow:var(--card-shadow)}
 main>:last-child{margin-bottom:0}
 p{margin:0 0 16px}
@@ -590,7 +590,13 @@ code{font-family:var(--font-code);font-size:.875em;background:var(--chrome);bord
 fieldset{margin:0 0 16px;padding:4px 16px 0;border:1px solid var(--seam);border-radius:var(--radius-control)}
 legend{padding:0 4px;color:var(--text-muted);font-size:15px;font-weight:500}
 fieldset label{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;cursor:pointer}
-input[type=checkbox]{width:20px;height:20px;margin:2px 0 0;accent-color:var(--accent-text)}
+input[type=checkbox]{appearance:none;display:grid;place-content:center;width:20px;height:20px;margin:2px 0 0;border:1px solid var(--control-border);border-radius:var(--radius-chip);background:var(--chrome);cursor:pointer}
+input[type=checkbox]::before{content:'';width:6px;height:11px;border:solid var(--on-accent);border-width:0 2px 2px 0;transform:translateY(-1px) rotate(45deg);opacity:0}
+input[type=checkbox]:checked{border-color:var(--accent-text);background:var(--accent-text)}
+input[type=checkbox]:checked::before{opacity:1}
+@media (forced-colors:active){input[type=checkbox]{appearance:auto}input[type=checkbox]::before{display:none}}
+fieldset label>span{color:var(--text-muted)}
+fieldset strong,.warn{color:var(--text)}
 .warn{display:block;margin-top:8px;padding-left:12px;border-left:2px solid var(--state-needs-you)}
 label[for=code]{color:var(--text-muted);font-size:15px}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch}
@@ -599,7 +605,7 @@ button{min-height:44px;padding:8px 24px;border:0;border-radius:var(--radius-cont
 button:hover{background:var(--accent-fill-hover)}
 @media (pointer:fine){button:active{scale:var(--scale-press);transition-duration:var(--duration-hover),var(--duration-press)}}
 :focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
-@media (max-width:400px){:root{--gutter:16px}body{padding-top:24px}main{padding:20px 16px}}
+@media (max-width:400px){:root{--gutter:16px}body{padding-top:24px}main{padding:20px 16px}button{width:100%}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>

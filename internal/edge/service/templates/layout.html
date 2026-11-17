@@ -12,7 +12,7 @@
 </head>
 <body>
 <header class="top">
-<p class="brand"><img src="/cloudfield-logo-small.svg" alt="Cloudfield" width="162" height="32"> Edge</p>
+<p class="brand"><img src="/cloudfield-logo-small.svg" alt="Cloudfield" width="162" height="32"> <span>Edge</span></p>
 {{if .Account}}{{$t := .Title}}<div class="who">
 <span>Signed in with GitHub as {{template "account" .Account}}</span>
 <form method="post" action="/signout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">Sign out</button></form>
@@ -26,7 +26,7 @@
 </header>
 <main>
 <h1>{{.Title}}</h1>
-{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+{{if and .Error (ne .Title "Account")}}<p class="error" role="alert">{{.Error}}</p>{{end}}
 {{end}}
 
 {{define "bottom"}}</main>

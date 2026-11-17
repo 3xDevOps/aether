@@ -42,7 +42,7 @@
 
   --font-sans: 'DM Sans Variable', 'DM Sans Fallback', system-ui, sans-serif;
   --font-title: 'Saira', 'DM Sans Variable', 'DM Sans Fallback', system-ui, sans-serif;
-  --font-code: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-code: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace;
 
   --size-small: 13px;
   --size-ui: 15px;
@@ -65,6 +65,7 @@
   --gutter: 24px;
   --column: 880px;
   --measure: 68ch;
+  --panel-wide: 640px;
   --panel: 440px;
   --control-height: 40px;
   --input-height: 44px;
@@ -121,7 +122,13 @@ body {
 }
 
 p, ul, dl, table, form { margin: 0 0 var(--space-4); }
-main > p, .note, .empty, .danger-zone p { max-width: var(--measure); }
+main > p:not(.error, .warning, .empty), .note, .danger-zone p { max-width: var(--measure); }
+
+/* A page with one task (sign in, a code, a result, an error) is one narrow
+   centred column; lists and the account page keep the full width. */
+main:not(:has(.list, .choices, .danger-zone, .empty, .panel.full)), .top:not(:has(nav)) { max-width: var(--panel); margin-inline: auto; }
+main:has(.usercode) { max-width: var(--panel-wide); margin-inline: auto; }
+main > .panel:only-of-type { max-width: none; }
 
 a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
 
@@ -165,11 +172,14 @@ h3 { font-size: var(--size-h3); font-weight: 600; line-height: 1.3; margin: var(
   margin: 0;
   min-height: 48px;
   padding-bottom: var(--space-4);
+  line-height: 1;
   color: var(--text-muted);
   font-size: var(--size-ui);
   font-weight: 500;
 }
 .brand img { display: block; height: var(--logo-height); width: auto; }
+/* Sets Edge on the wordmark's baseline, 29.4 of the logo's 32px down. */
+.brand span { align-self: flex-start; padding-top: 26px; }
 .top:has(nav) .brand { padding-bottom: 0; }
 
 .who {
@@ -273,6 +283,7 @@ input {
   color: var(--text);
   font: 400 var(--size-body)/1.4 var(--font-sans);
 }
+input:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; border-color: var(--focus-ring); }
 
 input[name='user_code'] {
   width: 12ch;
@@ -310,15 +321,18 @@ input[name='user_code'] {
   border-left: 2px solid var(--state-needs-you);
   background: var(--raised);
 }
+.done { border-left: 2px solid var(--state-done); }
 
 .note { color: var(--text-muted); font-size: var(--size-ui); }
 
 .empty {
   padding: var(--space-5) var(--space-6);
-  border: 1px dashed var(--seam);
+  border: 1px solid var(--seam);
   border-radius: var(--radius-panel);
+  background: var(--chrome);
   color: var(--text-muted);
 }
+.empty code { white-space: nowrap; }
 
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .actions button { min-width: 8rem; }
@@ -362,6 +376,8 @@ input[name='user_code'] {
 .list code.sub { white-space: nowrap; }
 .list td[data-label='Status'] { white-space: nowrap; }
 .list .action { padding-block: 6px; text-align: right; width: 1%; white-space: nowrap; }
+.list .action button { min-height: 32px; padding: var(--space-1) var(--space-3); background: none; box-shadow: none; color: var(--text-muted); font-size: var(--size-small); }
+.list .action button:hover { background: var(--hover-chrome); color: var(--text); }
 .list .name { display: block; font-weight: 600; overflow-wrap: anywhere; }
 .list .sub { display: block; }
 .list td .sub { margin-top: var(--space-1); padding: 0; border: 0; background: none; color: var(--text-muted); font-size: var(--size-small); }
@@ -411,7 +427,8 @@ input[name='user_code'] {
   .list th:first-child, .list td:first-child { width: auto; }
   .list .action { width: auto; margin-top: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--seam); text-align: left; }
   .list .action:empty { display: none; }
-  .list .action button { width: 100%; }
+  .list .action button { width: 100%; min-height: var(--touch-target); }
+  .list code.sub { white-space: normal; overflow-wrap: anywhere; }
   .list .date { white-space: normal; }
 }
 
@@ -428,6 +445,9 @@ input[name='user_code'] {
 .choices form { margin: 0; }
 .choices p { margin-bottom: var(--space-4); color: var(--text-muted); }
 .choices p strong { display: block; margin-bottom: var(--space-1); color: var(--text); font-size: 18px; overflow-wrap: anywhere; }
+.choices > li:not(:only-child) .primary { border-color: var(--seam); background: var(--raised); box-shadow: var(--button-shadow); color: var(--text); }
+.choices > li:not(:only-child) .primary:hover { background: var(--hover-chrome); box-shadow: var(--button-hover-shadow); }
+@media (min-width: 640px) { .choices .wide { display: inline-flex; width: auto; } }
 .choices.unavailable > li { background: none; box-shadow: none; color: var(--text-muted); }
 
 /* Account */
@@ -435,9 +455,12 @@ input[name='user_code'] {
 .danger-zone {
   margin-top: var(--space-8);
   padding: var(--space-6);
-  border: 1px solid var(--state-failed);
+  border: 1px solid var(--seam);
+  border-left: 2px solid var(--state-failed);
   border-radius: var(--radius-panel);
 }
+.danger-zone p > .button { min-height: 32px; padding: 2px var(--space-3); font-size: var(--size-small); vertical-align: baseline; }
+.danger-zone .error { margin-top: var(--space-6); }
 .danger-zone > :last-child { margin-bottom: 0; }
 .danger-zone h3:first-of-type { margin-top: var(--space-6); }
 .danger-zone form { margin-top: var(--space-6); }

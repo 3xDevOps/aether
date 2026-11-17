@@ -30,7 +30,7 @@
 {{template "bottom" .}}{{end}}
 
 {{define "device_done"}}{{template "top" .}}
-<div class="panel">
+<div class="panel{{if .Data.Approved}} done{{end}}">
 {{if .Data.Approved}}<p>{{.Data.Label}} is signed in. Return to your terminal.</p>
 {{else}}<p>The sign-in for {{.Data.Label}} was denied. The device gets no token.</p>{{end}}
 </div>
