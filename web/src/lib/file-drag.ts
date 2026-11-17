@@ -7,7 +7,19 @@ export function fitLabel(limit: number): string {
 }
 
 function hasFiles(transfer: DataTransfer | null): boolean {
-  return Boolean(transfer && Array.from(transfer.types).includes('Files'))
+  return Boolean(transfer && (
+    Array.from(transfer.types).includes('Files') ||
+    (transfer.files?.length ?? 0) > 0 ||
+    Array.from(transfer.items ?? []).some((item) => item.kind === 'file')
+  ))
+}
+
+function droppedFiles(transfer: DataTransfer): File[] {
+  const files = Array.from(transfer.files ?? [])
+  return files.length ? files : Array.from(transfer.items ?? [])
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null)
 }
 
 /**
@@ -65,7 +77,7 @@ export function useFileDrop({ onFiles, limit }: { onFiles: (files: File[]) => vo
       event.preventDefault()
       event.stopPropagation()
       end()
-      if (limit > 0) onFiles(Array.from(event.dataTransfer.files))
+      if (limit > 0) onFiles(droppedFiles(event.dataTransfer))
     },
   }
   return { count, refused: count !== null && count > limit, handlers }
@@ -75,9 +87,10 @@ export function useFileDrop({ onFiles, limit }: { onFiles: (files: File[]) => vo
 export function useRefuseStrayFileDrops() {
   useEffect(() => {
     const refuse = (event: DragEvent) => {
-      if (event.defaultPrevented || !event.dataTransfer?.types.includes('Files')) return
+      const transfer = event.dataTransfer
+      if (event.defaultPrevented || !transfer || !hasFiles(transfer)) return
       event.preventDefault()
-      event.dataTransfer.dropEffect = 'none'
+      transfer.dropEffect = 'none'
     }
     window.addEventListener('dragover', refuse)
     window.addEventListener('drop', refuse)

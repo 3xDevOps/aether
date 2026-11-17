@@ -56,4 +56,12 @@ describe('useFileDrop', () => {
     fireEvent.drop(screen.getByTestId('target'), { dataTransfer: files })
     expect(onFiles).toHaveBeenCalledWith(files.files)
   })
+
+  it('takes a native file item when the webview omits the Files type', () => {
+    const onFiles = vi.fn()
+    const file = new File(['x'], 'shot.png', { type: 'image/png' })
+    render(<Target onFiles={onFiles} />)
+    fireEvent.drop(screen.getByTestId('target'), { dataTransfer: { types: [], files: [], items: [{ kind: 'file', getAsFile: () => file }] } })
+    expect(onFiles).toHaveBeenCalledWith([file])
+  })
 })
