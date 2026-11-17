@@ -342,7 +342,10 @@ top to bottom:
    launch. A slanted cut splits it in two. The left half, **New session** (`n`),
    slides the launch panel out of the sidebar's right edge over the view, with
    no scrim; clicking outside or pressing Escape slides it away to an arrow
-   that restores it. The outside click reaches the view behind it. **Close**
+   that restores it. Drag its right edge or focus **Resize launch panel** and
+   use the arrow keys to set its width from 360px to 720px; the available room
+   beside the sidebar caps the maximum. The width is saved on this browser.
+   The outside click reaches the view behind it. **Close**
    dismisses the form and its draft. The right half appears once a launch has
    been saved: it shows the saved agent's glyph and launches that agent, mode,
    model, account and fallback at once with no task and with `children: "on"`,
@@ -5151,13 +5154,17 @@ device run.
 
 ### Details
 
-While the session's row holds 320px for it plus `minReadableWidth` (560px),
-Details is a 320px `complementary "Run details"` beside the view, toggled by
-the header button or `Mod+.` and remembered (`detailsOpen`, persisted). When
-the row narrows, for example when the assistant docks, the inline panel goes
-and comes back once there is room again. Narrower rows open it as a side sheet and
-phones as a bottom sheet, each a `dialog "Run details"` that returns focus to
-whatever opened it. Sections (`details.tsx`):
+While the session's row holds 280px for it plus `minReadableWidth` (560px),
+Details is a `complementary "Run details"` beside the view, 320px by default.
+Its left-edge splitter adjusts the width from 280px to 560px, capped to keep
+560px for the view while inline and capped to the available room in the side
+sheet; arrow keys resize it too. The width is saved on this browser. The
+header button or `Mod+.` toggles the panel and remembers
+(`detailsOpen`, persisted). When the row narrows, for example when the
+assistant docks, the inline panel goes and comes back once there is room again.
+Narrower rows open it as a resizable side sheet and phones as a bottom sheet,
+each a `dialog "Run details"` that returns focus to whatever opened it.
+Sections (`details.tsx`):
 
 - **Needs you**: `RequestCard`s for pending native inputs, teammate messages
   awaiting the controller with **Deny** / **Approve** through

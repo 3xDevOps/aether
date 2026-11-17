@@ -110,6 +110,12 @@ export function onboardingStepIndex(step: OnboardingStep): number {
 export const minSidebarWidth = 220
 export const maxSidebarWidth = 400
 const defaultSidebarWidth = 260
+export const minLaunchWidth = 360
+export const maxLaunchWidth = 720
+const defaultLaunchWidth = 416
+export const minRunDetailsWidth = 280
+export const maxRunDetailsWidth = 560
+const defaultRunDetailsWidth = 320
 
 export type LaunchDefaults = Record<string, { mode: LaunchMode; model?: string; at: number }>
 
@@ -136,6 +142,8 @@ export interface UiSlice {
   theme: Theme
   textSize: TextSize
   sidebarWidth: number
+  launchWidth: number
+  runDetailsWidth: number
   sidebarCollapsed: boolean
   sidebarDrawerOpen: boolean
   /** Mounted pages showing their own filled action in their header. */
@@ -209,6 +217,8 @@ export interface UiSlice {
   setTheme: (theme: Theme) => void
   setTextSize: (size: TextSize) => void
   setSidebarWidth: (width: number) => void
+  setLaunchWidth: (width: number) => void
+  setRunDetailsWidth: (width: number) => void
   setSidebarDrawerOpen: (open: boolean) => void
   holdHeaderPrimary: () => () => void
   setTerminalDockHeight: (height: number) => void
@@ -261,6 +271,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   theme: 'dark',
   textSize: 'default',
   sidebarWidth: defaultSidebarWidth,
+  launchWidth: defaultLaunchWidth,
+  runDetailsWidth: defaultRunDetailsWidth,
   sidebarCollapsed: false,
   sidebarDrawerOpen: false,
   headerPrimaries: 0,
@@ -307,6 +319,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
     set({
       sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, width)),
     }),
+  setLaunchWidth: (width) => set({ launchWidth: Math.min(maxLaunchWidth, Math.max(minLaunchWidth, width)) }),
+  setRunDetailsWidth: (width) => set({ runDetailsWidth: Math.min(maxRunDetailsWidth, Math.max(minRunDetailsWidth, width)) }),
   setTerminalDockHeight: (height) => set({ terminalDockHeight: clampDockHeight(height) }),
   setTerminalFontSize: (size) => set({ terminalFontSize: clampTerminalFontSize(size), terminalFitWidth: false }),
   fitTerminalWidth: () => set({ terminalFitWidth: true }),
