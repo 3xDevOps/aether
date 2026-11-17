@@ -404,7 +404,16 @@ What changes:
   `FORWARD` or ufw's on `INPUT`, so egress-controlled VMs reach the proxy
   behind ufw. While the table is gone, the `FORWARD` policy drops all
   traffic VMs send through the host, and what they send to the host itself
-  is unfiltered. A change of default route applies when the next VM boots.
+  is unfiltered. A default-route interface is the interface of an IPv4
+  route to `0.0.0.0/0` in any routing table, such as a Tailscale exit
+  node's in table 52 or a `wg-quick` full tunnel's in table 51820, or of a
+  route to `0.0.0.0/1` or `128.0.0.0/1`, which OpenVPN's
+  `redirect-gateway def1` adds. VM taps, `aether-vmproxy`, `lo`, `docker0`
+  and `br-*` bridges never count. With an exit node `tailscale0` is one, so
+  VMs reach tailnet peers too. A change of default route applies when the
+  next VM boots. The MSS of a VM's
+  outgoing TCP connections is clamped to the MTU of the interface they leave
+  by, so 1240 bytes through `tailscale0`'s 1280.
 - The environment terminal runs in `aether-vm-terminal-<member id>.service`
   and keeps its root disk across a stop and start, as its container did.
   When the server starts with `vm`, it stops a member's terminal container

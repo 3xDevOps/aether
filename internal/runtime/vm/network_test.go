@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/vishvananda/netlink"
 )
 
 func TestNetworkAddressing(t *testing.T) {
@@ -140,7 +141,7 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 		`iifname "aethervm*" ip daddr { 169.254.0.0/16, 100.100.100.200, 168.63.129.16 } drop`,
 		`iifname "aethervme*" ct state established,related meta mark set meta mark | 0x1000000 accept`,
 		`iifname "aethervme*" ip daddr 10.200.0.1 tcp dport 3128 meta mark set meta mark | 0x1000000 accept`,
-		`iifname "aethervme*" reject with icmpx admin-prohibited`,
+		"iifname \"aethervme*\" reject with icmpx admin-prohibited\n\t\tiifname \"aethervm*\" tcp flags syn tcp option maxseg size set rt mtu\n",
 		`oifname "aethervm*" ct state established,related meta mark set meta mark | 0x1000000 accept`,
 		`oifname "aethervm*" drop`,
 	} {
@@ -155,14 +156,29 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 	}
 }
 
-func TestRouteUplinksAreTheDefaultRoutes(t *testing.T) {
-	table := `Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT
-ens5	00000000	01001FAC	0003	0	0	100	00000000	0	0	0
-ens5	00001FAC	00000000	0001	0	0	100	00F0FFFF	0	0	0
-docker0	000011AC	00000000	0001	0	0	0	0000FFFF	0	0	0
-wg0	00000000	00000000	0001	0	0	200	00000000	0	0	0
-`
-	if got := routeUplinks(strings.NewReader(table)); !slices.Equal(got, []string{"ens5", "wg0"}) {
-		t.Errorf("uplinks = %v", got)
+func TestRouteUplinksAreTheInternetRoutes(t *testing.T) {
+	names := map[int]string{1: "lo", 2: "ens5", 3: "docker0", 4: "br-3f2a", 5: "tailscale0", 6: "wg0", 7: "tun0", 8: "aethervm1", 9: "aethervme2", 10: "aether-vmproxy", 11: "eth1", 12: "eth2"}
+	route := func(dst string, link, table int) netlink.Route {
+		r := netlink.Route{LinkIndex: link, Table: table}
+		r.Dst, _ = netlink.ParseIPNet(dst)
+		return r
+	}
+	multipath := route("0.0.0.0/0", 0, 100)
+	multipath.MultiPath = []*netlink.NexthopInfo{{LinkIndex: 11}, {LinkIndex: 12}, {LinkIndex: 3}}
+	for _, tc := range []struct {
+		name   string
+		routes []netlink.Route
+		want   []string
+	}{
+		{"main table", []netlink.Route{route("0.0.0.0/0", 2, 254), route("172.31.0.0/20", 2, 254), route("172.17.0.0/16", 3, 254)}, []string{"ens5"}},
+		{"tailscale exit node", []netlink.Route{route("0.0.0.0/0", 2, 254), route("0.0.0.0/0", 5, 52), route("100.101.102.103/32", 5, 52)}, []string{"ens5", "tailscale0"}},
+		{"wg-quick full tunnel", []netlink.Route{{LinkIndex: 6, Table: 51820}, route("10.0.0.0/24", 2, 254)}, []string{"wg0"}},
+		{"openvpn def1", []netlink.Route{route("0.0.0.0/1", 7, 254), route("128.0.0.0/1", 7, 254), route("0.0.0.0/0", 2, 254), route("10.8.0.0/24", 7, 254)}, []string{"tun0", "ens5"}},
+		{"multipath", []netlink.Route{multipath}, []string{"eth1", "eth2"}},
+		{"excluded interfaces", []netlink.Route{route("0.0.0.0/0", 1, 254), route("0.0.0.0/0", 3, 254), route("0.0.0.0/0", 4, 10), route("0.0.0.0/1", 8, 254), route("128.0.0.0/1", 9, 254), route("0.0.0.0/0", 10, 11), route("0.0.0.0/0", 42, 12)}, nil},
+	} {
+		if got := routeUplinks(tc.routes, names); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: uplinks = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

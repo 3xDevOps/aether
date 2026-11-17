@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -17,6 +18,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/egress"
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 // vmSubnet holds one /30 per VM: .1 is the host end of its tap, .2 the
@@ -145,6 +148,11 @@ func (e *engine) egressKey(ip netip.Addr) (string, error) {
 // on to them. Its input and forward chains run just before iptables', whose
 // INPUT and FORWARD take only what they marked.
 //
+// Forward clamps the MSS of a VM's SYNs to the route's MTU, as the host's own
+// TCP sizes its segments: the guest sees only its tap's 1500 bytes, so through
+// a smaller uplink such as tailscale0 or wg0 a server's full-size replies
+// would reach it only where path MTU discovery works end to end.
+//
 // Prerouting drops the whole link-local range 169.254.0.0/16 from open taps,
 // not just the two metadata IPs: it carries cloud metadata, credential and
 // resolver endpoints (IMDS, the AWS VPC DNS at 169.254.169.253, ECS task
@@ -152,8 +160,9 @@ func (e *engine) egressKey(ip netip.Addr) (string, error) {
 // (the gateway and proxy are in 10.200.0.0/16). Alibaba's 100.100.100.200 and
 // Azure's WireServer 168.63.129.16, which serve the same role outside that
 // range, are dropped too. The shared-address range 100.64.0.0/10 is not
-// dropped whole, because it is also Tailscale's: the forward chain already
-// lets an open VM out only on the default-route uplinks, so it never reaches
+// dropped whole, because it is also Tailscale's. tailscale0 is an uplink only
+// while the host uses an exit node, and then an open VM reaches tailnet peers
+// as it does the hosts on any uplink's network. Otherwise it never reaches
 // a tailnet peer anyway, and dropping the range would only cut off the host's
 // own tailnet address, which it may reach. The configured DNS resolvers stay
 // reachable on port 53, since a host may run one at a link-local address.
@@ -178,6 +187,7 @@ table inet {{.Table}} {
 	chain forward {
 		type filter hook forward priority filter - 1; policy accept;
 		iifname "{{.EgressTaps}}*" reject with icmpx admin-prohibited
+		iifname "{{.Taps}}*" tcp flags syn tcp option maxseg size set rt mtu
 {{- if .Uplinks}}
 		iifname "{{.Taps}}*" oifname { {{range $i, $u := .Uplinks}}{{if $i}}, {{end}}"{{$u}}"{{end}} } meta mark set meta mark | {{.Mark}} accept
 {{- end}}
@@ -256,23 +266,50 @@ func (e *engine) ensureNetwork(ctx context.Context) error {
 	return nil
 }
 
-// defaultRoutes reads the interfaces of the host's IPv4 default routes.
+// defaultRoutes reads the interfaces of the host's IPv4 internet routes in
+// every routing table, since policy routing may keep them out of main.
 func defaultRoutes() ([]string, error) {
-	f, err := os.Open("/proc/net/route")
+	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Table: unix.RT_TABLE_UNSPEC}, netlink.RT_FILTER_TABLE)
 	if err != nil {
 		return nil, fmt.Errorf("vm runtime: read the host's routes: %w", err)
 	}
-	defer func() { _ = f.Close() }()
-	return routeUplinks(f), nil
+	links, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("vm runtime: read the host's interfaces: %w", err)
+	}
+	names := make(map[int]string, len(links))
+	for _, link := range links {
+		names[link.Index] = link.Name
+	}
+	return routeUplinks(routes, names), nil
 }
 
-func routeUplinks(r io.Reader) []string {
+// routeUplinks names the interfaces of the default routes, such as a
+// Tailscale exit node's in table 52 or wg-quick's in table 51820, and of the
+// 0.0.0.0/1 and 128.0.0.0/1 pair a VPN lays over the default route. A VM's
+// tap, the proxy link, lo or a Docker bridge is never an uplink, whatever
+// routes through it.
+func routeUplinks(routes []netlink.Route, names map[int]string) []string {
 	var out []string
-	sc := bufio.NewScanner(r)
-	for sc.Scan() {
-		f := strings.Fields(sc.Text())
-		if len(f) >= 8 && f[1] == "00000000" && f[7] == "00000000" && !slices.Contains(out, f[0]) {
-			out = append(out, f[0])
+	for _, r := range routes {
+		if r.Dst != nil {
+			if ones, _ := r.Dst.Mask.Size(); ones > 1 {
+				continue
+			}
+		}
+		links := []int{r.LinkIndex}
+		for _, hop := range r.MultiPath {
+			links = append(links, hop.LinkIndex)
+		}
+		for _, index := range links {
+			name := names[index]
+			switch {
+			case name == "", name == "lo", name == proxyLink, name == "docker0",
+				strings.HasPrefix(name, tapPrefix), strings.HasPrefix(name, "br-"),
+				slices.Contains(out, name):
+				continue
+			}
+			out = append(out, name)
 		}
 	}
 	return out
