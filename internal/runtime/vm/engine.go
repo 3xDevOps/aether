@@ -424,11 +424,11 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		cfg.Serves = append(cfg.Serves, guest.Socket{Port: guest.BrowserPort, Path: guest.BrowserSocket})
 	}
 	if rec.Net != offline {
-		var dns []netip.Addr
+		cfg.Network = guestNetwork(rec.Net)
 		if !rec.Egress {
-			dns = []netip.Addr{proxyAddr}
+			cfg.Network.DNS = []netip.Addr{proxyAddr}
+			_, cfg.Network.Search = hostResolvConf()
 		}
-		cfg.Network = guestNetwork(rec.Net, dns)
 	}
 	cmdline, err := cfg.KernelArgs(cmdlineBase)
 	if err != nil {

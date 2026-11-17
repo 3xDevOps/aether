@@ -14,6 +14,7 @@ func TestKernelArgsRoundTrip(t *testing.T) {
 			Address: netip.MustParsePrefix("10.88.0.5/24"),
 			Gateway: netip.MustParseAddr("10.88.0.1"),
 			DNS:     []netip.Addr{netip.MustParseAddr("10.88.0.1"), netip.MustParseAddr("1.1.1.1")},
+			Search:  []string{"corp.example", "tailnet-name.ts.net"},
 		},
 		Mounts: []Mount{
 			{Volume: VolumeShare, Source: "home", Target: "/root"},
@@ -56,6 +57,7 @@ func TestConfigRejects(t *testing.T) {
 		"relative loopback": {Loopbacks: []Loopback{{Port: 47630, Path: "run/x.sock"}}},
 		"hostname":          {Hostname: "bad host"},
 		"network no prefix": {Network: &Network{Gateway: netip.MustParseAddr("10.0.0.1")}},
+		"search domain":     {Network: &Network{Address: netip.MustParsePrefix("10.0.0.2/30"), Gateway: netip.MustParseAddr("10.0.0.1"), Search: []string{"a b"}}},
 		"checkout key path": {Checkouts: []CheckoutMount{{Serial: "repo0", Key: "../etc", Target: "/workspace"}}},
 		"checkout serial":   {Checkouts: []CheckoutMount{{Serial: "repo0,root", Key: "run", Target: "/workspace"}}},
 	} {

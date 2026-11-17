@@ -81,9 +81,9 @@ func chNetArg(index int, egressOnly bool) string {
 	return fmt.Sprintf("tap=%s,ip=%s,mask=255.255.255.252,mac=02:ae:00:00:%02x:%02x", tapName(index, egressOnly), host, byte(index>>8), byte(index))
 }
 
-func guestNetwork(index int, dns []netip.Addr) *guest.Network {
+func guestNetwork(index int) *guest.Network {
 	host, guestAddr := netAddrs(index)
-	return &guest.Network{Address: netip.PrefixFrom(guestAddr, 30), Gateway: host, DNS: dns}
+	return &guest.Network{Address: netip.PrefixFrom(guestAddr, 30), Gateway: host}
 }
 
 // allocateNet returns the lowest index no recorded or reserved VM holds.
@@ -306,7 +306,8 @@ func hostDNS() []netip.Addr {
 		if err != nil {
 			break
 		}
-		servers := slices.DeleteFunc(nameservers(f), func(a netip.Addr) bool { return !a.Is4() || a.IsLoopback() })
+		all, _ := resolvConf(f)
+		servers := slices.DeleteFunc(all, func(a netip.Addr) bool { return !a.Is4() || a.IsLoopback() })
 		_ = f.Close()
 		if len(servers) > 0 {
 			return servers
@@ -315,17 +316,29 @@ func hostDNS() []netip.Addr {
 	return dockerDNS
 }
 
-func nameservers(r io.Reader) []netip.Addr {
-	var out []netip.Addr
+// resolvConf reads a resolv.conf's servers and search domains. As in glibc,
+// the last search or domain line wins; a domain that is not a valid name,
+// such as systemd-resolved's "." for none, is left out.
+func resolvConf(r io.Reader) (servers []netip.Addr, search []string) {
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
-		if len(fields) < 2 || fields[0] != "nameserver" {
+		if len(fields) < 2 {
 			continue
 		}
-		if addr, err := netip.ParseAddr(fields[1]); err == nil {
-			out = append(out, addr)
+		switch fields[0] {
+		case "nameserver":
+			if addr, err := netip.ParseAddr(fields[1]); err == nil {
+				servers = append(servers, addr)
+			}
+		case "search", "domain":
+			search = search[:0]
+			for _, d := range fields[1:] {
+				if d = strings.TrimSuffix(d, "."); guest.ValidDomain(d) {
+					search = append(search, d)
+				}
+			}
 		}
 	}
-	return out
+	return servers, search
 }

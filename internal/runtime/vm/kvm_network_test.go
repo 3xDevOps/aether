@@ -284,6 +284,11 @@ func TestKVMNetwork(t *testing.T) {
 	}
 
 	expect("an open VM resolves through the host's own resolver", probe(t, e, "run-vmnet-a", "resolve relay.aether.test"), true)
+	if _, search := hostResolvConf(); len(search) > 0 {
+		if out, _ := vmRun(t, e, "run-vmnet-a", "grep ^search /etc/resolv.conf"); strings.TrimSpace(out) != "search "+strings.Join(search, " ") {
+			t.Errorf("an open VM searches %q, the host %v", out, search)
+		}
+	}
 	expect("an open VM reaches the internet", probe(t, e, "run-vmnet-a", "dial example.com:80"), true)
 	expect("an open VM reaches the host", probe(t, e, "run-vmnet-a", "dial "+hostPort), true)
 	for what, target := range targets {

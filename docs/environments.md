@@ -391,8 +391,9 @@ What changes:
   Nothing outside starts a connection into it.
 - A VM resolves names through `10.200.0.1`, where the server passes each
   query to the first three servers in the host's `/etc/resolv.conf`, as
-  Docker's embedded DNS server does for containers. A VM so resolves what
-  the host resolves, through a loopback stub such as systemd-resolved's
+  Docker's embedded DNS server does for containers, and searches the
+  host's search domains. A VM so resolves what the host resolves, short
+  names included, through a loopback stub such as systemd-resolved's
   `127.0.0.53`, Tailscale's MagicDNS or a VPN's resolver. Lookups fail
   while the server restarts. The host's upstream DNS servers also stay
   reachable on port 53, even at a link-local address: a VM started before

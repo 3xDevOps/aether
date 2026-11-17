@@ -250,11 +250,7 @@ func writeDNSMessage(c io.Writer, msg []byte) error {
 // so a changed resolver applies at once. A loopback stub counts: the relay
 // runs on the host.
 func hostResolvers() []netip.AddrPort {
-	var servers []netip.Addr
-	if f, err := os.Open("/etc/resolv.conf"); err == nil {
-		servers = nameservers(f)
-		_ = f.Close()
-	}
+	servers, _ := hostResolvConf()
 	if len(servers) == 0 {
 		servers = dockerDNS
 	}
@@ -263,4 +259,15 @@ func hostResolvers() []netip.AddrPort {
 		out = append(out, netip.AddrPortFrom(s, dnsPort))
 	}
 	return out
+}
+
+// hostResolvConf reads the host's /etc/resolv.conf, the file Docker copies
+// a container's search domains from.
+func hostResolvConf() (servers []netip.Addr, search []string) {
+	f, err := os.Open("/etc/resolv.conf")
+	if err != nil {
+		return nil, nil
+	}
+	defer func() { _ = f.Close() }()
+	return resolvConf(f)
 }

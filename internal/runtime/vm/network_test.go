@@ -42,13 +42,26 @@ func TestNetworkAddressing(t *testing.T) {
 			t.Errorf("%s is no guest's but read as network %d", addr, index)
 		}
 	}
-	n := guestNetwork(1, dockerDNS)
+	n := guestNetwork(1)
 	if n.Address != netip.MustParsePrefix("10.200.0.6/30") || n.Gateway.String() != "10.200.0.5" {
 		t.Errorf("guest network = %+v", n)
 	}
-	servers := nameservers(strings.NewReader("# x\nnameserver 127.0.0.53\nnameserver 10.0.0.2\nnameserver fe80::1%eth0\nsearch ec2.internal\n"))
+	servers, search := resolvConf(strings.NewReader("# x\nnameserver 127.0.0.53\nnameserver 10.0.0.2\nnameserver fe80::1%eth0\nsearch ec2.internal\n"))
 	if want := []netip.Addr{netip.MustParseAddr("127.0.0.53"), netip.MustParseAddr("10.0.0.2"), netip.MustParseAddr("fe80::1%eth0")}; !slices.Equal(servers, want) {
 		t.Errorf("nameservers = %v", servers)
+	}
+	if !slices.Equal(search, []string{"ec2.internal"}) {
+		t.Errorf("search = %v", search)
+	}
+	for conf, want := range map[string][]string{
+		"search corp.example tailnet.ts.net.\n": {"corp.example", "tailnet.ts.net"},
+		"search .\n":                            nil,
+		"search a.example\ndomain b.example\n":  {"b.example"},
+		"search bad_label.example ok.example\n": {"ok.example"},
+	} {
+		if _, got := resolvConf(strings.NewReader(conf)); !slices.Equal(got, want) {
+			t.Errorf("search of %q = %v, want %v", conf, got, want)
+		}
 	}
 }
 

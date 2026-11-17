@@ -60,6 +60,9 @@ func configureNetwork(cfg guest.Config) error {
 		return nil
 	}
 	var resolv strings.Builder
+	if len(n.Search) > 0 {
+		resolv.WriteString("search " + strings.Join(n.Search, " ") + "\n")
+	}
 	for _, a := range n.DNS {
 		resolv.WriteString("nameserver " + a.String() + "\n")
 	}
