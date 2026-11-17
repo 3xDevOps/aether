@@ -727,15 +727,12 @@ for pair in aether:cloudfield aether-server:cloudfield-server; do
 done
 
 # The name of TARGET to print in a command run on this machine: its new
-# name when that is our link in BIN_DIR and BIN_DIR is on PATH.
+# name when that is our link in BIN_DIR and the one the shell finds.
 command_name() {
 	link="${BIN_DIR}/$2"
-	if [ -L "$link" ] && [ "$link" -ef "${BIN_DIR}/$1" ]; then
-		case ":${PATH}:" in *":${BIN_DIR}:"*)
-			echo "$2"
-			return
-			;;
-		esac
+	if [ -L "$link" ] && [ "$link" -ef "${BIN_DIR}/$1" ] && [ "$(command -v "$2" 2>/dev/null)" = "$link" ]; then
+		echo "$2"
+		return
 	fi
 	echo "$1"
 }
