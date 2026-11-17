@@ -396,6 +396,11 @@ from the folder itself, and
 `maskable-*.png` as `icon-maskable-*.png`, `apple-icon-180.png` as
 `apple-touch-icon.png`, and `favicon-16.png`, `favicon-32.png`,
 `favicon-48.png`). After the set changes, copy them again under these names.
+The Edge's pages embed their own copies of `cloudfield-logo-small.svg`,
+`cloudfield-favicon.svg`, `icons/favicon-32.png` and
+`icons/apple-touch-icon.png` in `internal/edge/service/templates/images/`;
+copy those again too. `TestAssetCopiesMatchTheirSources` fails until they
+match.
 
 The Android app's launcher and notification icons are VectorDrawables in
 `android/app/src/main/res/drawable/`, generated from the Cloudfield logo set in

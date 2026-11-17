@@ -2,9 +2,11 @@
 <resources>
     <color name="window_background">#1f1f1f</color>
     <color name="error_text">#f2b8b5</color>
-    <color name="raised">#222324</color>
-    <color name="seam">#14ffffff</color>
-    <color name="text">#e8e8e8</color>
-    <color name="text_muted">#9a9a9a</color>
-    <color name="accent_text">#5fb3a8</color>
+    <color name="raised">#151d2a</color>
+    <color name="seam">#17f7f0e4</color>
+    <color name="text">#f7f0e4</color>
+    <color name="text_muted">#97a3b5</color>
+    <color name="accent_fill">#f5c542</color>
+    <color name="accent_text">#54e0d0</color>
+    <color name="on_accent">#070b11</color>
 </resources>

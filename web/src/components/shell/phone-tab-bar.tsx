@@ -118,7 +118,7 @@ export function PhoneTabBar() {
             aria-label="New session"
             hint={blocked}
             aria-disabled={blocked ? true : undefined}
-            icon={<span className={cn('flex size-full items-center justify-center rounded-full', filledLaunch && 'bg-accent text-on-accent')}><Plus /></span>}
+            icon={<span className={cn('flex size-full items-center justify-center rounded-full', filledLaunch && 'bg-action text-on-accent')}><Plus /></span>}
             onClick={() => !blocked && openDialog('launch')}
           />
         )}

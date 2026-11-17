@@ -15,8 +15,9 @@ the state. Both gateways use the shared `internal/webgate` API and WebSocket
 surfaces; the server gateway authenticates each request with Tailscale WhoIs
 and no browser token.
 
-The visual contract is a dense developer workbench on graphite surfaces with
-one teal accent: flat panes, compact controls, restrained elevation and short
+The visual contract is a dense developer workbench on neutral surfaces: in
+the dark theme blue-black, with a teal accent and a gold primary button, as
+on the website, and in the light one white with a teal accent: flat panes, compact controls, restrained elevation and short
 token-driven motion. `docs/styles.md` defines the tokens, type and motion.
 
 The gateways and their transport boundaries are documented in
@@ -179,7 +180,7 @@ The manifest's `theme_color` and the layout's viewport `themeColor` both read
 `web/src/app/theme-color.ts` and take the dark value, the default theme;
 `ThemeEffect` switches the page's `theme-color` meta to the light value when
 the member picks light. `background_color` is the separate
-`iconBackground` from that module, `#0b0911`, the tile of the Cloudfield
+`iconBackground` from that module, `#070b11`, the tile of the Cloudfield
 icons: an installed app's splash centres an icon on it, and any other value
 would leave the icon's tile showing as a square. The splash changes to the
 dashboard's own `--canvas` as the SPA paints over it.
@@ -561,7 +562,7 @@ above zero the **New** tab drops its filled pill. The holders are a session
 header with a primary action, Environment's **Open** or **Save environment**,
 onboarding, Files with a file open and the Changes view's **Publish…**.
 
-**More** holds the workspace switcher, whose amber counts come from
+**More** holds the workspace switcher, whose needs-you counts come from
 `attention.list` too, every page the desktop header and sidebar link to
 (Board, Activity, Insights, Memory, Files, Environment, Agents, Templates,
 Members, Settings, Devices, Manage workspaces) in a list that scrolls, the
@@ -1866,7 +1867,8 @@ old place, new cards fade in, removed ones fade out, and the camera stays.
 A parent's fold button shows its subsession count; folded, `+N`. Folding
 fades the subsessions out and repacks, and the camera follows so the parent
 stays where it was on screen; a folded family never unfolds by itself.
-When hidden subsessions need you the button turns amber, as `+N · k need you`.
+When hidden subsessions need you the button turns the needs-you colour, as
+`+N · k need you`.
 Unlike the sidebar, whose fold keeps Needs you subsessions visible, the Map
 never moves cards on a state change. Folds persist in `aether.ui`
 (`boardMapFolded`), pruned to sessions that still exist.
@@ -2086,8 +2088,8 @@ its own dot shape and a text or `aria-label` label, so no state is told by
 colour alone. Only Working pulses, breathing in opacity and size, except in
 the sidebar, board, palette and All workspaces, and not under
 `prefers-reduced-motion`.
-Waiting states are a neutral, static glyph; Needs you is the only amber
-state.
+Waiting states are a neutral, static glyph; no other state takes the
+needs-you colour.
 
 `stateWords` gives a state's words: the reason in place of the label when
 the reason names what the session waits on ("Waiting for 2 subsessions", "Waiting
@@ -2122,7 +2124,7 @@ reads "Waiting for ...", which moves to the tooltip as "The agent reported:
 | `condition` | "Waiting on *detail* · checked 2m ago", aging with the half-minute clock | the state's |
 | `source_unknown` | "Waiting on *detail* since 01:10 — *error*": the local time of the last successful read and the source's error verbatim, never the last status as current | dashed clock, neutral |
 | `system_fault`, still waiting | "Wait fault: *detail* — *error*" | clock, failed colour |
-| `system_fault`, Needs you | the Needs you reason, then " — *error*" | amber ring |
+| `system_fault`, Needs you | the Needs you reason, then " — *error*" | needs-you ring |
 | `unverified` | the agent's summary; the tooltip adds "Not verified: the wait names no condition Cloudfield can check." | the state's |
 
 `toneOf` picks the dot, and the tooltip gives the exact time of the last
@@ -2156,7 +2158,7 @@ running".
 | Stale wait | dashed ring | `waiting` with `cause` `wait-expired`: a waiting report went stale. Asks nothing | Working |
 | Waiting | dashed ring | a session whose request waits on another member, read "Waiting for *name*" | Working |
 | Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action. Also a live `finished` session a member answered **Not yet** (no `review`, with a `review_changed_at`), read "Not finished yet" | Working |
-| Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
+| Needs you | needs-you ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
 | Finished: review | filled accent circle with a check | `finished` (a reported success on a live session) unless answered **Not yet**, or a `completed` run whose `review` is `ready` or `later` | Finished: review, never Needs you |
 | Completed / Merged | check | `completed`, `merged` | Finished |
 | Finished: reported to its parent | check in `icon-faint` | an attached subsession's reported success, which is for its parent agent only ([failure-handling.md](failure-handling.md#needs-you)) | Finished, beneath its parent |
@@ -2866,8 +2868,8 @@ per open with `agent.list` and `account.usage` for every account, four reads
 at a time, and nothing until that account's `agent.list` answers: "Not
 installed", "Needs <owner>'s login", "Your account only" or "Unavailable"
 (its error as the tooltip) from the `agent.list` fields below, else the
-agent's fullest current usage window as "<n>% used" (amber from 80%, red at
-100%, as on Settings > **Usage**; "· stale" with the provider's error as the
+agent's fullest current usage window as "<n>% used" (the needs-you colour
+from 80%, red at 100%, as on Settings > **Usage**; "· stale" with the provider's error as the
 tooltip when its last read failed), else "Sign in after launch" when
 `login_found` is false, else "Ready". "Signed out" or "Sign-in refused"
 (needs-you, `login_problem` as the tooltip) comes before the usage window. A failed `agent.list` reads "Not
@@ -3196,8 +3198,8 @@ acquisition, release and takeover animations drive `--control-reach` and
 while the dots move or a hold is under way, then half once acquisition
 settles. Behind the terminal toolbar it then breathes on an infinite 8-second
 loop; on the multiplayer strip, whose dots answer the pointer, it holds still.
-During a hold `--control-hold` moves a 4rem gradient mask that fades the teal
-out and a red copy in. In
+During a hold `--control-hold` moves a 4rem gradient mask that fades the
+`--control-light` dots out and a red copy in. In
 Enhanced sessions its appearance follows the acknowledged ACP lease, not the
 unused agent terminal's history or connection state, and it shows on every
 view that shows the strip. Voluntary release retracts it; takeover
@@ -3393,8 +3395,8 @@ files") with up to three tool icons, failures, plan progress and tools still
 running. While the turn is open and the stream live, the header carries the
 live state instead: the state dot, "Running npm test", "Waiting on 2
 subagents", "Waiting for your approval: <command>" (or "Waiting for your
-answer") in amber, else "Working", with the seconds since the block's work
-began: the segment's start for its first block.
+answer") in the needs-you colour, else "Working", with the seconds since the
+block's work began: the segment's start for its first block.
 A turn whose newest row is not a block keeps the `live` row. Steps sit on a
 rail: thoughts (a two-line preview that expands to the whole thought), lookups
 (consecutive reads, searches and fetches as chips; a chip for a file in the
@@ -3933,7 +3935,7 @@ the selected shell under one toolbar, a 32px strip (44px on touch): the
 terminal tabs (**Agent**, then each shell; one menu under 768px), **+ Shell**,
 the **Tools** menu, and on the right the presence summary with
 `ControlButton` (click to take a free lease, hold three seconds to request an
-occupied one; **Release** has the accent fill) and the connection word only
+occupied one; **Release** is a primary button) and the connection word only
 while a live session's attach is not live. A finished session reads "Container
 removed · read-only" in muted text there.
 Refusals, lost steering and presence errors are one line under the strip. A
@@ -3994,7 +3996,7 @@ refusal, a release or a dropped connection discards them. If the server
 answers with a full replay instead of resuming, that redraw stays on screen
 rather than behind "Restoring terminal history", which would blur the terminal
 mid-word.
-The toolbar shows an accent-filled **Release** while you control the shell, or "<name> controls"
+The toolbar shows a primary **Release** while you control the shell, or "<name> controls"
 / "The agent controls" with **Take control**, which confirms; with nobody
 controlling it shows neither. Under 768px the controller's name moves to the
 line under the toolbar. Leaving the Terminal view releases the lease. **Shell
@@ -4281,7 +4283,7 @@ and the Environment keep native xterm scrollback.
   mirror shows who controls ("Nobody controls", "<name> controls", "You
   control in another session since <time>", with "(last known)" while the
   status is stale) and **Take control**. Live, acknowledged local control
-  reads "You control" with an accent-filled **Release**, plus teal control
+  reads "You control" with a primary **Release**, plus `--control-light`
   dots behind the terminal toolbar while input is writable
   ([styles.md](styles.md)). They
   never change layout, and return to neutral during replay or history
@@ -4440,8 +4442,8 @@ both what it renders and the overlap set the conflict chips read.
   merge base. A row shows the subject (focusable, with the full subject in a
   tooltip), a mono pill with the branch or base name at its tip, the short
   SHA, and the author and age once the card is 420px wide. An upstream
-  commit that touches a path a merge would conflict on (`paths`) is amber
-  with a count. More than eight commits fold into **N more commits**, which
+  commit that touches a path a merge would conflict on (`paths`) is the
+  needs-you colour with a count. More than eight commits fold into **N more commits**, which
   keeps the three newest upstream commits in sight and unfolds the rest; a
   `truncated` log ends in a row that says so, with dotted edges. The top row
   is the pending action, a hollow node with dashed edges to both tips:
@@ -8024,7 +8026,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   the state mark says what state. `StatusDot`
   (`src/components/ui/status-dot.tsx`) is the only session-state mark: one shape
   and colour per state (filled circle Working, clock Waiting for, dashed ring
-  Waiting, amber ring Needs you, filled accent check Finished: review, check
+  Waiting, needs-you ring Needs you, filled accent check Finished: review, check
   Completed, ring with a bar Closed, cross Failed, ring with an exclamation
   mark Interrupted, broken ring Disconnected, bars Paused), named by the state
   word where it stands alone.
@@ -8037,7 +8039,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 - **Motion is optional.** Every animation and transition stops under
   `prefers-reduced-motion: reduce`: the state pulse, the Session live
   shimmer, row and answer-block entrances, overlay and sheet entrances, tab indicators, disclosures, spinners
-  and skeletons. The controlling terminal's 1px teal outline is always static.
+  and skeletons. The controlling terminal's 1px accent outline is always static.
   There is no startup scene or reveal-flash animation.
 - **Primitives first.** `src/components/ui/` holds the house primitives on
   Radix: `Button` (`primary`, `secondary`, `ghost`, `danger`, `link` and the
@@ -8297,7 +8299,7 @@ The installed app is a manual check too, because no browser lets a test
 emulate the `display-mode: standalone` a real install gives. On Android,
 Chrome's ⋮ menu should offer **Install app**; on iPhone, Safari's **Share >
 Add to Home Screen**. The icon that lands on the home screen should be the
-Cloudfield mark on a `#0b0911` tile, and opening it should give a full-screen dashboard
+Cloudfield mark on a `#070b11` tile, and opening it should give a full-screen dashboard
 with the shell's own top bar, safe-area padding intact under
 the notch, and the soft keyboard still shortening the layout rather than
 covering it. Watch what the server saw with:

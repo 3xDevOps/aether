@@ -173,7 +173,7 @@
 
 /* Revealed from the right edge, where Take control and Release sit, so the
    color pours out of the button and drains back into it. During a hold, red
-   spreads from the same edge and blends into the teal over 4rem. */
+   spreads from the same edge and blends into the control colour over 4rem. */
 .control-matrix-reach {
   clip-path: inset(0 0 0 calc(var(--control-reach) * 100%));
   mask-image: linear-gradient(to left, transparent calc(var(--control-edge) - 4rem), #000 var(--control-edge));
@@ -209,6 +209,7 @@
   --text-muted: #6b6b6b;
   --icon-faint: #8a8a8a;
   --accent-fill: #367f77;
+  --accent-mark: #367f77;
   --control-light: #367f77;
   --control-dots: 100%;
   --accent-text: #306f69;
@@ -260,42 +261,43 @@
 .dark {
   color-scheme: dark;
 
-  --canvas: #141516;
-  --chrome: #1b1c1d;
-  --hover: #1d1e1f;
-  --hover-chrome: #262728;
-  --raised: #222324;
-  --seam: rgb(255 255 255 / 0.08);
-  --control-border: #767676;
-  --text: #e8e8e8;
-  --text-muted: #9a9a9a;
-  --icon-faint: #7a7a7a;
-  --accent-fill: #367f77;
-  --control-light: #4cc2b3;
+  --canvas: #070b11;
+  --chrome: #0c141f;
+  --hover: #121924;
+  --hover-chrome: #1c2531;
+  --raised: #151d2a;
+  --seam: rgb(247 240 228 / 0.09);
+  --control-border: #717c8d;
+  --text: #f7f0e4;
+  --text-muted: #97a3b5;
+  --icon-faint: #798699;
+  --accent-fill: #f5c542;
+  --accent-mark: #54e0d0;
+  --control-light: #f5c542;
   --control-dots: 70%;
-  --accent-text: #5fb3a8;
-  --focus-ring: #5fb3a8;
-  --on-accent: #ffffff;
-  --selection: #17413d;
+  --accent-text: #54e0d0;
+  --focus-ring: #54e0d0;
+  --on-accent: #070b11;
+  --selection: #0c3b36;
 
   --state-working: #4a9eff;
-  --state-needs-you: #e0a52a;
+  --state-needs-you: #f5c542;
   --state-failed: #f05c4a;
   --state-done: #45c26a;
-  --state-paused: #8a8a8a;
-  --on-failed: #141516;
-  --on-done: #141516;
+  --state-paused: #798699;
+  --on-failed: #070b11;
+  --on-done: #070b11;
 
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
   --series-4: #c98500;
-  --series-5: #d55181;
+  --series-5: #8fbaff;
   --series-6: #008300;
   --series-7: #9085e9;
   --series-8: #e66767;
-  --series-other: #7a7a7a;
-  --series-rest: #4a4a4a;
+  --series-other: #6e798a;
+  --series-rest: #3e4958;
 
   --diff-add: #45c26a;
   --diff-del: #f05c4a;
@@ -387,7 +389,7 @@
   --color-state-failed-soft: color-mix(in srgb, var(--state-failed) var(--tone-soft), transparent);
   --color-state-done-soft: color-mix(in srgb, var(--state-done) var(--tone-soft), transparent);
   --color-state-paused-soft: color-mix(in srgb, var(--state-paused) var(--tone-soft), transparent);
-  --color-accent-soft: color-mix(in srgb, var(--accent-fill) var(--tone-soft), transparent);
+  --color-accent-soft: color-mix(in srgb, var(--accent-mark) var(--tone-soft), transparent);
   --color-diff-add: var(--diff-add);
   --color-diff-del: var(--diff-del);
   --color-diff-add-bg: color-mix(in srgb, var(--diff-add) var(--diff-bg), transparent);
@@ -397,11 +399,13 @@
   --color-agent-omp: var(--agent-omp);
   --color-agent-cursor: var(--agent-cursor);
 
-  /* `accent` is a fill for backgrounds and borders but the link colour for
-     text. Tailwind reads the property namespace before `--color-*`. */
-  --color-accent: var(--accent-fill);
+  /* `accent` marks what is selected or active as a fill or border, and is the
+     link colour for text. Tailwind reads the property namespace before
+     `--color-*`. `action` is the primary button's own fill. */
+  --color-accent: var(--accent-mark);
   --color-focus: var(--focus-ring);
-  --color-accent-hover: color-mix(in srgb, var(--accent-fill) 88%, black);
+  --color-action: var(--accent-fill);
+  --color-action-hover: color-mix(in srgb, var(--accent-fill) 88%, black);
   --text-color-accent: var(--accent-text);
   --text-color-muted: var(--text-muted);
   --color-scrim: var(--scrim);
@@ -413,7 +417,7 @@
   --shadow-button-hover: var(--button-hover-shadow);
   --shadow-overlay: var(--overlay-shadow);
   --shadow-dialog: var(--dialog-shadow);
-  --shadow-field-focus: 0 0 4px color-mix(in srgb, var(--accent-fill) 25%, transparent);
+  --shadow-field-focus: 0 0 4px color-mix(in srgb, var(--accent-mark) 25%, transparent);
 }
 
 /* Saira at 600 for pane, dialog, step and empty-state headings only. */
@@ -513,7 +517,7 @@
     display: grid;
     place-items: center;
     overflow: hidden;
-    background: #0b0911;
+    background: #070b11;
     opacity: 1;
     transition: opacity 260ms cubic-bezier(0.4, 0, 1, 1);
   }
@@ -630,16 +634,16 @@
     }
   }
 
-  /* Sticky note colors derive from accent-fill/control-light so dark and
-     light themes both track the live theme rather than a fixed palette. */
+  /* Sticky note colors derive from accent-mark so dark and light themes
+     both track the live theme rather than a fixed palette. */
   .sticky-note {
     --scratch-stroke: #ff9b8a;
-    background: color-mix(in srgb, var(--accent-fill) 30%, var(--canvas));
-    border-color: color-mix(in srgb, var(--control-light) 38%, transparent);
+    background: color-mix(in srgb, var(--accent-mark) 30%, var(--canvas));
+    border-color: color-mix(in srgb, var(--accent-mark) 38%, transparent);
   }
 
   .sticky-note__header {
-    color: color-mix(in srgb, var(--control-light) 65%, var(--text));
+    color: color-mix(in srgb, var(--accent-mark) 65%, var(--text));
   }
 }
 

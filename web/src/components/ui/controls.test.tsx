@@ -97,7 +97,7 @@ test('the variants paint the tokens the design system names', () => {
       <Button variant="danger">Danger</Button>
     </>,
   )
-  expect(screen.getByRole('button', { name: 'Primary' }).className).toContain('bg-accent')
+  expect(screen.getByRole('button', { name: 'Primary' }).className).toContain('bg-action')
   const secondary = screen.getByRole('button', { name: 'Secondary' }).className
   expect(secondary).toContain('bg-raised')
   expect(secondary).toContain('hover:not-aria-disabled:bg-hover-chrome')

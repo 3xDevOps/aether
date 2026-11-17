@@ -17,7 +17,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: 'bg-accent text-on-accent hover:not-aria-disabled:bg-accent-hover',
+        primary: 'bg-action text-on-accent hover:not-aria-disabled:bg-action-hover',
         secondary: 'border border-seam bg-raised text-text shadow-button hover:not-aria-disabled:bg-hover-chrome hover:not-aria-disabled:shadow-button-hover',
         ghost: 'text-muted hover:not-aria-disabled:bg-hover-chrome hover:not-aria-disabled:text-text',
         danger: 'bg-state-failed text-on-failed hover:not-aria-disabled:bg-state-failed/90',
