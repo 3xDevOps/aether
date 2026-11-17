@@ -380,6 +380,9 @@ top to bottom:
    scrolls on its own, and while more rows sit below the fold its bottom edge
    fades out. The sidebar never collapses on its own at narrow widths; the
    splitter and `⌘B` stay the reader's call.
+Each session row starts with its status dot and an owner-colored disclosure
+chevron. It points right while closed and down while open, even when the
+session has no subsessions; opening an empty list shows nothing underneath.
 4. **Manage workspaces**, **Members** and **Settings**, for every member.
    Board through Templates live in the header instead, leaving the sidebar's
    height for sessions. The current destination carries
