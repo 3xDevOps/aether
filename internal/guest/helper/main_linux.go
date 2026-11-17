@@ -191,7 +191,8 @@ func serve() error {
 	}
 	record(guest.RootStep, switchRoot())
 	record("mount system filesystems", mountSystem())
-	record("harden the kernel", harden())
+	record("write the boot sysctls", writeBootSysctls())
+	record("raise the open-file limit", unix.Setrlimit(unix.RLIMIT_NOFILE, &unix.Rlimit{Cur: openFileLimit, Max: openFileLimit}))
 	cmdline, err := os.ReadFile("/proc/cmdline")
 	record("read the kernel command line", err)
 	cfg, err := guest.ParseCmdline(string(cmdline))
