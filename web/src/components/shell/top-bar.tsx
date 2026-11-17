@@ -70,7 +70,7 @@ export function TopBar({ navigation = true }: { navigation?: boolean }) {
           ) : (
             <div className="flex shrink-0 items-center">
               <img src="/cloudfield-logo-small.svg" alt="Cloudfield" width={LOGO_WIDTH} height={32} className="hidden dark:block" />
-              <img src="/cloudfield-logo-for-light-backgrounds.svg" alt="Cloudfield" width={LOGO_WIDTH} height={32} className="dark:hidden" />
+              <img src="/cloudfield-logo-small-for-light-backgrounds.svg" alt="Cloudfield" width={LOGO_WIDTH} height={32} className="dark:hidden" />
             </div>
           )}
           {navigation && <HeaderNavigation compact={compact} onCompact={setCompact} />}

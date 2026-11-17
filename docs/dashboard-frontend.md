@@ -179,7 +179,7 @@ The manifest's `theme_color` and the layout's viewport `themeColor` both read
 `web/src/app/theme-color.ts` and take the dark value, the default theme;
 `ThemeEffect` switches the page's `theme-color` meta to the light value when
 the member picks light. `background_color` is the separate
-`iconBackground` from that module, `#0d1424`, the navy tile of the Cloudfield
+`iconBackground` from that module, `#0b0911`, the tile of the Cloudfield
 icons: an installed app's splash centres an icon on it, and any other value
 would leave the icon's tile showing as a square. The splash changes to the
 dashboard's own `--canvas` as the SPA paints over it.
@@ -8292,7 +8292,7 @@ The installed app is a manual check too, because no browser lets a test
 emulate the `display-mode: standalone` a real install gives. On Android,
 Chrome's ⋮ menu should offer **Install app**; on iPhone, Safari's **Share >
 Add to Home Screen**. The icon that lands on the home screen should be the
-Cloudfield mark on a navy tile, and opening it should give a full-screen dashboard
+Cloudfield mark on a `#0b0911` tile, and opening it should give a full-screen dashboard
 with the shell's own top bar, safe-area padding intact under
 the notch, and the soft keyboard still shortening the layout rather than
 covering it. Watch what the server saw with:

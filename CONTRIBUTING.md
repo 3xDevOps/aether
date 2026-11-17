@@ -390,8 +390,8 @@ graphic still shows the Aether mark and name: `python3 scripts/make-icons.py`
 The dashboard's icons, favicons and logo are the Cloudfield logo set's files,
 copied unchanged from `public/cloudfield/` of `3xDevOps/aether-web`:
 `web/public/cloudfield-mark.svg`, `cloudfield-logo-small.svg`,
-`cloudfield-logo-for-light-backgrounds.svg` and `cloudfield-favicon.svg` from
-the folder itself, and
+`cloudfield-logo-small-for-light-backgrounds.svg` and `cloudfield-favicon.svg`
+from the folder itself, and
 `web/public/icons/` from its `png/` folder (`icon-192.png`, `icon-512.png`,
 `maskable-*.png` as `icon-maskable-*.png`, `apple-icon-180.png` as
 `apple-touch-icon.png`, and `favicon-16.png`, `favicon-32.png`,

@@ -48,9 +48,11 @@ The aliases use `font-display: swap` and load only when a matching character
 appears; xterm keeps its own full-font family and cell metrics.
 
 The header shows the Cloudfield logo at 32px tall:
-`web/public/cloudfield-logo-small.svg`, the c and single-line letters, in the
-dark theme, and `cloudfield-logo-for-light-backgrounds.svg`, the c and
-three-line letters, in the light one; the set has no light single-line file.
+`web/public/cloudfield-logo-small.svg` in the dark theme and
+`cloudfield-logo-small-for-light-backgrounds.svg` in the light one. Both draw
+the c as two flat colours alternating dash by dash, teal `#54e0d0` and blue
+`#4a8dff` on dark and each darkened on light, and every letter stroke as two
+thin parallel lines.
 Where the navigation's destinations do not all fit beside the 162px logo, the
 32px `cloudfield-favicon.svg` tile replaces it, and the navigation still counts
 90px, the old brand's width, when it decides what fits, so it collapses at the

@@ -17,5 +17,5 @@
     <color name="accent_text">#306f69</color>
     <color name="on_accent">#ffffff</color>
     <!-- The fill of cloudfield-android-background.svg. -->
-    <color name="ic_launcher_background">#0d1424</color>
+    <color name="ic_launcher_background">#0b0911</color>
 </resources>
