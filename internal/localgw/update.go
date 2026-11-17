@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/macinstall"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/serverunit"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -368,11 +369,14 @@ func (g *Gateway) localUpdateStatus(_ *http.Request, _ []byte) (any, *protocol.E
 func restartCommand(updated []string) string {
 	for _, path := range updated {
 		if filepath.Base(path) == "aether-server" {
-			return "sudo systemctl restart aether-server"
+			return "sudo systemctl restart " + restartUnit()
 		}
 	}
 	return ""
 }
+
+// restartUnit is a variable so no test asks the host's systemd.
+var restartUnit = serverunit.RestartName
 
 // checkRelease runs the release check, mapping an unreachable GitHub to
 // the same code every other unavailable dependency uses.

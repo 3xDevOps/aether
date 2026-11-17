@@ -54,6 +54,16 @@ func TestUpdateApplyCarriesTheServerRestart(t *testing.T) {
 	if got.RestartCommand != "sudo systemctl restart aether-server" {
 		t.Fatalf("restart_command = %q, want the command aether update prints", got.RestartCommand)
 	}
+
+	// Once systemd resolves the unit's second name, the line uses it.
+	restartUnit = func() string { return "cloudfield-server" }
+	rec = do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%v): %s", rec.Code, err, rec.Body)
+	}
+	if got.RestartCommand != "sudo systemctl restart cloudfield-server" {
+		t.Fatalf("restart_command = %q, want the unit's second name", got.RestartCommand)
+	}
 }
 
 func TestUpdateApplyOmitsTheRestartWithoutAServer(t *testing.T) {

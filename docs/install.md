@@ -163,6 +163,13 @@ If the directory is not on your `PATH`, the script prints the line to add (it
 never edits a profile), and it prints the `sudo rm -f` for an older `aether`
 in `/usr/local/bin` that would run first.
 
+Beside `aether` and `aether-server` the script adds `cloudfield` and
+`cloudfield-server`, relative symlinks to them; the files keep the `aether`
+names. A name that already holds anything is left as it is. If the
+filesystem refuses the link, the script prints the `ln` error and the
+install still succeeds. `next:` names a command on this machine by its new
+name only where that link exists and its directory is on `PATH`.
+
 - `--role server` with no terminal installs the binaries, then exits 1 with
   the command that sets the server up from flags
   ([First boot](#first-boot)):
@@ -225,6 +232,11 @@ user `PATH`. Then it runs `aether gui build`, which installs the
 ask for administrator rights or change the execution policy or Defender
 settings: `-ExecutionPolicy Bypass` applies to that one process only. Open a
 new terminal afterwards: open ones keep their old `PATH`.
+
+Beside `aether.exe` it writes `cloudfield.cmd`, which runs `aether.exe` with
+the same arguments, unless something already holds that name. `next:` keeps
+the `aether` names: `cmd.exe` parses the arguments of a `.cmd` again, so an
+unquoted `&`, as in an `aether://` link, would split the command.
 
 It takes `-Version <tag>`, `-BinDir <dir>` and `-Role client|none` (`none`
 installs only the CLI), or `AETHER_VERSION`, `AETHER_BIN_DIR`, `AETHER_ROLE`,
@@ -533,6 +545,13 @@ restart it: `sudo systemctl restart aether-server`. All sessions together
 then compete as one group with `system.slice`, which holds `aether-server`,
 `docker`, `containerd`, `ssh` and `tailscaled`, and with `user.slice`, which
 holds login shells.
+
+`aether-server install` and `setup` also link
+`/etc/systemd/system/cloudfield-server.service` to `aether-server.service`
+when nothing holds that name. `systemctl` takes either name for `start`,
+`stop`, `restart` and `status`; `enable` refuses the link, so enable
+`aether-server`. Restart lines the dashboard and `aether update` print use
+`cloudfield-server` only where systemd resolves it.
 
 `aether-server install` and `setup` write `/etc/systemd/system/aether.slice`
 beside the unit, with `CPUWeight=50` and `IOWeight=50`. `system.slice` and
@@ -1108,6 +1127,9 @@ sudo aether-server edge leave
 # 1. Stop the service.
 sudo systemctl disable --now aether-server
 sudo rm -f /etc/systemd/system/aether-server.service /etc/systemd/system/aether.slice
+# The cloudfield-* names, only where they are the installer's links.
+u=/etc/systemd/system/cloudfield-server.service
+if [ "$(readlink $u)" = aether-server.service ]; then sudo rm $u; fi
 sudo systemctl daemon-reload
 # 2. Containers and VMs. Stopping the server does NOT remove them.
 sudo docker rm -f $(sudo docker ps -aq --filter label=aether.managed=true)
@@ -1119,6 +1141,7 @@ sudo docker volume rm $(sudo docker volume ls -q --filter label=aether.managed=t
 # 3. State, config, binary.
 sudo rm -rf /var/lib/aether /etc/aether
 sudo rm -f /usr/local/bin/aether-server
+if [ "$(readlink /usr/local/bin/cloudfield-server)" = aether-server ]; then sudo rm /usr/local/bin/cloudfield-server; fi
 sudo rm -rf /usr/local/bin/cloud-hypervisor /usr/local/lib/aether   # with session-runtime vm
 # The VM firewall rules and IP forwarding stay until the next reboot.
 sudo rm -rf /tmp/aether-patch-*
@@ -1146,7 +1169,8 @@ systemctl --user daemon-reload
 rm -rf ~/.config/aether ~/.config/aether-desktop
 ssh-keygen -R '[<server-host>]:2222'
 rm -f ~/.local/bin/aether       # the client default
-# sudo rm -f /usr/local/bin/aether if you installed there instead
+if [ "$(readlink ~/.local/bin/cloudfield)" = aether ]; then rm ~/.local/bin/cloudfield; fi
+# Installed in /usr/local/bin instead: the same two lines there, with sudo.
 # only if you ran `aether gui build`:
 rm -rf ~/.local/share/cloudfield/desktop ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.desktop
 rm -rf ~/.cache/aether ~/.cache/electron ~/.cache/electron-builder

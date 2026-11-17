@@ -45,10 +45,11 @@ func pinVersion(t *testing.T) {
 // stubApply replaces the binary-swapping call for one test.
 func stubApply(t *testing.T, fn func(context.Context, string, string) ([]string, error)) {
 	t.Helper()
-	old, oldLink := applyUpdate, linkBinaries
-	t.Cleanup(func() { applyUpdate, linkBinaries = old, oldLink })
+	old, oldLink, oldUnit := applyUpdate, linkBinaries, restartUnit
+	t.Cleanup(func() { applyUpdate, linkBinaries, restartUnit = old, oldLink, oldUnit })
 	applyUpdate = fn
 	linkBinaries = func([]string) error { return nil }
+	restartUnit = func() string { return "aether-server" }
 }
 
 // updateGateway builds a gateway whose release check is stubbed.

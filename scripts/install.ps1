@@ -837,6 +837,29 @@ function Install-AetherCli {
     return $destination
 }
 
+# Byte for byte the cloudfield.cmd internal/selfupdate's writeShim writes.
+function Add-AetherShim {
+    param([Parameter(Mandatory = $true)][string] $Directory)
+    $shim = Join-Path $Directory 'cloudfield.cmd'
+    $stage = Join-Path $Directory ('.cloudfield.cmd.{0}.tmp' -f ([Guid]::NewGuid().ToString('N')))
+    try {
+        # Test-Path follows a link, so it misses one that dangles.
+        if ([System.IO.Directory]::GetFileSystemEntries($Directory, 'cloudfield.cmd').Length -gt 0) { return }
+        [System.IO.File]::WriteAllBytes($stage, [System.Text.Encoding]::ASCII.GetBytes('@"%~dp0aether.exe" %*' + "`r`n"))
+        # File.Move refuses an existing destination, so a file that appeared
+        # since the check is not replaced.
+        [System.IO.File]::Move($stage, $shim)
+    }
+    catch {
+        Write-Warning ("could not write {0}: {1}; aether works as before" -f $shim, $_.Exception.GetBaseException().Message.TrimEnd('.'))
+    }
+    finally {
+        if (Test-Path -LiteralPath $stage) {
+            Remove-Item -LiteralPath $stage -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Get-AetherInstalledVersion {
     param([Parameter(Mandatory = $true)][string] $CliPath)
     if (-not (Test-Path -LiteralPath $CliPath -PathType Leaf)) { return $null }
@@ -1157,6 +1180,7 @@ function Invoke-AetherInstall {
             $destination = Install-AetherCli $release.Path $binDir $release.Expected (@($destination) + $desktopPaths)
         }
         Write-AetherDetail $destination
+        Add-AetherShim $binDir
         try {
             $pathChanged = Update-AetherPath $binDir
         } catch {

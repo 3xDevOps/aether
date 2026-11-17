@@ -548,6 +548,10 @@ func main() {
     Assert-AetherTest ($result.Stderr.Contains('fixture stderr progress')) ("desktop build stderr did not reach the console: " + $result.Output)
     Assert-AetherTest (-not $result.Stderr.Contains('NativeCommandError')) ("desktop build stderr became an error record: " + $result.Stderr)
     Assert-AetherTest ((Get-AetherTestUserPath).StartsWith($freshUserPath)) 'fresh install altered unrelated PATH entries'
+    # The same cloudfield.cmd the updater writes (internal/selfupdate.writeShim).
+    $shimText = '@"%~dp0aether.exe" %*' + "`r`n"
+    $freshShim = Join-Path $freshBin 'cloudfield.cmd'
+    Assert-AetherEqual $shimText ([IO.File]::ReadAllText($freshShim)) 'fresh install did not write the cloudfield.cmd shim'
     Assert-AetherTest ([Environment]::GetEnvironmentVariable('Path', 'User').StartsWith([Environment]::ExpandEnvironmentVariables($freshUserPath))) 'fresh install stopped expanding PATH tokens'
 
     # Reinstall twice: unrelated files survive and a case/trailing-slash PATH
@@ -572,6 +576,7 @@ func main() {
     Assert-AetherTest ($result.Stdout.Contains(('[2/2] CLI {0} is already installed' -f $version))) ("unchanged reinstall did not say so: " + $result.Output)
     Assert-AetherTest (-not ([IO.File]::ReadAllText($requestLog).Contains('aether-windows-amd64.exe'))) 'unchanged reinstall downloaded the CLI again'
     Assert-AetherEqual 'unrelated user file' ([IO.File]::ReadAllText($unrelated)) 'reinstall deleted an unrelated file'
+    Assert-AetherEqual $shimText ([IO.File]::ReadAllText($freshShim)) 'reinstall changed cloudfield.cmd'
     $finalUserPath = Get-AetherTestUserPath
     Assert-AetherTest ($finalUserPath.Contains('%SystemRoot%\System32')) 'reinstall lost an expandable PATH token'
     $normalizedEntries = @($finalUserPath -split ';' | ForEach-Object { Get-AetherNormalizedPathEntry $_ })
@@ -582,6 +587,9 @@ func main() {
     $noneBin = Join-Path $root 'none-bin'
     $noneLog = Join-Path $root 'none.log'
     New-Item -ItemType Directory -Path $noneBin -Force | Out-Null
+    # A cloudfield.cmd the installer did not write is left as it is.
+    $takenShim = Join-Path $noneBin 'cloudfield.cmd'
+    [IO.File]::WriteAllText($takenShim, 'not ours')
     Write-AetherRelease $releaseRoot 'v0.4.0-alpha.6' $fixture $fixture
     $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.4.0-alpha.6', '-Role', 'none', '-BinDir', $noneBin) @{
         AETHER_BASE_URL = $baseUrl
@@ -589,6 +597,8 @@ func main() {
     }
     Assert-AetherEqual 0 $result.ExitCode ("CLI-only install failed: " + $result.Output)
     Assert-AetherTest (Test-Path -LiteralPath (Join-Path $noneBin 'aether.exe') -PathType Leaf) 'CLI-only install did not install the CLI'
+    Assert-AetherEqual 'not ours' ([IO.File]::ReadAllText($takenShim)) 'install replaced a cloudfield.cmd it did not write'
+    Assert-AetherTest (-not $result.Output.Contains('cloudfield.cmd')) ("install warned about a cloudfield.cmd that is not its own: " + $result.Output)
     Assert-AetherTest (-not (Test-Path -LiteralPath $noneLog)) 'CLI-only opt out invoked GUI build'
 
     # CLOUDFIELD_X wins over AETHER_X; a blank one falls back.

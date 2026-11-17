@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/3xDevOps/Aether/internal/serverunit"
 )
 
 // ServiceName is the system service identifier.
-const ServiceName = "aether-server"
+const ServiceName = serverunit.Name
 
 // UnitPath is where the system unit belongs.
 const UnitPath = "/etc/systemd/system/" + ServiceName + ".service"

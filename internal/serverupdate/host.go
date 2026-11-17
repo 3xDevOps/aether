@@ -12,6 +12,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/Aether/internal/serverunit"
 )
 
 // Host carries the three things a self-update does to the machine it runs
@@ -44,16 +45,11 @@ type Host struct {
 	UnitDir string
 }
 
-// UnitAlias is the second name of the server's unit, a symlink to its
-// unit file. The unit keeps its name and text, because a binary from
-// before the second name restarts it by that name after a rollback.
-const UnitAlias = "cloudfield-server.service"
-
-// LinkUnit makes UnitAlias in UnitDir a link to the server's unit file
-// when the unit file is there and nothing holds the name, and reports
-// whether it did. A name held by anything else is left as it is and is no
-// error. It never reloads systemd: a daemon-reload acts on every unit of
-// the host.
+// LinkUnit makes serverunit.Alias in UnitDir a link to the server's
+// unit file when the unit file is there and nothing holds the name, and
+// reports whether it did. A name held by anything else is left as it is and
+// is no error. It never reloads systemd: a daemon-reload acts on every unit
+// of the host.
 func (h Host) LinkUnit() (bool, error) {
 	if h.UnitDir == "" {
 		return false, nil
@@ -62,7 +58,7 @@ func (h Host) LinkUnit() (bool, error) {
 	if _, err := os.Stat(filepath.Join(h.UnitDir, unit)); err != nil {
 		return false, nil
 	}
-	created, err := selfupdate.Symlink(h.UnitDir, unit, UnitAlias)
+	created, err := selfupdate.Symlink(h.UnitDir, unit, serverunit.Alias)
 	if errors.Is(err, selfupdate.ErrNameTaken) {
 		return false, nil
 	}

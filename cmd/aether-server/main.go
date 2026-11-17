@@ -11,11 +11,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -34,6 +32,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/Aether/internal/serverunit"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -568,19 +567,12 @@ func linkSecondNames(host serverupdate.Host) {
 	// reloads systemd itself, because a daemon-reload has host-wide effects.
 	if created {
 		go func() {
-			if !unitAliasResolved() {
-				slog.Warn("systemd does not resolve " + serverupdate.UnitAlias + " to " + serversetup.ServiceName +
+			if !serverunit.AliasResolves() {
+				slog.Warn("systemd does not resolve " + serverunit.Alias + " to " + serversetup.ServiceName +
 					" yet; it does after: sudo systemctl daemon-reload")
 			}
 		}()
 	}
-}
-
-// unitAliasResolved reports whether systemd loads the unit's second name
-// as the server's unit.
-func unitAliasResolved() bool {
-	out, err := exec.Command("systemctl", "show", "-p", "Id", "--value", serverupdate.UnitAlias).Output()
-	return err == nil && strings.TrimSpace(string(out)) == serversetup.ServiceName+".service"
 }
 
 // warnIfUnitOutdated tells the operator when the installed systemd unit, or
