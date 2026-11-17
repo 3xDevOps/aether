@@ -152,8 +152,7 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
       className={cn(
         'rounded-composer border border-seam',
         'group-focus-visible:outline-2 group-focus-visible:-outline-offset-2 group-focus-visible:outline-focus group-focus-visible:transition-none',
-        scale === undefined ? 'max-h-full max-w-full' : 'max-w-none shrink-0 cursor-zoom-out',
-        scale === undefined && 'cursor-zoom-in',
+        scale === undefined ? 'max-h-full max-w-full cursor-default' : 'max-w-none shrink-0 cursor-default',
       )}
       style={natural ? {
         width: natural.width * (scale ?? fitScale()),
@@ -297,7 +296,7 @@ function MessageImage({ runID, messageID, index, name, onURL, onOpen }: MessageI
         <>
           {!loaded && <span role="status" className="absolute p-3 text-ui-sm text-muted">Loading {name.toLowerCase()}…</span>}
           {url && (
-            <Button type="button" variant="quiet" aria-label={`Open ${name.toLowerCase()} full size`} className={cn('size-full cursor-zoom-in coarse:h-full', focusRingInset)} onClick={onOpen}>
+            <Button type="button" variant="quiet" aria-label={`Open ${name.toLowerCase()} full size`} className={cn('size-full cursor-default coarse:h-full', focusRingInset)} onClick={onOpen}>
               <img
                 src={url}
                 alt={name}
