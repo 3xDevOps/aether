@@ -22,7 +22,7 @@ var loginExitLine = regexp.MustCompile(`^` + loginExitMark + ` ([0-9]+)$`)
 
 func agentLogin(args []string) error {
 	if len(args) != 1 || args[0] == "" || args[0][0] == '-' {
-		return errors.New("usage: aether agent login <name>")
+		return errors.New("usage: cloudfield agent login <name>")
 	}
 	var agent protocol.AgentInfo
 	found := false

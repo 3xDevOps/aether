@@ -14,8 +14,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const memberMergeUsage = "usage: aether member merge start | aether member merge <code> [--keep <member-id>] [--keep-admin] [--yes] |\n" +
-	"       aether member merge accept [<proposal-id>] [--keep-admin] [--yes] | aether member merge cancel"
+const memberMergeUsage = "usage: cloudfield member merge start | cloudfield member merge <code> [--keep <member-id>] [--keep-admin] [--yes] |\n" +
+	"       cloudfield member merge accept [<proposal-id>] [--keep-admin] [--yes] | cloudfield member merge cancel"
 
 // memberMerge mints a merge code on one sign-in, proposes a merge with it
 // from the other, and accepts or cancels it.

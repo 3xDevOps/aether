@@ -61,7 +61,7 @@ func updateCmd(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 || *channel != "" && *tag != "" || *yes && *channel == "" {
-		return errors.New("usage: aether-server update [--version <tag>] | --channel <stable|beta|nightly> [--yes]")
+		return errors.New("usage: cloudfield-server update [--version <tag>] | --channel <stable|beta|nightly> [--yes]")
 	}
 	if os.Geteuid() != 0 {
 		return errors.New("run it as root: sudo aether-server update")

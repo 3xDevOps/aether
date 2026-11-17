@@ -24,16 +24,16 @@ func init() {
 	register(command{
 		name:  "server",
 		short: "server administration: update",
-		usage: "aether server update [--status] [--version <tag>] [--when now|idle] [--allow-downgrade] [--cancel] [--yes]",
-		example: "aether server update --status\n" +
-			"aether server update --when idle --yes",
+		usage: "cloudfield server update [--status] [--version <tag>] [--when now|idle] [--allow-downgrade] [--cancel] [--yes]",
+		example: "cloudfield server update --status\n" +
+			"cloudfield server update --when idle --yes",
 		run: runServer,
 	})
 }
 
 func runServer(args []string) error {
 	if len(args) < 1 || args[0] != "update" {
-		return errors.New("usage: aether server <update>")
+		return errors.New("usage: cloudfield server <update>")
 	}
 	return serverUpdate(args[1:])
 }
@@ -46,7 +46,7 @@ type serverUpdateOptions struct {
 	allowDowngrade bool
 }
 
-const serverUpdateUsage = "usage: aether server update [--status] [--version <tag>] [--when now|idle] [--allow-downgrade] [--cancel] [--yes]"
+const serverUpdateUsage = "usage: cloudfield server update [--status] [--version <tag>] [--when now|idle] [--allow-downgrade] [--cancel] [--yes]"
 
 // parseServerUpdate parses the flags of "aether server update". --status
 // and --cancel each stand alone: --status reports state rather than

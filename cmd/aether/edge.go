@@ -18,13 +18,13 @@ func init() {
 	register(command{
 		name:    "edge",
 		short:   "connect your GitHub account to the linked server's edge",
-		usage:   "aether edge connect",
-		example: "aether edge connect",
+		usage:   "cloudfield edge connect",
+		example: "cloudfield edge connect",
 		run:     runEdge,
 	})
 }
 
-const edgeUsage = "usage: aether edge connect"
+const edgeUsage = "usage: cloudfield edge connect"
 
 func runEdge(args []string) error {
 	if len(args) != 1 || args[0] != "connect" {

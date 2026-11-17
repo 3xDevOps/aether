@@ -24,24 +24,24 @@ func init() {
 	register(command{
 		name:  "config",
 		short: "list and upload agent configuration",
-		usage: "aether config ls\n" +
-			"aether config ls [-r] <agent> [path]\n" +
-			"aether config cat <agent> <path>\n" +
-			"aether config push [--dry-run] [--overwrite] <agent> <path>...\n" +
-			"aether config push [--dry-run] [--overwrite] <agent> <path> --from <file>",
-		example: "aether config ls\n" +
-			"aether config ls -r claude\n" +
-			"aether config cat claude settings.json\n" +
-			"aether config push --dry-run claude settings.json",
+		usage: "cloudfield config ls\n" +
+			"cloudfield config ls [-r] <agent> [path]\n" +
+			"cloudfield config cat <agent> <path>\n" +
+			"cloudfield config push [--dry-run] [--overwrite] <agent> <path>...\n" +
+			"cloudfield config push [--dry-run] [--overwrite] <agent> <path> --from <file>",
+		example: "cloudfield config ls\n" +
+			"cloudfield config ls -r claude\n" +
+			"cloudfield config cat claude settings.json\n" +
+			"cloudfield config push --dry-run claude settings.json",
 		run: runConfig,
 	})
 }
 
-const configUsage = "usage: aether config ls\n" +
-	"   or: aether config ls [-r] <agent> [path]\n" +
-	"   or: aether config cat <agent> <path>\n" +
-	"   or: aether config push [--dry-run] [--overwrite] <agent> <path>...\n" +
-	"   or: aether config push [--dry-run] [--overwrite] <agent> <path> --from <file>\n" +
+const configUsage = "usage: cloudfield config ls\n" +
+	"   or: cloudfield config ls [-r] <agent> [path]\n" +
+	"   or: cloudfield config cat <agent> <path>\n" +
+	"   or: cloudfield config push [--dry-run] [--overwrite] <agent> <path>...\n" +
+	"   or: cloudfield config push [--dry-run] [--overwrite] <agent> <path> --from <file>\n" +
 	"each path is a file or directory inside the agent's directory, relative to it; . is the whole directory\n" +
 	"ls and cat read the server's copy; push uploads this computer's, or with --from uploads <file> as <path>\n" +
 	"push never replaces a server file that differs unless --overwrite is given"

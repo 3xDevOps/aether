@@ -15,8 +15,8 @@ func init() {
 	register(command{
 		name:    "audit",
 		short:   "show audit history: connector and assistant writes, and connector, account-share, member and Slack link changes",
-		usage:   "aether audit [--connector <connector-id>] [--limit <n>] [--before <seq>]",
-		example: "aether audit --connector con-7k2m9q4xbd",
+		usage:   "cloudfield audit [--connector <connector-id>] [--limit <n>] [--before <seq>]",
+		example: "cloudfield audit --connector con-7k2m9q4xbd",
 		flags:   true,
 		run:     runAudit,
 	})
@@ -31,7 +31,7 @@ func runAudit(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return errors.New("usage: aether audit [--connector <connector-id>] [--limit <n>] [--before <seq>]")
+		return errors.New("usage: cloudfield audit [--connector <connector-id>] [--limit <n>] [--before <seq>]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.AuditListResult

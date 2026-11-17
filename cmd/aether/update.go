@@ -28,10 +28,10 @@ import (
 func init() {
 	register(command{
 		name:  "update",
-		short: "update this binary (and aether-server beside it) to a release",
-		usage: "aether update [--check [--json]] [--version <tag>] [--no-app] [--force]",
-		example: "aether update --check --json\n" +
-			"aether update",
+		short: "update this binary (and cloudfield-server beside it) to a release",
+		usage: "cloudfield update [--check [--json]] [--version <tag>] [--no-app] [--force]",
+		example: "cloudfield update --check --json\n" +
+			"cloudfield update",
 		flags: true,
 		run:   runUpdate,
 	})

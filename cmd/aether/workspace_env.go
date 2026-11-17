@@ -14,12 +14,12 @@ import (
 )
 
 const (
-	workspaceEnvUsage       = "usage: aether workspace env <list|set|unset|import|script|egress>"
-	workspaceEnvListUsage   = "usage: aether workspace env list [--workspace <name-or-id>]"
-	workspaceEnvSetUsage    = "usage: aether workspace env set [--workspace <name-or-id>] <NAME>=<value> [<NAME>=<value> ...]\n   or: aether workspace env set [--workspace <name-or-id>] --secret <NAME>   (the value is read from stdin)"
-	workspaceEnvUnsetUsage  = "usage: aether workspace env unset [--workspace <name-or-id>] <NAME> [<NAME> ...]"
-	workspaceEnvImportUsage = "usage: aether workspace env import [--workspace <name-or-id>] [--plain] <file|->"
-	workspaceEnvScriptUsage = "usage: aether workspace env script [--workspace <name-or-id>] [--file <path|->|--clear]"
+	workspaceEnvUsage       = "usage: cloudfield workspace env <list|set|unset|import|script|egress>"
+	workspaceEnvListUsage   = "usage: cloudfield workspace env list [--workspace <name-or-id>]"
+	workspaceEnvSetUsage    = "usage: cloudfield workspace env set [--workspace <name-or-id>] <NAME>=<value> [<NAME>=<value> ...]\n   or: cloudfield workspace env set [--workspace <name-or-id>] --secret <NAME>   (the value is read from stdin)"
+	workspaceEnvUnsetUsage  = "usage: cloudfield workspace env unset [--workspace <name-or-id>] <NAME> [<NAME> ...]"
+	workspaceEnvImportUsage = "usage: cloudfield workspace env import [--workspace <name-or-id>] [--plain] <file|->"
+	workspaceEnvScriptUsage = "usage: cloudfield workspace env script [--workspace <name-or-id>] [--file <path|->|--clear]"
 
 	workspaceEnvScope = "new sessions get this; sandboxes that already exist keep what they started with"
 )

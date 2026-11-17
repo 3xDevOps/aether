@@ -13,43 +13,43 @@ func init() {
 	register(command{
 		name:  "workspace",
 		short: "manage workspaces: init, add, import, delete, list, access, grant, revoke, owner, settings, origin, env, mirror",
-		usage: "aether workspace init <name> [--base <branch>]\n" +
-			"aether workspace add <name> [--base <branch>]\n" +
-			"aether workspace import <path|url> [--name <name>]\n" +
-			"aether workspace delete <name> --yes\n" +
-			"aether workspace list\n" +
-			"aether workspace access <workspace>\n" +
-			"aether workspace grant <workspace> <member-id>...\n" +
-			"aether workspace revoke <workspace> <member-id>\n" +
-			"aether workspace owner <workspace> <member-id>\n" +
-			"aether workspace settings [--workspace <name>] [--message-others everyone|admins-only] [--child-max-live <n>]\n" +
-			"aether workspace origin [--workspace <name>] [<url>|--clear]\n" +
-			"aether workspace env list [--workspace <name>]\n" +
-			"aether workspace env set [--workspace <name>] <NAME>=<value>...\n" +
-			"aether workspace env set [--workspace <name>] --secret <NAME>\n" +
-			"aether workspace env unset [--workspace <name>] <NAME>...\n" +
-			"aether workspace env import [--workspace <name>] [--plain] <file|->\n" +
-			"aether workspace env script [--workspace <name>] [--file <path|->|--clear]\n" +
-			"aether workspace mirror status [--workspace <name>]\n" +
-			"aether workspace mirror configure --source <url> [--workspace <name>] [--branch <branch>]\n" +
+		usage: "cloudfield workspace init <name> [--base <branch>]\n" +
+			"cloudfield workspace add <name> [--base <branch>]\n" +
+			"cloudfield workspace import <path|url> [--name <name>]\n" +
+			"cloudfield workspace delete <name> --yes\n" +
+			"cloudfield workspace list\n" +
+			"cloudfield workspace access <workspace>\n" +
+			"cloudfield workspace grant <workspace> <member-id>...\n" +
+			"cloudfield workspace revoke <workspace> <member-id>\n" +
+			"cloudfield workspace owner <workspace> <member-id>\n" +
+			"cloudfield workspace settings [--workspace <name>] [--message-others everyone|admins-only] [--child-max-live <n>]\n" +
+			"cloudfield workspace origin [--workspace <name>] [<url>|--clear]\n" +
+			"cloudfield workspace env list [--workspace <name>]\n" +
+			"cloudfield workspace env set [--workspace <name>] <NAME>=<value>...\n" +
+			"cloudfield workspace env set [--workspace <name>] --secret <NAME>\n" +
+			"cloudfield workspace env unset [--workspace <name>] <NAME>...\n" +
+			"cloudfield workspace env import [--workspace <name>] [--plain] <file|->\n" +
+			"cloudfield workspace env script [--workspace <name>] [--file <path|->|--clear]\n" +
+			"cloudfield workspace mirror status [--workspace <name>]\n" +
+			"cloudfield workspace mirror configure --source <url> [--workspace <name>] [--branch <branch>]\n" +
 			"    [--auth public|deploy-key|github] [--github-account-id <id>] [--known-hosts-file <path>]\n" +
-			"aether workspace mirror refresh --workspace <name>\n" +
-			"aether workspace mirror adopt --workspace <name> --generation <n> --commit <sha> --yes\n" +
-			"aether workspace mirror disable --workspace <name> --yes",
-		example: "aether workspace list\n" +
-			"aether workspace import ~/src/app\n" +
-			"aether workspace import https://github.com/acme/app\n" +
-			"aether workspace grant app mem-rbekp4h6fx\n" +
-			"aether workspace env set --workspace app API_URL=https://api.example.com\n" +
-			"aether workspace env set --workspace app --secret DATABASE_PASSWORD < secret.txt\n" +
-			"aether workspace mirror status --workspace app",
+			"cloudfield workspace mirror refresh --workspace <name>\n" +
+			"cloudfield workspace mirror adopt --workspace <name> --generation <n> --commit <sha> --yes\n" +
+			"cloudfield workspace mirror disable --workspace <name> --yes",
+		example: "cloudfield workspace list\n" +
+			"cloudfield workspace import ~/src/app\n" +
+			"cloudfield workspace import https://github.com/acme/app\n" +
+			"cloudfield workspace grant app mem-rbekp4h6fx\n" +
+			"cloudfield workspace env set --workspace app API_URL=https://api.example.com\n" +
+			"cloudfield workspace env set --workspace app --secret DATABASE_PASSWORD < secret.txt\n" +
+			"cloudfield workspace mirror status --workspace app",
 		run: runWorkspace,
 	})
 }
 
 func runWorkspace(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether workspace <init|add|import|delete|list|access|grant|revoke|owner|settings|origin|env|mirror>")
+		return fmt.Errorf("usage: cloudfield workspace <init|add|import|delete|list|access|grant|revoke|owner|settings|origin|env|mirror>")
 	}
 	switch args[0] {
 	case "init":
@@ -85,7 +85,7 @@ func runWorkspace(args []string) error {
 
 func workspaceList(args []string) error {
 	if len(args) > 0 {
-		return fmt.Errorf("usage: aether workspace list")
+		return fmt.Errorf("usage: cloudfield workspace list")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var list protocol.WorkspaceListResult
@@ -127,10 +127,10 @@ func workspaceInit(args []string) error {
 	base := fs.String("base", "", "branch new session worktrees are cut from (default main)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether workspace init <name> [--base <branch>]", err)
+		return fmt.Errorf("%w\nusage: cloudfield workspace init <name> [--base <branch>]", err)
 	}
 	if name == "" {
-		return fmt.Errorf("usage: aether workspace init <name> [--base <branch>]")
+		return fmt.Errorf("usage: cloudfield workspace init <name> [--base <branch>]")
 	}
 	return createWorkspace(workspaceCreateOptions{name: name, base: *base})
 }
@@ -140,10 +140,10 @@ func workspaceAdd(args []string) error {
 	base := fs.String("base", "", "branch new session worktrees are cut from (default main)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether workspace add <name> [--base <branch>]", err)
+		return fmt.Errorf("%w\nusage: cloudfield workspace add <name> [--base <branch>]", err)
 	}
 	if name == "" {
-		return fmt.Errorf("usage: aether workspace add <name> [--base <branch>]")
+		return fmt.Errorf("usage: cloudfield workspace add <name> [--base <branch>]")
 	}
 	return createWorkspace(workspaceCreateOptions{name: name, base: *base})
 }
@@ -185,10 +185,10 @@ func workspaceDelete(args []string) error {
 	yes := fs.Bool("yes", false, "confirm permanent deletion of the workspace and all its data")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether workspace delete <name-or-id> --yes", err)
+		return fmt.Errorf("%w\nusage: cloudfield workspace delete <name-or-id> --yes", err)
 	}
 	if name == "" {
-		return fmt.Errorf("usage: aether workspace delete <name-or-id> --yes")
+		return fmt.Errorf("usage: cloudfield workspace delete <name-or-id> --yes")
 	}
 	if !*yes {
 		return fmt.Errorf("--yes is required because workspace deletion permanently removes its sessions, repository and data")

@@ -14,15 +14,15 @@ func init() {
 	register(command{
 		name:    "pull",
 		short:   "fetch a session's branches into the linked clones (no merge)",
-		usage:   "aether pull <session-id>",
-		example: "aether pull run-d6ay38tj8j",
+		usage:   "cloudfield pull <session-id>",
+		example: "cloudfield pull run-d6ay38tj8j",
 		run:     runPull,
 	})
 }
 
 func runPull(args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: aether pull <session>")
+		return errors.New("usage: cloudfield pull <session>")
 	}
 	cfg, err := cli.Load()
 	if err != nil {

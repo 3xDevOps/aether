@@ -15,15 +15,15 @@ func init() {
 	register(command{
 		name:  "invite",
 		short: "invite a GitHub account through the edge, or mint a one-time invite code",
-		usage: "aether invite [--ttl <seconds>] [--workspace <workspace>]...\n" +
-			"aether invite --github <login> [--role <super_admin|admin|collaborator|viewer>] [--workspace <workspace>]...\n" +
-			"aether invite --email <address> [--role <super_admin|admin|collaborator|viewer>] [--workspace <workspace>]...\n" +
-			"aether invite list\n" +
-			"aether invite revoke <invitation-id>",
-		example: "aether invite\n" +
-			"aether invite --workspace web\n" +
-			"aether invite --github alice --role collaborator --workspace web --workspace api\n" +
-			"aether invite list",
+		usage: "cloudfield invite [--ttl <seconds>] [--workspace <workspace>]...\n" +
+			"cloudfield invite --github <login> [--role <super_admin|admin|collaborator|viewer>] [--workspace <workspace>]...\n" +
+			"cloudfield invite --email <address> [--role <super_admin|admin|collaborator|viewer>] [--workspace <workspace>]...\n" +
+			"cloudfield invite list\n" +
+			"cloudfield invite revoke <invitation-id>",
+		example: "cloudfield invite\n" +
+			"cloudfield invite --workspace web\n" +
+			"cloudfield invite --github alice --role collaborator --workspace web --workspace api\n" +
+			"cloudfield invite list",
 		flags: true,
 		run:   runInvite,
 	})
@@ -39,7 +39,7 @@ func runInvite(args []string) error {
 			return inviteList()
 		case "revoke":
 			if len(args) != 2 {
-				return fmt.Errorf("usage: aether invite revoke <invitation-id>")
+				return fmt.Errorf("usage: cloudfield invite revoke <invitation-id>")
 			}
 			return withControl(func(c *protocol.Client) error {
 				if err := c.Call(protocol.MethodMemberInvitationRevoke,
@@ -77,7 +77,7 @@ func runInvite(args []string) error {
 	})
 }
 
-const inviteUsage = "usage: aether invite [--ttl <seconds>]\n" +
+const inviteUsage = "usage: cloudfield invite [--ttl <seconds>]\n" +
 	"       aether invite --github <login> | --email <address> [--role super_admin|admin|collaborator|viewer]\n" +
 	"       aether invite ... [--workspace <workspace>]...\n" +
 	"       aether invite list | revoke <invitation-id>"

@@ -12,8 +12,8 @@ func init() {
 	register(command{
 		name:    "cost",
 		short:   "report token usage and cost per member and per session",
-		usage:   "aether cost [--workspace <name>] [--runs]",
-		example: "aether cost --workspace app --runs",
+		usage:   "cloudfield cost [--workspace <name>] [--runs]",
+		example: "cloudfield cost --workspace app --runs",
 		flags:   true,
 		run:     runCost,
 	})

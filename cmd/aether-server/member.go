@@ -13,7 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-const memberUsage = "usage: aether-server member role <member-id> <viewer|collaborator|admin|super_admin> [--config <file>]"
+const memberUsage = "usage: cloudfield-server member role <member-id> <viewer|collaborator|admin|super_admin> [--config <file>]"
 
 func memberCmd(args []string) error {
 	if len(args) < 3 || args[0] != "role" {

@@ -17,16 +17,16 @@ func init() {
 	register(command{
 		name:  "device",
 		short: "list, approve, or revoke the devices members reach the server through an edge with",
-		usage: "aether device list\n" +
-			"aether device approve <code|device-id>\n" +
-			"aether device revoke <device-id>",
-		example: "aether device list",
+		usage: "cloudfield device list\n" +
+			"cloudfield device approve <code|device-id>\n" +
+			"cloudfield device revoke <device-id>",
+		example: "cloudfield device list",
 		run:     runDevice,
 	})
 }
 
 func runDevice(args []string) error {
-	const usage = "usage: aether device <list|approve <code or device-id>|revoke <device-id>>"
+	const usage = "usage: cloudfield device <list|approve <code or device-id>|revoke <device-id>>"
 	if len(args) < 1 {
 		return fmt.Errorf("%s", usage)
 	}

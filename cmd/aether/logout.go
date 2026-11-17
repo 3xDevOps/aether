@@ -16,8 +16,8 @@ func init() {
 	register(command{
 		name:    "logout",
 		short:   "revoke this device's edge sign-in, or show how to delete the edge account",
-		usage:   "aether logout [--edge <url>] [--delete-account]",
-		example: "aether logout",
+		usage:   "cloudfield logout [--edge <url>] [--delete-account]",
+		example: "cloudfield logout",
 		flags:   true,
 		run:     runLogout,
 	})
@@ -31,7 +31,7 @@ func runLogout(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether logout [--edge <url>] [--delete-account]")
+		return fmt.Errorf("usage: cloudfield logout [--edge <url>] [--delete-account]")
 	}
 	client, err := edgeClient(*edgeURL)
 	if err != nil {

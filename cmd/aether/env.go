@@ -11,16 +11,16 @@ import (
 	"golang.org/x/term"
 )
 
-const envUsage = "usage: aether env save|reset [--yes]"
+const envUsage = "usage: cloudfield env save|reset [--yes]"
 
 func init() {
 	register(command{
 		name:  "env",
 		short: "save or reset your Environment",
-		usage: "aether env save\n" +
-			"aether env reset [--yes]",
-		example: "aether env save\n" +
-			"aether env reset --yes",
+		usage: "cloudfield env save\n" +
+			"cloudfield env reset [--yes]",
+		example: "cloudfield env save\n" +
+			"cloudfield env reset --yes",
 		run: runEnv,
 	})
 }

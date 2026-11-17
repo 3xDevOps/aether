@@ -18,8 +18,8 @@ func init() {
 	register(command{
 		name:    "init",
 		short:   "prepare a server data directory (does not start the server)",
-		usage:   "aether init [--data-dir <path>]",
-		example: "aether init --data-dir /var/lib/aether",
+		usage:   "cloudfield init [--data-dir <path>]",
+		example: "cloudfield init --data-dir /var/lib/aether",
 		flags:   true,
 		run:     runInit,
 	})

@@ -13,21 +13,21 @@ func init() {
 	register(command{
 		name:  "ssh",
 		short: "open a shell or run a command in a session, through the system ssh",
-		usage: "aether ssh [ssh options] <session-id> [command]",
-		example: "aether ssh run-d6ay38tj8j\n" +
-			"aether ssh run-d6ay38tj8j git status",
+		usage: "cloudfield ssh [ssh options] <session-id> [command]",
+		example: "cloudfield ssh run-d6ay38tj8j\n" +
+			"cloudfield ssh run-d6ay38tj8j git status",
 		run: runSSH,
 	})
 	register(command{
 		name:    "ssh-config",
 		short:   "let ssh, scp and editors reach every session as <session-id>" + cli.RunHostSuffix,
-		usage:   "aether ssh-config",
-		example: "aether ssh-config",
+		usage:   "cloudfield ssh-config",
+		example: "cloudfield ssh-config",
 		run:     runSSHConfig,
 	})
 }
 
-const sshUsage = "usage: aether ssh [ssh options] <session> [command]"
+const sshUsage = "usage: cloudfield ssh [ssh options] <session> [command]"
 
 // runSSH runs the system ssh against a run with the options aether
 // ssh-config would have written, so it needs no ~/.ssh/config. With --stdio
@@ -116,7 +116,7 @@ func sshStdio(host string) error {
 
 func runSSHConfig(args []string) error {
 	if len(args) != 0 {
-		return fmt.Errorf("usage: aether ssh-config")
+		return fmt.Errorf("usage: cloudfield ssh-config")
 	}
 	result, err := cli.InstallSSHConfig()
 	if err != nil {

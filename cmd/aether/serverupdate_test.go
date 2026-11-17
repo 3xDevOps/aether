@@ -19,7 +19,7 @@ func TestServerRequiresUpdateSubcommand(t *testing.T) {
 		if err == nil {
 			t.Fatalf("runServer(%v) succeeded, want a usage error", args)
 		}
-		if got := err.Error(); got != "usage: aether server <update>" {
+		if got := err.Error(); got != "usage: cloudfield server <update>" {
 			t.Fatalf("runServer(%v) error = %q, want the exact usage line", args, got)
 		}
 	}

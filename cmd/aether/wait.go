@@ -19,8 +19,8 @@ func init() {
 	register(command{
 		name:    "wait",
 		short:   "wait until a session finishes, needs you or ends its turn (exit 0 finished, 1 failed, 3 needs you, 4 parked until a message, 5 its wait broke, 124 timed out)",
-		usage:   "aether wait <session-id> [--timeout <duration>] [--json]",
-		example: "aether wait run-d6ay38tj8j --timeout 30m --json",
+		usage:   "cloudfield wait <session-id> [--timeout <duration>] [--json]",
+		example: "cloudfield wait run-d6ay38tj8j --timeout 30m --json",
 		flags:   true,
 		run:     runWait,
 	})
@@ -50,13 +50,13 @@ const waitOutputGrace = 15 * time.Second
 func runWait(args []string) error {
 	fs := newFlagSet("wait")
 	timeout := fs.Duration("timeout", 0, "give up after this long and exit 124, e.g. 30m (default: no limit)")
-	asJSON := fs.Bool("json", false, "print the session as aether sessions <session-id> --json does")
+	asJSON := fs.Bool("json", false, "print the session as cloudfield sessions <session-id> --json does")
 	runID, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether wait <session-id> [--timeout <duration>] [--json]", err)
+		return fmt.Errorf("%w\nusage: cloudfield wait <session-id> [--timeout <duration>] [--json]", err)
 	}
 	if runID == "" {
-		return fmt.Errorf("usage: aether wait <session-id> [--timeout <duration>] [--json]")
+		return fmt.Errorf("usage: cloudfield wait <session-id> [--timeout <duration>] [--json]")
 	}
 	var deadline <-chan time.Time
 	end := time.Now().Add(*timeout)

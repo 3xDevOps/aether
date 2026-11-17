@@ -51,8 +51,8 @@ func init() {
 	register(command{
 		name:    "version",
 		short:   "print the version",
-		usage:   "aether version",
-		example: "aether version",
+		usage:   "cloudfield version",
+		example: "cloudfield version",
 		run: func([]string) error {
 			_, err := fmt.Println("aether", version.String())
 			return err
@@ -85,7 +85,7 @@ func dispatch(args []string) error {
 	case errors.Is(err, flag.ErrHelp), slices.ContainsFunc(args[1:], isHelpFlag):
 		return writeHelp(os.Stdout, c, helpFlags.Name(), helpFlags)
 	case err != nil:
-		return fmt.Errorf("%w; see aether %s --help", err, helpFlags.Name())
+		return fmt.Errorf("%w; see cloudfield %s --help", err, helpFlags.Name())
 	}
 	return nil
 }
@@ -114,7 +114,7 @@ func helpCmd(args []string) error {
 }
 
 // Only a help flag right after the command's literal words asks for help:
-// a later one can belong to a run, as in aether ssh <run-id> ls --help.
+// a later one can belong to a run, as in cloudfield ssh <run-id> ls --help.
 func helpPath(c command, args []string) (string, bool) {
 	path := c.name
 	for _, arg := range args {
@@ -134,7 +134,7 @@ func linesFor(text, path string) []string {
 	match := false
 	for _, line := range strings.Split(text, "\n") {
 		if !strings.HasPrefix(line, " ") {
-			rest, ok := strings.CutPrefix(line, "aether "+path)
+			rest, ok := strings.CutPrefix(line, "cloudfield "+path)
 			match = ok && (rest == "" || rest[0] == ' ')
 		}
 		if match {
@@ -192,7 +192,7 @@ func parseLeadingArg(fs *flag.FlagSet, args []string) (string, error) {
 }
 
 func printHelp(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "usage: aether <command> [args]")
+	_, _ = fmt.Fprintln(w, "usage: cloudfield <command> [args]")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "commands:")
 	sorted := slices.SortedFunc(slices.Values(commands), func(a, b command) int { return strings.Compare(a.name, b.name) })
@@ -202,6 +202,6 @@ func printHelp(w io.Writer) {
 	}
 	_ = tw.Flush()
 	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "start: aether status shows what is set up and the next step; aether <command> --help explains a command")
-	_, _ = fmt.Fprintln(w, "coding agents: aether help agents, or https://github.com/3xDevOps/cloudfield/blob/main/docs/agents.md")
+	_, _ = fmt.Fprintln(w, "start: cloudfield status shows what is set up and the next step; cloudfield <command> --help explains a command")
+	_, _ = fmt.Fprintln(w, "coding agents: cloudfield help agents, or https://github.com/3xDevOps/cloudfield/blob/main/docs/agents.md")
 }

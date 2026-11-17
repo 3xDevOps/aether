@@ -15,19 +15,19 @@ func init() {
 	register(command{
 		name:  "profile",
 		short: "push, status, or rollback an agent profile",
-		usage: "aether profile push --agent <agent> [--workspace <name>] [--allow-secret <file>]... [--skip-secret <file>]...\n" +
-			"aether profile status --agent <agent>\n" +
-			"aether profile rollback --agent <agent> <snapshot-id>",
-		example: "aether profile push --agent claude\n" +
-			"aether profile status --agent claude\n" +
-			"aether profile rollback --agent claude <snapshot-id>",
+		usage: "cloudfield profile push --agent <agent> [--workspace <name>] [--allow-secret <file>]... [--skip-secret <file>]...\n" +
+			"cloudfield profile status --agent <agent>\n" +
+			"cloudfield profile rollback --agent <agent> <snapshot-id>",
+		example: "cloudfield profile push --agent claude\n" +
+			"cloudfield profile status --agent claude\n" +
+			"cloudfield profile rollback --agent claude <snapshot-id>",
 		run: runProfile,
 	})
 }
 
 func runProfile(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether profile <push|status|rollback> [flags]")
+		return fmt.Errorf("usage: cloudfield profile <push|status|rollback> [flags]")
 	}
 	switch args[0] {
 	case "push":
@@ -60,7 +60,7 @@ func profilePush(args []string) error {
 		return err
 	}
 	if *agent == "" {
-		return fmt.Errorf("usage: aether profile push --agent <agent> [--skip-secret <file> ...] [--allow-secret <file> ...]")
+		return fmt.Errorf("usage: cloudfield profile push --agent <agent> [--skip-secret <file> ...] [--allow-secret <file> ...]")
 	}
 	if len(allow) > 0 && *workspace == "" {
 		return fmt.Errorf("profile push: --allow-secret requires --workspace")
@@ -109,7 +109,7 @@ func profileStatus(args []string) error {
 		return err
 	}
 	if *agent == "" {
-		return fmt.Errorf("usage: aether profile status --agent <agent>")
+		return fmt.Errorf("usage: cloudfield profile status --agent <agent>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		res, err := cliprofile.Status(c, *agent)
@@ -128,7 +128,7 @@ func profileRollback(args []string) error {
 		return err
 	}
 	if *agent == "" || fs.NArg() < 1 {
-		return fmt.Errorf("usage: aether profile rollback --agent <agent> <snapshot-id>")
+		return fmt.Errorf("usage: cloudfield profile rollback --agent <agent> <snapshot-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		snap, err := cliprofile.Rollback(c, *agent, fs.Arg(0))

@@ -20,15 +20,15 @@ func init() {
 	register(command{
 		name:  "session",
 		short: "launch an agent session",
-		usage: "aether session <task> [flags]\n" +
-			"aether session - [flags]\n" +
-			"aether session --template <name> [--param <name=value>]... [--workspace <name>]\n" +
-			"aether session switch <session-id> --mode standard|enhanced",
-		example: "aether session \"fix the flaky login test\" --agent claude\n" +
-			"aether session \"review this dependency upgrade\" --agent claude --permission isolated\n" +
-			"aether session - --agent codex --idempotency-key fix-login-1 < task.md\n" +
-			"aether session --template nightly-audit\n" +
-			"aether session switch run-d6ay38tj8j --mode enhanced",
+		usage: "cloudfield session <task> [flags]\n" +
+			"cloudfield session - [flags]\n" +
+			"cloudfield session --template <name> [--param <name=value>]... [--workspace <name>]\n" +
+			"cloudfield session switch <session-id> --mode standard|enhanced",
+		example: "cloudfield session \"fix the flaky login test\" --agent claude\n" +
+			"cloudfield session \"review this dependency upgrade\" --agent claude --permission isolated\n" +
+			"cloudfield session - --agent codex --idempotency-key fix-login-1 < task.md\n" +
+			"cloudfield session --template nightly-audit\n" +
+			"cloudfield session switch run-d6ay38tj8j --mode enhanced",
 		flags: true,
 		run:   runRun,
 	})
@@ -50,7 +50,7 @@ func runRun(args []string) error {
 	cachedBase := fs.String("cached-base", "", "retry a launch from an exact accepted base commit")
 	fallbackOrder := fs.String("fallback", "", fallbackHelp)
 	noFallback := fs.Bool("no-fallback", false, noFallbackHelp)
-	children := fs.String("children", "", "subsessions this session's agent may start: on or off for this session only (default: your setting, aether subsessions)")
+	children := fs.String("children", "", "subsessions this session's agent may start: on or off for this session only (default: your setting, cloudfield subsessions)")
 	idempotencyKey := fs.String("idempotency-key", "", "the key a failed or interrupted launch printed: the retry returns that launch's session instead of starting another (default: a new key)")
 	var repos stringList
 	fs.Var(&repos, "repo", "also check out this workspace ID or name at /repos/<name> with its own session branch (repeatable)")
@@ -90,7 +90,7 @@ func runRun(args []string) error {
 		return fmt.Errorf("invalid --children %q: want on or off", *children)
 	}
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether session [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--effort <level>] [--permission root|default|isolated] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--children on|off] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: aether session --template <name> [--param k=v] [--workspace]\n   or: aether session switch <session-id> --mode standard|enhanced")
+		return fmt.Errorf("usage: cloudfield session [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--effort <level>] [--permission root|default|isolated] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--children on|off] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: cloudfield session --template <name> [--param k=v] [--workspace]\n   or: cloudfield session switch <session-id> --mode standard|enhanced")
 	}
 	fromStdin := task == "-"
 	task, err = stdinText(task, "task", os.Stdin)

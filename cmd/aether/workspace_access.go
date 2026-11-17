@@ -31,7 +31,7 @@ func nameOrID(names map[string]string, id string) string {
 
 func workspaceAccess(args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: aether workspace access <workspace>")
+		return fmt.Errorf("usage: cloudfield workspace access <workspace>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		id, err := resolveWorkspace(c, args[0])
@@ -66,7 +66,7 @@ func printWorkspaceAccess(w io.Writer, res protocol.WorkspaceAccessResult, names
 
 func workspaceGrant(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: aether workspace grant <workspace> <member-id> [<member-id>...]")
+		return fmt.Errorf("usage: cloudfield workspace grant <workspace> <member-id> [<member-id>...]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		id, err := resolveWorkspace(c, args[0])
@@ -88,7 +88,7 @@ func workspaceGrant(args []string) error {
 
 func workspaceRevoke(args []string) error {
 	if len(args) != 2 {
-		return fmt.Errorf("usage: aether workspace revoke <workspace> <member-id>")
+		return fmt.Errorf("usage: cloudfield workspace revoke <workspace> <member-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		id, err := resolveWorkspace(c, args[0])
@@ -108,7 +108,7 @@ func workspaceRevoke(args []string) error {
 
 func workspaceOwner(args []string) error {
 	if len(args) != 2 {
-		return fmt.Errorf("usage: aether workspace owner <workspace> <member-id>")
+		return fmt.Errorf("usage: cloudfield workspace owner <workspace> <member-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		id, err := resolveWorkspace(c, args[0])

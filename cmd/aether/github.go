@@ -12,7 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const githubUsage = "usage: aether github connect"
+const githubUsage = "usage: cloudfield github connect"
 
 // githubLoginCommand is what github.oauth.start runs in the Environment. gh
 // always asks for repo, read:org and gist, and adds the scopes named here.
@@ -31,8 +31,8 @@ func init() {
 	register(command{
 		name:    "github",
 		short:   "connect your Environment to GitHub",
-		usage:   "aether github connect",
-		example: "aether github connect",
+		usage:   "cloudfield github connect",
+		example: "cloudfield github connect",
 		run:     runGitHub,
 	})
 }

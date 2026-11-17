@@ -17,9 +17,9 @@ func init() {
 	register(command{
 		name:  "attach",
 		short: "attach to a session's PTY",
-		usage: "aether attach <session-id> [--read-only] [--shell <tab>]",
-		example: "aether attach run-d6ay38tj8j\n" +
-			"aether attach run-d6ay38tj8j --read-only",
+		usage: "cloudfield attach <session-id> [--read-only] [--shell <tab>]",
+		example: "cloudfield attach run-d6ay38tj8j\n" +
+			"cloudfield attach run-d6ay38tj8j --read-only",
 		flags: true,
 		run:   runAttach,
 	})
@@ -31,10 +31,10 @@ func runAttach(args []string) error {
 	shell := fs.String("shell", "", "open a writable shell tab inside the session")
 	runID, err := parseLeadingArg(fs, args)
 	if err != nil {
-		return fmt.Errorf("%w\nusage: aether attach [--read-only] [--shell <tab>] <session>", err)
+		return fmt.Errorf("%w\nusage: cloudfield attach [--read-only] [--shell <tab>] <session>", err)
 	}
 	if runID == "" {
-		return fmt.Errorf("usage: aether attach [--read-only] [--shell <tab>] <session>")
+		return fmt.Errorf("usage: cloudfield attach [--read-only] [--shell <tab>] <session>")
 	}
 	cfg, err := cli.Load()
 	if err != nil {

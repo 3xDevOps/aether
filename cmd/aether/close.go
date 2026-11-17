@@ -12,14 +12,14 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const closeUsage = "usage: aether close <session-id> --outcome merged|abandoned [--force]"
+const closeUsage = "usage: cloudfield close <session-id> --outcome merged|abandoned [--force]"
 
 func init() {
 	register(command{
 		name:    "close",
 		short:   "close a session as merged or abandoned",
-		usage:   "aether close <session-id> --outcome <merged|abandoned> [--force]",
-		example: "aether close run-d6ay38tj8j --outcome merged",
+		usage:   "cloudfield close <session-id> --outcome <merged|abandoned> [--force]",
+		example: "cloudfield close run-d6ay38tj8j --outcome merged",
 		flags:   true,
 		run:     runClose,
 	})
