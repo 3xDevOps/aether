@@ -383,7 +383,7 @@ aether session "rename the /users endpoint in the API and the web client" \
 ```
 
 Each extra repo is cloned to `/repos/<workspace name>` (characters outside
-`A-Za-z0-9._-` become `-`), on its own session branch `aether/run-<task>-<id>` in
+`A-Za-z0-9._-` become `-`), on its own session branch `cloudfield/run-<task>-<id>` in
 its own workspace. The agent's startup prompt lists the extra paths. The
 dashboard shows each repo on the session page, and the per-session Git, pull request
 and **Changes** methods take a `repo` (the repo's workspace ID) to pick one;
@@ -464,8 +464,9 @@ box sat, **Relaunch** in the **More** menu, or `aether reopen <session-id>` brin
 the session back with its chat and files. The 7 days stop counting while the session is
 live again and start over when you close it.
 
-`aether pull <session-id>` fetches the branch, `aether/run-<task>-<id>`, into the
-clone linked for its workspace, without merging.
+`aether pull <session-id>` fetches the branch, `cloudfield/run-<task>-<id>`
+(`aether/run-<task>-<id>` for older sessions), into the clone linked for its
+workspace, without merging.
 
 ### From a script or agent
 

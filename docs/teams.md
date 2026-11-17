@@ -324,8 +324,9 @@ workspace's publish destination; otherwise run
 client keeps one linked clone per workspace: linking another clone of it
 replaces the first, and `aether status` lists them.
 
-Branches named `aether/run-*` belong to the server and cannot be force-pushed or
-deleted. Every other branch behaves like a normal git remote. `aether pull <session>`
+Session branches belong to the server and cannot be force-pushed or deleted:
+`cloudfield/run-*` for new sessions, and `aether/run-*` for sessions created before
+the rename and in a workspace whose repository has a branch named `cloudfield`. Every other branch behaves like a normal git remote. `aether pull <session>`
 brings a session's branches into the linked clones.
 
 | Setting | Default | What it does |
