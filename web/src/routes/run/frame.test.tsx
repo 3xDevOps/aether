@@ -493,6 +493,39 @@ describe('run details', () => {
     return within(await screen.findByRole('dialog', { name: 'Session details' }))
   }
 
+  it('resizes the desktop details panel from its left edge and saves the bounded width', async () => {
+    atViewport(1600)
+    open()
+    const panel = await details()
+    const handle = panel.getByRole('separator', { name: 'Resize session details' })
+    expect(handle.getAttribute('aria-valuenow')).toBe('320')
+    handle.focus()
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' })
+    expect(useStore.getState().runDetailsWidth).toBe(336)
+    fireEvent.pointerDown(handle, { clientX: 400 })
+    fireEvent.pointerMove(window, { clientX: 390 })
+    fireEvent.pointerUp(window)
+    expect(useStore.getState().runDetailsWidth).toBe(346)
+    fireEvent.keyDown(handle, { key: 'Home' })
+    expect(useStore.getState().runDetailsWidth).toBe(280)
+    fireEvent.keyDown(handle, { key: 'End' })
+    expect(useStore.getState().runDetailsWidth).toBe(560)
+    expect(JSON.parse(localStorage.getItem('aether.ui')!).state.runDetailsWidth).toBe(560)
+  })
+
+  it('caps the details panel to the room beside the sidebar', async () => {
+    atViewport(800)
+    open()
+    const panel = await details()
+    const handle = panel.getByRole('separator', { name: 'Resize session details' })
+    expect(handle.getAttribute('aria-valuemax')).toBe('540')
+    handle.focus()
+    fireEvent.keyDown(handle, { key: 'End' })
+    expect(useStore.getState().runDetailsWidth).toBe(540)
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' })
+    expect(useStore.getState().runDetailsWidth).toBe(540)
+  })
+
   it('lists what waits on the viewer, the notes and the run record', async () => {
     open({ pending_inputs: [{ id: 'in_1', session_id: 's', kind: 'question' }] })
     const panel = await details()

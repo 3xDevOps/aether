@@ -216,7 +216,13 @@ The other primitives with motion or a fixed size:
   surface that slides out of the sidebar edge (220ms, `--ease-sheet`) for the
   launch panel and the right half's preview: clipped at that edge, no scrim,
   `shadow-dialog` for the panel, `shadow-overlay` for the preview. With the
-  sidebar hidden or on a phone it slides in from the window edge.
+  sidebar hidden or on a phone it slides in from the window edge. On desktop,
+  drag the launch panel's right edge to resize it; its saved width ranges from
+  360px to 720px, capped by the available room.
+- The Session details panel defaults to 320px. Its left edge resizes it from
+  280px to 560px, leaving 560px for the session view when inline. The side
+  sheet is capped to the available room; the width is saved on this browser.
+  On phones the panel remains a bottom sheet.
 - `Tabs` draws one `SlidingIndicator` per list: the underline look slides a
   2px accent bar, the segmented look a `bg-raised` pill with a seam ring. It
   follows keyboard selection and stays attached in a scrolling strip.

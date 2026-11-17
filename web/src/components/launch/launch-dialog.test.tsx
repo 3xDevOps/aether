@@ -85,6 +85,33 @@ describe('reopening', () => {
   })
 })
 
+describe('panel width', () => {
+  it('resizes from the window edge, keeps the width and respects the available space', async () => {
+    const resize = atViewport(1200)
+    await open()
+    const handle = screen.getByRole('separator', { name: 'Resize launch panel' })
+    expect(handle.getAttribute('aria-valuenow')).toBe('416')
+    handle.focus()
+    fireEvent.pointerDown(handle, { clientX: 1000 })
+    fireEvent.pointerMove(window, { clientX: 1016 })
+    fireEvent.pointerUp(window)
+    expect(useStore.getState().launchWidth).toBe(432)
+    fireEvent.keyDown(handle, { key: 'Home' })
+    expect(useStore.getState().launchWidth).toBe(360)
+    fireEvent.keyDown(handle, { key: 'End' })
+    expect(useStore.getState().launchWidth).toBe(720)
+    expect(JSON.parse(localStorage.getItem('aether.ui')!).state.launchWidth).toBe(720)
+
+    useStore.getState().setSidebarWidth(400)
+    resize(900)
+    await waitFor(() => expect(handle.getAttribute('aria-valuemax')).toBe('500'))
+    fireEvent.keyDown(handle, { key: 'End' })
+    expect(useStore.getState().launchWidth).toBe(500)
+    fireEvent.keyDown(handle, { key: 'ArrowRight' })
+    expect(useStore.getState().launchWidth).toBe(500)
+  })
+})
+
 describe('saved launch draft', () => {
   const resume = () => screen.getByRole('button', { name: 'Resume new session draft' })
 
