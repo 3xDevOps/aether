@@ -42,9 +42,9 @@ flowchart LR
 | --- | --- | --- |
 | `aether` | `cloudfield` | The CLI. `cloudfield` is a symlink to `aether` in the same directory; the file keeps the old name. |
 | `aether-server` | `cloudfield-server` | The server, linked the same way. |
-| `aether.exe` | `cloudfield.cmd` | Windows. `cloudfield.cmd` runs `aether.exe` with the same arguments. `cmd.exe` parses the arguments of a `.cmd` again, so an unquoted `&`, as in an `aether://` link, splits the command: type `aether` for those. |
+| `aether.exe` | `cloudfield.cmd` | Windows. `cloudfield.cmd` runs `aether.exe` with the same arguments. PowerShell passes an argument without spaces to a `.cmd` unquoted, so `cmd.exe` splits `'aether://…&…'` at the `&` and expands `%NAME%`: type `aether` for links and arguments with `&`, `%` or `^`. |
 | `aether-server.service` | `cloudfield-server.service` | A symlink to the unit in `/etc/systemd/system`. `systemctl restart` and `status` take either name once systemd has reloaded. `systemctl enable` refuses an alias and `journalctl -u` reads the real unit, so those take `aether-server`. |
-| `aether-internal` | `cloudfield-internal` | Inside a session. Containers created before the rename have only `/usr/local/bin/aether-internal`. |
+| `aether-internal` | `cloudfield-internal` | Inside a session. Containers created before the rename have only `/usr/local/bin/aether-internal`, and micro VM sessions are told the old name. |
 | `AETHER_<NAME>` | `CLOUDFIELD_<NAME>` | A variable you set in a shell or a client. A program reads `CLOUDFIELD_<NAME>` when it is not empty, else `AETHER_<NAME>`. Variables in `/etc/aether/aether-server.env` and the edge's env files, and those Cloudfield sets inside sessions, such as `AETHER_RUN_ID`, keep the old names. |
 
 The old names keep working, with no end date.
@@ -194,7 +194,7 @@ name only where that link exists and its directory is on `PATH`.
   curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client --role none --bin-dir "$HOME/.local/bin"
   ```
 
-  Otherwise it says that installing `cloudfield-server` needs root, passwordless
+  Otherwise it says that installing `aether-server` needs root, passwordless
   `sudo`, or a terminal where `sudo` can ask for the password, such as
   `ssh -t <user>@<host> '<install command>'`.
 
@@ -247,8 +247,8 @@ new terminal afterwards: open ones keep their old `PATH`.
 
 Beside `aether.exe` it writes `cloudfield.cmd`, which runs `aether.exe` with
 the same arguments, unless something already holds that name. `next:` keeps
-the `aether` names: `cmd.exe` parses the arguments of a `.cmd` again, so an
-unquoted `&`, as in an `aether://` link, would split the command.
+the `aether` names: PowerShell passes an argument without spaces to a `.cmd`
+unquoted, so `cmd.exe` would split an `aether://` link at its `&`.
 
 It takes `-Version <tag>`, `-BinDir <dir>` and `-Role client|none` (`none`
 installs only the CLI), or `CLOUDFIELD_VERSION`, `CLOUDFIELD_BIN_DIR`, `CLOUDFIELD_ROLE`,
@@ -501,8 +501,8 @@ super admin unless you pass `--tailnet-require-key`.
 With the edge on, install also prints the edge, policy and server id. It
 prints one `warning:` line naming what the host lacks (git, ssh-keygen, a
 running systemd, or the memory and disk above), without failing, and ends on
-`next:` with `sudo cloudfield-server edge claim-code`, then `cloudfield login` and
-`cloudfield link --claim <code>` on your computer.
+`next:` with `sudo aether-server edge claim-code`, then `aether login` and
+`aether link --claim <code>` on your computer.
 
 A rerun that names an option the kept config file sets differently exits 1,
 writes nothing, and prints `aether-server config set <key> <value>` for each
@@ -1013,7 +1013,7 @@ pointer mark is in `update.json` beside `config.json`.
   container uses.
 - The systemd unit. When the release ships a different one, the journal warns
   with the command that applies it:
-  `sudo cloudfield-server install --sysbox=false && sudo systemctl daemon-reload && sudo systemctl restart aether-server`.
+  `sudo aether-server install --sysbox=false && sudo systemctl daemon-reload && sudo systemctl restart aether-server`.
   When only `aether.slice` is missing or differs, and a local Docker uses the
   systemd cgroup driver, the warning leaves out the restart ([Keep the server reachable under load](#keep-the-server-reachable-under-load)).
   Keep your own changes in a drop-in (`sudo systemctl edit aether-server`).

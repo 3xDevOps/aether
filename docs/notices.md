@@ -208,7 +208,7 @@ transitive component has been independently license-audited.
 ## Not distributed by the app
 
 Enhanced-mode adapters are not distributed with Cloudfield. `agent.install` and
-`aether agent add --enhanced` install them from the npm registry into the
+`cloudfield agent add --enhanced` install them from the npm registry into the
 member's home, each under its own licence, which
 `internal/harness/acpregistry.json` records: `@agentclientprotocol/claude-agent-acp`
 (proprietary), `@agentclientprotocol/codex-acp` (Apache-2.0), and `pi-acp`

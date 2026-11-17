@@ -3,7 +3,8 @@
 Cloudfield's MCP bridge is an in-container MCP server for six coordination
 tools and two team memory tools, registered automatically for Enhanced sessions
 and manually elsewhere. The canonical agent interface is the
-`cloudfield-internal` CLI, which is automatically available in every managed
+`cloudfield-internal` CLI (`aether-internal` in containers created before the
+rename and in micro VM sessions), which is available in every managed
 container and can load a version-matched skill on demand. The bridge does not mirror the whole `cloudfield-internal` surface.
 
 When coordination assets are available, the server stages verified executable

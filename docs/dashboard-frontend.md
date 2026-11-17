@@ -7658,7 +7658,7 @@ that runs a newer release than a client refuses that client
   after the re-checks report this machine as current:
   - the paths replaced;
   - the `restart_command` for a co-located `cloudfield-server`;
-  - a rebuild still running, or its real error with `cloudfield gui build`.
+  - a rebuild still running, or its real error with `aether gui build`.
 
   A `403` answer means the macOS dialog was cancelled or the password
   refused: *Update cancelled, nothing was changed.*, muted, with the
