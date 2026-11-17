@@ -76,6 +76,13 @@ test('Needs you denies a permission and replies to a question from their cards',
   }, { timeout: 180_000 }).toContain('pong')
   await alice.api.rpc('run.inject', { run_id: asker.run.id, message: 'ask permission', idempotency_key: `phone-permission-${asker.run.id}` })
   const idle = await launch({ harness: 'claude', task: 'an agent that stops and asks' })
+  // Starting a container adds a network interface, and Chromium fails any
+  // request in flight then with net::ERR_NETWORK_CHANGED. A script chunk lost
+  // that way leaves the dashboard blank, so load it only once both are up.
+  await expect.poll(async () => {
+    const status = await alice.api.rpc<{ run: { state?: string } }>('run.get', { run_id: idle.run.id })
+    return status.run.state
+  }, { timeout: 180_000 }).toBe('waiting')
 
   await page.goto(alice.url)
   const cards = page.getByRole('list', { name: 'Needs you' })
@@ -84,10 +91,6 @@ test('Needs you denies a permission and replies to a question from their cards',
   await expect(permission.getByRole('button', { name: 'Approve' })).toHaveCount(0)
   await expect(permission.getByRole('button', { name: /always/i })).toHaveCount(0)
 
-  await expect.poll(async () => {
-    const status = await alice.api.rpc<{ run: { state?: string } }>('run.get', { run_id: idle.run.id })
-    return status.run.state
-  }, { timeout: 180_000 }).toBe('waiting')
   runCoordCLI(idle.run.id, ['report', '--outcome', 'needs-input', '--summary', 'Which suite next?', '--idempotency-key', 'phone-question'])
   const question = cards.getByRole('group').filter({ hasText: 'Agent asks: Which suite next?' })
   await expect(question).toBeVisible({ timeout: 30_000 })
