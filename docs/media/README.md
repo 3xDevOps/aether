@@ -78,8 +78,9 @@ described above:
 - `run-map-restored.png`: the actual Board, run cards and store with
   deterministic fixture runs, including child runs, a paused run and a
   failed run. No live gateway was connected.
-- `launch-splash-restored.png`: the restored animation paused at 700ms by a
-  temporary browser harness. Production animation timings were unchanged.
+- `launch-splash.png`: the launch splash at rest, 2000ms after its first
+  paint, at 1280x800 in dark mode. Playwright's clock held the timers and the
+  canvas; no gateway answered, so the splash stayed up until its 2500ms cap.
 - `launch-splash-lifecycle.png`: 27 browser checkpoints covering the minimum
   display time, timeout, fade, session reuse, reduced motion and storage
   failures. The desktop bridge and startup failures were injected; this was

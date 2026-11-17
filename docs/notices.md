@@ -78,7 +78,7 @@ The dashboard bundles these fonts under the SIL Open Font License 1.1:
   `web/public/fonts/saira-latin.woff2` is the normal-width variable font,
   weights 100-900, Latin subset, downloaded from
   [Google Fonts](https://fonts.googleapis.com/css2?family=Saira:wght@100..900&display=swap).
-- VT323 for the launch-splash wordmark
+- VT323 for the Play listing's feature graphic
   ([`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
   `web/public/fonts/vt323-latin.woff2` is the Latin subset at weight 400.
 - `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for xterm
@@ -97,7 +97,7 @@ The dashboard bundles these fonts under the SIL Open Font License 1.1:
     --output-file=web/public/fonts/noto-sans-symbols-2-spinners.woff2
   ```
 
-`scripts/make-icons.py` also uses VT323 to draw the wordmark on the Play
+`scripts/make-icons.py` uses VT323 to draw the wordmark on the Play
 listing's feature graphic, `android/listing/feature-graphic.png`, whose
 tagline is JetBrainsMono NFM.
 

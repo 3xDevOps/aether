@@ -1088,10 +1088,13 @@ exists: a shell built by an older `aether gui build` lacks them.
 ### Launch splash
 
 `App.tsx` mounts `src/components/launch-splash.tsx` over the shell at desktop
-startup. It intentionally preserves the original animated night sky and pixel
-wordmark, not the workbench's visual language
-([Styles](styles.md#session-state-and-motion)); its logo is the Cloudfield
-mark with no glow, and the wordmark is in the set's Cream.
+startup. It plays the website's opening, drawn from
+`public/cloudfield-logo-small.svg`, not the workbench's visual language
+([Styles](styles.md#session-state-and-motion)). A `?raw` import inlines the
+file's text into the bundle: Vite does this for Vitest, and the Turbopack rule
+in `next.config.ts` runs `raw-loader.cjs` for `next dev` and `next build`, so
+the splash fetches nothing. If the file cannot be split into the parts that
+move, the splash shows it as a plain `<img>` instead.
 
 The splash requires `window.aetherDesktop` and plays once per desktop window,
 recorded by `aether.launchSplashShown` in `sessionStorage`. Browser tabs,
@@ -1105,6 +1108,8 @@ It stays for at least 600ms, then fades when hydration succeeds or fails.
 A hung connection starts the fade at 2500ms even without a result. The fade
 lasts 260ms, releases pointer input as it begins and unmounts the splash at
 its end, exposing the shell or the raw connection error and window controls.
+A hydrate that lands before 600ms fades the splash while the opening is still
+playing; the rest of the name appears at once and dissolves with it.
 
 ### URL state
 
