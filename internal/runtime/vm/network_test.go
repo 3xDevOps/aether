@@ -157,27 +157,31 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 }
 
 func TestRouteUplinksAreTheInternetRoutes(t *testing.T) {
-	names := map[int]string{1: "lo", 2: "ens5", 3: "docker0", 4: "br-3f2a", 5: "tailscale0", 6: "wg0", 7: "tun0", 8: "aethervm1", 9: "aethervme2", 10: "aether-vmproxy", 11: "eth1", 12: "eth2"}
+	names := map[int]string{1: "lo", 2: "ens5", 3: "br-ens3", 4: "docker0", 5: "tailscale0", 6: "wg0", 7: "tun0", 8: "aethervm1", 9: "aethervme2", 10: "aether-vmproxy", 11: "eth1", 12: "eth2"}
 	route := func(dst string, link, table int) netlink.Route {
 		r := netlink.Route{LinkIndex: link, Table: table}
 		r.Dst, _ = netlink.ParseIPNet(dst)
 		return r
 	}
-	multipath := route("0.0.0.0/0", 0, 100)
-	multipath.MultiPath = []*netlink.NexthopInfo{{LinkIndex: 11}, {LinkIndex: 12}, {LinkIndex: 3}}
+	via := func(link int) netlink.Route { return route("1.1.1.1/32", link, 0) }
+	multipath := route("0.0.0.0/0", 0, 254)
+	multipath.MultiPath = []*netlink.NexthopInfo{{LinkIndex: 11}, {LinkIndex: 12}}
 	for _, tc := range []struct {
-		name   string
-		routes []netlink.Route
-		want   []string
+		name             string
+		routes, internet []netlink.Route
+		want             []string
 	}{
-		{"main table", []netlink.Route{route("0.0.0.0/0", 2, 254), route("172.31.0.0/20", 2, 254), route("172.17.0.0/16", 3, 254)}, []string{"ens5"}},
-		{"tailscale exit node", []netlink.Route{route("0.0.0.0/0", 2, 254), route("0.0.0.0/0", 5, 52), route("100.101.102.103/32", 5, 52)}, []string{"ens5", "tailscale0"}},
-		{"wg-quick full tunnel", []netlink.Route{{LinkIndex: 6, Table: 51820}, route("10.0.0.0/24", 2, 254)}, []string{"wg0"}},
-		{"openvpn def1", []netlink.Route{route("0.0.0.0/1", 7, 254), route("128.0.0.0/1", 7, 254), route("0.0.0.0/0", 2, 254), route("10.8.0.0/24", 7, 254)}, []string{"tun0", "ens5"}},
-		{"multipath", []netlink.Route{multipath}, []string{"eth1", "eth2"}},
-		{"excluded interfaces", []netlink.Route{route("0.0.0.0/0", 1, 254), route("0.0.0.0/0", 3, 254), route("0.0.0.0/0", 4, 10), route("0.0.0.0/1", 8, 254), route("128.0.0.0/1", 9, 254), route("0.0.0.0/0", 10, 11), route("0.0.0.0/0", 42, 12)}, nil},
+		{"main table", []netlink.Route{{LinkIndex: 2, Table: 254}, route("172.31.0.0/20", 2, 254), route("172.17.0.0/16", 4, 254)}, []netlink.Route{via(2)}, []string{"ens5"}},
+		{"bridged NIC", []netlink.Route{route("0.0.0.0/0", 3, 254)}, []netlink.Route{via(3)}, []string{"br-ens3"}},
+		{"tailscale exit node", []netlink.Route{route("0.0.0.0/0", 2, 254), route("0.0.0.0/0", 5, 52), route("100.101.102.103/32", 5, 52)}, []netlink.Route{via(5), via(5)}, []string{"ens5", "tailscale0"}},
+		{"wg-quick full tunnel", []netlink.Route{route("0.0.0.0/0", 2, 254), route("0.0.0.0/0", 6, 51820)}, []netlink.Route{via(6), via(6)}, []string{"ens5", "wg0"}},
+		{"openvpn def1", []netlink.Route{route("0.0.0.0/1", 7, 254), route("128.0.0.0/1", 7, 254), route("0.0.0.0/0", 2, 254)}, []netlink.Route{via(7), via(7)}, []string{"ens5", "tun0"}},
+		{"per-NIC source routing", []netlink.Route{route("0.0.0.0/0", 2, 254), route("0.0.0.0/0", 11, 101), route("192.168.100.0/24", 11, 254)}, []netlink.Route{via(2)}, []string{"ens5"}},
+		{"multipath", []netlink.Route{multipath}, []netlink.Route{via(11)}, []string{"eth1", "eth2"}},
+		{"no internet route", nil, nil, nil},
+		{"excluded interfaces", []netlink.Route{route("0.0.0.0/0", 1, 254), route("0.0.0.0/0", 8, 254), route("0.0.0.0/0", 10, 254), route("0.0.0.0/0", 42, 254)}, []netlink.Route{via(9), via(1)}, nil},
 	} {
-		if got := routeUplinks(tc.routes, names); !slices.Equal(got, tc.want) {
+		if got := routeUplinks(tc.routes, tc.internet, names); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: uplinks = %v, want %v", tc.name, got, tc.want)
 		}
 	}

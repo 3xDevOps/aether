@@ -405,15 +405,18 @@ What changes:
   behind ufw. While the table is gone, the `FORWARD` policy drops all
   traffic VMs send through the host, and what they send to the host itself
   is unfiltered. A default-route interface is the interface of an IPv4
-  route to `0.0.0.0/0` in any routing table, such as a Tailscale exit
-  node's in table 52 or a `wg-quick` full tunnel's in table 51820, or of a
-  route to `0.0.0.0/1` or `128.0.0.0/1`, which OpenVPN's
-  `redirect-gateway def1` adds. VM taps, `aether-vmproxy`, `lo`, `docker0`
-  and `br-*` bridges never count. With an exit node `tailscale0` is one, so
-  VMs reach tailnet peers too. A change of default route applies when the
-  next VM boots. The MSS of a VM's
-  outgoing TCP connections is clamped to the MTU of the interface they leave
-  by, so 1240 bytes through `tailscale0`'s 1280.
+  default route in the main routing table, or the one `ip route get 1.1.1.1`
+  or `ip route get 128.0.0.1` names, which follows the host's routing
+  rules: `tailscale0` with a Tailscale exit node, `wg0` with a `wg-quick`
+  full tunnel, `tun0` with OpenVPN's `redirect-gateway def1`. A default
+  route in another table, such as a second NIC's source-routing table,
+  does not count, and VM taps, `aether-vmproxy` and `lo` never do. With an
+  exit node, VMs also reach tailnet peers, Tailscale's `100.100.100.100` on
+  every port (its web client on 80, Taildrive on 8080) and any subnet
+  routes the host accepts. A change of default route applies when the next
+  VM boots. The MSS of a VM's outgoing TCP connections is clamped to the
+  MTU of the interface they leave by: 1240 bytes through `tailscale0`'s
+  1280.
 - The environment terminal runs in `aether-vm-terminal-<member id>.service`
   and keeps its root disk across a stop and start, as its container did.
   When the server starts with `vm`, it stops a member's terminal container

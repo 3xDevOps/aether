@@ -266,12 +266,19 @@ func (e *engine) ensureNetwork(ctx context.Context) error {
 	return nil
 }
 
-// defaultRoutes reads the interfaces of the host's IPv4 internet routes in
-// every routing table, since policy routing may keep them out of main.
+// defaultRoutes reads the interfaces of the host's IPv4 default routes and of
+// the routes its policy rules pick for the internet.
 func defaultRoutes() ([]string, error) {
 	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Table: unix.RT_TABLE_UNSPEC}, netlink.RT_FILTER_TABLE)
 	if err != nil {
 		return nil, fmt.Errorf("vm runtime: read the host's routes: %w", err)
+	}
+	var internet []netlink.Route
+	for _, probe := range []string{"1.1.1.1", "128.0.0.1"} {
+		// No route to a probe means no uplink toward it, not a failure.
+		if got, getErr := netlink.RouteGet(net.ParseIP(probe)); getErr == nil {
+			internet = append(internet, got...)
+		}
 	}
 	links, err := net.Interfaces()
 	if err != nil {
@@ -281,36 +288,38 @@ func defaultRoutes() ([]string, error) {
 	for _, link := range links {
 		names[link.Index] = link.Name
 	}
-	return routeUplinks(routes, names), nil
+	return routeUplinks(routes, internet, names), nil
 }
 
-// routeUplinks names the interfaces of the default routes, such as a
-// Tailscale exit node's in table 52 or wg-quick's in table 51820, and of the
-// 0.0.0.0/1 and 128.0.0.0/1 pair a VPN lays over the default route. A VM's
-// tap, the proxy link, lo or a Docker bridge is never an uplink, whatever
-// routes through it.
-func routeUplinks(routes []netlink.Route, names map[int]string) []string {
-	var out []string
+// routeUplinks ignores default routes outside the main table: a per-NIC
+// source-routing table holds one too, and that NIC's network is no uplink.
+func routeUplinks(routes, internet []netlink.Route, names map[int]string) []string {
+	var links []int
 	for _, r := range routes {
+		if r.Table != unix.RT_TABLE_MAIN {
+			continue
+		}
 		if r.Dst != nil {
-			if ones, _ := r.Dst.Mask.Size(); ones > 1 {
+			if ones, _ := r.Dst.Mask.Size(); ones > 0 {
 				continue
 			}
 		}
-		links := []int{r.LinkIndex}
+		links = append(links, r.LinkIndex)
 		for _, hop := range r.MultiPath {
 			links = append(links, hop.LinkIndex)
 		}
-		for _, index := range links {
-			name := names[index]
-			switch {
-			case name == "", name == "lo", name == proxyLink, name == "docker0",
-				strings.HasPrefix(name, tapPrefix), strings.HasPrefix(name, "br-"),
-				slices.Contains(out, name):
-				continue
-			}
-			out = append(out, name)
+	}
+	for _, r := range internet {
+		links = append(links, r.LinkIndex)
+	}
+	var out []string
+	for _, index := range links {
+		name := names[index]
+		switch {
+		case name == "", name == "lo", name == proxyLink, strings.HasPrefix(name, tapPrefix), slices.Contains(out, name):
+			continue
 		}
+		out = append(out, name)
 	}
 	return out
 }
