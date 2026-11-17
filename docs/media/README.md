@@ -20,7 +20,7 @@ is that the work happens somewhere else and comes back as a branch.
    from the terminal and the colored banner appearing in the dashboard's
    terminal view a second later.
 4. **Pull** (~8s) - back in the terminal, `aether pull <run>` and then
-   `git diff main...aether/aether/run-<slug>-<id>` showing real code.
+   `git diff main...aether/cloudfield/run-<slug>-<id>` showing real code.
 
 Cut it before anything hangs. If the agent takes a long pause, record again -
 do not speed up the middle, because a sped-up terminal reads as fake.

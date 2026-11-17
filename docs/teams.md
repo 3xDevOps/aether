@@ -327,8 +327,11 @@ replaces the first, and `aether status` lists them.
 Session branches belong to the server and cannot be force-pushed or deleted:
 `cloudfield/run-*` for new sessions, and `aether/run-*` for sessions created
 before the rename and in a workspace whose repository has a branch named
-`cloudfield`. Every other branch behaves like a normal git remote.
-`aether pull <session>` brings a session's branches into the linked clones.
+`cloudfield`. Every other branch behaves like a normal git remote, except
+that git refuses a branch named `cloudfield` or `aether` once session branches
+under that name exist, in the server's repository or in the publish
+destination. `aether pull <session>` brings a session's branches into the
+linked clones.
 
 | Setting | Default | What it does |
 | --- | --- | --- |

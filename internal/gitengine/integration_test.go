@@ -1560,8 +1560,8 @@ func TestReceivePackAllowsFeatureBranchForcePush(t *testing.T) {
 	}
 }
 
-// The rename to Cloudfield moves new sessions to cloudfield/run- later;
-// both prefixes must be protected from the release that first accepts them.
+// Sessions from before the rename keep aether/run- branches, so both
+// prefixes stay protected.
 func TestReceivePackProtectsBothSessionBranchPrefixes(t *testing.T) {
 	for _, prefix := range []string{"aether/run-", "cloudfield/run-"} {
 		t.Run(prefix, func(t *testing.T) {

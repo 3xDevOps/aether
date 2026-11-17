@@ -4693,7 +4693,7 @@ both what it renders and the overlap set the conflict chips read.
 - **Publish is two steps.** **Publish…** appears with `run.git.status` once
   the diff has a file, and opens `publish-dialog.tsx`, a bottom sheet on a
   phone. One line above both steps names what they act on and as whom,
-  "`aether/run-1` at `4f9c2a7d` · as Ada Lovelace · GitHub ada-l", with
+  "`cloudfield/run-1` at `4f9c2a7d` · as Ada Lovelace · GitHub ada-l", with
   **Refresh status** beside it and the status's own errors under it. **1 ·
   Commit** selects changed paths, reviews their worktree and staged diffs and
   untracked contents, and runs **Commit selected**. **2 · Push and pull
@@ -4704,9 +4704,9 @@ both what it renders and the overlap set the conflict chips read.
   uncertain survive switching steps, closing the dialog and switching views.
 - **The destination is two sentences.** Step 2 (`publish-push.tsx`) says
   where the work goes instead of asking: "Pushes commit `4f9c2a7d` to
-  `https://github.com/acme/app.git` as branch `aether/run-1`. Never a force
+  `https://github.com/acme/app.git` as branch `cloudfield/run-1`. Never a force
   push." and "Opens a pull request into `acme/app:main` from
-  `ada/app:aether/run-1` as **ada-l**. It is not merged from here." Under
+  `ada/app:cloudfield/run-1` as **ada-l**. It is not merged from here." Under
   them sit only what the member writes, **PR title**, **PR description** and
   **Draft PR**, and the buttons. A pull request the branch already has
   replaces the second sentence with its number, title and state, linking to
