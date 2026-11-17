@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"slices"
@@ -49,6 +50,15 @@ func TestKVMNetProbe(t *testing.T) {
 		}
 	case "dial":
 		fmt.Println(dial(args[1]))
+	case "resolve":
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", args[1])
+		if err != nil {
+			fmt.Println("error:", err)
+			return
+		}
+		fmt.Println("connected:", addrs)
 	case "connect":
 		c, err := net.DialTimeout("tcp", args[1], 3*time.Second)
 		if err != nil {
@@ -195,6 +205,13 @@ func TestKVMNetwork(t *testing.T) {
 	ws := func(id, host string) *domain.Workspace {
 		return &domain.Workspace{ID: domain.WorkspaceID(id), Environment: domain.WorkspaceEnvironment{Egress: domain.EgressPolicy{On: true, Hosts: []string{host}}}}
 	}
+	// Only the host reaches this resolver, as only the host reaches its own
+	// systemd-resolved stub or tailnet resolver: a guest resolves its name
+	// through the server's relay or not at all.
+	hostOnly := fakeResolver(t, "relay.aether.test.", netip.MustParseAddr("192.0.2.7"))
+	e.listenDNS = func() (*dnsRelay, error) {
+		return listenDNS(proxyAddr, vmSubnet, func() []netip.AddrPort { return append([]netip.AddrPort{hostOnly}, hostResolvers()...) })
+	}
 	proxy := egress.New(&Runtime{vms: e}, probeStore{"run-vmnet-c": ws("ws-allows", "example.com"), "run-vmnet-d": ws("ws-denies", "example.org")}, probeBus{})
 	if _, err := proxy.Prepare(t.Context()); err != nil {
 		t.Fatal(err)
@@ -244,7 +261,7 @@ func TestKVMNetwork(t *testing.T) {
 	}
 	expect("the host reaches the Docker container", dial(containerIP+":8080"), true)
 	targets := map[string]string{"another VM": b + ":8080", "a VM with egress control": c + ":8080", "a Docker container": containerIP + ":8080"}
-	egressTargets := map[string]string{"the internet": "1.1.1.1:443", "another VM": a + ":8080", "the host": hostPort}
+	egressTargets := map[string]string{"the internet": "1.1.1.1:443", "another VM": a + ":8080", "the host": hostPort, "the DNS relay": proxyAddr.String() + ":53"}
 	for _, dns := range hostDNS() {
 		egressTargets["the DNS server "+dns.String()] = dns.String() + ":53"
 	}
@@ -266,6 +283,7 @@ func TestKVMNetwork(t *testing.T) {
 		t.Logf("169.254.169.253 is not a reachable non-resolver link-local target here: %s", got)
 	}
 
+	expect("an open VM resolves through the host's own resolver", probe(t, e, "run-vmnet-a", "resolve relay.aether.test"), true)
 	expect("an open VM reaches the internet", probe(t, e, "run-vmnet-a", "dial example.com:80"), true)
 	expect("an open VM reaches the host", probe(t, e, "run-vmnet-a", "dial "+hostPort), true)
 	for what, target := range targets {

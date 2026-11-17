@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -45,8 +46,8 @@ func TestNetworkAddressing(t *testing.T) {
 	if n.Address != netip.MustParsePrefix("10.200.0.6/30") || n.Gateway.String() != "10.200.0.5" {
 		t.Errorf("guest network = %+v", n)
 	}
-	servers := nameservers(strings.NewReader("# x\nnameserver 127.0.0.53\nnameserver 10.0.0.2\nnameserver fe80::1\nsearch ec2.internal\n"))
-	if !slices.Equal(servers, []netip.Addr{netip.MustParseAddr("10.0.0.2")}) {
+	servers := nameservers(strings.NewReader("# x\nnameserver 127.0.0.53\nnameserver 10.0.0.2\nnameserver fe80::1%eth0\nsearch ec2.internal\n"))
+	if want := []netip.Addr{netip.MustParseAddr("127.0.0.53"), netip.MustParseAddr("10.0.0.2"), netip.MustParseAddr("fe80::1%eth0")}; !slices.Equal(servers, want) {
 		t.Errorf("nameservers = %v", servers)
 	}
 }
@@ -71,6 +72,9 @@ func TestAllocateNetSkipsRecordedAndReserved(t *testing.T) {
 func TestEgressVMsAreNamedByTheirAddress(t *testing.T) {
 	h := newHarness(t)
 	h.createStarted("run-open", sessionSpec("run-open"))
+	if args := strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "aether.dns=10.200.0.1 ") {
+		t.Errorf("an open VM resolves past the server's DNS relay:\n%s", args)
+	}
 	spec := sessionSpec("run-egress")
 	spec.Egress = true
 	h.createStarted("run-egress", spec)
@@ -133,7 +137,12 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	udp, tcp := e.dns.ports()
 	for _, want := range []string{
+		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 udp dport 53 dnat ip to 10.200.0.1:%d`, udp),
+		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 tcp dport 53 dnat ip to 10.200.0.1:%d`, tcp),
+		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 udp dport %d meta mark set meta mark | 0x1000000 accept`, udp),
+		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 tcp dport %d meta mark set meta mark | 0x1000000 accept`, tcp),
 		`iifname "aethervm*" meta nfproto ipv6 drop`,
 		`iifname "aethervm*" fib saddr . iif oif missing drop`,
 		`meta l4proto { tcp, udp } th dport 53 accept`,
