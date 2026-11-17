@@ -215,7 +215,7 @@ func TestWriteAndReportWritesTheUnitAndConfig(t *testing.T) {
 	unitPath := filepath.Join(dir, "aether-server.service")
 	configPath := filepath.Join(dir, "server.conf")
 	var out bytes.Buffer
-	if err := writeAndReport(&out, unitPath, configPath, map[string]string{"addr": ":2300"}, false); err != nil {
+	if _, err := writeAndReport(&out, unitPath, configPath, map[string]string{"addr": ":2300"}, false); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -247,7 +247,7 @@ func TestWriteAndReportSaysWhenItKeepsAConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err := writeAndReport(&out, filepath.Join(dir, "aether-server.service"), configPath,
+	_, err := writeAndReport(&out, filepath.Join(dir, "aether-server.service"), configPath,
 		map[string]string{"addr": ":9999"}, false)
 	if err != nil {
 		t.Fatal(err)

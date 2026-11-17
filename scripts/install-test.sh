@@ -54,8 +54,9 @@ echo "installed /home/tester/.local/share/cloudfield/desktop"
 echo "open it from your application menu as Cloudfield"
 EOF
 
-# Stands in for the real binary. A completed setup writes the systemd unit,
-# which is what the installer checks afterwards, and ends on its next steps.
+# Stands in for the real binary. A completed setup writes the systemd unit
+# and links its second name to it, which is what the installer checks
+# afterwards, and ends on its next steps.
 # It usually writes within the installer's marker's file time, which counts
 # as written. SETUP_FAILS is a setup that errors;
 # SETUP_DECLINES is the operator answering no to the summary, which the real
@@ -69,9 +70,10 @@ if [ "${SETUP_DECLINES:-0}" = 1 ]; then
 	exit 0
 fi
 touch "$AETHER_UNIT_PATH"
+ln -s aether-server.service "${AETHER_UNIT_PATH%/*}/cloudfield-server.service" 2>/dev/null || :
 echo "next:"
 echo "  1. start the server on this machine:"
-echo "       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
+echo "       sudo systemctl daemon-reload && sudo systemctl enable --now cloudfield-server"
 EOF
 
 # $fixtures/releases/<tag>/ holds what each tag publishes, $fixtures/latest
@@ -259,6 +261,17 @@ fi
 exec /bin/mv "$@"
 EOF
 
+# STUB_LN_FAIL is a filesystem that refuses symlinks.
+cat >"$bin/ln" <<'EOF'
+#!/bin/sh
+if [ -n "${STUB_LN_FAIL:-}" ]; then
+	for last; do :; done
+	echo "ln: failed to create symbolic link '$last': Operation not permitted" >&2
+	exit 1
+fi
+exec /bin/ln "$@"
+EOF
+
 cat >"$bin/sleep" <<'EOF'
 #!/bin/sh
 printf 'sleep %s\n' "$*" >>"$CMD_LOG"
@@ -372,7 +385,8 @@ reset() {
 	: >"$reqs"
 	: >"$out"
 	: >"$err"
-	rm -f "$bindir/aether" "$bindir/aether-server" "$AETHER_UNIT_PATH"
+	rm -f "$bindir/aether" "$bindir/aether-server" "$bindir/cloudfield" "$bindir/cloudfield-server" \
+		"$AETHER_UNIT_PATH" "$tmp/cloudfield-server.service"
 	chmod 0755 "$sysbin"
 	rm -rf "${sysbin:?}"/* "$home/.local"
 	rm -f "$answers"
@@ -421,7 +435,7 @@ not_ran "aether gui build"
 grep -q "^sudo .*aether-server setup$" "$log" || fail "setup did not go through sudo"
 [ "$(activations)" = 1 ] || fail "printed the activation line $(activations) times, want once"
 [ "$(sed -n '/systemctl daemon-reload/,$p' "$out")" = "$(printf '%s\n\n%s' \
-	"       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server" \
+	"       sudo systemctl daemon-reload && sudo systemctl enable --now cloudfield-server" \
 	"Read the quickstart before going further: $quickstart")" ] ||
 	fail "more than the guide follows setup's next steps"
 plain
@@ -438,7 +452,7 @@ printed "  then, on your computer:"
 printed "  aether link <this-host>        # on a tailnet: the server's tailnet name"
 printed "  aether login                   # otherwise, sign in to the edge, Cloudfield's relay"
 ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
-printed "  sudo aether-server setup       # config, systemd unit, and how to start it"
+printed "  sudo cloudfield-server setup   # config, systemd unit, and how to start it"
 plain
 
 # --- declining setup exits 0 but writes nothing: no activation line ------
@@ -446,7 +460,7 @@ plain
 reset "--role server, setup declined"
 SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether-server setup"
-printed "sudo aether-server setup"
+printed "sudo cloudfield-server setup"
 [ "$(activations)" = 0 ] || fail "offered to activate a service that was never written"
 printed "$quickstart"
 
@@ -461,6 +475,21 @@ SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 |
 printed "  sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
 [ "$(activations)" = 1 ] || fail "printed the activation line $(activations) times, want once"
 ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
+
+# A unit that a release with the second names linked starts by the new
+# name; a cloudfield-server.service that is not our link leaves the old one.
+reset "--role server, declined, the unit already linked"
+touch -t 200001010000 "$AETHER_UNIT_PATH"
+ln -s aether-server.service "$tmp/cloudfield-server.service"
+SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
+printed "  sudo systemctl daemon-reload && sudo systemctl enable --now cloudfield-server"
+
+reset "--role server, declined, cloudfield-server.service is another file"
+touch -t 200001010000 "$AETHER_UNIT_PATH"
+echo "[Unit]" >"$tmp/cloudfield-server.service"
+SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
+printed "  sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
+[ "$(cat "$tmp/cloudfield-server.service")" = "[Unit]" ] || fail "the installer changed $tmp/cloudfield-server.service"
 
 reset "--role server as root, declined but a unit is already installed"
 touch -t 200001010000 "$AETHER_UNIT_PATH"
@@ -482,7 +511,7 @@ $guard env AETHER_TTY="$tmp/no-such-tty" sh "$script" --role server >"$out" 2>&1
 [ "$status" != 0 ] || fail "installer exited 0 without setting up the server"
 not_ran "aether-server setup"
 [ -x "$bindir/aether-server" ] || fail "the server binary was not installed"
-printed "sudo aether-server install --edge-url https://edge.cloudfield.ai --edge-access <account|approved-devices>"
+printed "sudo cloudfield-server install --edge-url https://edge.cloudfield.ai --edge-access <account|approved-devices>"
 not_printed "This machine is your Aether server"
 
 # --- --role client: aether gui build runs --------------------------------
@@ -494,8 +523,8 @@ not_ran "aether-server setup"
 printed "This machine is a client"
 printed "$quickstart"
 printed "  open Cloudfield from your applications to link your server, or in a terminal:"
-printed "  aether link <server-host>      # on a tailnet: the server's tailnet name"
-ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
+printed "  cloudfield link <server-host>  # on a tailnet: the server's tailnet name"
+ends_with "  cloudfield link '<invite link>' # or with an invite link from an admin"
 plain
 
 reset "--role client, gui build fails"
@@ -518,8 +547,72 @@ plain
 reset "--role none, unit already installed"
 touch "$AETHER_UNIT_PATH"
 sh "$script" --role none >"$out" 2>&1 || fail "installer exited non-zero"
-printed "sudo aether-server update --version v0.0.0-test"
+printed "sudo cloudfield-server update --version v0.0.0-test"
+not_printed "sudo cloudfield-server setup"
 not_printed "sudo aether-server setup"
+
+# --- the cloudfield names: relative links beside the real files ----------
+#
+# The same links the updater makes (internal/selfupdate.Link): a rerun, or
+# an install over the links a v0.8.7 updater made, leaves the same state.
+
+links_are() {
+	for pair in aether:cloudfield aether-server:cloudfield-server; do
+		[ -L "$bindir/${pair#*:}" ] || fail "$bindir/${pair#*:} is not a link"
+		[ "$(readlink "$bindir/${pair#*:}")" = "${pair%%:*}" ] ||
+			fail "$bindir/${pair#*:} links to $(readlink "$bindir/${pair#*:}"), want ${pair%%:*}"
+	done
+	grep -Fq "# release v0.0.0-test" "$bindir/cloudfield" || fail "cloudfield does not run the installed aether"
+}
+
+reset "a fresh install links the new names, and a rerun keeps them"
+sh "$script" --role none >"$out" 2>&1 || fail "installer exited non-zero"
+links_are
+not_printed "warning"
+sh "$script" --role none >"$out" 2>&1 || fail "rerunning the installer failed"
+links_are
+not_printed "warning"
+
+reset "an install over an old one without links adds them"
+printf 'old cli' >"$bindir/aether"
+printf 'old server' >"$bindir/aether-server"
+sh "$script" --role none >"$out" 2>&1 || fail "installer exited non-zero"
+links_are
+
+reset "an install over the links an updater made keeps them"
+printf 'old cli' >"$bindir/aether"
+printf 'old server' >"$bindir/aether-server"
+ln -s aether "$bindir/cloudfield"
+ln -s aether-server "$bindir/cloudfield-server"
+sh "$script" --role none >"$out" 2>&1 || fail "installer exited non-zero"
+links_are
+not_printed "warning"
+
+reset "an absolute link to the binary is kept as it is"
+ln -s "$bindir/aether" "$bindir/cloudfield"
+sh "$script" --role client >"$out" 2>&1 || fail "installer exited non-zero"
+[ "$(readlink "$bindir/cloudfield")" = "$bindir/aether" ] || fail "the absolute link was replaced"
+printed "  cloudfield link <server-host>  # on a tailnet: the server's tailnet name"
+
+# Whatever else holds a new name was not made here: it is left as it is,
+# no warning, and the printed commands keep the old names.
+reset "a new name that holds something else is left alone"
+printf 'not ours' >"$bindir/cloudfield"
+ln -s elsewhere "$bindir/cloudfield-server"
+sh "$script" --role none >"$out" 2>&1 || fail "installer exited non-zero"
+[ "$(cat "$bindir/cloudfield")" = "not ours" ] || fail "the installer replaced $bindir/cloudfield"
+[ "$(readlink "$bindir/cloudfield-server")" = elsewhere ] || fail "the installer replaced $bindir/cloudfield-server"
+not_printed "warning"
+printed "  sudo aether-server setup       # on the server box"
+sh "$script" --role client >"$out" 2>&1 || fail "installer exited non-zero"
+printed "  aether link <server-host>      # on a tailnet: the server's tailnet name"
+
+reset "a filesystem that refuses symlinks warns and installs"
+STUB_LN_FAIL=1 sh "$script" --role client >"$out" 2>&1 || fail "installer exited non-zero"
+[ -x "$bindir/aether" ] || fail "the CLI was not installed"
+[ ! -e "$bindir/cloudfield" ] && [ ! -L "$bindir/cloudfield" ] || fail "a cloudfield appeared anyway"
+printed "aether install: warning: ln: failed to create symbolic link '$bindir/cloudfield': Operation not permitted; aether works as before. To add the name: ln -s aether '$bindir/cloudfield'"
+printed "  aether link <server-host>      # on a tailnet: the server's tailnet name"
 
 # --- AETHER_ROLE=client is the same as --role client ---------------------
 
@@ -709,7 +802,7 @@ PATH="$no_node_path" sh "$script" --role client >"$out" 2>&1 || fail "installer 
 ran "aether gui build"
 not_ran "aether-server setup"
 printed "This machine is a client"
-printed "aether link <server-host> "
+printed "cloudfield link <server-host> "
 not_printed "Node.js 22+"
 printed "$quickstart"
 
@@ -727,6 +820,9 @@ reset "client role installs the CLI alone into ~/.local/bin, without sudo"
 not_ran "sudo "
 printed "installed $home/.local/bin/aether"
 ran "aether gui build"
+# Linked, but not on PATH: the steps keep the name PATH already finds.
+[ "$(readlink "$home/.local/bin/cloudfield")" = aether ] || fail "~/.local/bin/cloudfield is not a link to aether"
+printed "  aether link <server-host>      # on a tailnet: the server's tailnet name"
 # An aether-server next to the CLI makes `aether update` treat this machine as
 # a server, so a client answer must not download or install one.
 [ ! -e "$home/.local/bin/aether-server" ] || fail "a client answer installed the server binary"
@@ -751,6 +847,8 @@ chmod 0555 "$sysbin"
 ran "sudo cp"
 ran "sudo mv -f $sysbin/.aether-server.install."
 printed "installed $sysbin/aether-server"
+ran "sudo ln -s aether-server $sysbin/cloudfield-server"
+[ "$(readlink "$sysbin/cloudfield-server")" = aether-server ] || fail "$sysbin/cloudfield-server is not a link to aether-server"
 
 reset "--bin-dir wins over the client role"
 sh "$script" --role client --bin-dir "$bindir" >"$out" 2>&1 || fail "installer exited non-zero"
@@ -878,6 +976,16 @@ reset "stale /usr/local/bin/aether on a client"
 ) >"$out" 2>&1 || fail "installer exited non-zero"
 printed "an older $sysbin/aether would shadow $home/.local/bin/aether"
 printed "sudo rm -f $sysbin/aether"
+not_printed "$sysbin/cloudfield"
+
+reset "a stale /usr/local/bin/aether and its link"
+: >"$sysbin/aether"
+ln -s aether "$sysbin/cloudfield"
+(
+	unset AETHER_BIN_DIR
+	sh "$script" --role client
+) >"$out" 2>&1 || fail "installer exited non-zero"
+printed "sudo rm -f $sysbin/aether $sysbin/cloudfield"
 
 reset "stale /usr/local/bin/aether warns for an explicit --bin-dir too"
 : >"$sysbin/aether"
@@ -1364,6 +1472,7 @@ STUB_OS=Darwin STUB_ARCH=arm64 latest_install || fail "installer exited non-zero
 installed_from v0.7.0-alpha.12 darwin-arm64
 requested "/v0.7.0-alpha.12/aether-darwin-arm64"
 not_requested "linux-"
+[ "$(readlink "$bindir/cloudfield")" = aether ] || fail "macOS did not link cloudfield"
 [ "$(cat "$bindir/aether-server")" = "old server" ] || fail "macOS replaced aether-server"
 
 host "linux/amd64 gets both linux-amd64 binaries"

@@ -715,6 +715,38 @@ for name in $order; do
 done
 replacing=no staged=no
 
+# --- the cloudfield names ----------------------------------------------
+
+# cloudfield and cloudfield-server are relative links to the real files,
+# made only where nothing holds the name, as internal/selfupdate's Link
+# makes them on every update. Anything else at the name is left as it is,
+# and no failure to link fails the install.
+for pair in aether:cloudfield aether-server:cloudfield-server; do
+	target="${pair%%:*}" link="${BIN_DIR}/${pair#*:}"
+	if [ ! -e "${BIN_DIR}/${target}" ] || [ -e "$link" ] || [ -L "$link" ]; then
+		continue
+	fi
+	if ! ln_err="$($sudo ln -s "$target" "$link" 2>&1)"; then
+		say "warning: ${ln_err}; ${target} works as before. To add the name: ${sudo:+sudo }ln -s ${target} '${link}'"
+	fi
+done
+
+# The name of TARGET to print in a command run on this machine: its new
+# name when that is our link in BIN_DIR and BIN_DIR is on PATH.
+command_name() {
+	link="${BIN_DIR}/$2"
+	if [ -L "$link" ] && [ "$link" -ef "${BIN_DIR}/$1" ]; then
+		case ":${PATH}:" in *":${BIN_DIR}:"*)
+			echo "$2"
+			return
+			;;
+		esac
+	fi
+	echo "$1"
+}
+cli_name="$(command_name aether cloudfield)"
+server_name="$(command_name aether-server cloudfield-server)"
+
 # --- finish that role's setup ------------------------------------------
 
 setup_ran=no
@@ -741,7 +773,7 @@ run_server_setup() {
 	fi
 	if [ "$have_tty" = no ]; then
 		die "installed ${replaced}, but did not set up the server: aether-server setup asks questions and there is no terminal. Set it up with flags instead:
-  ${setup_sudo:+sudo }aether-server install --edge-url https://edge.cloudfield.ai --edge-access <account|approved-devices>"
+  ${setup_sudo:+sudo }${server_name} install --edge-url https://edge.cloudfield.ai --edge-access <account|approved-devices>"
 	fi
 	echo
 	say "running aether-server setup"
@@ -819,8 +851,12 @@ check_path() {
 	if [ "$BIN_DIR" != "$SYSTEM_BIN_DIR" ] && [ "$COMPONENTS" != server ] &&
 		[ -e "${SYSTEM_BIN_DIR}/aether" ]; then
 		[ "$warned" = yes ] || echo
+		stale="${SYSTEM_BIN_DIR}/aether"
+		if [ -L "${SYSTEM_BIN_DIR}/cloudfield" ] && [ "${SYSTEM_BIN_DIR}/cloudfield" -ef "${SYSTEM_BIN_DIR}/aether" ]; then
+			stale="${stale} ${SYSTEM_BIN_DIR}/cloudfield"
+		fi
 		say "warning: an older ${SYSTEM_BIN_DIR}/aether would shadow ${BIN_DIR}/aether. Remove it:"
-		echo "  sudo rm -f ${SYSTEM_BIN_DIR}/aether"
+		echo "  sudo rm -f ${stale}"
 	fi
 }
 
@@ -863,12 +899,14 @@ next_step() {
 	fi
 }
 
+# link_steps HEADING HOST CLI: CLI is the command name on the machine the
+# steps are for.
 link_steps() {
 	printf '  %s\n' "$1"
-	next_step "aether link $2" "on a tailnet: the server's tailnet name"
-	next_step "aether login" "otherwise, sign in to the edge, Cloudfield's relay"
-	next_step "aether link --claim <code>" "with the claim link server setup printed"
-	next_step "aether link '<invite link>'" "or with an invite link from an admin"
+	next_step "$3 link $2" "on a tailnet: the server's tailnet name"
+	next_step "$3 login" "otherwise, sign in to the edge, Cloudfield's relay"
+	next_step "$3 link --claim <code>" "with the claim link server setup printed"
+	next_step "$3 link '<invite link>'" "or with an invite link from an admin"
 }
 
 echo
@@ -890,22 +928,28 @@ server)
 		if [ -n "$setup_sudo" ] || [ -n "${SUDO_USER:-}" ]; then
 			as_root="sudo "
 		fi
-		next_step "${as_root}systemctl daemon-reload && ${as_root}systemctl enable --now aether-server"
+		# setup links the unit's second name beside the unit it writes.
+		service=aether-server
+		unit_alias="${UNIT_PATH%/*}/cloudfield-server.service"
+		if [ -L "$unit_alias" ] && [ "$unit_alias" -ef "$UNIT_PATH" ]; then
+			service=cloudfield-server
+		fi
+		next_step "${as_root}systemctl daemon-reload && ${as_root}systemctl enable --now ${service}"
 	elif [ -f "$UNIT_PATH" ]; then
-		next_step "sudo aether-server update --version ${VERSION}" "restart the running server onto this binary"
+		next_step "sudo ${server_name} update --version ${VERSION}" "restart the running server onto this binary"
 	else
-		next_step "sudo aether-server setup" "config, systemd unit, and how to start it"
+		next_step "sudo ${server_name} setup" "config, systemd unit, and how to start it"
 	fi
-	link_steps "then, on your computer:" "<this-host>"
+	link_steps "then, on your computer:" "<this-host>" aether
 	;;
 client)
 	if [ "$gui_built" = yes ]; then
-		link_steps "open Cloudfield from your applications to link your server, or in a terminal:" "<server-host>"
+		link_steps "open Cloudfield from your applications to link your server, or in a terminal:" "<server-host>" "$cli_name"
 	else
-		link_steps "link your server:" "<server-host>"
+		link_steps "link your server:" "<server-host>" "$cli_name"
 	fi
 	if [ "$gui_built" != yes ]; then
-		next_step "aether gui build" "the desktop app, or run \`aether gui\` for a browser tab"
+		next_step "${cli_name} gui build" "the desktop app, or run \`${cli_name} gui\` for a browser tab"
 	fi
 	if [ -n "$gui_failure" ]; then
 		echo
@@ -914,10 +958,10 @@ client)
 	;;
 *)
 	if [ "$COMPONENTS" != "client" ] && [ -f "$UNIT_PATH" ]; then
-		next_step "sudo aether-server update --version ${VERSION}" "restart the running server onto this binary"
+		next_step "sudo ${server_name} update --version ${VERSION}" "restart the running server onto this binary"
 	elif [ "$COMPONENTS" != "client" ]; then
-		next_step "sudo aether-server setup" "on the server box: config, systemd unit, activation line"
+		next_step "sudo ${server_name} setup" "on the server box: config, systemd unit, activation line"
 	fi
-	link_steps "then, on a client:" "<server>"
+	link_steps "then, on a client:" "<server>" aether
 	;;
 esac

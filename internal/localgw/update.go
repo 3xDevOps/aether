@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -360,18 +362,29 @@ func (g *Gateway) localUpdateStatus(_ *http.Request, _ []byte) (any, *protocol.E
 	return g.rebuild.snapshot(), nil
 }
 
-// restartCommand names the follow-up a swapped aether-server needs, the
-// same one `aether update` prints. selfupdate.Update replaces the server
-// binary beside the CLI on a single-box install, and the running server
-// keeps the old code until someone restarts the unit - so the answer has
-// to carry the command rather than leave the operator to notice.
+// restartCommand names the follow-up a swapped aether-server needs.
+// selfupdate.Update replaces the server binary beside the CLI on a
+// single-box install, and the running server keeps the old code until
+// someone restarts the unit - so the answer has to carry the command
+// rather than leave the operator to notice.
 func restartCommand(updated []string) string {
 	for _, path := range updated {
 		if filepath.Base(path) == "aether-server" {
+			if unitAliasResolves() {
+				return "sudo systemctl restart cloudfield-server"
+			}
 			return "sudo systemctl restart aether-server"
 		}
 	}
 	return ""
+}
+
+// unitAliasResolves reports whether systemd loads cloudfield-server.service
+// as the server's unit, which takes the link and a systemd that has read
+// it. A variable, so no test asks the host's systemd.
+var unitAliasResolves = func() bool {
+	out, err := exec.Command("systemctl", "show", "-p", "Id", "--value", "cloudfield-server.service").Output()
+	return err == nil && strings.TrimSpace(string(out)) == "aether-server.service"
 }
 
 // checkRelease runs the release check, mapping an unreachable GitHub to

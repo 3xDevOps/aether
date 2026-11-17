@@ -119,7 +119,8 @@ func askWithoutDocker(p *prompter) error {
 // code's 30 minutes start when the person can use it. Without Docker the
 // server cannot start, so it issues none and next: says how to get one.
 func writeSetup(w io.Writer, unitPath, configPath string, values map[string]string, force, sysbox, docker bool, tailnetHost string) error {
-	if err := writeAndReport(w, unitPath, configPath, values, force); err != nil {
+	service, err := writeAndReport(w, unitPath, configPath, values, force)
+	if err != nil {
 		return err
 	}
 	if sysbox {
@@ -134,7 +135,7 @@ func writeSetup(w io.Writer, unitPath, configPath string, values map[string]stri
 	if err != nil {
 		return err
 	}
-	return printNextSteps(w, configPath, options, claimCode, docker, tailnetHost)
+	return printNextSteps(w, configPath, options, claimCode, docker, tailnetHost, service)
 }
 
 func askSysbox(p *prompter, docker bool) bool {

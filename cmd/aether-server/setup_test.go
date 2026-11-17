@@ -742,7 +742,7 @@ func TestWriteSetupWithoutDockerStartsNextOnDocker(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "  1. install or start Docker on this machine:\n       https://docs.docker.com/engine/install/\n" +
-		"  2. start the server on this machine:\n       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server\n" +
+		"  2. start the server on this machine:\n       sudo systemctl daemon-reload && sudo systemctl enable --now cloudfield-server\n" +
 		"  3. on this machine, print a claim code:\n       sudo aether-server edge claim-code --config " + configPath + "\n" +
 		installStep(4) +
 		"  5. on your computer, sign in and claim the server with that code:\n       aether login\n       aether link --claim <code>\n" +
@@ -803,7 +803,7 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 	if sysboxAt < 0 || claimAt < sysboxAt || nextAt < claimAt {
 		t.Errorf("want Sysbox output, then the claim link, then the next steps:\n%s", got)
 	}
-	if !strings.HasSuffix(got, "\n       "+serversetup.ActivateCommand+"\n"+installStep(2)+
+	if !strings.HasSuffix(got, "\n       systemctl daemon-reload && systemctl enable --now cloudfield-server\n"+installStep(2)+
 		"  3. on your computer: in the Cloudfield app's Connect step choose Cloudfield relay, sign in\n"+
 		"     with GitHub and paste the claim link above; in a terminal:\n"+
 		"       aether login\n"+
@@ -853,7 +853,7 @@ func TestPrintNextStepsNamesTheTailnetHost(t *testing.T) {
 	} {
 		var out bytes.Buffer
 		o := optionsOf(t, map[string]string{"addr": tc.addr, "web-port": tc.web, "edge-url": ""})
-		if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "box.tail1234.ts.net"); err != nil {
+		if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "box.tail1234.ts.net", serversetup.ServiceName); err != nil {
 			t.Fatal(err)
 		}
 		want := installStep(2) +
@@ -874,7 +874,7 @@ func TestPrintNextStepsFollowsTheSavedTailnetConfig(t *testing.T) {
 	t.Setenv("SUDO_USER", "")
 	var out bytes.Buffer
 	o := optionsOf(t, map[string]string{"edge-url": "", "tailnet-require-key": "true"})
-	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "box.tail1234.ts.net"); err != nil {
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "box.tail1234.ts.net", serversetup.ServiceName); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "box.tail1234.ts.net") || !strings.Contains(out.String(), "aether link <this-host>:2222") {
@@ -883,7 +883,7 @@ func TestPrintNextStepsFollowsTheSavedTailnetConfig(t *testing.T) {
 
 	out.Reset()
 	o = optionsOf(t, map[string]string{"addr": "192.168.1.10:2222", "edge-url": ""})
-	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "box.tail1234.ts.net"); err != nil {
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "box.tail1234.ts.net", serversetup.ServiceName); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "box.tail1234.ts.net") || !strings.Contains(out.String(), "aether link 192.168.1.10:2222") {
@@ -892,7 +892,7 @@ func TestPrintNextStepsFollowsTheSavedTailnetConfig(t *testing.T) {
 
 	out.Reset()
 	o = optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": edgeagent.DefaultURL})
-	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "code", true, "box.tail1234.ts.net"); err != nil {
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "code", true, "box.tail1234.ts.net", serversetup.ServiceName); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "aether link box.tail1234.ts.net\n  4. or, on a computer off the tailnet: in the Cloudfield app's Connect step choose Cloudfield relay") {
@@ -909,7 +909,7 @@ func TestPrintNextStepsPrefixesSudoForASudoUser(t *testing.T) {
 	} {
 		t.Setenv("SUDO_USER", sudoUser)
 		var out bytes.Buffer
-		if err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": ":2300"}), "", true, ""); err != nil {
+		if err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": ":2300"}), "", true, "", serversetup.ServiceName); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(out.String(), want) || !strings.HasSuffix(out.String(), "\n       aether link <this-host>:2300\n") {
@@ -926,7 +926,7 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 	claim := installStep(3) + "  4. on your computer, sign in and claim the server with that code:\n       aether login\n       aether link --claim <code>\n"
 	var out bytes.Buffer
 	o := optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": edgeagent.DefaultURL})
-	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, ""); err != nil {
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "", serversetup.ServiceName); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasSuffix(out.String(), "\n       sudo aether-server edge claim-code\n"+claim+mcpStep(5)) {
@@ -934,7 +934,7 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := printNextSteps(&out, "/srv/it's here/server.conf", o, "", true, ""); err != nil {
+	if err := printNextSteps(&out, "/srv/it's here/server.conf", o, "", true, "", serversetup.ServiceName); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasSuffix(out.String(), `sudo aether-server edge claim-code --config '/srv/it'\''s here/server.conf'`+"\n"+claim+mcpStep(5)) {
@@ -952,7 +952,7 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 
 	out.Reset()
 	o = optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": "https://edge.example"})
-	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, ""); err != nil {
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true, "", serversetup.ServiceName); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "\n       aether login --edge https://edge.example\n       aether link --claim <code> --edge https://edge.example\n") {
@@ -964,7 +964,7 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 // through it.
 func TestPrintNextStepsRefusesAnAddrWithoutAPortBeforePrinting(t *testing.T) {
 	var out bytes.Buffer
-	err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": "2222"}), "", true, "")
+	err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": "2222"}), "", true, "", serversetup.ServiceName)
 	if err == nil || !strings.Contains(err.Error(), `addr "2222"`) || out.Len() != 0 {
 		t.Errorf("err = %v, output %q; want the addr error and nothing printed", err, out.String())
 	}
