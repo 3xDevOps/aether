@@ -113,7 +113,7 @@ directory connectors"
 3. Check the connector shows **Connected** and all 26 tools appear under
    **Tool permissions**, read tools without a confirmation prompt.
 4. Run every [example prompt](#the-listing) and each tool at least once
-   through **+ → Connectors**. Revoke the connector afterwards (`aether mcp
+   through **+ → Connectors**. Revoke the connector afterwards (`cloudfield mcp
    revoke <id>`).
 
 **MCP Inspector.** The Inspector's own OAuth client is not `claude.ai` or
@@ -178,10 +178,10 @@ Checklist:
 - [ ] Each read tool returns a result with no generic error.
 - [ ] Each write and control tool, called on a throwaway demo session, does what
       its description says.
-- [ ] `aether mcp revoke <id>` on a second connector makes its next call
+- [ ] `cloudfield mcp revoke <id>` on a second connector makes its next call
       answer 401.
 - [ ] Last: reusing a rotated refresh token a minute later answers
-      `invalid_grant` and `aether mcp` no longer lists the connector.
+      `invalid_grant` and `cloudfield mcp` no longer lists the connector.
 
 ## Reviewer account
 

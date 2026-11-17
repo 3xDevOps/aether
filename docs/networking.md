@@ -1,6 +1,6 @@
 # Networking and identity
 
-A client (the `aether` CLI or the dashboard) must reach the server's SSH port,
+A client (the `cloudfield` CLI or the dashboard) must reach the server's SSH port,
 `:2222` by default. Git, the control channel, terminals and `ssh` into a session
 ([terminal.md](terminal.md#ssh-and-editors)) all travel over that one
 connection. The server opens no HTTP port unless you set `web-port`
@@ -23,9 +23,9 @@ flowchart LR
 
 | Path | You need | Who can join | Each person installs | Trade-offs |
 | --- | --- | --- | --- | --- |
-| [Tailscale](#tailscale) | The server on a tailnet | Anyone on the tailnet, once an admin approves | Tailscale and `aether` | No keys or invite codes. Enables the dashboard for phones. Identity is the device owner |
-| [An edge](#through-an-edge) | A GitHub account. No open port | Anyone invited by GitHub account | `aether` | Works behind any NAT. A third party relays traffic but cannot read SSH. No server-hosted dashboard |
-| [LAN, VPN or public IP](#plain-lan-vpn-or-a-cloud-box) | A reachable `host:2222` | Anyone with an invite code | `aether` | You manage SSH keys and invite codes. Keep the port behind a firewall |
+| [Tailscale](#tailscale) | The server on a tailnet | Anyone on the tailnet, once an admin approves | Tailscale and `cloudfield` | No keys or invite codes. Enables the dashboard for phones. Identity is the device owner |
+| [An edge](#through-an-edge) | A GitHub account. No open port | Anyone invited by GitHub account | `cloudfield` | Works behind any NAT. A third party relays traffic but cannot read SSH. No server-hosted dashboard |
+| [LAN, VPN or public IP](#plain-lan-vpn-or-a-cloud-box) | A reachable `host:2222` | Anyone with an invite code | `cloudfield` | You manage SSH keys and invite codes. Keep the port behind a firewall |
 
 All paths feed one member list, so a tailnet server can also hand an invite
 code to someone outside the tailnet. With no preference, use Tailscale. When
@@ -48,7 +48,7 @@ or invite code.
 
    Give your team the name it prints, such as `my-server.tailnet-name.ts.net`.
 
-2. Run `sudo aether-server setup` ([install.md](install.md#first-boot)). It
+2. Run `sudo cloudfield-server setup` ([install.md](install.md#first-boot)). It
    finds tailscaled, names its tailnet and asks `Use Tailscale to reach this
    server`. Enter answers yes; no turns tailnet sign-in off. Setup ends by
    printing the host name to link to.
@@ -58,7 +58,7 @@ or invite code.
 
    ```sh
    sudo tailscale up
-   aether link my-server
+   cloudfield link my-server
    ```
 
    A bare host name uses port `:2222`. The first link saves the host key in
@@ -79,17 +79,17 @@ part before the `@` becomes the display name.
   then, a first super admin SSH key is taken only over the tailnet or from the
   server itself, so a port 2222 open beyond the tailnet cannot be used to take
   super admin first.
-- Everyone after that joins as a pending collaborator. `aether link` prints
+- Everyone after that joins as a pending collaborator. `cloudfield link` prints
   `linked to <server> as <name> (collaborator, pending); an admin runs: aether
   member approve <member-id>`, and every other command fails with `membership
   pending admin approval; ask an admin to run: aether member approve
-  <member-id>` until one does. Roles change with `aether member role`
+  <member-id>` until one does. Roles change with `cloudfield member role`
   ([teams.md](teams.md)).
 - `--tailnet-auto-join` skips approval, for teams whose tailnet already is the
   team boundary.
 - Removing someone from the tailnet, or denying them the server in your
   Tailscale ACLs, locks them out of this path. Their other sign-ins stay until
-  `aether member remove <member-id>`. [Single sign-on](teams.md#single-sign-on)
+  `cloudfield member remove <member-id>`. [Single sign-on](teams.md#single-sign-on)
   covers signing the tailnet in through your identity provider.
 
 ### What an attacker can and cannot do
@@ -111,7 +111,7 @@ while tailscaled is down.
 | Message on the client | What happened |
 | --- | --- |
 | `tailnet identity unavailable; key authentication required` | The connection did not arrive over the tailnet, or tailscaled is down. Routine on LAN connections |
-| `tailnet login <x> must also present a registered SSH key` | `--tailnet-require-key` is on, as `aether-server setup` leaves it when you answer no to its tailnet question. To undo: `sudo aether-server config set tailnet-require-key false`, then `sudo systemctl restart aether-server` |
+| `tailnet login <x> must also present a registered SSH key` | `--tailnet-require-key` is on, as `cloudfield-server setup` leaves it when you answer no to its tailnet question. To undo: `sudo cloudfield-server config set tailnet-require-key false`, then `sudo systemctl restart aether-server` |
 
 The server's user must be able to read `/var/run/tailscale/tailscaled.sock`.
 The shipped unit runs as root. For another user, run `sudo tailscale set
@@ -122,15 +122,15 @@ The shipped unit runs as root. For another user, run `sudo tailscale set
 An edge is a relay on the public internet. The server and the client both dial
 out to it, so neither needs an open port, a tailnet or a copied SSH key, and
 people sign in with GitHub. The project runs one at
-`https://edge.cloudfield.ai`. `aether-server setup` turns it on when the host has
+`https://edge.cloudfield.ai`. `cloudfield-server setup` turns it on when the host has
 no tailscaled or you answer no to its tailnet question. You can also
 [run your own](edge.md#running-your-own-edge).
 
 ```sh
-aether login                        # sign in with GitHub; --json prints the address and code as JSON
-aether link --claim '<claim link>'  # the owner, with the claim link or code aether-server setup printed
-aether link '<invite link>'         # anyone an admin invited, with the link the admin sent
-aether status                       # what this computer is linked to, and the next step
+cloudfield login                        # sign in with GitHub; --json prints the address and code as JSON
+cloudfield link --claim '<claim link>'  # the owner, with the claim link or code cloudfield-server setup printed
+cloudfield link '<invite link>'         # anyone an admin invited, with the link the admin sent
+cloudfield status                       # what this computer is linked to, and the next step
 ```
 
 A bare name such as `my-server` is always an SSH address. Only a server id, a
@@ -152,7 +152,7 @@ With no tailnet and no edge, SSH keys and invite codes identify people.
 ### The first admin
 
 ```sh
-aether link 192.168.1.50:2222
+cloudfield link 192.168.1.50:2222
 ```
 
 The first key to link a fresh server becomes the super admin. Without an edge or
@@ -165,7 +165,7 @@ The CLI offers `~/.ssh/id_ed25519` and any key in your ssh-agent, and creates
 `~/.ssh/id_ed25519` if it finds none. For another key:
 
 ```sh
-aether link 192.168.1.50:2222 --key ~/.ssh/aether_ed25519
+cloudfield link 192.168.1.50:2222 --key ~/.ssh/aether_ed25519
 ```
 
 When the server has an edge, the first super admin's key must come from a loopback
@@ -174,14 +174,14 @@ port could otherwise take super admin before the owner claims the server.
 
 ```sh
 ssh -L 2222:127.0.0.1:2222 <user>@<server-host>   # keep it open
-aether link 127.0.0.1:2222                        # in another terminal
+cloudfield link 127.0.0.1:2222                        # in another terminal
 ```
 
 From any other address the handshake fails and the server's message names the
-claim instead: `sudo aether-server edge claim-code` on the server, then
-`aether login` and `aether link --claim <code>` on your machine
+claim instead: `sudo cloudfield-server edge claim-code` on the server, then
+`cloudfield login` and `cloudfield link --claim <code>` on your machine
 ([edge.md](edge.md#server-id-and-claiming)). Once you are admin, your key works
-from any address: `aether link <server-host>:2222`.
+from any address: `cloudfield link <server-host>:2222`.
 
 `link` saves the path in the client's `config.json` (`~/.config/aether/` on
 Linux, `~/Library/Application Support/aether/` on macOS). `git push aether`
@@ -196,7 +196,7 @@ An unknown key is refused with `no Cloudfield member for this key`. An admin
 creates a one-time code (`--ttl` is in seconds, default 24 hours):
 
 ```sh
-aether invite --ttl 3600
+cloudfield invite --ttl 3600
 ```
 
 ```
@@ -208,7 +208,7 @@ The teammate redeems it once, which registers their key as a collaborator and
 burns the code:
 
 ```sh
-aether link <server-host> --invite <invite-code> --name "Example"
+cloudfield link <server-host> --invite <invite-code> --name "Example"
 ```
 
 ```
@@ -226,14 +226,14 @@ keys as secrets.
 
 There are two dashboards, and they are independent.
 
-| | `aether gui` | Server-hosted |
+| | `cloudfield gui` | Server-hosted |
 | --- | --- | --- |
 | Sessions on | Your own machine, on `127.0.0.1` | The server |
 | Reaches the server | Over the same SSH link as the CLI | Directly, over HTTPS |
 | Works with | Every path above | Tailscale only |
 | Good for | Computers: has the directory picker and other local actions ([local-gateway.md](local-gateway.md)) | Phones and borrowed laptops: open a URL, already signed in |
 
-`aether gui` changes nothing about the server's network shape. The
+`cloudfield gui` changes nothing about the server's network shape. The
 server-hosted dashboard is the server's only HTTP port, and it listens on the
 host's tailnet addresses only. It needs tailscaled running before the server,
 MagicDNS and HTTPS certificates enabled for the tailnet (Tailscale admin
@@ -241,15 +241,15 @@ console, DNS page), and root or the tailscaled operator to fetch the
 certificate. Plain HTTP is never offered. Turn it on:
 
 ```sh
-sudo aether-server config set web-port 443
+sudo cloudfield-server config set web-port 443
 sudo systemctl restart aether-server
 ```
 
 Any device on the tailnet then opens the server's MagicDNS name, already signed
 in, with no token or install: `https://my-server.tailnet-name.ts.net/` (other
 ports append `:<port>`). `web-port` defaults to `0`, SSH only.
-`aether-server setup` offers `443` after you answer yes to its tailnet
-question, and `aether-server install --web-port 443` sets it without questions.
+`cloudfield-server setup` offers `443` after you answer yes to its tailnet
+question, and `cloudfield-server install --web-port 443` sets it without questions.
 
 Requests are identified by the same tailnet lookup as SSH, on every request
 with no session or token. The joining, approval and role rules above apply, and
@@ -282,7 +282,7 @@ On iOS, Web Push works only for the installed app, and has these limits:
   is on, and clears at 0. The push carries no count, so a closed app keeps
   the badge it last had until you open it.
 
-Install the server URL, not an `aether gui` one. An `aether gui` URL carries a
+Install the server URL, not a `cloudfield gui` one. A `cloudfield gui` URL carries a
 per-process token that the home-screen icon drops, so the app opens
 unauthenticated. There is no offline mode: away from the tailnet the app shows
 the same connection error as the browser.
@@ -337,7 +337,7 @@ them.
 
 It needs:
 
-- The server-hosted dashboard. `aether gui` does not offer the switch. The
+- The server-hosted dashboard. `cloudfield gui` does not offer the switch. The
   [desktop app](install.md#desktop-app) shows its own notification while open.
 - A browser with Web Push: Chrome, Edge and Firefox on a computer or Android,
   Safari on a Mac. On an iPhone or iPad it works only in the dashboard added to
@@ -363,7 +363,7 @@ The app's WebView has no Web Push, so the app subscribes itself through
 as [ntfy](https://ntfy.sh) from Google Play or F-Droid, holds one connection
 to its push server for every app that uses it. The switch is the same
 **Settings → Notify this device when a session needs me**, in either
-connection mode, `aether gui`'s Edge gateway included.
+connection mode, `cloudfield gui`'s Edge gateway included.
 
 Turning it on asks Android for permission to notify, then asks the
 distributor for an address and Web Push keys, picking the default
@@ -461,7 +461,7 @@ login and a tagged node has none` (tagged nodes use a key over SSH), or `503`
 not on the tailnet).
 
 `web-port` is off by default because it needs tailscaled, MagicDNS and HTTPS
-certificates that an existing install may lack. On a fresh config `aether-server
+certificates that an existing install may lack. On a fresh config `cloudfield-server
 setup` checks that tailscaled answers, that HTTPS certificates are on, that the
 host holds its tailnet addresses (tailscaled with `--tun=userspace-networking`
 does not) and that nothing listens on port 443. If a check fails it offers `0`

@@ -15,10 +15,10 @@ You can also reach a session over SSH from your own editor.
 ## Open your environment
 
 ```sh
-aether terminal                # open the main tab
-aether terminal --tab t2       # open or create another tab
-aether terminal status
-aether terminal stop
+cloudfield terminal                # open the main tab
+cloudfield terminal --tab t2       # open or create another tab
+cloudfield terminal status
+cloudfield terminal stop
 ```
 
 In the dashboard, select **Environment** in the header (under **More
@@ -35,19 +35,19 @@ are in [environments.md](environments.md).
 
 ### Run one command
 
-`aether terminal exec` runs one command in your environment without opening a
+`cloudfield terminal exec` runs one command in your environment without opening a
 tab. Use it from a script or a coding agent on your machine:
 
 ```sh
-aether terminal exec claude --version
-aether terminal exec 'echo "$HOME"; uname -sm'
+cloudfield terminal exec claude --version
+cloudfield terminal exec 'echo "$HOME"; uname -sm'
 ```
 
 The arguments are joined with spaces and run by a login shell in your home, so
 `$HOME` and `PATH` match a tab. Quote the command so your local shell does not
 expand it. A stopped environment is started. The command has no terminal and no
-input. When it ends, its output is written to yours and `aether` exits with its
-exit code. If `aether` itself fails it exits 1 and prints `aether: <error>`.
+input. When it ends, its output is written to yours and `cloudfield` exits with its
+exit code. If `cloudfield` itself fails it exits 1 and prints `aether: <error>`.
 
 Two limits apply. Passing either fails the call and returns none of the
 output:
@@ -58,7 +58,7 @@ output:
 | 1 MiB of stdout and stderr together. The command may keep running. Redirect long output to a file. | `aether: rpc error -32603: terminal exec: exec output: output passed the 1048576 byte limit` |
 
 Output is returned as text. Bytes that are not valid UTF-8 arrive as U+FFFD.
-Interrupting `aether` does not stop the command.
+Interrupting `cloudfield` does not stop the command.
 
 ## Session control
 
@@ -88,7 +88,7 @@ it, does not give you input.
   to type, and **Release** to go back to watching.
 - A second tab of your own is a different session, not a second writer. The
   toolbar reads **You control in another session since <time>**.
-- `aether attach <session>` asks for control. `aether attach --read-only <session>`
+- `cloudfield attach <session>` asks for control. `cloudfield attach --read-only <session>`
   only watches.
 
 To take an occupied session, hold **Take control** for three seconds (pointer,
@@ -141,7 +141,7 @@ eight files per message.
   (**Sends to the agent's terminal.**), also while the controller's dashboard
   reconnects, as it does when the message wakes a sleeping session. The owner
   of an uncontrolled session takes the lease first, then sends. A message you
-  send without the lease, from the assistant, `aether message` or a connector,
+  send without the lease, from the assistant, `cloudfield message` or a connector,
   also arrives at once while you are the controller, reconnecting or not.
 - A message from anyone else waits 45 seconds (**Delivers in 45 s unless the
   controller decides sooner.**). It shows in the chat with a border in the
@@ -160,7 +160,7 @@ eight files per message.
   ([Codex](harnesses.md#codex)). **Sent** then means Codex accepted it.
 - **Send to agent** in the **Changes** view sends your diff comments as one such
   message.
-- `aether message <session-id> "<text>"` (or `-` for stdin) prints the receipt:
+- `cloudfield message <session-id> "<text>"` (or `-` for stdin) prints the receipt:
   `delivered`, `queued for the member in control` with when it is delivered,
   or the denial reason.
 - If you cannot message the agent, the composer says why: **This session has
@@ -227,7 +227,7 @@ under the toolbar.
 A live session is also an SSH host. Run this once on your computer:
 
 ```sh
-aether ssh-config
+cloudfield ssh-config
 ```
 
 ```
@@ -240,7 +240,7 @@ ssh <session-id>.aether now opens a shell in that session. scp, sftp, rsync and 
 names the `aether` binary by path, so run it again after moving the binary. The
 only change to `~/.ssh/config` is an `Include` line at the top. The host name
 is the session id plus `.aether`, for example `run-gejd5cbk74.aether`. It reaches
-the server your CLI is linked to. Without the config, `aether ssh [ssh options]
+the server your CLI is linked to. Without the config, `cloudfield ssh [ssh options]
 <session-id> [command]` takes the same options.
 
 > [!WARNING]
@@ -296,7 +296,7 @@ attention and is not paused. The server rechecks every three seconds and closes
 the connection when that stops being true. **Activity** shows **Connected over
 SSH** beside your avatar.
 
-A refusal comes from `aether ssh --stdio` before ssh's own `Connection closed
+A refusal comes from `cloudfield ssh --stdio` before ssh's own `Connection closed
 by UNKNOWN port 65535`:
 
 | Message | What to do |
@@ -310,7 +310,7 @@ by UNKNOWN port 65535`:
 | `aether: "<host>" does not name a session: a session id holds only lowercase letters, digits and hyphens` | Use `<run-id>.aether`. |
 | `start the port forwarding relay: the helper exited 125: dev-exec: expected ...` | The session was created before this server version. Launch a new session. |
 | `aether: not linked; run aether link <host:port>, or aether login and then aether link --claim <code>` | Link this computer first. |
-| `ssh: Could not resolve hostname <session-id>.aether` | Run `aether ssh-config`. |
+| `ssh: Could not resolve hostname <session-id>.aether` | Run `cloudfield ssh-config`. |
 
 ## Sign in to agents and set up GitHub
 
@@ -321,11 +321,11 @@ Login state lives in your home, so you do not save the environment. See
 [GitHub](environment-home.md#connect-github).
 
 For a login that opens a browser, click the OAuth URL printed in the terminal.
-In the CLI, first run `aether forward terminal <callback-port>` in a second
-terminal on your computer: the environment has no `aether` command. Device-code
+In the CLI, first run `cloudfield forward terminal <callback-port>` in a second
+terminal on your computer: the environment has no `cloudfield` command. Device-code
 logins, `gh auth login --web` among them, need no forward.
 
-Install tools in the environment, then **Save environment** (or `aether env
+Install tools in the environment, then **Save environment** (or `cloudfield env
 save`) so new sessions get them. See
 [environments.md](environments.md#save-the-environment).
 
@@ -411,9 +411,9 @@ layout, so some lines can appear on both sides of the boundary.
 The server keeps a session's terminal recording until you delete the session or
 terminal. Closing the container, reclaiming the checkout and archiving do not
 remove it. If earlier output has expired, history is marked truncated and
-cannot be recovered. `aether logs <session-id> [--limit N]` prints the recorded
+cannot be recovered. `cloudfield logs <session-id> [--limit N]` prints the recorded
 terminal lines as plain text, and an Enhanced session's messages and tool calls,
-one line each. `aether attach` is a raw stream that replays retained
+one line each. `cloudfield attach` is a raw stream that replays retained
 output and discards keystrokes typed before the replay finishes.
 
 ## Reconnects and server updates
@@ -427,7 +427,7 @@ The environment survives a server restart or update, and unsaved
 changes stay. A session keeps the Cloudfield helper it was created with, so SSH
 features added by a later server need a new session.
 
-Session shells, and terminals the agent starts with `aether-internal terminal
+Session shells, and terminals the agent starts with `cloudfield-internal terminal
 start`, survive a server restart or update too. Each runs under a keeper: an
 `aether-internal acp-keeper term` process in the session sandbox, started as
 root from the staged server binary, that owns the shell's PTY, starts the
@@ -450,7 +450,7 @@ before the restart is restored as below. Control of a kept terminal survives too
 records each lease's holder, `control_session_id` and `control_generation`
 in the session's terminal registry under the server's state directory when
 it is acquired, released or revoked, and the next server restores it. A lease the agent took
-with `aether-internal control acquire` comes back as it was, so its next
+with `cloudfield-internal control acquire` comes back as it was, so its next
 `terminal input` with the same generation is accepted however long after the
 restart it arrives. A person's lease comes back disconnected for 15 seconds,
 in which the same browser tab reconnects and keeps control; after that it
@@ -486,6 +486,6 @@ against the shell limit until its container stops.
 ## Limits
 
 - Six environment tabs, and four people's plus four agent shells per session.
-- `aether terminal exec`: 10 minutes and 1 MiB of output.
+- `cloudfield terminal exec`: 10 minutes and 1 MiB of output.
 - SSH: 16 connections per session, 8 per member.
 - Images up to 8 MiB, other message files up to 64 MiB, eight per message.

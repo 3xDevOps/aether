@@ -46,7 +46,7 @@ and `ci` follow every pull request the session recorded (`run.pr.create`), and
 start the moment it records one.
 
 The server reads GitHub with the watch owner's own `gh` login in their
-Cloudfield home, the one `aether github connect` sets up (see
+Cloudfield home, the one `cloudfield github connect` sets up (see
 [environment-home.md](environment-home.md#from-the-cli)). Without one the
 watch is created in the `error` state with the real error and the fix:
 
@@ -408,7 +408,7 @@ An agent that ends its turn waiting on a pull request, its checks or another
 session names what it waits on:
 
 ```sh
-aether-internal report --outcome waiting --for ci \
+cloudfield-internal report --outcome waiting --for ci \
   --until pr:acme/app#7:checks@3f9c2ab --summary 'Waiting for CI on #7'
 ```
 

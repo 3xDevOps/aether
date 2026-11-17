@@ -59,7 +59,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps
 For manual installation or uninstallation, see [install.md](docs/install.md#manual-install).
 >[!TIP]
 > Cloudfield can also be accessed on the go! You can use any mobile AI chatbot that supports MCP connectors. That way you can directly use the Claude or ChatGPT
-> apps on your phone to launch agents on aether and check in on them. We recommend that you go through onboarding first before setting up connectors. See
+> apps on your phone to launch agents on Cloudfield and check in on them. We recommend that you go through onboarding first before setting up connectors. See
 > [Connectors Guide](https://github.com/3xDevOps/cloudfield/blob/main/docs/connectors.md)  
 
 

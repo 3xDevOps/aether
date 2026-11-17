@@ -8,12 +8,12 @@ the [quickstart](quickstart.md).
 
 | Term | Meaning | Guide |
 | --- | --- | --- |
-| Server | `aether-server`, the Linux program that runs agents in Docker containers or virtual machines and stores your workspaces. Clients reach it over SSH, on port `2222` by default, over a tailnet, or through an edge. | [install.md](install.md) |
-| Client | What you use to reach a server: the `aether` CLI (Linux, macOS, Windows), the desktop app, or the Android app. | [install.md](install.md) |
-| Dashboard | The web app for sessions, agents, files and settings. The desktop app, `aether gui` and the Android app show it, and the server can host it on a tailnet. | [networking.md](networking.md#the-dashboard) |
+| Server | `cloudfield-server`, the Linux program that runs agents in Docker containers or virtual machines and stores your workspaces. Clients reach it over SSH, on port `2222` by default, over a tailnet, or through an edge. | [install.md](install.md) |
+| Client | What you use to reach a server: the `cloudfield` CLI (Linux, macOS, Windows), the desktop app, or the Android app. | [install.md](install.md) |
+| Dashboard | The web app for sessions, agents, files and settings. The desktop app, `cloudfield gui` and the Android app show it, and the server can host it on a tailnet. | [networking.md](networking.md#the-dashboard) |
 | Tailnet | A private network made with Tailscale. On a tailnet the server can sign people in by their Tailscale login and host the dashboard. | [networking.md](networking.md) |
 | Edge | A relay with GitHub sign-in that servers and clients both dial out to, so neither needs an open port. The project runs one at `https://edge.cloudfield.ai`, and you can run your own. | [edge.md](edge.md) |
-| Claim link | The link `aether-server setup` prints. Whoever uses it first, in the desktop app or with `aether link --claim`, becomes the server's super admin. | [quickstart.md](quickstart.md#2-start-the-server) |
+| Claim link | The link `cloudfield-server setup` prints. Whoever uses it first, in the desktop app or with `cloudfield link --claim`, becomes the server's super admin. | [quickstart.md](quickstart.md#2-start-the-server) |
 | Member | A person with an account on a server. Each member has a role: viewer, collaborator (the default), admin or super admin. | [teams.md](teams.md#roles) |
 | Super admin | A member with the super admin role: admin in every workspace, and the only one who manages members, roles and the server itself. The first person to link a fresh server becomes one. | [teams.md](teams.md#roles) |
 | Admin | A member who administers the workspaces they own and uses the ones they are granted. | [teams.md](teams.md#roles) |
@@ -26,7 +26,7 @@ the [quickstart](quickstart.md).
 | Session | One agent working on one task in its own sandbox, with its own checkout of the workspace and optionally of other workspaces ([extra repos](quickstart.md#working-across-repos)). A closed session keeps its sandbox for 7 days, so you can relaunch it. | [quickstart.md](quickstart.md) |
 | Session branch | Each session commits to its own branch, `aether/run-<task>-<id>`, in the workspace's repository on the server. The session's **Changes** view shows its diff and has **Publish…**. | [quickstart.md](quickstart.md#8-review-and-publish-the-result) |
 | Board | The dashboard page that groups sessions into **Needs you**, **Working** and **Finished**. | [quickstart.md](quickstart.md#7-watch-it) |
-| Environment | Your own sandbox on the server, opened from **Environment** in the dashboard or with `aether terminal`. Your sessions start from its image: agents you install reach them at once, other tools only after **Save environment**. | [environments.md](environments.md) |
+| Environment | Your own sandbox on the server, opened from **Environment** in the dashboard or with `cloudfield terminal`. Your sessions start from its image: agents you install reach them at once, other tools only after **Save environment**. | [environments.md](environments.md) |
 | Home | Your persistent directory on the server, mounted as `$HOME` in your environment and in every session you launch. Installed agents (`~/.local/bin`), their logins and their configuration live there. | [environment-home.md](environment-home.md) |
 | Standard image | The container image an environment starts from until its member saves their own, `ghcr.io/3xdevops/aether-standard`. | [environments.md](environments.md) |
 | Agent | A coding CLI a session starts: Claude Code, Codex, OpenCode, pi, oh-my-pi (`omp`), GitHub Copilot CLI, Gemini CLI, Cursor CLI, Antigravity CLI, or one you add. Cloudfield's code calls these harnesses. | [harnesses.md](harnesses.md) |
@@ -115,7 +115,7 @@ Reference:
   built.
 - [Styles](styles.md): the dashboard's visual language.
 - [Dashboard gateways](local-gateway.md): the HTTP and WebSocket surface that
-  `aether gui` and the server's tailnet dashboard serve.
+  `cloudfield gui` and the server's tailnet dashboard serve.
 - [Coordination](coordination.md): how overlapping sessions and subsessions warn
   and message each other.
 - [ChatGPT plugin listing](chatgpt-plugin.md): build the directory package,

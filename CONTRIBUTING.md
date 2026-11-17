@@ -2,8 +2,8 @@
 
 How to build Cloudfield from source, run your build beside an installed release,
 test it, put it on a test server, and get it merged. Cloudfield has a Linux
-server (`aether-server`) that runs coding agents in containers, a client CLI
-(`aether`) for Linux, macOS and Windows, and a web dashboard built into both
+server (`cloudfield-server`) that runs coding agents in containers, a client CLI
+(`cloudfield`) for Linux, macOS and Windows, and a web dashboard built into both
 binaries. Terms such as session, workspace and environment are explained in the
 [glossary](docs/README.md#concepts).
 
@@ -51,7 +51,7 @@ machine you are on:
 
 | File | What it is |
 | --- | --- |
-| `dist/aether` | The client CLI, which serves the dashboard with `aether gui` |
+| `dist/aether` | The client CLI, which serves the dashboard with `cloudfield gui` |
 | `dist/aether-server` | The server, Linux only. It serves the dashboard on its tailnet web port |
 | `dist/aether-edge` | The edge relay ([docs/edge.md](docs/edge.md)), Linux only |
 
@@ -90,22 +90,22 @@ The two share everything a client stores: the link config
 `%AppData%\aether\config.json` on Windows), the SSH key `~/.ssh/id_ed25519`
 and `~/.ssh/known_hosts`. So `./dist/aether link` changes what the installed
 CLI and a running desktop app connect to. Ports do not clash: every
-`aether gui`, the desktop app's included, binds a free port on 127.0.0.1
+`cloudfield gui`, the desktop app's included, binds a free port on 127.0.0.1
 unless you pass `--port`, and a taken `--port` fails with
 `aether: localgw: listen: listen tcp 127.0.0.1:8080: bind: address already in use`.
 
 To give the dev CLI its own key and links on Linux or macOS, point `HOME` and
-`AETHER_CONFIG_DIR` at an empty directory and unset `SSH_AUTH_SOCK` for every
+`CLOUDFIELD_CONFIG_DIR` at an empty directory and unset `SSH_AUTH_SOCK` for every
 dev CLI command. With `SSH_AUTH_SOCK` set, the dev CLI offers the keys your
-ssh-agent holds: `aether link` creates no key of its own, and the server signs
+ssh-agent holds: `cloudfield link` creates no key of its own, and the server signs
 you in as your existing member, even with `--invite`. With all three, the dev
 CLI creates its own key, so join with an invite code
 ([docs/teams.md](docs/teams.md)):
 
 ```sh
 devhome=$(mktemp -d)
-env -u SSH_AUTH_SOCK HOME=$devhome AETHER_CONFIG_DIR=$devhome ./dist/aether link <server>:2222 --invite <code>
-env -u SSH_AUTH_SOCK HOME=$devhome AETHER_CONFIG_DIR=$devhome ./dist/aether gui
+env -u SSH_AUTH_SOCK HOME=$devhome CLOUDFIELD_CONFIG_DIR=$devhome ./dist/aether link <server>:2222 --invite <code>
+env -u SSH_AUTH_SOCK HOME=$devhome CLOUDFIELD_CONFIG_DIR=$devhome ./dist/aether gui
 ```
 
 A new key makes a new person only where the server identifies people by key.
@@ -118,11 +118,11 @@ and the invite. Otherwise sign in as a different tailnet login or a different
 invited GitHub account.
 
 > [!WARNING]
-> `aether gui` checks for a newer release when it starts, and the dashboard
+> `cloudfield gui` checks for a newer release when it starts, and the dashboard
 > offers it ([update prompts](docs/dashboard-frontend.md#update-prompts)).
 > Accepting it, or running `./dist/aether update`, replaces `dist/aether`
 > (and `dist/aether-server` on Linux) with the release and rebuilds an
-> installed desktop app against it. `AETHER_NO_UPDATE_CHECK=1` turns the
+> installed desktop app against it. `CLOUDFIELD_NO_UPDATE_CHECK=1` turns the
 > checks off.
 
 ### The desktop app
@@ -130,11 +130,11 @@ invited GitHub account.
 `./dist/aether gui build` replaces your installed desktop app, builds it from
 source, and ties it to the absolute path of `dist/aether`. If `dist/` is then
 deleted or moved, the app stops with `The CLI that installed this app is no
-longer executable at <path>`. Run `aether gui build` with the released CLI to
+longer executable at <path>`. Run `cloudfield gui build` with the released CLI to
 go back. To try the shell on the dev CLI without touching the installed app:
 
 ```sh
-cd desktop && npm ci && AETHER_BIN="$PWD/../dist/aether" npm start
+cd desktop && npm ci && CLOUDFIELD_BIN="$PWD/../dist/aether" npm start
 ```
 
 ### The dashboard with hot reload
@@ -144,12 +144,12 @@ Run Next's dev server against a local gateway
 
 ```sh
 ./dist/aether gui --port 8080 --url          # terminal 1: prints a URL with ?token=
-cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
+cd web && CLOUDFIELD_DASHBOARD=http://127.0.0.1:8080 \
   bun run dev -- --port 3000 --hostname 127.0.0.1   # terminal 2
 ```
 
 Open `http://127.0.0.1:3000/?token=<token>` with the token from terminal 1;
-it works until that `aether gui` exits. Edits in `web/src` reload in the
+it works until that `cloudfield gui` exits. Edits in `web/src` reload in the
 browser. Gateway or server changes need `make build` and a restart.
 
 The server needs Linux, Docker and systemd; see
@@ -217,7 +217,7 @@ descends from (`ghcr.io/3xdevops/aether-standard:v0.7.1-beta.1` for
 Browser tab needs `aether/browser:test`, which the server never pulls, and
 fails with `runtime: image aether/browser:test is built locally and is
 missing from the daemon` until you run `make browser-image` on the target or
-`sudo aether-server config set browser-image ghcr.io/3xdevops/aether-browser:<tag>`
+`sudo cloudfield-server config set browser-image ghcr.io/3xdevops/aether-browser:<tag>`
 and restart.
 
 ### On a server that runs a release
@@ -248,7 +248,7 @@ A server stamped `dev` or a bare hash refuses no client. The rule works the
 other way too: a release server refuses a dev CLI built from an older
 release.
 
-Once a newer release exists, `sudo aether-server update` and the dashboard's
+Once a newer release exists, `sudo cloudfield-server update` and the dashboard's
 server update prompt offer it, and installing it replaces your dev build and
 the `aether` beside it. Nothing installs on its own: the server only checks,
 about every six hours. Add `AETHER_NO_UPDATE_CHECK=1` to
@@ -258,7 +258,7 @@ If the server has data you want to keep, copy its data directory while it is
 stopped, then deploy:
 
 ```sh
-sudo aether-server config show              # the data-dir row
+sudo cloudfield-server config show              # the data-dir row
 sudo systemctl stop aether-server
 backup=/var/lib/aether.bak-$(date +%Y%m%d-%H%M%S)
 sudo cp -a /var/lib/aether "$backup"
@@ -269,8 +269,8 @@ Note the printed path. You need it to restore this copy.
 
 ### Test the latest main
 
-No nightly or main-branch release is published: the installer, `aether
-update` and `aether-server update` install only published releases, by
+No nightly or main-branch release is published: the installer, `cloudfield
+update` and `cloudfield-server update` install only published releases, by
 default the newest that is not a prerelease. Build `main` yourself:
 
 ```sh
@@ -294,7 +294,7 @@ gh run download <session-id> --name binaries-go --dir aether-main
 On the server, if your branch added no migration:
 
 ```sh
-sudo aether-server update --version <tag>
+sudo cloudfield-server update --version <tag>
 ```
 
 `<tag>` is the release your build descends from or a newer one. The update
@@ -306,7 +306,7 @@ refuses a database the release cannot open:
 refusing to downgrade: this database is at schema N and <tag> only knows schema M; it could not open it
 ```
 
-An older release needs `aether server update --version <tag>
+An older release needs `cloudfield server update --version <tag>
 --allow-downgrade` from an admin's client, with the same database check.
 
 If your branch added a migration, restore your copy, then install the
@@ -322,15 +322,15 @@ sudo systemctl start aether-server
 ```
 
 On a client the installed `aether` was never replaced. If you ran
-`./dist/aether gui build`, run `aether gui build` to tie the desktop app to
+`./dist/aether gui build`, run `cloudfield gui build` to tie the desktop app to
 the release again. `make clean` deletes `dist/`.
 
 ## Desktop shell
 
-`desktop/` is an Electron window around `aether gui`. It bundles no CLI: it
-starts the one named by `AETHER_BIN`, else the one recorded by the
-`aether gui build` that installed it, else `aether` on `PATH`. Users install
-it with `aether gui build`, which unpacks the sources embedded by
+`desktop/` is an Electron window around `cloudfield gui`. It bundles no CLI: it
+starts the one named by `CLOUDFIELD_BIN`, else the one recorded by the
+`cloudfield gui build` that installed it, else `aether` on `PATH`. Users install
+it with `cloudfield gui build`, which unpacks the sources embedded by
 `desktop/embed.go` ([docs/install.md](docs/install.md#desktop-app)), so a new
 file the shell needs at run time goes in both `desktop/embed.go` and the
 `files` list in `desktop/electron-builder.yml`. `make test-scripts` runs its
@@ -480,7 +480,7 @@ Commit messages, pull request titles and code style follow
 [AGENTS.md](AGENTS.md#commits). Update the guide in `docs/` that a change
 affects in the same pull request. An agent working inside a Cloudfield run ends
 every pull request description with `Opened from Aether session <session id>`, using
-the `run_id` that `aether-internal status` reports.
+the `run_id` that `cloudfield-internal status` reports.
 
 AI tools are welcome under the [AI contributions policy](AI_POLICY.md): you
 own what you submit, you add `This PR was made with the help of <name of
@@ -809,7 +809,7 @@ tags or prunes until a step says so. Each of 1 to 5 is one-time.
    ([Promote](#promote)). It becomes `v0.8.7`, build 1, with the first
    `stable.json` and `beta.json`. A server still on `v0.8.7-beta.N` has no
    signed build, so it shows the update but waits for a super admin's
-   `aether server update`; from `v0.8.7` on it applies updates itself, and
+   `cloudfield server update`; from `v0.8.7` on it applies updates itself, and
    `AETHER_NO_UPDATE_CHECK=1` stops that.
 8. **The nightly environment and pruning**, before you switch nightlies on:
    - **Settings → Environments → New environment**, named `nightly`:
@@ -826,7 +826,7 @@ tags or prunes until a step says so. Each of 1 to 5 is one-time.
    `gh variable set NIGHTLY_ENABLED` ([Nightlies](#nightlies)). The first
    nightly is `v0.9.0-nightly.1`, build 2. Run the prune dry run, then set
    `NIGHTLY_PRUNE_ENABLED`. Turn them off with `gh variable delete`.
-10. **Point the project's own server at nightly:** `sudo aether-server update
+10. **Point the project's own server at nightly:** `sudo cloudfield-server update
    --channel nightly --yes` on it.
 
 <details>

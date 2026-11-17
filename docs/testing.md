@@ -158,7 +158,7 @@ script committed to the test repository).
 | `TestIntegrationMultiMember` | Joining, roles, handoff, budget caps, an agent crash |
 | `TestIntegrationChaos*` | The server killed mid-session, disk pressure, a stalled agent |
 | `TestIntegrationCoordination*` | Messages between sessions |
-| `TestIntegrationServerUpdate*` | `aether-server update`: preflight, rollback, downgrade guards |
+| `TestIntegrationServerUpdate*` | `cloudfield-server update`: preflight, rollback, downgrade guards |
 | `TestIntegrationRestart*` | Enhanced sessions through server restarts and updates ([Restart acceptance](#restart-acceptance)) |
 | `TestIntegrationServerGateway` | The dashboard the server hosts on the tailnet |
 | `TestIntegrationConnectorFlows` | A ChatGPT connector, over OAuth and MCP, launching, messaging, answering and stopping enhanced sessions |
@@ -206,7 +206,7 @@ The test then restarts the server five ways, 20 seconds apart: `SIGTERM` and
 start the same binary twice, replace the binary with the second build, put the
 first build back (the rollback case), and `SIGKILL`. Every restart lands while
 a call, an inbox long poll and a send are in flight. The swap and rollback stop
-the server with `SIGTERM` and replace the file, as `aether-server update` does;
+the server with `SIGTERM` and replace the file, as `cloudfield-server update` does;
 the `exec` step itself is covered by `TestIntegrationServerUpdate*`.
 
 It fails on any of:
@@ -317,7 +317,7 @@ process (`internal/server/mockmodel_integration_test.go`) serves streaming
 Anthropic `/v1/messages` and OpenAI `/v1/responses`. Each prompt the test
 sends carries a tag, `aether-script:<turn>;`, naming the script the mock
 plays for that turn: one tool call per step, then a text answer. The mock
-answers each report reminder Cloudfield sends with `aether-internal report`.
+answers each report reminder Cloudfield sends with `cloudfield-internal report`.
 
 One Standard and one Enhanced session per agent play these turns in order. The
 launch starts `turn`, mail starts `wake`, and `run.inject` starts the rest:
@@ -524,7 +524,7 @@ skips those tests where `bun` is not installed.
 The fixtures do not prove a real model turn. To check one, start an isolated
 coordinated Standard session with the exact CLI, server and extension versions under
 test, end a turn idle, send it one message with
-`aether-internal send --to <session> --body <nonce>`, and confirm exactly one new
+`cloudfield-internal send --to <session> --body <nonce>`, and confirm exactly one new
 turn reads and acknowledges it. Never edit a live hook, credentials or trust
 settings to get there.
 
@@ -657,7 +657,7 @@ hit testing and focus outlines belong to the
 ## The dashboard end-to-end suite
 
 `web/e2e/` drives Chromium against the dashboard embedded in `dist/aether`,
-through a real `aether gui` gateway and a real `aether-server` over SSH.
+through a real `cloudfield gui` gateway and a real `aether-server` over SSH.
 Playwright is the runner.
 
 ```sh
@@ -685,7 +685,7 @@ Each test gets its own stack:
   it from reading this project's published releases and channel pointers,
   so `server.update_status` reports no release and a channel not chosen
   yet; a spec that needs other update state answers that method itself.
-- One `aether gui` per member, each with its own `HOME` and
+- One `cloudfield gui` per member, each with its own `HOME` and
   `AETHER_CONFIG_DIR`, so nothing touches your own keys or links.
 - Real git repositories on disk.
 
@@ -826,7 +826,7 @@ runs every package that has them:
 
 It needs root on a Linux x86-64 host with `/dev/kvm`, `cloud-hypervisor`,
 `qemu-img`, `mkfs.ext4`, `virtiofsd` at `/usr/libexec/virtiofsd`, systemd,
-iptables and network access to pull images. `sudo aether-server vm install
+iptables and network access to pull images. `sudo cloudfield-server vm install
 --vm-kernel dist/aether-vmlinux-x86_64` installs them the way a server does,
 as CI's `kvm` job does. `make test-kvm` fails, naming what is missing,
 rather than skip. It runs only the tests named `TestKVM...`: the
@@ -962,7 +962,7 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 | `dashboard` | `bun run typecheck` and `bun run test` | Same, from `web/` |
 | `dashboard-e2e` | [End-to-end suite](#the-dashboard-end-to-end-suite) in two shards | `make test-e2e E2E_ARGS='--shard=N/2'` |
 | `windows`, `windows-install` | [Windows](#windows); `windows` also scans `release-build`'s Windows binaries with Defender, and the `windows-install` install (zip) and update legs package and launch the Windows desktop zip on amd64 and arm64 | |
-| `release-build (binaries, desktop, android)` | `make release-binaries`, `aether gui build` on Linux with and without Node on `PATH`, `make android` | `make release-binaries`, [Desktop shell](../CONTRIBUTING.md#desktop-shell), `make android` |
+| `release-build (binaries, desktop, android)` | `make release-binaries`, `cloudfield gui build` on Linux with and without Node on `PATH`, `make android` | `make release-binaries`, [Desktop shell](../CONTRIBUTING.md#desktop-shell), `make android` |
 | `edge-image` | [The edge image](#the-edge-image) and [qualification](#edge-upgrade-qualification) | |
 | `kvm` | [VM tests](#vm-tests) on a hosted runner, which has `/dev/kvm` (`.github/workflows/kvm.yml`) | `make kernel`, then `make test-kvm` as root |
 

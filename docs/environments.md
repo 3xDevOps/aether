@@ -55,10 +55,10 @@ a newer Git in your environment and save it, or
 
 ### Updating the standard image
 
-`aether server update` brings the matching standard image
+`cloudfield server update` brings the matching standard image
 ([install.md](install.md#upgrading)). It reaches you only after two steps:
 
-1. A saved environment wins over the standard image. Run `aether env reset`
+1. A saved environment wins over the standard image. Run `cloudfield env reset`
    (this discards what you installed outside the home), or update the tool
    yourself in your environment and save again.
 2. Stop and reopen your environment and start a new session. A container keeps the
@@ -70,12 +70,12 @@ reused tag such as `:latest` also needs `docker pull` on the host, except with
 it, so only a new tag or digest reaches VMs.
 
 ```sh
-sudo aether-server config set standard-image <a newer image> && sudo systemctl restart aether-server
+sudo cloudfield-server config set standard-image <a newer image> && sudo systemctl restart aether-server
 ```
 
 ## Install tools in your environment
 
-Open your environment with `aether terminal`, or select **Environment** in the
+Open your environment with `cloudfield terminal`, or select **Environment** in the
 dashboard header (under **More navigation** on a narrow screen). It is a
 persistent shell where you install system tools and language runtimes, for
 example:
@@ -99,7 +99,7 @@ The workspace's setup script and variables apply to sessions, not to this termin
 Select **Save environment** on the **Environment** page, or run:
 
 ```sh
-aether env save
+cloudfield env save
 ```
 
 Saving pauses the terminal for a few seconds while Docker commits it. The
@@ -116,8 +116,8 @@ pushed to a registry.
   ones. To fix a bad save, repair it and save again, or reset.
 - Every save is checked before it becomes your saved image
   ([Saved image checks](#saved-image-checks)).
-- Saving needs a running terminal. If it is stopped, `aether env save` fails
-  with `environment terminal is not running`. Open it with `aether terminal`,
+- Saving needs a running terminal. If it is stopped, `cloudfield env save` fails
+  with `environment terminal is not running`. Open it with `cloudfield terminal`,
   check your changes are there, then save.
 - The environment survives a stop, a shell exit and a server
   restart, so unsaved changes stay until you reset. Cloudfield recreates the
@@ -198,7 +198,7 @@ state.
 ## Reset to standard
 
 Open **Environment actions**, then **Reset to standard…** (offered once you
-have saved an image), or run `aether env reset`. Reset destroys the container,
+have saved an image), or run `cloudfield env reset`. Reset destroys the container,
 forgets your saved image and removes it and your previous image from the server. Files outside your
 home are lost. The next open and all new sessions use the standard image.
 
@@ -208,7 +208,7 @@ Anything but `y` or `yes` prints `aether: aether env reset: nothing was reset`
 and exits 1. Without a terminal it needs `--yes`, or it fails with
 `aether: --yes is required because aether env reset destroys your Environment's sandbox, unsaved changes and saved image: aether env reset --yes`.
 
-**Stop environment…** (`aether terminal stop`) only stops the container. Your
+**Stop environment…** (`cloudfield terminal stop`) only stops the container. Your
 home, saved image and unsaved changes stay.
 
 ### When a saved image is missing
@@ -220,7 +220,7 @@ your sessions and terminal fail with an error that names the missing tag:
 scheduler: saved environment image "<tag>" is missing from the runtime; run aether env reset to return to the standard image
 ```
 
-Cloudfield does not fall back to the standard image silently. Run `aether env reset`.
+Cloudfield does not fall back to the standard image silently. Run `cloudfield env reset`.
 
 ## Docker inside sessions
 
@@ -232,12 +232,12 @@ needs no `--privileged` and no host Docker socket, so `docker run`,
 `docker build` and `docker compose up` work as on a laptop.
 
 An admin turns it on with the **Install** button under **Settings → Server**
-(admins only), by accepting the Docker-inside-sessions question in `aether-server
+(admins only), by accepting the Docker-inside-sessions question in `cloudfield-server
 setup`, or on the server host:
 
 ```sh
-sudo aether-server sysbox install
-aether-server sysbox status     # prints on or off
+sudo cloudfield-server sysbox install
+cloudfield-server sysbox status     # prints on or off
 ```
 
 The host must be Ubuntu or Debian on amd64 or arm64, run Docker, and have Linux
@@ -250,7 +250,7 @@ nothing with `Docker inside sessions is unavailable on this host: <reason>`.
 Sysbox. Any other value names a runtime registered in Docker. To opt out:
 
 ```sh
-sudo aether-server config set container-runtime runc
+sudo cloudfield-server config set container-runtime runc
 sudo systemctl restart aether-server
 ```
 
@@ -260,7 +260,7 @@ What to expect:
   and terminals get Docker within a minute. Reopen an open environment
   terminal.
 - Images, containers and volumes inside a session are deleted with its container,
-  and `aether env save` does not keep them.
+  and `cloudfield env save` does not keep them.
 - A port published by an inner container is on the session's own network. Reach it
   at `127.0.0.1`.
 - Inner containers resolve names through `8.8.8.8`: the session's own resolver,
@@ -274,7 +274,7 @@ What to expect:
   unix:///var/run/docker.sock. Is the docker daemon running?`
 - A saved image from before Docker joined the standard image has no CLI.
   Install it with `sudo apt-get install -y docker.io docker-compose-v2
-  docker-buildx` and `aether env save`, or `aether env reset`.
+  docker-buildx` and `cloudfield env save`, or `cloudfield env reset`.
 
 How the boundary differs from the host is in
 [security.md](security.md#the-agent-container).
@@ -282,7 +282,7 @@ How the boundary differs from the host is in
 ## Resource limits and launch admission
 
 Each new session and environment gets a ceiling on CPU, memory and
-processes. An admin changes the defaults with `aether-server serve` flags:
+processes. An admin changes the defaults with `cloudfield-server serve` flags:
 
 | Flag | Default (`0`) | What it limits |
 | --- | --- | --- |
@@ -291,7 +291,7 @@ processes. An admin changes the defaults with `aether-server serve` flags:
 | `--run-pids` | 4096 | Processes and threads |
 
 ```sh
-sudo aether-server config set run-memory 12884901888   # 12 GiB
+sudo cloudfield-server config set run-memory 12884901888   # 12 GiB
 ```
 
 An admin can also set the limits from **Settings → Server → Session limits**,
@@ -330,15 +330,15 @@ This is work in progress; [the plan](plans/2026-11-13-microvm-sessions.md)
 lists what is still to come.
 
 ```sh
-sudo aether-server config set session-runtime vm
-sudo aether-server vm install
+sudo cloudfield-server config set session-runtime vm
+sudo cloudfield-server vm install
 sudo systemctl restart aether-server
 ```
 
 The server must run as root: it starts each VM in a systemd unit and sets up
 its network, and it removes the files sessions leave behind itself rather than
 through a root container. The host needs `/dev/kvm` and systemd, besides
-Docker; `aether-server vm install` checks for KVM and installs the rest: Cloud
+Docker; `cloudfield-server vm install` checks for KVM and installs the rest: Cloud
 Hypervisor, the tools VM disks and the VM firewall need, and the release's
 guest kernel at `/usr/local/lib/aether/vmlinux` (`--vm-kernel`, config key
 `vm-kernel`, names another path). [Hosts for VM
@@ -499,7 +499,7 @@ marked **secret**.
 
 An admin edits both under **Environment** on the workspace's settings page
 (workspace switcher → **Workspace settings**, or the workspace's **Settings**
-in **Manage workspaces**), or with `aether workspace env`. Every
+in **Manage workspaces**), or with `cloudfield workspace env`. Every
 member can read the script, the variable names and the non-secret values.
 
 A change applies to sessions launched afterwards. An existing container keeps its
@@ -511,16 +511,16 @@ does not.
 ### Setup script
 
 ```sh
-aether workspace env script                    # print it
-aether workspace env script --file setup.sh    # replace it; - reads stdin
-aether workspace env script --clear
+cloudfield workspace env script                    # print it
+cloudfield workspace env script --file setup.sh    # replace it; - reads stdin
+cloudfield workspace env script --clear
 ```
 
 The script (for a Node project, one line: `npm ci`) runs in each new
 session's sandbox, after it starts and before the agent. It runs as `/bin/sh -ec`
 (POSIX `sh`, stops at the first failing command, stderr merged into stdout) in
 `/workspace` as the session's user, which is never root. A session with
-extra repos (`aether session --repo`) runs it in the primary one; the others are at
+extra repos (`cloudfield session --repo`) runs it in the primary one; the others are at
 `/repos/<workspace name>`. It sees the
 workspace variables, your `$HOME` and tool caches, `AETHER_RUN_ID` and
 `AETHER_WORKSPACE_ID`.
@@ -543,16 +543,16 @@ setup script output:
 npm error code E401
 ```
 
-The last 16 KiB of output goes only to whoever launched (`aether session` prints it,
+The last 16 KiB of output goes only to whoever launched (`cloudfield session` prints it,
 the launch dialog shows it) and is not stored with the session. Secrets in it are
 replaced with `***`.
 
 ### Variables
 
 ```sh
-aether workspace env list
-aether workspace env set NODE_ENV=test API_URL=https://api.example.test
-aether workspace env unset NODE_ENV
+cloudfield workspace env list
+cloudfield workspace env set NODE_ENV=test API_URL=https://api.example.test
+cloudfield workspace env unset NODE_ENV
 ```
 
 A name cannot be empty or contain `=`. The server sets some variables after the
@@ -568,19 +568,19 @@ A secret is a variable whose value the server stores and never returns. Its
 value is read from stdin, so it stays out of your shell history:
 
 ```sh
-aether workspace env set --secret NPM_TOKEN < token.txt
-aether workspace env set --secret NPM_TOKEN     # on a terminal: prompts, input hidden
+cloudfield workspace env set --secret NPM_TOKEN < token.txt
+cloudfield workspace env set --secret NPM_TOKEN     # on a terminal: prompts, input hidden
 ```
 
-`aether workspace env list` and the dashboard show only the name, to admins as
+`cloudfield workspace env list` and the dashboard show only the name, to admins as
 well. To change a secret, set it again.
 
 Import a `.env` file to add many at once. Values are stored as secrets unless
 you pass `--plain`. The dashboard's **Import .env…** previews each line first.
 
 ```sh
-aether workspace env import .env
-aether workspace env import --plain .env
+cloudfield workspace env import .env
+cloudfield workspace env import --plain .env
 ```
 
 A project that needs the `.env` file, not just the variables, can import them
@@ -606,11 +606,11 @@ Off by default. When an admin turns it on, the workspace's new sessions reach on
 the hosts on its list, which starts as the hosts agents need (below):
 
 ```sh
-aether workspace env egress on
-aether workspace env egress allow pypi.example.com '*.mirror.example.com'
-aether workspace env egress deny raw.githubusercontent.com
-aether workspace env egress list
-aether workspace env egress off
+cloudfield workspace env egress on
+cloudfield workspace env egress allow pypi.example.com '*.mirror.example.com'
+cloudfield workspace env egress deny raw.githubusercontent.com
+cloudfield workspace env egress list
+cloudfield workspace env egress off
 ```
 
 The dashboard has the same switch and list under **Environment**. A host is an
@@ -626,7 +626,7 @@ egress control is on or off, and reaches only the agent rows of the table
 below (Claude Code through OpenCode), whatever the workspace's list says.
 
 Such a session starts on `aether-egress`, a Docker network with no route out. Its
-one way out is a proxy inside `aether-server` on that network's gateway, port
+one way out is a proxy inside `cloudfield-server` on that network's gateway, port
 3128, which the session finds in `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`,
 `https_proxy`, `NO_PROXY` and `no_proxy` (`localhost,127.0.0.1,::1`), plus
 `NODE_USE_ENV_PROXY=1` for Node's `fetch`. These replace workspace variables of
