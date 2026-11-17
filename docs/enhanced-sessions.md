@@ -27,7 +27,7 @@ first to install and sign in to an agent. Other terms are in the
 Like Standard, an Enhanced session acts without asking by default. You can switch
 the session to a mode that asks (Claude Code, Codex and Gemini offer one).
 
-`claude`, `codex` and `pi` need their adapter installed: `aether agent add
+`claude`, `codex` and `pi` need their adapter installed: `cloudfield agent add
 <name> --enhanced` installs the agent and its adapter
 ([Enhanced adapters](harnesses.md#enhanced-adapters)).
 
@@ -46,7 +46,7 @@ in **New session** or in the **Default mode** select on the **Agents** page, and
 **New session** starts on it. A launch from **New session** saves the
 agent, mode and model on the server, so every device starts from them
 ([Saved launch choices](teams.md#saved-launch-choices)). For an agent with no remembered mode, **New session** starts on Enhanced when the agent's Enhanced mode is installed, and on Standard
-otherwise; `aether session` and the connector do so
+otherwise; `cloudfield session` and the connector do so
 whenever no mode is named. **New session** lists Enhanced first and marks it
 **Recommended**. Before an agent's Enhanced mode is installed, **Set up**
 suggests Enhanced for Codex, oh-my-pi, OpenCode, Copilot, Gemini and Cursor,
@@ -57,12 +57,12 @@ Enhanced.
 ## Launch an Enhanced session
 
 ```sh
-aether session "fix the flaky login test" --agent codex --mode enhanced
-aether session "fix the flaky login test" --agent claude --mode enhanced --model opus --effort high
+cloudfield session "fix the flaky login test" --agent codex --mode enhanced
+cloudfield session "fix the flaky login test" --agent claude --mode enhanced --model opus --effort high
 ```
 
-`--mode` takes `standard`, `enhanced` or `background` on `aether session` and
-`aether template save`. The task is the session's
+`--mode` takes `standard`, `enhanced` or `background` on `cloudfield session` and
+`cloudfield template save`. The task is the session's
 first prompt. An agent with no ACP command is refused:
 
 ```text
@@ -177,7 +177,7 @@ after you switch to a mode that asks, from an agent whose own configuration
 still asks, or for a check the agent never skips. Claude Code in
 `bypassPermissions` still asks for an explicit `ask` rule in its settings, a
 tool that needs a person, and its own safety checks, at every
-[permission tier](security.md#permission-tiers). Answer here, with `aether
+[permission tier](security.md#permission-tiers). Answer here, with `cloudfield
 answer`, or with a connector's `aether_decide_approval`. Each request marks the session **Needs you** and docks above the
 composer, one at a time (`1 of N`). The composer stays shut until you answer.
 **Interrupt** stops the turn and cancels the request instead.
@@ -202,7 +202,7 @@ refuses `bypassPermissions` when its settings or managed policy set
 - An answered request stays in the timeline as one line, such as "Allowed once
   · run `go test`".
 - A subagent's request is the session's request, answered the same way.
-- From the CLI, `aether sessions <session-id>` lists pending requests and `aether
+- From the CLI, `cloudfield sessions <session-id>` lists pending requests and `aether
   answer <session-id> <request-id> <option-id>` answers one: allow once or reject once,
   never always.
 - Answering needs permission to steer the session and control of it. The first
@@ -227,7 +227,7 @@ Standard session whose agent reports its turns. The reason tells you how it ende
 | --- | --- | --- |
 | `turn ended without a report` | `waiting` | The turn ended normally with no outcome report |
 | `agent reported success` | `finished` | The session shows **Finished: review** ([failure-handling.md](failure-handling.md#review)) |
-| `needs input: <question>` | `needs-you` | The agent ran `aether-internal report --outcome needs-input` and ended its turn |
+| `needs input: <question>` | `needs-you` | The agent ran `cloudfield-internal report --outcome needs-input` and ended its turn |
 | `blocked: <summary>` | `needs-you` | The agent reported an external blocker |
 | the summary of a `waiting` report | `waiting-agents`, `waiting-ci` or `waiting-tools` | The agent waits on its own agents, CI or a process |
 | the summary of an `answered` report | `answered` | The agent replied with nothing pending. It never needs you |
@@ -264,7 +264,7 @@ between turns.
 Messages from other sessions and people ([coordination.md](coordination.md)) reach an
 Enhanced session without hooks. When mail arrives and the session has no turn running,
 the server sends the agent one prompt telling it to run
-`aether-internal inbox` and acknowledge the batch, ending with
+`cloudfield-internal inbox` and acknowledge the batch, ending with
 `End this turn with exactly one report as your last action: aether_report, or /usr/local/bin/aether-internal report where you have no aether_report tool.`
 A message steered into a running turn carries no such line. Messages that arrive together
 share one prompt, and each set of new unread messages starts at most one turn,
@@ -311,8 +311,8 @@ The keeper and that exec run as root, out of the agent's reach; the adapter
 runs as the session's user, as before ([security](security.md#permission-tiers)).
 
 A server restart or update (`systemctl restart aether-server`,
-`aether server update`, a boot trial or a rollback) leaves the keeper and the
-agent running. Terminals started with `aether-internal terminal` run under a
+`cloudfield server update`, a boot trial or a rollback) leaves the keeper and the
+agent running. Terminals started with `cloudfield-internal terminal` run under a
 keeper of their own and keep their output, input and exit status through it
 ([terminal.md](terminal.md#reconnects-and-server-updates)). The next server
 process reattaches and adopts the conversation: the turn in flight keeps
@@ -344,7 +344,7 @@ dropped, and the session parks with `turn interrupted`. Queued messages read
 **Not sent**: send them again. Background tasks end with the old adapter,
 including commands the agent's own shell tool left running, and the log notes
 **Background work interrupted**. Commands in a terminal started with
-`aether-internal terminal` keep running, and the terminal stays usable
+`cloudfield-internal terminal` keep running, and the terminal stays usable
 ([terminal.md](terminal.md#reconnects-and-server-updates)). A conversation that
 cannot be restored starts a new one and says `Started a new agent
 conversation`. When another process attaches to the keeper, which only a
@@ -447,8 +447,8 @@ A running Standard or Enhanced session can move to the other mode in the same
 container, keeping the agent's conversation:
 
 ```sh
-aether session switch <session-id> --mode enhanced
-aether session switch <session-id> --mode standard
+cloudfield session switch <session-id> --mode enhanced
+cloudfield session switch <session-id> --mode standard
 ```
 
 In the dashboard, **More → Switch to Enhanced…** (or **Switch to Standard…**)

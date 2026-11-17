@@ -1,6 +1,6 @@
 # Slack
 
-A Slack bot inside `aether-server` sends you a direct message when a session needs
+A Slack bot inside `cloudfield-server` sends you a direct message when a session needs
 you and lets you answer from Slack, for example on your phone. It connects out
 to Slack over Socket Mode, so it works on a tailnet-only server with no edge
 and no public URL.
@@ -48,19 +48,19 @@ An admin does this once, on the server.
 4. On the server:
 
    ```sh
-   sudo aether-server slack setup
+   sudo cloudfield-server slack setup
    ```
 
    It asks for the app-level token, then the bot token, on standard input.
    Typing at a terminal hides them; never pass tokens as arguments. Piped
-   input is one token per line: `sudo aether-server slack setup < tokens.txt`.
+   input is one token per line: `sudo cloudfield-server slack setup < tokens.txt`.
    It checks both tokens with Slack, writes them to
    `<data-dir>/slack/app-token` and `<data-dir>/slack/bot-token` (mode 0600,
    directory 0700; the data directory defaults to `/var/lib/aether`), and
    prints the bot name and Slack workspace. Apply it with
    `sudo systemctl restart aether-server`. A server that runs as its own user
    (`User=aether` in the unit) must be able to read the files, so run the
-   setup as that user: `sudo -u aether aether-server slack setup`.
+   setup as that user: `sudo -u aether cloudfield-server slack setup`.
 
 The app asks for three scopes and nothing else:
 
@@ -78,20 +78,20 @@ one.
 Each member links their own account.
 
 ```sh
-aether slack link
+cloudfield slack link
 ```
 
 It prints a one-use code like `ABCD-EFGH` that expires in 10 minutes. In
 Slack, open the bot under **Apps** and send the code in its **Messages** tab,
-in any case, dash optional. The bot answers `Linked to <your Aether name> on
+in any case, dash optional. The bot answers `Linked to <your Cloudfield name> on
 <server>.` A new code replaces your unspent one. A Slack account links to one
 member at a time; linking it again moves it.
 
 **Settings → Notifications → Slack** in the dashboard does the same with
-**Link Slack** and **Unlink**. `aether slack` shows whether the server is
+**Link Slack** and **Unlink**. `cloudfield slack` shows whether the server is
 connected to Slack, and your link.
 
-A link acts as you, judged by the device you ran `aether slack link` on, like a
+A link acts as you, judged by the device you ran `cloudfield slack link` on, like a
 [connector](connectors.md). It stops working when you unlink, that device is
 revoked, your member is removed, or the server runs under `edge-access
 approved-devices` and that device is not approved. A link made over a member
@@ -164,8 +164,8 @@ to the bot, outside a thread, only links.
 
 ## Turn it off
 
-- A member: `aether slack unlink`, or **Unlink** in **Settings**.
-- An admin: `sudo aether-server slack remove` deletes both token files, then
+- A member: `cloudfield slack unlink`, or **Unlink** in **Settings**.
+- An admin: `sudo cloudfield-server slack remove` deletes both token files, then
   `sudo systemctl restart aether-server`.
 
 Messages already sent stay in Slack ([privacy.md](privacy.md#slack)).
@@ -174,9 +174,9 @@ Messages already sent stay in Slack ([privacy.md](privacy.md#slack)).
 
 | You see | Fix |
 | --- | --- |
-| `aether slack link` fails with `slack.link: Slack is not set up on this server; an admin sets it up with: sudo aether-server slack setup (docs/slack.md)` | Ask an admin to set it up |
-| `aether slack` shows `not connected: slack: auth.test: invalid_auth`, or `apps.connections.open` with `invalid_auth` or `not_authed` | A token was revoked or mistyped. Run `sudo aether-server slack setup` again |
-| `aether slack` shows `not connected:` with a network error | The server cannot reach slack.com. It honours `HTTPS_PROXY` from `/etc/aether/aether-server.env` |
+| `cloudfield slack link` fails with `slack.link: Slack is not set up on this server; an admin sets it up with: sudo aether-server slack setup (docs/slack.md)` | Ask an admin to set it up |
+| `cloudfield slack` shows `not connected: slack: auth.test: invalid_auth`, or `apps.connections.open` with `invalid_auth` or `not_authed` | A token was revoked or mistyped. Run `sudo cloudfield-server slack setup` again |
+| `cloudfield slack` shows `not connected:` with a network error | The server cannot reach slack.com. It honours `HTTPS_PROXY` from `/etc/aether/aether-server.env` |
 | The bot answers `your Slack link no longer works (...); run aether slack link again` | The device or member behind the link is gone; link again |
-| The bot answers `That code is wrong, expired or already used. Run aether slack link for a new one.` | Run `aether slack link` again |
-| Messages stop arriving | Run `aether slack` and check your link; see the list of what stops a link in [Link your Slack account](#link-your-slack-account) |
+| The bot answers `That code is wrong, expired or already used. Run aether slack link for a new one.` | Run `cloudfield slack link` again |
+| Messages stop arriving | Run `cloudfield slack` and check your link; see the list of what stops a link in [Link your Slack account](#link-your-slack-account) |

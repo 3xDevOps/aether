@@ -5,7 +5,7 @@ Cloudfield server. Once you add one, you can launch sessions, see what needs
 you, answer agents, and check pull requests from a chat in ChatGPT or Claude,
 the phone apps included, with no Cloudfield app on the phone. The connector acts
 as you: the Cloudfield member who authorized it, under the same role checks as
-`aether` and the dashboard.
+`cloudfield` and the dashboard.
 
 ```mermaid
 flowchart LR
@@ -25,7 +25,7 @@ server hosts the connector endpoint and signs you in.
   [edge.md](edge.md#turning-it-on).
 - A server new enough to serve connectors. Otherwise the edge answers HTTP 501:
   `server <name> (<id>) runs aether-server <version>, which has no MCP endpoint; upgrade it: sudo aether-server update`.
-- A linked CLI (`aether link`) on an approved device, a member SSH key or a
+- A linked CLI (`cloudfield link`) on an approved device, a member SSH key or a
   tailnet connection. Under `edge-access account`, any registered device works.
 - A ChatGPT or Claude plan that allows custom connectors (see below).
 
@@ -46,13 +46,13 @@ section shows the URL at once. What the third step asks depends on the server's
 The section checks every 3 seconds and shows **ChatGPT (chatgpt.com)
 connected** with its scopes once the app connects. It lists your connectors
 with their scopes, the URL each was added at, when each was added and last
-used, and **Reconnect** and **Revoke** buttons. Errors appear as `aether mcp`
+used, and **Reconnect** and **Revoke** buttons. Errors appear as `cloudfield mcp`
 prints them, with a link to the fix.
 
 From a terminal:
 
 ```sh
-aether mcp
+cloudfield mcp
 ```
 
 ```
@@ -64,7 +64,7 @@ Connected:
 Remove one: aether mcp revoke <id>
 ```
 
-Where the page asks for a code, `aether mcp` prints one instead of the `No
+Where the page asks for a code, `cloudfield mcp` prints one instead of the `No
 code` line:
 
 ```
@@ -72,13 +72,13 @@ code` line:
 ```
 
 The URL is the same for both apps and every server on the edge. On the
-server, `sudo aether-server edge status` also prints it. Before edge protocol
+server, `sudo cloudfield-server edge status` also prints it. Before edge protocol
 3, and for a member with no GitHub account linked, it is the server's own URL,
 `https://edge.onaether.dev/mcp/<server id>`. The code works once, within 10
-minutes. Running `aether mcp` again replaces a code you have not used.
+minutes. Running `cloudfield mcp` again replaces a code you have not used.
 
 That URL's page asks for a code even when the universal URL needs none, so a
-connector added there reconnects with one. `aether mcp code` prints a code
+connector added there reconnects with one. `cloudfield mcp code` prints a code
 alone. In Settings, **Reconnect** on such a connector shows the server's own
 URL and a code. A connector added at the universal URL of another address of
 the edge is not such a connector: it shows as **Universal URL** and
@@ -91,7 +91,7 @@ Custom MCP servers are added on the web only, at chatgpt.com
 
 1. Open [ChatGPT Plugins](https://chatgpt.com/plugins).
 2. Select the plus button, then **Add custom MCP server**.
-3. Name it `Aether`, paste the URL from `aether mcp` as the server URL, and
+3. Name it `Aether`, paste the URL from `cloudfield mcp` as the server URL, and
    choose **OAuth**.
 4. Select **Create as a plugin**, then install it.
 5. On the [universal URL](#the-universal-url), the edge's page opens: sign in
@@ -110,7 +110,7 @@ On claude.ai
 ([Anthropic: add a custom connector](https://claude.com/docs/connectors/custom/add-unlisted)):
 
 1. Free, Pro and Max: open **Customize → Connectors**, select **Add custom
-   connector**, name it `Aether`, paste the URL from `aether mcp`, leave
+   connector**, name it `Aether`, paste the URL from `cloudfield mcp`, leave
    **Advanced settings** empty and select **Add**. Free allows one custom
    connector.
 2. Team and Enterprise: an Owner opens **Organization settings → Connectors**,
@@ -145,7 +145,7 @@ the server's [`edge-access`](edge.md#access-policies) policy:
   with the [scopes](#scopes) and no code. Signing in at the edge already
   admits you there.
 - `approved-devices`: the page asks for the code. Paste the code from
-  **Settings → ChatGPT and Claude** in the app, or `aether mcp`.
+  **Settings → ChatGPT and Claude** in the app, or `cloudfield mcp`.
 
 **Continue** posts the edge's signed statement that your GitHub account chose
 this server to the edge, never in a URL. The server binds it to the first
@@ -154,13 +154,13 @@ within 5 minutes. A link copied out of your browser, history or a log connects
 nobody. [edge.md](edge.md#mcp-connectors) has the details.
 
 The sign-in page lists a server only to the GitHub accounts bound to its
-members. So the app and `aether mcp` show the universal URL only to a member with a
+members. So the app and `cloudfield mcp` show the universal URL only to a member with a
 GitHub account bound, and `<edge>/mcp/<server id>` to one with only a member
-SSH key or tailnet login. `sudo aether-server edge status` prints both.
+SSH key or tailnet login. `sudo cloudfield-server edge status` prints both.
 
 A connector added without a code stops working when the server switches to
 `approved-devices`, when its GitHub account is unbound from the member
-(`aether member identities`, or deleting the account at the edge), or when the
+(`cloudfield member identities`, or deleting the account at the edge), or when the
 member is removed. It has no device, so a method that needs an approved device
 refuses it, as it refuses a device no person approved, and it cannot mint a
 pairing code or a Slack link code. Connectors added at
@@ -169,7 +169,7 @@ pairing code or a Slack link code. Connectors added at
 ### Move a connector to the universal URL
 
 A connector keeps the URL it was added at. Settings marks each one
-**Universal URL** or **This server's own URL**, and `aether mcp` prints
+**Universal URL** or **This server's own URL**, and `cloudfield mcp` prints
 `universal URL` or `at <url>`. Once Settings shows the universal URL for you,
 **Move to the universal URL** next to a connector on the server's own URL
 starts a new connection: add Cloudfield again in the app with the universal URL.
@@ -177,7 +177,7 @@ Settings revokes the old connector once a new one from the same client, such as
 ChatGPT or Claude, connects at the universal URL and calls Cloudfield. If none
 calls within 10 minutes, it leaves the old one and says so. Remove the old
 Aether connector in ChatGPT or Claude yourself. From a terminal, connect again at the
-universal URL, then run `aether mcp revoke <old id>`.
+universal URL, then run `cloudfield mcp revoke <old id>`.
 
 ### Self-hosted and custom edges
 
@@ -221,7 +221,7 @@ than `offline_access`, the only one the OAuth metadata lists in
 | `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing sessions, switching a session's mode, handing sessions to teammates, opening and merging pull requests. Text an agent wrote could talk the assistant into approving or ending work without asking you |
 
 Every member can read every session on the server, so a connector can read all of
-them. A connector lists only the tools of its scopes, and `aether mcp` shows
+them. A connector lists only the tools of its scopes, and `cloudfield mcp` shows
 each connector's scopes.
 
 The server also checks the scope of every call a connector makes, whatever the
@@ -408,7 +408,7 @@ text again on purpose, pass a new `idempotency_key`.
 order), `no_fallback`, `extra_workspace_ids`, `children` (`on` or `off`:
 whether its agent may start [subsessions](teams.md#subsessions); without it, your
 setting decides) and `permission` (`root`, `default` or `isolated`: the
-session's [permission tier](security.md#permission-tiers)), as `aether session`
+session's [permission tier](security.md#permission-tiers)), as `cloudfield session`
 does. Any other `permission` fails with the tool's schema error, such as
 `validating /properties/permission: enum: admin does not equal any of: [ root default isolated]`. The server
 checks the account before anything starts: a launch with an agent
@@ -711,7 +711,7 @@ once** and **Always allow** per tool. Cloudfield shows no confirmation card of
 its own for these tools, and the [assistant's
 auto-approval](assistant.md#auto-approval) applies only inside
 [`aether_ask_assistant`](#ask-your-assistant) turns. Your role still decides: a
-viewer's launch is refused, as it is in `aether`. A connector's calls are judged
+viewer's launch is refused, as it is in `cloudfield`. A connector's calls are judged
 by the device its code was minted on: a method that needs an approved device
 refuses a connector minted on a registered one.
 
@@ -757,12 +757,12 @@ device or Slack user it acted on (for an accepted merge, the absorbed member;
 for a refused one, the proposal), and `ok` or `error` with the error code. It never holds tokens, messages or other parameters. How a call arrived
 is `connector` with the client and connector id, `assistant`, `dashboard` for
 the server-hosted dashboard, or `cli` for any SSH client, including the
-desktop app and `aether gui`.
+desktop app and `cloudfield gui`.
 
 ```sh
-aether audit                                  # your entries, newest first
-aether audit --connector con-7k2m9q4xbd       # one connector's calls, creation and end
-aether audit --before 812                     # the page after one ending at 812
+cloudfield audit                                  # your entries, newest first
+cloudfield audit --connector con-7k2m9q4xbd       # one connector's calls, creation and end
+cloudfield audit --before 812                     # the page after one ending at 812
 ```
 
 ```
@@ -787,7 +787,7 @@ keep their id, so only super admins see them.
 Select **Revoke** next to it in **Settings → ChatGPT and Claude**, or run:
 
 ```sh
-aether mcp revoke con-7k2m9q4xbd
+cloudfield mcp revoke con-7k2m9q4xbd
 ```
 
 The connector's next call fails, including one in a session the app already has
@@ -799,27 +799,27 @@ Revoke it here too.
 
 A connector also stops working at its next request when:
 
-- the device it was minted on is revoked (`aether device revoke <device id>`)
+- the device it was minted on is revoked (`cloudfield device revoke <device id>`)
 - its member is removed
 - the server runs under `edge-access approved-devices` and that device is not
   approved
-- its refresh token goes unused for 30 days (`aether mcp` then no longer lists
+- its refresh token goes unused for 30 days (`cloudfield mcp` then no longer lists
   it)
 - the edge moved to another origin, which changes the connector URL
 
 A connector whose code was minted over a member SSH key or a tailnet
 connection has no device, so revoking a device never cuts it off. Revoke it
-with `aether mcp revoke`.
+with `cloudfield mcp revoke`.
 
 ## Troubleshooting
 
-`aether mcp` prints errors as `aether: rpc error <code>: <message>`.
+`cloudfield mcp` prints errors as `aether: rpc error <code>: <message>`.
 
 | Message | Fix |
 | --- | --- |
 | `connector.code: this server has no edge (edge-url is empty), and ChatGPT and Claude reach a connector only through one; an admin turns it on with: sudo aether-server config set edge-url https://edge.cloudfield.ai, then sudo systemctl restart aether-server` | Turn the edge on |
 | `connector.code: this server is not connected to its edge at <edge-url>; an admin sees why with: sudo aether-server edge status` | Fix the edge connection |
-| `connector.code needs an approved device, a member SSH key or a tailnet connection; this connection signed in with device "<label>", which is registered` | An admin approves your device, or run `aether mcp` from an approved one |
+| `connector.code needs an approved device, a member SSH key or a tailnet connection; this connection signed in with device "<label>", which is registered` | An admin approves your device, or run `cloudfield mcp` from an approved one |
 | `method not found: connector.code; the server is older than this CLI, and an admin updates it with aether server update` | Update the server |
 | `connector.revoke: no connector <id>; aether mcp lists yours` | The id is wrong or already revoked |
 
@@ -830,7 +830,7 @@ A tool call can fail with:
 | `<method> needs the <scope> scope, which <client> connector <id> was not granted; ...` | Select **Reconnect** next to the connector and check the box the message names |
 | `<method>: <client> connector <id> cannot call this method; ...` | No connector can. Use the app or the CLI |
 | `503 this server already has 8 MCP connector requests in progress through the edge; retry shortly` | 8 calls to the server were in progress for the 15 seconds this one waited, or 16 others were already waiting. Call again after the `Retry-After` seconds; if it persists, the edge's log and `aether_edge_refusals_total{reason="MCP connection limit"}` show it ([edge.md](edge.md#monitoring)) |
-| `503 server is not connected to the edge` | The server is down or cannot reach the edge; an admin runs `sudo aether-server edge status`. For 30 seconds after the edge sees the server's control channel end, it holds up to 16 calls and sends them to the server once it is back, so a quick restart does not fail them. A host that drops off the network without closing the channel is noticed only after 60 seconds of silence. If the client marks the connector failed, reconnect it (in Claude Code, `/mcp`) |
+| `503 server is not connected to the edge` | The server is down or cannot reach the edge; an admin runs `sudo cloudfield-server edge status`. For 30 seconds after the edge sees the server's control channel end, it holds up to 16 calls and sends them to the server once it is back, so a quick restart does not fail them. A host that drops off the network without closing the channel is noticed only after 60 seconds of silence. If the client marks the connector failed, reconnect it (in Claude Code, `/mcp`) |
 
 On the page that opens when you connect:
 
@@ -840,15 +840,15 @@ On the page that opens when you connect:
 | `10 wrong codes came from your address in the last minute. Wait a minute, then paste the code again.` | 10 wrong codes in a minute from your address (your IPv6 /64). Other addresses are not affected |
 | `300 wrong codes came to this server from all addresses in the last minute. Wait a minute, then paste the code again.` | Someone is guessing codes from many addresses. Pairing resumes a minute after the guessing stops |
 | `Cloudfield connectors work with ChatGPT and Claude; <host> is not one of them.` | Only `chatgpt.com` and `claude.ai` can connect |
-| `None of your servers can take this connection.` (edge sign-in page) | Each server listed under **Not available** says why: not connected, too old for the universal URL (an admin runs `sudo aether-server update`), or an invitation you have not joined |
-| The edge sign-in page does not list your server | Your GitHub account is not bound to a member there. Bind it (`aether member identities`) or use the `<edge>/mcp/<server id>` URL `aether mcp` prints |
+| `None of your servers can take this connection.` (edge sign-in page) | Each server listed under **Not available** says why: not connected, too old for the universal URL (an admin runs `sudo cloudfield-server update`), or an invitation you have not joined |
+| The edge sign-in page does not list your server | Your GitHub account is not bound to a member there. Bind it (`cloudfield member identities`) or use the `<edge>/mcp/<server id>` URL `cloudfield mcp` prints |
 | `Cannot connect as your GitHub account: <account> is not a member of <server>; ...` | That GitHub account is not bound to a member. Sign in at the edge as the right account, or connect with a code |
 | `Cannot connect as your GitHub account: the edge's sign-in for it was already used.`, `... expired at <time>` or `... was issued at <time>, and this server takes only sign-ins issued from <time>, 30s after it last started` | Start again from ChatGPT or Claude |
 | `Cannot connect as your GitHub account: the edge's sign-in for it was already opened in another browser.` or `... this consent page was opened in another browser than the one that signed in at the edge.` | The page was opened or posted from a browser other than the one that chose the server. Start again from ChatGPT or Claude in one browser |
 | `The edge put its sign-in in the URL, where logs and browser history keep it, so it is refused.` | The server's edge speaks protocol 4, but something sent the old hand-off. Start again from ChatGPT or Claude |
 
 If an app asks you to sign in again, the connector was revoked or cut off.
-Connect again from the app; `aether mcp` prints the URL and a code if the page
+Connect again from the app; `cloudfield mcp` prints the URL and a code if the page
 asks for one.
 
 ## Security model

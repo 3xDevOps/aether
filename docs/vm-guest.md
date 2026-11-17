@@ -413,7 +413,7 @@ port
 | `Stage` | Writes a tree of the whole checkout: within the evidence bound for evidence, or over a copy of the checkout's own index for the final commit, as the server stages a checkout on its disk. |
 | `Install` | Indexes a pack the server sends into the checkout with `index-pack --strict`, applies ref updates in one transaction, and for a commit makes the staged index the checkout's. It runs git as the checkout's owner. |
 | `Tree`, `ReadFile`, `WriteFile`, `FileDiff` | The Files view on the checkout, including uploads. |
-| `Sync` | Serves a live overlay's endpoint (`aether sync --live`) at the checkout. |
+| `Sync` | Serves a live overlay's endpoint (`cloudfield sync --live`) at the checkout. |
 
 The server treats every reply as data from the session. It copies a
 snapshot's tree and HEAD into the session's `<run-id>.diffsnap/` store with

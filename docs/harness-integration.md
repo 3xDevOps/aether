@@ -26,16 +26,16 @@ commands below work only inside a session.
 1. Register the agent:
 
    ```sh
-   aether agent add <name> --standard "<cmd> {task}" --background "<cmd> -p {task}"
+   cloudfield agent add <name> --standard "<cmd> {task}" --background "<cmd> -p {task}"
    ```
 
 2. Install the executable into `~/.local/bin` and sign in
    ([Agents](harnesses.md#set-up-an-agent)).
-3. Launch it with `aether session "<task>" --agent <name>`.
+3. Launch it with `cloudfield session "<task>" --agent <name>`.
 
 Cloudfield gives the agent its [instructions](coordination.md#agent-instructions) after
 the task prompt. A launch with no task gets none, so tell the agent's own startup
-mechanism to run `aether-internal skill` and `aether-internal memory brief`.
+mechanism to run `cloudfield-internal skill` and `cloudfield-internal memory brief`.
 
 ## Explicit inbox reads
 
@@ -80,7 +80,7 @@ chmod +x "$adapter_dir/aether-context.sh"
 rm -rf "$adapter_dir"
 ```
 
-It calls `aether-internal hook generic context` and prints only Cloudfield's own
+It calls `cloudfield-internal hook generic context` and prints only Cloudfield's own
 guidance: an instruction to read the inbox, plus any overlap notes. It
 prints nothing when there is no mail. Peer message bodies are never in the output.
 They stay in the inbox as attributed data.

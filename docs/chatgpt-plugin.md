@@ -194,7 +194,7 @@ guesser the login was right: pick one nobody would guess and share it only
 with the review, like the password. Turning it on for `edge.onaether.dev` is the owner's step; this
 repository does not do it.
 
-Set it up, with the demo server's id from `aether-server edge status` or
+Set it up, with the demo server's id from `cloudfield-server edge status` or
 `aether-edge servers list`:
 
 1. On the edge host, write the file, mode 0600, and note the password it
@@ -205,15 +205,15 @@ Set it up, with the demo server's id from `aether-server edge status` or
    in `/etc/aether-edge/aether-edge.env` (or pass
    `--reviewer-account-file`) and restart the edge. Its log says
    `aether-edge: reviewer account on`.
-3. On the demo server: `sudo aether-server config set edge-reviewer true`,
+3. On the demo server: `sudo cloudfield-server config set edge-reviewer true`,
    then `sudo systemctl restart aether-server`. It needs
    `edge-access account`; under `approved-devices` the consent page asks
    the reviewer for a pairing code as it asks anyone.
 4. As an admin of the demo server, bind the login to the reviewer's member,
-   a collaborator: `aether member link --reviewer <random-login> <member-id>`.
+   a collaborator: `cloudfield member link --reviewer <random-login> <member-id>`.
    An admin member is refused, and a member made admin later is cut off.
 
-Revoke it with `aether member unlink <member-id> reviewer:<random-login>`,
+Revoke it with `cloudfield member unlink <member-id> reviewer:<random-login>`,
 which deletes the connectors it authorized, or by turning `edge-reviewer`
 off on the demo server and restarting it, which cuts them off at their next
 call. Removing the flag from the edge, or a new password, only stops new
@@ -224,7 +224,7 @@ deleted.
 
 The rest of the setup:
 
-- **Demo server.** An `aether-server` linked to the project edge with
+- **Demo server.** A `cloudfield-server` linked to the project edge with
   `--edge-access account` and `edge-reviewer` on
   ([edge.md](edge.md), [connectors.md](connectors.md)).
   Install and sign in Claude Code on it so test 1 can launch, and give it
@@ -345,7 +345,7 @@ plaintext in memory while relaying.
 | Server records | Sessions and messages created through a connector record `via ChatGPT` or `via Claude` | With the session |
 | Server, audit history | Each write call through a connector or the assistant, refused ones included; connectors created, revoked, or removed with their member, device or edge sign-in; and, from any client including the dashboard and CLI, account shares and revocations, member approvals, removals and role changes, device and edge sign-in removals, member merges, and Slack link codes and unlinks ([connectors.md](connectors.md#audit-history)). Each entry: time, member, how the call arrived, method, workspace, target id and outcome; no tokens, parameters or message bodies | Per member, the newest 10,000 call entries and, separately, the newest 10,000 changes that took effect |
 
-**Controls.** `aether mcp` lists a member's connectors and `aether mcp revoke
+**Controls.** `cloudfield mcp` lists a member's connectors and `cloudfield mcp revoke
 <id>` revokes one; the consent page grants `write` and `control` separately
 ([connectors.md](connectors.md)). Edge account deletion is in
 [privacy.md](privacy.md#what-an-edge-stores).

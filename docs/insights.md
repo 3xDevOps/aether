@@ -142,7 +142,7 @@ is too old.
 - Time worked, time waiting and pull requests are recorded only from the day
   your server was upgraded to a version that records them. Earlier sessions are
   left out of those numbers, and the page says
-  `Aether records this from <date> on` when only some sessions are measured.
+  `Cloudfield records this from <date> on` when only some sessions are measured.
 - Deleting a session removes it from these statistics.
 - The tiles read `This server does not report insights. Update the server to
   see them.` when the server is too old.

@@ -49,10 +49,10 @@ The project has not yet run `--gpu` on GPU hardware.
 ## Install
 
 ```sh
-sudo aether-server dictation install          # CPU
-sudo aether-server dictation install --gpu    # NVIDIA GPU
-sudo aether-server dictation status
-sudo aether-server dictation remove
+sudo cloudfield-server dictation install          # CPU
+sudo cloudfield-server dictation install --gpu    # NVIDIA GPU
+sudo cloudfield-server dictation status
+sudo cloudfield-server dictation remove
 ```
 
 All three read `--data-dir` and `--config` like `serve`. `install` downloads
@@ -114,7 +114,7 @@ a VM with no network device instead, in the systemd unit
 limit, and the memory cap plus 256 MiB for the guest kernel and helper. Its socket stays inside the VM, on a directory its user
 owns; the server listens on `<data-dir>/dictation/sock/engine.sock` itself
 once the engine accepts, and relays each connection through the VM's helper.
-`aether-server dictation install` then pulls nothing into Docker: the first
+`cloudfield-server dictation install` then pulls nothing into Docker: the first
 clip builds the VM disk from the engine's image. `--gpu` is refused, since
 the VM has no GPU. A server switched to `vm` removes an engine container
 Docker still has at its start.
@@ -134,7 +134,7 @@ Limits:
   The HTTP body cap for this method is 6 MiB.
 - The server transcribes one clip at a time. Four more may wait, each for at
   most 1 minute; each member has at most one transcribing or waiting. A clip has 3 minutes once its turn
-  comes, and `aether gui` waits 4 minutes for the answer.
+  comes, and `cloudfield gui` waits 4 minutes for the answer.
 - `hints` holds at most 200 names, each 1 to 80 bytes: the dashboard sends
   workspace, repository and session names. After transcription, a run of one to
   four words is respelled as a hint only when its letters and digits,
@@ -167,7 +167,7 @@ wherever you put it, such as a task. See [privacy.md](privacy.md#dictation).
 
 ## Licences
 
-`aether-server` does not bundle the engine or the model; `install` downloads
+`cloudfield-server` does not bundle the engine or the model; `install` downloads
 them from the sherpa-onnx releases above.
 
 - The model is [NVIDIA Parakeet TDT 0.6B v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2)
