@@ -250,7 +250,7 @@ conflict radar itself continues to operate.
 
 ## The assistant tool set
 
-`cloudfield-server mcp --assistant` serves a different tool set for the member
+`aether-server mcp --assistant` serves a different tool set for the member
 assistant (the built-in agent that runs in a sandbox of its own, not in a
 session or the member's environment). It dials `/run/aether-assistant/assistant.sock`; `-socket`
 overrides the path. The socket is bound to one member, so no call names who

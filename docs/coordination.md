@@ -787,7 +787,7 @@ such a session `skill --hooks` names any Claude settings file that still
 registers the inbox `Stop` hook so you can remove it: it races the reporter
 the same way.
 
-The supplied files invoke `cloudfield-internal hook <harness> <event>`. Command hooks
+The supplied files invoke `aether-internal hook <harness> <event>`. Command hooks
 read native JSON on stdin and write that agent's native JSON response.
 Extension hooks use event `context` and receive plain trusted context text.
 With no pending mail or applicable overlap guidance, stdout is empty.

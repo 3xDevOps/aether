@@ -505,12 +505,12 @@ running systemd, or the memory and disk above), without failing, and ends on
 `cloudfield link --claim <code>` on your computer.
 
 A rerun that names an option the kept config file sets differently exits 1,
-writes nothing, and prints `cloudfield-server config set <key> <value>` for each
+writes nothing, and prints `aether-server config set <key> <value>` for each
 such option (with `--config <file>` when not the default):
 
 ```
 aether-server: /etc/aether/server.conf exists and sets other values than you named; install keeps an existing config file, so nothing was written. Apply them with:
-  sudo cloudfield-server config set edge-access approved-devices
+  sudo aether-server config set edge-access approved-devices
 or rewrite the file from these flags alone by adding --force
 ```
 
@@ -863,7 +863,7 @@ This server runs v0.9.0-nightly.12 (build 412). Beta is at v0.9.0-beta.1 (build 
 ```
 
 Meanwhile `server.update_status` reports `channel_wait`, and `sudo
-aether-server update` prints
+cloudfield-server update` prints
 `aether-server v0.9.0-nightly.12 (build 412) stays on its build until beta reaches it: beta is at v0.9.0-beta.1 (build 380)`.
 The same build under the lower channel's tag installs. Each channel keeps
 its own pointer mark in `server-update/check.json`, so switching away and
@@ -952,7 +952,7 @@ a server update is already being applied: v0.9.0-nightly.13 is applying now and 
 
 An update whose download could not be undone refuses the next one until
 `cloudfield-server` restarts and puts the previous binaries back. `--when idle`
-cannot go with `--allow-downgrade`; the CLI refuses with `cloudfield server
+cannot go with `--allow-downgrade`; the CLI refuses with `aether server
 update: --allow-downgrade applies now only; drop --when idle`. A release that is not above the running build is refused
 without `--allow-downgrade`:
 
@@ -993,7 +993,7 @@ with a root unit, `sudo cloudfield update` runs `sudo cloudfield-server update`.
 
 The dashboard's **Update now** runs the same update and relaunches the app.
 For a CLI in a directory you cannot write, macOS asks once for an administrator
-password (a dialog titled `osascript`); Linux shows `sudo cloudfield update`.
+password (a dialog titled `osascript`); Linux shows `sudo aether update`.
 
 A running sync daemon restarts onto the new binary within about a minute.
 One from `v0.7.0-alpha.12` or older needs one restart by hand:

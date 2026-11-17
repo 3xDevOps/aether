@@ -113,7 +113,7 @@ join links. To move it, at a quiet time:
    apply it with:
      sudo systemctl restart aether-server
    to move back:
-     sudo cloudfield-server edge move https://edge.onaether.dev
+     sudo aether-server edge move https://edge.onaether.dev
    ```
 
    A refusal prints one line from the table below, exits 1 and writes
@@ -282,7 +282,7 @@ unreadable because it ran without `sudo`:
 
 ```
 the edge is off: edge-url is empty in /etc/aether/server.conf; turn it on with:
-  sudo cloudfield-server config set edge-url https://edge.cloudfield.ai
+  sudo aether-server config set edge-url https://edge.cloudfield.ai
 ```
 
 When the edge's key changed, the server keeps retrying and logs this. Run `edge
@@ -353,13 +353,13 @@ requires approval, fails with:
 
 ```
 device "dana-laptop", signed in as github account dana, is waiting for approval. An admin approves it from the dashboard's Needs you card, or you do, from an approved device of yours, or with:
-  cloudfield device approve <device id>
+  aether device approve <device id>
 or on the server:
-  sudo cloudfield-server device review
+  sudo aether-server device review
 ```
 
 If the device would be the server's only super admin and that super admin has no approved
-device, the refusal carries an approval code for `sudo cloudfield-server device
+device, the refusal carries an approval code for `sudo aether-server device
 approve <code>` instead.
 
 ### Members, invitations and devices
@@ -372,7 +372,7 @@ GitHub accounts bound to a member.
 
 An invitation's link is `https://<relay host>/join/<server id>/<invitation
 id>#<secret>`. Opening it shows a page that opens the desktop app (**Open in
-Cloudfield**) and offers the link to **Copy**, or run `cloudfield link <link>`. The
+Cloudfield**) and offers the link to **Copy**, or run `aether link <link>`. The
 secret is the link's fragment, which a browser never sends, so no request to the
 edge carries it. There is no claim page, so no claim secret passes through the
 edge.

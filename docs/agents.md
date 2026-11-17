@@ -165,7 +165,7 @@ cloudfield workspace import https://github.com/acme/app
 A path imports the clone and pushes its checked-out branch to the server. A
 GitHub URL needs GitHub connected first ([Publish](#bring-results-back-and-publish)
 shows `cloudfield github connect`). It prints `fetched <branch> at <commit>` and an
-`cloudfield workspace mirror adopt ... --yes` command: show the human the commit and
+`aether workspace mirror adopt ... --yes` command: show the human the commit and
 run the command once they confirm it.
 
 ### 5. Install and sign in the agent
@@ -189,7 +189,7 @@ Check with `cloudfield agent list --json` (`login_found`) and
 `cloudfield account usage`, which asks the vendor whether the login works. Both
 look only for a login file. A key set with `cloudfield workspace env set --secret`
 writes none, so `login_found` stays false, `account usage` reports the agent
-unauthenticated, and `cloudfield status` keeps naming `cloudfield agent login`; go on
+unauthenticated, and `cloudfield status` keeps naming `aether agent login`; go on
 to step 6.
 
 ### 6. Launch the first session
