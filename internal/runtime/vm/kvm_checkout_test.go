@@ -181,7 +181,7 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	key := prefix + "-a"
 	run := domain.RunID(key)
 	branch := h.sh(t, key, "git symbolic-ref --short HEAD")
-	if !strings.HasPrefix(branch, "aether/run-") {
+	if !strings.HasPrefix(branch, "cloudfield/run-") {
 		t.Fatalf("checkout is on %q, not its run branch", branch)
 	}
 	if owner := h.sh(t, key, "stat -c %u:%g /workspace /workspace/src/0/f0.txt /workspace/.git/index | sort -u"); owner != "1000:1000" {

@@ -1284,7 +1284,7 @@ command's `output` (`exit_code`, `stdout`, `stderr`, `truncated`) verbatim.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `run.git.log` | `{"run_id":"...","limit":50}` (`limit` optional, 1 to 200, default 50) | `{"branch":"aether/run-...","base_ref":"origin/main","base":"<sha>","head":"<sha>","merge_base":"<sha>","ahead":2,"behind":3,"commits":[Commit],"upstream":[Commit],"conflicts":[{"path":"go.mod"}],"conflicts_error":"...","truncated":false,"output":{...},"error":"..."}` |
+| `run.git.log` | `{"run_id":"...","limit":50}` (`limit` optional, 1 to 200, default 50) | `{"branch":"cloudfield/run-...","base_ref":"origin/main","base":"<sha>","head":"<sha>","merge_base":"<sha>","ahead":2,"behind":3,"commits":[Commit],"upstream":[Commit],"conflicts":[{"path":"go.mod"}],"conflicts_error":"...","truncated":false,"output":{...},"error":"..."}` |
 | `run.pr.merge` | `{"run_id":"...","method":"squash"\|"merge"\|"rebase","expected_head":"<sha>","repository":"owner/name","number":128,"expected_login":"octocat","expected_base":"main"}` (`repository` and `number` optional, together; `expected_login` and `expected_base` optional) | `{"identity":"octocat","pull_request":RunPullRequest,"merged":true,"account_member_id":"...","output":{...},"error":"..."}` |
 
 `run.git.log` compares the checkout's `HEAD` with its upstream base: the
@@ -2619,7 +2619,7 @@ These tell a client what to re-read; none carries the full state.
 
   ```json
   {"type":"git.branch","run_id":"run_...","payload":{"workspace_id":"ws_...",
-   "branch":"aether/run-...","commit":"<sha>","previous":"<sha>","forced":false}}
+   "branch":"cloudfield/run-...","commit":"<sha>","previous":"<sha>","forced":false}}
   ```
 
 - `run.pr`: a pull request recorded for the session was opened through

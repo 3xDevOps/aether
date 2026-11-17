@@ -82,7 +82,7 @@ test('selected paths preserve unrelated staging, report index failure, and retai
   await page.getByRole('option', { name: 'writable', exact: true }).click()
   // A remote with one push URL names it, and the branch starts as the checkout's own.
   await expect(page.getByRole('combobox', { name: 'Writable push URL', exact: true })).toHaveText('/tmp/published.git')
-  await expect(page.getByLabel('Push head branch', { exact: true })).toHaveValue(/^aether\//)
+  await expect(page.getByLabel('Push head branch', { exact: true })).toHaveValue(/^cloudfield\/run-/)
   await page.getByLabel('Push head branch', { exact: true }).fill('reviewed-native')
   await page.getByRole('button', { name: 'Push branch' }).click()
   const push = page.getByRole('region', { name: 'Push outcome' })

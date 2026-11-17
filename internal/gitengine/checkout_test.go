@@ -338,3 +338,48 @@ func seedBareMain(t *testing.T, e *Engine, ws domain.WorkspaceID) {
 	runCheckoutGit(t, work, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
 	runCheckoutGit(t, work, "push", repo, "main")
 }
+
+func TestNewSessionBranchesStartWithCloudfield(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := t.Context()
+	if _, err := e.InitWorkspaceRepo(ctx, "ws1"); err != nil {
+		t.Fatalf("InitWorkspaceRepo: %v", err)
+	}
+	seedBareMain(t, e, "ws1")
+
+	checkout, branch, err := e.CreateRunCheckout(ctx, "ws1", "run-7k2m9q4xbd", "main", "Fix the bug", "")
+	if err != nil {
+		t.Fatalf("CreateRunCheckout: %v", err)
+	}
+	if want := "cloudfield/run-fix-the-bug-7k2m9q4xbd"; branch != want {
+		t.Errorf("branch = %q, want %q", branch, want)
+	}
+	if got := runCheckoutGit(t, checkout, "symbolic-ref", "--short", "HEAD"); got != branch {
+		t.Errorf("checkout is on %q, want %q", got, branch)
+	}
+}
+
+// A branch named cloudfield takes the path git would need for the
+// refs/heads/cloudfield/ directory, so sessions there fall back to aether/run-
+// rather than failing to start.
+func TestWorkspaceWithACloudfieldBranchKeepsTheAetherPrefix(t *testing.T) {
+	e := newUnitEngine(t)
+	ctx := t.Context()
+	repo, err := e.InitWorkspaceRepo(ctx, "forked")
+	if err != nil {
+		t.Fatalf("InitWorkspaceRepo: %v", err)
+	}
+	seedBareMain(t, e, "forked")
+	runCheckoutGit(t, repo, "branch", "cloudfield", "main")
+
+	_, branch, err := e.CreateRunCheckout(ctx, "forked", "run-7k2m9q4xbd", "main", "Fix the bug", "")
+	if err != nil {
+		t.Fatalf("CreateRunCheckout: %v", err)
+	}
+	if want := "aether/run-fix-the-bug-7k2m9q4xbd"; branch != want {
+		t.Errorf("branch = %q, want %q", branch, want)
+	}
+	if exists, err := e.WorkspaceBranchExists(ctx, "forked", branch); err != nil || !exists {
+		t.Errorf("WorkspaceBranchExists(%q) = %v, %v; want the branch reserved", branch, exists, err)
+	}
+}

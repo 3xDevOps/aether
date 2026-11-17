@@ -1239,7 +1239,7 @@ too:
 ```sh
 cd ~/code/myproject
 git branch --set-upstream-to=origin/main main
-git branch -D $(git branch --format='%(refname:short)' --list 'aether/run-*')
+git branch -D $(git branch --format='%(refname:short)' --list 'cloudfield/run-*' 'aether/run-*')
 git remote remove aether
 ```
 

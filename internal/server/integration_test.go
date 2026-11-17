@@ -130,7 +130,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	if run.Status != string(domain.RunRunning) {
 		t.Fatalf("launched run status = %q, want running", run.Status)
 	}
-	if run.Branch == "" || !strings.HasPrefix(run.Branch, "aether/run-") {
+	if run.Branch == "" || !strings.HasPrefix(run.Branch, "cloudfield/run-") {
 		t.Fatalf("launched run branch = %q", run.Branch)
 	}
 	runID := domain.RunID(run.ID)

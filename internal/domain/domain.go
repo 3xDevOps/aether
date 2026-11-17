@@ -854,7 +854,9 @@ type Run struct {
 	Activity RunActivity
 	// StatusSeq increases on every change of status, reason or activity.
 	StatusSeq int64
-	// Branch is aether/run-<slug>-<id>.
+	// Branch is cloudfield/run-<slug>-<id>, or aether/run-<slug>-<id> for
+	// sessions created before the rename and in a workspace with a branch
+	// named cloudfield.
 	Branch string
 	// LastCommit is the most recently published commit on the run branch.
 	LastCommit   string
