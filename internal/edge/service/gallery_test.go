@@ -126,8 +126,8 @@ func galleryStates(t *testing.T) []galleryState {
 		{"account-wrong-confirm", "account_page", 400, withErr(in(me, "Account", acct(sum, true)), "the confirmation does not name this account: type octo-dev")},
 		{"account-deleted", "account_deleted", 200, out("Account deleted", sum)},
 		{"join", "join", 200, out("Join a Cloudfield server", join)},
-		{"error-csrf", "error", 403, withErr(in(me, http.StatusText(403), nil), "this form did not come from this edge page or your session changed; reload the page and try again")},
-		{"error-github", "error", 403, withErr(out(http.StatusText(403), nil), "GitHub sign-in failed: access_denied The user has denied your application access.")},
+		{"error-csrf", "error", 403, withErr(in(me, http.StatusText(http.StatusForbidden), nil), "this form did not come from this edge page or your session changed; reload the page and try again")},
+		{"error-github", "error", 403, withErr(out(http.StatusText(http.StatusForbidden), nil), "GitHub sign-in failed: access_denied The user has denied your application access.")},
 		{"error-server", "error", 500, withErr(out(http.StatusText(500), nil), "edge: store: database is locked")},
 	}
 }
