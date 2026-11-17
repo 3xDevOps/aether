@@ -365,21 +365,21 @@ func TestNewSessionBranchesStartWithCloudfield(t *testing.T) {
 func TestWorkspaceWithACloudfieldBranchKeepsTheAetherPrefix(t *testing.T) {
 	e := newUnitEngine(t)
 	ctx := t.Context()
-	repo, err := e.InitWorkspaceRepo(ctx, "ws1")
+	repo, err := e.InitWorkspaceRepo(ctx, "forked")
 	if err != nil {
 		t.Fatalf("InitWorkspaceRepo: %v", err)
 	}
-	seedBareMain(t, e, "ws1")
+	seedBareMain(t, e, "forked")
 	runCheckoutGit(t, repo, "branch", "cloudfield", "main")
 
-	_, branch, err := e.CreateRunCheckout(ctx, "ws1", "run-7k2m9q4xbd", "main", "Fix the bug", "")
+	_, branch, err := e.CreateRunCheckout(ctx, "forked", "run-7k2m9q4xbd", "main", "Fix the bug", "")
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
 	if want := "aether/run-fix-the-bug-7k2m9q4xbd"; branch != want {
 		t.Errorf("branch = %q, want %q", branch, want)
 	}
-	if exists, err := e.WorkspaceBranchExists(ctx, "ws1", branch); err != nil || !exists {
+	if exists, err := e.WorkspaceBranchExists(ctx, "forked", branch); err != nil || !exists {
 		t.Errorf("WorkspaceBranchExists(%q) = %v, %v; want the branch reserved", branch, exists, err)
 	}
 }

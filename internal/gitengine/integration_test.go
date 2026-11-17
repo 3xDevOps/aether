@@ -505,7 +505,7 @@ func TestConcurrentRunsOneWorkspace(t *testing.T) {
 		t.Error(err)
 	}
 	for i := range n {
-		branch := fmt.Sprintf("refs/heads/aether/run-task-%d-run%d", i, i)
+		branch := fmt.Sprintf("refs/heads/cloudfield/run-task-%d-run%d", i, i)
 		if got := bareRevParse(t, e, "ws1", branch); len(got) != 40 {
 			t.Errorf("branch %s missing after concurrent runs", branch)
 		}
@@ -1321,7 +1321,7 @@ func TestReceivePackDeniesBranchDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	branch := "aether/run-artifact-run1"
+	branch := "cloudfield/run-artifact-run1"
 
 	dst := t.TempDir()
 	gitc(t, dst, "clone", url("ws1"), "c")
