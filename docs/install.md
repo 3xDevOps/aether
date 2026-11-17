@@ -348,8 +348,14 @@ Cloudfield removes the old app and, on Windows, `Aether.lnk`; if the old app is
 running then, a later start does. An old app installed before
 v0.7.0-alpha.13 on Linux or Windows stays; delete it by hand. Both apps use
 the same saved settings and sign-ins (`aether-desktop`, see
-[Uninstalling](#uninstalling)). Dock, taskbar and Start pins of the old app
-stop working; pin Cloudfield again.
+[Uninstalling](#uninstalling)). On macOS and Windows, Dock, taskbar and Start
+pins of the old app stop working; pin Cloudfield again. On Linux the launcher
+keeps its file name and opens Cloudfield, so its pins keep working.
+
+Going back to a release from before the rename, such as v0.8.7, installs
+Aether beside Cloudfield, because that release knows only the old name; it
+leaves Cloudfield and the shared settings in place. Updating forward again
+replaces Cloudfield, and its next start removes Aether.
 
 The app does not contain the CLI: `gui build` records the path of the CLI
 that ran it, and the app starts that one (`AETHER_BIN` overrides it). If that

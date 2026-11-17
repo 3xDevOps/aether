@@ -1176,7 +1176,7 @@ function Invoke-AetherInstall {
         }
         Write-Host 'next:'
         if ($role -eq 'client') {
-            Write-Host '  open Aether from the Start menu, or link from a new terminal:'
+            Write-Host '  open Cloudfield from the Start menu, or link from a new terminal:'
         }
         Write-Host '  aether link <server-host>      # on a tailnet: the server''s tailnet name'
         Write-Host '  aether login                   # otherwise, sign in to the edge, Cloudfield''s relay'

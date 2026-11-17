@@ -493,7 +493,7 @@ ran "aether gui build"
 not_ran "aether-server setup"
 printed "This machine is a client"
 printed "$quickstart"
-printed "  open Aether from your applications to link your server, or in a terminal:"
+printed "  open Cloudfield from your applications to link your server, or in a terminal:"
 printed "  aether link <server-host>      # on a tailnet: the server's tailnet name"
 ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
 plain

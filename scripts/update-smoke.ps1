@@ -429,9 +429,13 @@ function Get-ReleaseAsset([string]$Tag, [string]$Name, [string]$OutFile) {
     }
 }
 
-function Wait-Gone([string]$Path, [int]$TimeoutSec) {
+# The removal renames the old app to .aether-retired-<name> beside it,
+# deletes Aether.lnk, then deletes the renamed folder: done once all three
+# are gone.
+function Wait-Retired([string]$App, [int]$TimeoutSec) {
+    $retired = Join-Path (Split-Path -Parent $App) ('.aether-retired-' + (Split-Path -Leaf $App))
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
-    while (Test-Path -LiteralPath $Path) {
+    while ((Test-Path -LiteralPath $App) -or (Test-Path -LiteralPath $retired) -or (Test-Path -LiteralPath $legacyShortcut)) {
         if ([DateTime]::UtcNow -gt $deadline) { return $false }
         Start-Sleep -Milliseconds 500
     }
@@ -855,8 +859,9 @@ exit 1
     $appDir = Split-Path -Parent $desktop
     $programsDir = Split-Path -Parent $appDir
     # The old release installs its app under its own name, bound to the CLI
-    # at this path; then the old build of this checkout takes that path, as
-    # an update to it would.
+    # at this path. Then the old build of this checkout takes that path, so
+    # Update now runs in a v0.8.7 shell but in this branch's gateway, not
+    # v0.8.7's.
     Copy-Item -LiteralPath $legacyCli -Destination $installed -Force
     $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $legacyZip + '"')) 600
     Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $legacyDesktop)) "the $LegacyNameTag CLI installed its app in Programs\Aether Desktop"
@@ -880,9 +885,8 @@ exit 1
     Assert ((Get-Hash $installed) -eq $newHash) 'the CLI the renamed app runs is the new build'
     Assert (-not (Get-LastError)) 'no desktop build error was recorded'
     $null = Wait-Sidecar $relaunched $installed
-    Assert (Wait-Gone $legacyApp 60) 'the first start of the renamed app removed Programs\Aether Desktop'
-    Assert (-not (Test-Path -LiteralPath $legacyShortcut)) 'and Aether.lnk'
-    Assert (@(Get-ChildItem -LiteralPath $programsDir -Force -Filter '.aether-retired-*').Count -eq 0) 'and left no set-aside copy'
+    Assert (Wait-Retired $legacyApp 60) 'the first start of the renamed app removed Programs\Aether Desktop, its set-aside copy and Aether.lnk'
+    Assert (@(Get-ChildItem -LiteralPath $programsDir -Force -Filter '.aether-retired-*').Count -eq 0) 'no set-aside copy is left'
     $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
     Assert ($link.TargetPath -ieq $desktop) 'Cloudfield.lnk targets the renamed app'
     Stop-App $relaunched
@@ -899,6 +903,10 @@ exit 1
     $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $newZip + '"')) 600
     Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) 'the renamed app is installed beside it'
     Assert ((Test-Path -LiteralPath $legacyDesktop) -and (Test-Path -LiteralPath $legacyShortcut)) 'installing the renamed app removed nothing'
+    # Separate data directories, so both apps run at once; in normal use they
+    # share %APPDATA%\aether-desktop and the second one quits on the
+    # single-instance lock. This shows only that Windows refuses to rename
+    # the folder of a running app, so its removal waits for the next start.
     $legacy = Start-App $legacyDesktop $legacyDesktop (Join-Path $root 'Electron-legacy') (Get-FreePort)
     $null = Wait-Sidecar $legacy $installed
     $port = Get-FreePort
@@ -915,8 +923,7 @@ exit 1
     Wait-NoProcessUnder $legacyApp
     $renamed = Start-App $shortcut $desktop $electron (Get-FreePort)
     $null = Wait-Sidecar $renamed $installed
-    Assert (Wait-Gone $legacyApp 60) "the next start of the renamed app removed the $LegacyNameTag app once it had quit"
-    Assert (-not (Test-Path -LiteralPath $legacyShortcut)) 'and Aether.lnk'
+    Assert (Wait-Retired $legacyApp 60) "the next start of the renamed app removed the $LegacyNameTag app and Aether.lnk once it had quit"
     Stop-App $renamed
     Assert-NoNewDetections 'after the rename from Aether'
 
