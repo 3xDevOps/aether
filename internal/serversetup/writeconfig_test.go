@@ -103,3 +103,35 @@ func TestWriteConfigAsRootKeepsAnotherOwnersFile(t *testing.T) {
 		t.Fatalf("config %v, %v", got, lerr)
 	}
 }
+
+// A config shared with a group other than the writer's own keeps it.
+func TestWriteConfigKeepsTheGroup(t *testing.T) {
+	groups, err := os.Getgroups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "server.conf")
+	if err = os.WriteFile(path, []byte("old\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	gid := -1
+	for _, g := range groups {
+		if g != os.Getegid() && os.Chown(path, -1, g) == nil {
+			gid = g
+			break
+		}
+	}
+	if gid < 0 {
+		t.Skip("needs a second group")
+	}
+	if err = WriteConfig(path, map[string]string{"addr": ":2300"}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, got := fileOwner(info); got != gid {
+		t.Errorf("group after the write %d, want %d", got, gid)
+	}
+}
