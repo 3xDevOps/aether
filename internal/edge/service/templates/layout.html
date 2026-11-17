@@ -3,24 +3,30 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#070b11">
 <title>{{.Title}} - Cloudfield Edge</title>
+<link rel="icon" href="/cloudfield-favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/edge.css">
 </head>
 <body>
-<header>
-<strong>Cloudfield Edge</strong>
-{{if .Account}}<nav>
-<a href="/servers">Servers</a>
-<a href="/devices">Devices</a>
-<a href="/device">Sign in a device</a>
-<a href="/account">Account</a>
-<form method="post" action="/signout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out</button></form>
-</nav>
-<p class="who">Signed in with GitHub as {{template "account" .Account}}</p>{{end}}
+<header class="top">
+<p class="brand"><img src="/cloudfield-logo-small.svg" alt="Cloudfield" width="162" height="32"> <span>Edge</span></p>
+{{if .Account}}{{$t := .Title}}<div class="who">
+<span>Signed in with GitHub as {{template "account" .Account}}</span>
+<form method="post" action="/signout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="small">Sign out</button></form>
+</div>
+<nav aria-label="Edge">
+<a href="/servers"{{if eq $t "Servers"}} aria-current="page"{{end}}>Servers</a>
+<a href="/devices"{{if eq $t "Devices"}} aria-current="page"{{end}}>Devices</a>
+<a href="/device"{{if or (eq $t "Sign in a device") (eq $t "Confirm this device") (eq $t "Device signed in") (eq $t "Device denied")}} aria-current="page"{{end}}>Sign in a device</a>
+<a href="/account"{{if eq $t "Account"}} aria-current="page"{{end}}>Account</a>
+</nav>{{end}}
 </header>
 <main>
 <h1>{{.Title}}</h1>
-{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+{{if and .Error (ne .Title "Account")}}<p class="error" role="alert">{{.Error}}</p>{{end}}
 {{end}}
 
 {{define "bottom"}}</main>

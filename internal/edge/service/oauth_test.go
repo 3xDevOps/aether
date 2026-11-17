@@ -171,6 +171,15 @@ func TestPagesSendSecurityHeaders(t *testing.T) {
 	if strings.Contains(csp, "script-src") || strings.Contains(csp, "unsafe-inline") {
 		t.Errorf("CSP %q allows script", csp)
 	}
+	var fonts []string
+	for _, d := range directives {
+		if strings.HasPrefix(d, "font-src") {
+			fonts = append(fonts, d)
+		}
+	}
+	if !slices.Equal(fonts, []string{"font-src 'self'"}) {
+		t.Errorf("CSP %q font sources %q, want only font-src 'self'", csp, fonts)
+	}
 }
 
 func TestProviderErrorNeedsTheBrowsersState(t *testing.T) {

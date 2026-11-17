@@ -1,47 +1,53 @@
 {{define "account_page"}}{{template "top" .}}
 {{with .Data}}
-<dl>
-<dt>GitHub account</dt><dd>{{template "account" .Account}}</dd>
-<dt>Account id</dt><dd><code>{{.Account.ID}}</code></dd>
+<div class="panel full">
+<dl class="details">
+<div><dt>GitHub account</dt><dd>{{template "account" .Account}}</dd></div>
+<div><dt>Account id</dt><dd><code>{{.Account.ID}}</code></dd></div>
 </dl>
+</div>
 
-<h2>Delete this account</h2>
+<section class="danger-zone" aria-labelledby="delete">
+<h2 id="delete">Delete this account</h2>
 <p>Deleting it removes the account, its device tokens and its sessions at this edge, and closes its open connections. Every server below is told, now or when it next connects, and removes this identity and its edge devices. No server removes a member, changes a role or deletes data because of it.</p>
 <p>What stays: an SSH key or tailnet identity you use on a server keeps working until an admin removes it there, and an invitation to your login or email stays until that server's admin revokes it. Signing in again later creates a new account.</p>
 
 <h3>Servers you own</h3>
-{{if .Owned}}<table>
-<thead><tr><th>Name</th><th>Server id</th><th>Before you delete</th></tr></thead>
-<tbody>
-{{range .Owned}}<tr>
-<td>{{.Name}}</td>
-<td><code>{{.ID}}</code></td>
-<td>To hand it over, an admin of it runs <code>{{$.Data.Transfer}}</code>, naming another admin</td>
+{{if .Owned}}<table class="list" role="table">
+<thead role="rowgroup"><tr role="row"><th role="columnheader">Name <span class="sub">Server id</span></th><th role="columnheader">Before you delete</th></tr></thead>
+<tbody role="rowgroup">
+{{range .Owned}}<tr role="row">
+<td role="cell"><span class="name">{{.Name}}</span><code class="sub" data-label="Server id">{{.ID}}</code></td>
+<td role="cell" data-label="Before you delete">To hand it over, an admin of it runs <code>{{$.Data.Transfer}}</code>, naming another admin</td>
 </tr>
 {{end}}</tbody>
 </table>
-<p>A server you still own when you delete this account is left without an owner. It stays enrolled and its members keep their access; its administrator makes it owned again on the machine with a new code from <code>sudo aether-server edge claim-code</code>. The edge cannot transfer ownership itself: it records a new owner only when the server reports one.</p>
-{{else}}<p>None.</p>{{end}}
+<p class="note">A server you still own when you delete this account is left without an owner. It stays enrolled and its members keep their access; its administrator makes it owned again on the machine with a new code from <code>sudo aether-server edge claim-code</code>. The edge cannot transfer ownership itself: it records a new owner only when the server reports one.</p>
+{{else}}<p class="note">None.</p>{{end}}
 
 <h3>Servers you are a member of</h3>
-{{if .Member}}<table>
-<thead><tr><th>Name</th><th>Server id</th><th>Role</th></tr></thead>
-<tbody>
-{{range .Member}}<tr><td>{{.Name}}</td><td><code>{{.ID}}</code></td><td>{{.Role}}</td></tr>
+{{if .Member}}<table class="list" role="table">
+<thead role="rowgroup"><tr role="row"><th role="columnheader">Name <span class="sub">Server id</span></th><th role="columnheader">Role</th></tr></thead>
+<tbody role="rowgroup">
+{{range .Member}}<tr role="row"><td role="cell"><span class="name">{{.Name}}</span><code class="sub" data-label="Server id">{{.ID}}</code></td><td role="cell" data-label="Role">{{.Role}}</td></tr>
 {{end}}</tbody>
 </table>
-{{else}}<p>None.</p>{{end}}
+{{else}}<p class="note">None.</p>{{end}}
 
+{{if $.Error}}<p class="error" role="alert" id="delete-error">{{$.Error}}</p>{{end}}
 {{if .Fresh}}<form method="post" action="/account/delete">
 <input type="hidden" name="csrf" value="{{$.CSRF}}">
-<label>Type <strong>{{.Confirm}}</strong> to confirm <input name="confirm" autocomplete="off" spellcheck="false" required></label>
-<button>Delete this account</button>
+<label>Type <strong>{{.Confirm}}</strong> to confirm <input name="confirm" autocomplete="off" spellcheck="false" required{{if $.Error}} aria-invalid="true" aria-describedby="delete-error" autofocus{{end}}></label>
+<button class="danger">Delete this account</button>
 </form>
-{{else}}<p>Deleting needs a sign-in in this browser from the last {{.Window}}. <a class="button" href="{{.Reauth}}">Sign in again with GitHub</a>, then delete it from this page.</p>{{end}}
+{{else}}<p>Deleting needs a sign-in in this browser from the last {{.Window}}. <a class="button primary" href="{{.Reauth}}">Sign in again with GitHub</a>, then delete it from this page.</p>{{end}}
+</section>
 {{end}}
 {{template "bottom" .}}{{end}}
 
 {{define "account_deleted"}}{{template "top" .}}
+<div class="panel">
 <p>The account is deleted. {{with .Data}}{{len .Owned}} server(s) you owned now have no owner.{{end}} Each server you owned or belonged to is told when it is connected to this edge.</p>
 <p><a href="/signin">Sign in</a></p>
+</div>
 {{template "bottom" .}}{{end}}

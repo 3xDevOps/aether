@@ -6,8 +6,9 @@ dashboard it shows, is licensed under the GNU General Public License version
 first screen links to. The source for the exact build a release ships is the
 tag that release was cut from.
 
-These notices cover the Android APK, dashboard assets, and the separately
-distributed standard-environment and browser-companion images. The APK does not
+These notices cover the Android APK, dashboard assets, the edge binary
+(`aether-edge`), and the separately distributed standard-environment and
+browser-companion images. The APK does not
 contain the server or these container images. Each bundled dependency keeps its
 own license; Cloudfield's GPL-3.0 license does not replace those terms.
 
@@ -140,6 +141,19 @@ fit, search and web-links addons, under the
 [MIT license](https://github.com/xtermjs/xterm.js/blob/6.0.0/LICENSE).
 Dashboard dependency versions and resolved integrity records are in
 [`web/package.json`](../web/package.json) and [`web/bun.lock`](../web/bun.lock).
+
+## In the edge binary
+
+`aether-edge` embeds two of the dashboard's fonts for its browser pages, under
+the SIL Open Font License 1.1, with their licence texts in
+`internal/edge/service/templates/fonts/`:
+
+- DM Sans, `dm-sans-latin-wght-normal.woff2`, the same file the dashboard
+  bundles from
+  [`@fontsource-variable/dm-sans`](https://github.com/fontsource/font-files/tree/main/fonts/variable/dm-sans)
+  ([`LICENSE-dm-sans.txt`](../internal/edge/service/templates/fonts/LICENSE-dm-sans.txt)).
+- Saira, a copy of `web/public/fonts/saira-latin.woff2`
+  ([`LICENSE-saira.txt`](../internal/edge/service/templates/fonts/LICENSE-saira.txt)).
 
 ## In the standard environment image
 

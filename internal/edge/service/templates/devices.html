@@ -1,13 +1,12 @@
 {{define "devices"}}{{template "top" .}}
-{{if .Data}}<table>
-<thead><tr><th>Device</th><th>Key</th><th>Signed in</th><th>Last used</th><th></th></tr></thead>
-<tbody>
-{{range .Data}}<tr>
-<td>{{.Label}}</td>
-<td><code>{{fingerprint .Key}}</code></td>
-<td>{{.CreatedAt.Format "2006-01-02 15:04 MST"}}</td>
-<td>{{.LastUsedAt.Format "2006-01-02 15:04 MST"}}</td>
-<td><form method="post" action="/devices/revoke">
+{{if .Data}}<table class="list" role="table">
+<thead role="rowgroup"><tr role="row"><th role="columnheader">Device <span class="sub">Key</span></th><th role="columnheader">Signed in</th><th role="columnheader">Last used</th><th role="columnheader"></th></tr></thead>
+<tbody role="rowgroup">
+{{range .Data}}<tr role="row">
+<td role="cell"><span class="name">{{.Label}}</span><code class="sub" data-label="Key">{{fingerprint .Key}}</code></td>
+<td role="cell" class="date" data-label="Signed in">{{.CreatedAt.Format "2006-01-02 15:04 MST"}}</td>
+<td role="cell" class="date" data-label="Last used">{{.LastUsedAt.Format "2006-01-02 15:04 MST"}}</td>
+<td role="cell" class="action"><form method="post" action="/devices/revoke">
 <input type="hidden" name="csrf" value="{{$.CSRF}}">
 <input type="hidden" name="device" value="{{.ID}}">
 <button>Revoke</button>
@@ -15,6 +14,6 @@
 </tr>
 {{end}}</tbody>
 </table>
-<p>Revoke ends that device's token and closes its open connections.</p>
-{{else}}<p>No devices. Run <code>aether login</code> to sign one in.</p>{{end}}
+<p class="note">Revoke ends that device's token and closes its open connections.</p>
+{{else}}<p class="empty">No devices. Run <code>aether login</code> to sign one in.</p>{{end}}
 {{template "bottom" .}}{{end}}

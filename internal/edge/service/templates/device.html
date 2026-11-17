@@ -1,32 +1,37 @@
 {{define "device"}}{{template "top" .}}
+<div class="panel">
 <p>Enter the code that <code>aether login</code> printed in your terminal.</p>
 <form method="post" action="/device">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <label>Code <input name="user_code" autocomplete="off" autocapitalize="characters" spellcheck="false" required maxlength="16"></label>
-<button>Continue</button>
+<button class="primary">Continue</button>
 </form>
+</div>
 {{template "bottom" .}}{{end}}
 
 {{define "device_confirm"}}{{template "top" .}}
-{{with .Data}}
-<p class="warning">Confirm only if you started this sign-in yourself, just now, and your terminal shows code <strong>{{.UserCode}}</strong>. If someone sent you this code, deny it: approving gives that device access to your servers as you.</p>
-<dl>
-<dt>Code</dt><dd>{{.UserCode}}</dd>
-<dt>Device</dt><dd>{{.Label}}</dd>
-<dt>Device key</dt><dd><code>{{.Fingerprint}}</code></dd>
-<dt>Started</dt><dd>{{.Started}} ago</dd>
-<dt>Requested from</dt><dd><code>{{.From}}</code>{{if eq .From .Here}} (the address of this browser){{else}} (this browser is at <code>{{.Here}}</code>){{end}}</dd>
+<p class="warning">Confirm only if you started this sign-in yourself, just now, and your terminal shows code <strong>{{.Data.UserCode}}</strong>. If someone sent you this code, deny it: approving gives that device access to your servers as you.</p>
+<div class="panel full">
+{{with .Data}}<dl class="details">
+<div class="usercode"><dt>Code</dt><dd>{{.UserCode}}</dd></div>
+<div><dt>Device</dt><dd>{{.Label}}</dd></div>
+<div><dt>Device key</dt><dd><code>{{.Fingerprint}}</code></dd></div>
+<div><dt>Started</dt><dd>{{.Started}} ago</dd></div>
+<div><dt>Requested from</dt><dd><code>{{.From}}</code>{{if eq .From .Here}} (the address of this browser){{else}} (this browser is at <code>{{.Here}}</code>){{end}}</dd></div>
 </dl>
 {{end}}
-<form method="post" action="/device/confirm">
+<form method="post" action="/device/confirm" class="actions">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <input type="hidden" name="user_code" value="{{.Data.UserCode}}">
 <button name="decision" value="approve">Approve this device</button>
 <button name="decision" value="deny">Deny</button>
 </form>
+</div>
 {{template "bottom" .}}{{end}}
 
 {{define "device_done"}}{{template "top" .}}
+<div class="panel{{if .Data.Approved}} done{{end}}">
 {{if .Data.Approved}}<p>{{.Data.Label}} is signed in. Return to your terminal.</p>
 {{else}}<p>The sign-in for {{.Data.Label}} was denied. The device gets no token.</p>{{end}}
+</div>
 {{template "bottom" .}}{{end}}
