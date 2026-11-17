@@ -86,8 +86,10 @@ type Config struct {
 type Network struct {
 	Address netip.Prefix
 	Gateway netip.Addr
-	// DNS, when set, replaces the image's /etc/resolv.conf.
-	DNS []netip.Addr
+	// DNS, when set, replaces the image's /etc/resolv.conf, which then
+	// searches Search.
+	DNS    []netip.Addr
+	Search []string
 }
 
 // Mount binds Source, a relative path in Volume ("." for its root), at
@@ -151,6 +153,9 @@ func (c Config) KernelArgs(base string) (string, error) {
 			}
 			args = append(args, "aether.dns="+strings.Join(dns, ","))
 		}
+		if len(n.Search) > 0 {
+			args = append(args, "aether.search="+strings.Join(n.Search, ","))
+		}
 	}
 	for _, m := range c.Mounts {
 		arg := "aether.mount=" + string(m.Volume) + "," + escapePath(m.Source) + "," + escapePath(m.Target)
@@ -179,10 +184,14 @@ func (c Config) KernelArgs(base string) (string, error) {
 	}
 	line := strings.TrimSpace(strings.Join(append(args, "--", "guest"), " "))
 	if len(line) > maxCmdline {
-		return "", fmt.Errorf("guest: kernel command line is %d bytes, over the %d-byte limit", len(line), maxCmdline)
+		return "", fmt.Errorf("guest: kernel command line is %d bytes, over the %d-byte limit: %w", len(line), maxCmdline, ErrCmdlineTooLong)
 	}
 	return line, nil
 }
+
+// ErrCmdlineTooLong is KernelArgs' error for a configuration the kernel's
+// command line cannot hold.
+var ErrCmdlineTooLong = errors.New("the configuration does not fit the kernel command line")
 
 // ParseCmdline reads the configuration KernelArgs wrote from a kernel
 // command line. Arguments without the aether. prefix are ignored.
@@ -223,7 +232,7 @@ func (c *Config) parseArg(key, value string) error {
 		if err != nil {
 			return err
 		}
-		c.Network = &Network{Address: address, Gateway: gateway, DNS: c.dns()}
+		c.network().Address, c.network().Gateway = address, gateway
 	case "aether.dns":
 		dns := make([]netip.Addr, 0, len(fields))
 		for _, f := range fields {
@@ -233,10 +242,9 @@ func (c *Config) parseArg(key, value string) error {
 			}
 			dns = append(dns, a)
 		}
-		if c.Network == nil {
-			c.Network = &Network{}
-		}
-		c.Network.DNS = dns
+		c.network().DNS = dns
+	case "aether.search":
+		c.network().Search = fields
 	case "aether.mount":
 		if len(fields) != 3 && (len(fields) != 4 || (fields[3] != "ro" && fields[3] != "overlay")) {
 			return errors.New("want <volume>,<source>,<target>[,ro|,overlay]")
@@ -317,11 +325,11 @@ func (c *Config) parseArg(key, value string) error {
 	return nil
 }
 
-func (c *Config) dns() []netip.Addr {
+func (c *Config) network() *Network {
 	if c.Network == nil {
-		return nil
+		c.Network = &Network{}
 	}
-	return c.Network.DNS
+	return c.Network
 }
 
 // Validate reports every problem that would make the helper refuse c.
@@ -337,6 +345,11 @@ func (c Config) Validate() error {
 		for _, a := range n.DNS {
 			if !a.IsValid() {
 				errs = append(errs, errors.New("network has an invalid DNS server"))
+			}
+		}
+		for _, d := range n.Search {
+			if !ValidDomain(d) {
+				errs = append(errs, fmt.Errorf("search domain %q is not a valid domain name", d))
 			}
 		}
 	}
@@ -430,11 +443,17 @@ func cleanAbs(p string) bool {
 }
 
 func validHostname(name string) bool {
-	if len(name) > 64 {
+	return len(name) <= 64 && ValidDomain(name)
+}
+
+// ValidDomain reports whether name is a domain name of letters, digits and
+// hyphens, without a trailing dot.
+func ValidDomain(name string) bool {
+	if len(name) > 253 {
 		return false
 	}
 	for label := range strings.SplitSeq(name, ".") {
-		if label == "" || label[0] == '-' || label[len(label)-1] == '-' {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
 			return false
 		}
 		for _, r := range label {

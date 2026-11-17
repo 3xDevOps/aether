@@ -101,6 +101,7 @@ x86 kernels cap the whole line at 2047 bytes, and `KernelArgs` fails past it.
 | `aether.hostname=<name>` | Host name of the VM. |
 | `aether.net=<address>/<prefix>,<gateway>` | IPv4 address of the VM's one network device and its default route. |
 | `aether.dns=<server>[,<server>...]` | Name servers for `/etc/resolv.conf`. Without it the image's file stays. |
+| `aether.search=<domain>[,<domain>...]` | Search domains for that `/etc/resolv.conf`. |
 | `aether.mount=<volume>,<source>,<target>[,ro\|,overlay]` | Bind `<source>` of a volume at `<target>`, in command-line order. |
 | `aether.checkout=<serial>,<key>,<target>` | Mount the checkout disk with virtio serial `<serial>` for the git service under `<key>` and bind its checkout at `<target>`. |
 | `aether.sock=<port>,<path>` | Listen on `<path>` and relay each connection to vsock port `<port>` on the host. |

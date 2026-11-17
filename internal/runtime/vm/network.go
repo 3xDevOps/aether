@@ -84,9 +84,9 @@ func chNetArg(index int, egressOnly bool) string {
 	return fmt.Sprintf("tap=%s,ip=%s,mask=255.255.255.252,mac=02:ae:00:00:%02x:%02x", tapName(index, egressOnly), host, byte(index>>8), byte(index))
 }
 
-func guestNetwork(index int, dns []netip.Addr) *guest.Network {
+func guestNetwork(index int) *guest.Network {
 	host, guestAddr := netAddrs(index)
-	return &guest.Network{Address: netip.PrefixFrom(guestAddr, 30), Gateway: host, DNS: dns}
+	return &guest.Network{Address: netip.PrefixFrom(guestAddr, 30), Gateway: host}
 }
 
 // allocateNet returns the lowest index no recorded or reserved VM holds.
@@ -164,8 +164,9 @@ func (e *engine) egressKey(ip netip.Addr) (string, error) {
 // while the host uses an exit node, and then an open VM reaches tailnet peers
 // as it does the hosts on any uplink's network. Otherwise it never reaches
 // a tailnet peer anyway, and dropping the range would only cut off the host's
-// own tailnet address, which it may reach. The configured DNS resolvers stay
-// reachable on port 53, since a host may run one at a link-local address.
+// own tailnet address, which it may reach. Guests resolve through the DNS
+// relay at the proxy address; the host's upstream resolvers stay reachable on
+// port 53 too, since a host may run one at a link-local address.
 var firewall = template.Must(template.New("firewall").Parse(`table inet {{.Table}}
 delete table inet {{.Table}}
 table inet {{.Table}} {
@@ -178,11 +179,20 @@ table inet {{.Table}} {
 {{- end}}
 		iifname "{{.Taps}}*" ip daddr { 169.254.0.0/16, 100.100.100.200, 168.63.129.16 } drop
 	}
+	chain dns {
+		type nat hook prerouting priority dstnat - 1; policy accept;
+		iifname "{{.Taps}}*" ip daddr {{.Proxy}} udp dport 53 dnat ip to {{.Proxy}}:{{.DNSUDP}}
+		iifname "{{.Taps}}*" ip daddr {{.Proxy}} tcp dport 53 dnat ip to {{.Proxy}}:{{.DNSTCP}}
+	}
 	chain input {
 		type filter hook input priority filter - 1; policy accept;
 		iifname "{{.EgressTaps}}*" ct state established,related meta mark set meta mark | {{.Mark}} accept
 		iifname "{{.EgressTaps}}*" ip daddr {{.Proxy}} tcp dport {{.ProxyPort}} meta mark set meta mark | {{.Mark}} accept
 		iifname "{{.EgressTaps}}*" reject
+		iifname "{{.Taps}}*" ip daddr {{.Proxy}} udp dport {{.DNSUDP}} meta mark set meta mark | {{.Mark}} accept
+		iifname "{{.Taps}}*" ip daddr {{.Proxy}} tcp dport {{.DNSTCP}} meta mark set meta mark | {{.Mark}} accept
+		ip daddr {{.Proxy}} udp dport {{.DNSUDP}} drop
+		ip daddr {{.Proxy}} tcp dport {{.DNSTCP}} drop
 	}
 	chain forward {
 		type filter hook forward priority filter - 1; policy accept;
@@ -207,7 +217,7 @@ table inet {{.Table}} {
 
 // ensureNetwork sets up the host side of every VM's network. VMs leave the
 // host only through its default-route interfaces, so they miss every bridge
-// of Docker's, whatever it is named, and the DNS servers guests are given
+// of Docker's, whatever it is named, and the host's upstream DNS servers
 // stay reachable wherever they route, as a VPN's resolver does. It runs at
 // every start: the firewall is replaced in one transaction, so a changed
 // default route or resolver applies to the next VM that boots.
@@ -234,10 +244,16 @@ func (e *engine) ensureNetwork(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if e.dns == nil {
+		if e.dns, err = e.listenDNS(); err != nil {
+			return err
+		}
+	}
+	dnsUDP, dnsTCP := e.dns.ports()
 	var rules strings.Builder
 	if err = firewall.Execute(&rules, map[string]any{
 		"Table": firewallTable, "Taps": tapPrefix, "EgressTaps": egressTapPrefix,
-		"Proxy": proxyAddr, "ProxyPort": egress.Port, "Subnet": vmSubnet,
+		"Proxy": proxyAddr, "ProxyPort": egress.Port, "Subnet": vmSubnet, "DNSUDP": dnsUDP, "DNSTCP": dnsTCP,
 		"Uplinks": uplinks, "DNS": hostDNS(), "Mark": fmt.Sprintf("%#x", allowedMark),
 	}); err != nil {
 		return fmt.Errorf("vm runtime: write the VM firewall: %w", err)
@@ -324,8 +340,9 @@ func routeUplinks(routes, internet []netlink.Route, names map[int]string) []stri
 	return out
 }
 
-// hostDNS prefers systemd-resolved's upstream servers, since its stub at
-// 127.0.0.53 is unreachable from a guest.
+// hostDNS are the host's upstream IPv4 servers, which a guest may also query
+// itself. It prefers systemd-resolved's list, since its stub at 127.0.0.53 is
+// the host's own.
 func hostDNS() []netip.Addr {
 	for _, path := range []string{"/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"} {
 		f, err := os.Open(path)
@@ -335,7 +352,8 @@ func hostDNS() []netip.Addr {
 		if err != nil {
 			break
 		}
-		servers := nameservers(f)
+		all, _ := resolvConf(f)
+		servers := slices.DeleteFunc(all, func(a netip.Addr) bool { return !a.Is4() || a.IsLoopback() })
 		_ = f.Close()
 		if len(servers) > 0 {
 			return servers
@@ -344,18 +362,39 @@ func hostDNS() []netip.Addr {
 	return dockerDNS
 }
 
-func nameservers(r io.Reader) []netip.Addr {
-	var out []netip.Addr
+// resolvConf reads a resolv.conf's servers and search domains. As in glibc,
+// the last search or domain line wins; a domain that is not a valid name,
+// such as systemd-resolved's "." for none, is left out. The domains stop at
+// glibc's old limits of six and 256 bytes, which also keep a long host list
+// from pushing the guest's kernel command line past its limit.
+func resolvConf(r io.Reader) (servers []netip.Addr, search []string) {
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
-		fields := strings.Fields(sc.Text())
-		if len(fields) < 2 || fields[0] != "nameserver" {
+		line, _, _ := strings.Cut(sc.Text(), "#")
+		line, _, _ = strings.Cut(line, ";")
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
 			continue
 		}
-		addr, err := netip.ParseAddr(fields[1])
-		if err == nil && addr.Is4() && !addr.IsLoopback() {
-			out = append(out, addr)
+		switch fields[0] {
+		case "nameserver":
+			if addr, err := netip.ParseAddr(fields[1]); err == nil {
+				servers = append(servers, addr)
+			}
+		case "search", "domain":
+			search = search[:0]
+			size := 0
+			for _, d := range fields[1:] {
+				d = strings.TrimSuffix(d, ".")
+				if !guest.ValidDomain(d) {
+					continue
+				}
+				if size += len(d) + 1; len(search) == dnsMaxSearch || size > dnsMaxSearchBytes {
+					break
+				}
+				search = append(search, d)
+			}
 		}
 	}
-	return out
+	return servers, search
 }

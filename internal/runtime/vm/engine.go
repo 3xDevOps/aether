@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"math"
 	"net/netip"
 	"os"
@@ -79,8 +80,10 @@ type engine struct {
 	events  map[string]runtime.MemoryEvents
 	relays  map[string]*relay
 
-	netMu    sync.Mutex
-	reserved map[int]bool
+	netMu     sync.Mutex
+	reserved  map[int]bool
+	dns       *dnsRelay
+	listenDNS func() (*dnsRelay, error)
 
 	promotions sync.WaitGroup
 }
@@ -90,6 +93,7 @@ func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
 		cfg: cfg, root: filepath.Join(cfg.DataDir, "vm"), units: u, dial: dial, run: runCommand,
 		locks: map[string]*sync.Mutex{}, helpers: map[string]helper{}, gits: map[string]*guest.Git{}, booting: map[string]bool{},
 		fresh: map[string]bool{}, events: map[string]runtime.MemoryEvents{}, relays: map[string]*relay{}, reserved: map[int]bool{},
+		listenDNS: func() (*dnsRelay, error) { return listenDNS(proxyAddr, vmSubnet, hostResolvers) },
 	}
 }
 
@@ -421,13 +425,18 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		cfg.Serves = append(cfg.Serves, guest.Socket{Port: guest.BrowserPort, Path: guest.BrowserSocket})
 	}
 	if rec.Net != offline {
-		var dns []netip.Addr
+		cfg.Network = guestNetwork(rec.Net)
 		if !rec.Egress {
-			dns = hostDNS()
+			cfg.Network.DNS = []netip.Addr{proxyAddr}
+			_, cfg.Network.Search = hostResolvConf()
 		}
-		cfg.Network = guestNetwork(rec.Net, dns)
 	}
 	cmdline, err := cfg.KernelArgs(cmdlineBase)
+	if errors.Is(err, guest.ErrCmdlineTooLong) && cfg.Network != nil && len(cfg.Network.Search) > 0 {
+		slog.Warn("vm runtime: boot without the host's search domains, which do not fit the kernel command line", "vm", rec.Key, "search", cfg.Network.Search)
+		cfg.Network.Search = nil
+		cmdline, err = cfg.KernelArgs(cmdlineBase)
+	}
 	if err != nil {
 		return launch{}, fmt.Errorf("vm runtime: kernel command line: %w", err)
 	}

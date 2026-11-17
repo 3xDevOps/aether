@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -42,13 +43,29 @@ func TestNetworkAddressing(t *testing.T) {
 			t.Errorf("%s is no guest's but read as network %d", addr, index)
 		}
 	}
-	n := guestNetwork(1, dockerDNS)
+	n := guestNetwork(1)
 	if n.Address != netip.MustParsePrefix("10.200.0.6/30") || n.Gateway.String() != "10.200.0.5" {
 		t.Errorf("guest network = %+v", n)
 	}
-	servers := nameservers(strings.NewReader("# x\nnameserver 127.0.0.53\nnameserver 10.0.0.2\nnameserver fe80::1\nsearch ec2.internal\n"))
-	if !slices.Equal(servers, []netip.Addr{netip.MustParseAddr("10.0.0.2")}) {
+	servers, search := resolvConf(strings.NewReader("# x\nnameserver 127.0.0.53\nnameserver 10.0.0.2\nnameserver fe80::1%eth0\nsearch ec2.internal\n"))
+	if want := []netip.Addr{netip.MustParseAddr("127.0.0.53"), netip.MustParseAddr("10.0.0.2"), netip.MustParseAddr("fe80::1%eth0")}; !slices.Equal(servers, want) {
 		t.Errorf("nameservers = %v", servers)
+	}
+	if !slices.Equal(search, []string{"ec2.internal"}) {
+		t.Errorf("search = %v", search)
+	}
+	for conf, want := range map[string][]string{
+		"search corp.example tailnet.ts.net.\n":             {"corp.example", "tailnet.ts.net"},
+		"search .\n":                                        nil,
+		"search a.example\ndomain b.example\n":              {"b.example"},
+		"search bad_label.example ok.example\n":             {"ok.example"},
+		"search a b c d e f g\n":                            {"a", "b", "c", "d", "e", "f"},
+		"search corp.example # managed by NetworkManager\n": {"corp.example"},
+		"search " + strings.Repeat("x", 63) + ".example " + strings.Repeat("y", 63) + ".example " + strings.Repeat("z", 63) + ".example " + strings.Repeat("w", 63) + ".example\n": {strings.Repeat("x", 63) + ".example", strings.Repeat("y", 63) + ".example", strings.Repeat("z", 63) + ".example"},
+	} {
+		if _, got := resolvConf(strings.NewReader(conf)); !slices.Equal(got, want) {
+			t.Errorf("search of %q = %v, want %v", conf, got, want)
+		}
 	}
 }
 
@@ -72,6 +89,9 @@ func TestAllocateNetSkipsRecordedAndReserved(t *testing.T) {
 func TestEgressVMsAreNamedByTheirAddress(t *testing.T) {
 	h := newHarness(t)
 	h.createStarted("run-open", sessionSpec("run-open"))
+	if args := strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "aether.dns=10.200.0.1 ") {
+		t.Errorf("an open VM resolves past the server's DNS relay:\n%s", args)
+	}
 	spec := sessionSpec("run-egress")
 	spec.Egress = true
 	h.createStarted("run-egress", spec)
@@ -134,7 +154,14 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	udp, tcp := e.dns.ports()
 	for _, want := range []string{
+		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 udp dport 53 dnat ip to 10.200.0.1:%d`, udp),
+		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 tcp dport 53 dnat ip to 10.200.0.1:%d`, tcp),
+		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 udp dport %d meta mark set meta mark | 0x1000000 accept`, udp),
+		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 tcp dport %d meta mark set meta mark | 0x1000000 accept`, tcp),
+		fmt.Sprintf("ip daddr 10.200.0.1 udp dport %d drop", udp),
+		"type nat hook prerouting priority dstnat - 1;",
 		`iifname "aethervm*" meta nfproto ipv6 drop`,
 		`iifname "aethervm*" fib saddr . iif oif missing drop`,
 		`meta l4proto { tcp, udp } th dport 53 accept`,
