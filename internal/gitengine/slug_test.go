@@ -30,8 +30,8 @@ func TestSlugify(t *testing.T) {
 // `git diff`, so the task leads and the ID's random part trails.
 func TestRunBranchLeadsWithTheTask(t *testing.T) {
 	const run = "run-7k2m9q4xbd"
-	got := runBranch("fix the bug", shortID(run))
-	if want := "aether/run-fix-the-bug-7k2m9q4xbd"; got != want {
+	got := runBranch(runBranchPrefix, "fix the bug", shortID(run))
+	if want := "cloudfield/run-fix-the-bug-7k2m9q4xbd"; got != want {
 		t.Errorf("runBranch = %q, want %q", got, want)
 	}
 	if len(got) > 40 {
@@ -41,7 +41,7 @@ func TestRunBranchLeadsWithTheTask(t *testing.T) {
 
 func TestRunBranchWithoutAUsableTask(t *testing.T) {
 	const run = "run-7k2m9q4xbd"
-	if got := runBranch("!!!", shortID(run)); got != "aether/run-7k2m9q4xbd" {
+	if got := runBranch(runBranchPrefix, "!!!", shortID(run)); got != "cloudfield/run-7k2m9q4xbd" {
 		t.Errorf("runBranch with empty slug = %q", got)
 	}
 }

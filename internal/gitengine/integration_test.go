@@ -230,7 +230,7 @@ func TestCheckoutLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRunCheckout: %v", err)
 	}
-	if branch != "aether/run-fix-the-auth-bug-run1" {
+	if branch != "cloudfield/run-fix-the-auth-bug-run1" {
 		t.Errorf("branch = %q", branch)
 	}
 	if want := filepath.Join(e.cfg.CheckoutsDir, "run1"); checkout != want {
@@ -331,7 +331,7 @@ func TestRunBranchFallsBackToTheFullIDOnCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first session: %v", err)
 	}
-	if firstBranch != "aether/run-fix-the-auth-bug-nq0jf3" {
+	if firstBranch != "cloudfield/run-fix-the-auth-bug-nq0jf3" {
 		t.Fatalf("first branch = %q, want the short-id form", firstBranch)
 	}
 
@@ -339,7 +339,7 @@ func TestRunBranchFallsBackToTheFullIDOnCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("colliding run: %v", err)
 	}
-	if want := "aether/run-fix-the-auth-bug-" + colliding; branch != want {
+	if want := "cloudfield/run-fix-the-auth-bug-" + colliding; branch != want {
 		t.Errorf("colliding branch = %q, want %q", branch, want)
 	}
 
@@ -367,7 +367,7 @@ func TestFailedCheckoutReleasesItsBranchName(t *testing.T) {
 	ctx := t.Context()
 
 	const run = "01m0h6tym4y65102a721nq0jf3"
-	const short = "aether/run-fix-the-auth-bug-nq0jf3"
+	const short = "cloudfield/run-fix-the-auth-bug-nq0jf3"
 
 	// Fail the run-meta write, which happens after the branch is reserved.
 	// The sidecar lives at <CheckoutsDir>/<run>.json, so a directory

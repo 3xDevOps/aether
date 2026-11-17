@@ -53,13 +53,21 @@ func shortID(run domain.RunID) string {
 	return string(run)[len(run)-legacyShortIDLen:]
 }
 
-// runBranch is the run branch name: aether/run-<slug>-<id>. The task leads
+// New sessions' branches start with runBranchPrefix. Sessions created
+// before the rename keep legacyRunBranchPrefix, and a workspace whose
+// repository has a branch named cloudfield still gets it for new sessions.
+const (
+	runBranchPrefix       = "cloudfield/run-"
+	legacyRunBranchPrefix = "aether/run-"
+)
+
+// runBranch is the run branch name: <prefix><slug>-<id>. The task leads
 // so the branch reads as what it is in `git branch` output, and the ID
 // trails as the disambiguator. Callers pass a short ID; uniqueRunBranch
 // passes the full one when a short branch is already taken.
-func runBranch(task, id string) string {
+func runBranch(prefix, task, id string) string {
 	if slug := slugify(task); slug != "" {
-		return "aether/run-" + slug + "-" + id
+		return prefix + slug + "-" + id
 	}
-	return "aether/run-" + id
+	return prefix + id
 }
