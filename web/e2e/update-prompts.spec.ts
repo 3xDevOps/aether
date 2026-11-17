@@ -114,7 +114,12 @@ test('Check for updates says up to date, then shows a failed lookup verbatim', a
 
   await page.goto(alice.url)
   await footer(page).click()
-  await page.getByRole('menuitem', { name: 'Check for updates…' }).click()
+  // The menu opens above the footer, so its Team line, which arrives with
+  // presence.roster and budget.get, pushes every item up; a click aimed
+  // before it arrives lands on the Team line.
+  const menu = page.getByRole('menu')
+  await expect(menu.getByText('1 online · no spend yet', { exact: true })).toBeVisible()
+  await menu.getByRole('menuitem', { name: 'Check for updates…' }).click()
 
   const dialog = updates(page)
   await expect(dialog.getByRole('status').first()).toHaveText(
