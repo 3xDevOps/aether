@@ -68,10 +68,12 @@ func WriteConfig(path string, values map[string]string) error {
 }
 
 // replaceFile writes data to path, or to the file a symlink at path names,
-// by a rename beside it that keeps the file's mode and owner, so a crash
-// leaves the old content or the new, never a torn file. Where a rename
-// would change the owner, because the writer is not root and does not own
-// the file, or the directory takes no new file, it writes in place.
+// by a rename beside it that keeps the file's mode and group, so a crash
+// leaves the old content or the new, never a torn file. It writes in place
+// where the writer does not own the file, where the file is not a regular
+// one, or where the directory takes no new file. Root renames only onto a
+// file root owns: the path is resolved again for the rename, and whoever
+// owns the file may have swapped a directory on it since.
 func replaceFile(path string, data []byte) error {
 	target, err := filepath.EvalSymlinks(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -87,7 +89,7 @@ func replaceFile(path string, data []byte) error {
 	mode := info.Mode().Perm()
 	uid, gid := fileOwner(info)
 	euid := os.Geteuid()
-	if uid >= 0 && euid != 0 && uid != euid {
+	if !info.Mode().IsRegular() || (uid >= 0 && uid != euid) {
 		return os.WriteFile(target, data, mode)
 	}
 	dir := filepath.Dir(target)
@@ -103,8 +105,8 @@ func replaceFile(path string, data []byte) error {
 	if err == nil {
 		err = tmp.Chmod(mode)
 	}
-	if err == nil && euid == 0 && uid >= 0 {
-		err = tmp.Chown(uid, gid)
+	if err == nil && euid == 0 && uid == 0 {
+		err = tmp.Chown(0, gid)
 	}
 	if err == nil {
 		err = tmp.Sync()

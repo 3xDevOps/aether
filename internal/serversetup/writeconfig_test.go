@@ -9,8 +9,7 @@ import (
 
 // WriteConfig replaces the file by a rename: the mode stays, a symlink
 // stays a symlink with its target rewritten, and a write that fails leaves
-// the old file and no temporary file. Run as a user other than root, it
-// skips the owner step and the file stays the writer's.
+// the old file and no temporary file.
 func TestWriteConfigReplacesTheFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "server.conf")
@@ -67,5 +66,40 @@ func TestWriteConfigReplacesTheFile(t *testing.T) {
 		if strings.HasPrefix(e.Name(), ".") {
 			t.Errorf("temporary file %s left behind", e.Name())
 		}
+	}
+}
+
+// Root writes a file another user owns in place: a rename would create a
+// file with that owner in whatever directory the path names by then.
+func TestWriteConfigAsRootKeepsAnotherOwnersFile(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root")
+	}
+	path := filepath.Join(t.TempDir(), "server.conf")
+	if err := os.WriteFile(path, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(path, 65534, 65534); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = WriteConfig(path, map[string]string{"addr": ":2300"}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Error("the file was replaced by a rename")
+	}
+	if uid, _ := fileOwner(after); uid != 65534 {
+		t.Errorf("owner after the write %d, want 65534", uid)
+	}
+	if got, lerr := Load(path); lerr != nil || got["addr"] != ":2300" {
+		t.Fatalf("config %v, %v", got, lerr)
 	}
 }
