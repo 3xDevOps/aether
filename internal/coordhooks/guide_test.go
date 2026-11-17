@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -121,6 +122,9 @@ func TestNewNameText(t *testing.T) {
 
 // Only an executable file at the new path makes text name it.
 func TestLocalCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows files carry no executable bit; the session CLI runs in linux containers only")
+	}
 	dir := t.TempDir()
 	exe, plain := filepath.Join(dir, "exe"), filepath.Join(dir, "plain")
 	if err := os.WriteFile(exe, nil, 0o755); err != nil {
