@@ -383,6 +383,8 @@ top to bottom:
 Each session row starts with its status dot and an owner-colored disclosure
 chevron. It points right while closed and down while open, even when the
 session has no subsessions; opening an empty list shows nothing underneath.
+If a subsession is the active session, its parent stays expanded; clicking
+the parent's chevron cannot fold it until the viewer leaves that subsession.
 4. **Manage workspaces**, **Members** and **Settings**, for every member.
    Board through Templates live in the header instead, leaving the sidebar's
    height for sessions. The current destination carries

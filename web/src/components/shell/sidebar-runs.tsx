@@ -231,6 +231,13 @@ function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) 
   const [settledShown, setSettledShown] = useState(false)
   const touched = useRef(false)
   const hadChildren = useRef(below > 0)
+  const openSubsession = useStore((s) =>
+    (tree.childRuns?.members ?? []).some((row) => isRunRoute(s.route, row.run.id)) ||
+    settled.some((row) => isRunRoute(s.route, row.run.id)))
+
+  useEffect(() => {
+    if (openSubsession) setExpanded(true)
+  }, [openSubsession])
 
   useEffect(() => {
     const hasChildren = below > 0
@@ -248,7 +255,9 @@ function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) 
         subsessions={{
           count: foldable,
           expanded,
+          locked: openSubsession,
           onToggle: () => {
+            if (openSubsession) return
             touched.current = true
             setExpanded((open) => !open)
           },
@@ -323,7 +332,7 @@ function MineToggle() {
   )
 }
 
-function RunRowItem({ tree, subsessions }: { tree: RunTree; subsessions?: { count: number; expanded: boolean; onToggle: () => void } }) {
+function RunRowItem({ tree, subsessions }: { tree: RunTree; subsessions?: { count: number; expanded: boolean; locked?: boolean; onToggle: () => void } }) {
   return (
     <RunRow
       runID={tree.run.id}
@@ -352,7 +361,7 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   since: string
   workspaceName?: string
   childRuns?: TreeSummary
-  subsessions?: { count: number; expanded: boolean; onToggle: () => void }
+  subsessions?: { count: number; expanded: boolean; locked?: boolean; onToggle: () => void }
 }) {
   const run = useRun(runID)
   return run ? <RunRowButton run={run} {...shown} /> : null
@@ -371,7 +380,7 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
   since: string
   workspaceName?: string
   childRuns?: TreeSummary
-  subsessions?: { count: number; expanded: boolean; onToggle: () => void }
+  subsessions?: { count: number; expanded: boolean; locked?: boolean; onToggle: () => void }
 }) {
   const [emptyExpanded, setEmptyExpanded] = useState(false)
   const disclosure = subsessions ?? {
@@ -439,16 +448,18 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
             <Button
               variant="ghost"
               size="icon-sm"
-              label={disclosure.count > 0
+              label={disclosure.locked ? 'Cannot collapse while a subsession is open' : disclosure.count > 0
                 ? `${disclosure.expanded ? 'Collapse' : 'Expand'} ${disclosure.count} subsession${disclosure.count === 1 ? '' : 's'}`
                 : `${disclosure.expanded ? 'Collapse' : 'Expand'} subsessions`}
+              hint={disclosure.locked ? 'Leave the open subsession to collapse its parent' : undefined}
               aria-expanded={disclosure.expanded}
+              aria-disabled={disclosure.locked || undefined}
               style={{ color: resolveMember({ members, mergedInto }, run.member_id).member?.color }}
               onClick={(event) => {
                 event.stopPropagation()
                 disclosure.onToggle()
               }}
-              className="-mr-2"
+              className="-mr-2 aria-disabled:opacity-100"
             >
               <ChevronRight className={cn('size-4 text-current', chevronTurn, disclosure.expanded && 'rotate-90')} strokeWidth={2.75} />
             </Button>
