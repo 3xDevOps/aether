@@ -13,8 +13,8 @@ import (
 )
 
 // fakeResolver answers name's A query with answer over UDP and TCP on one
-// loopback port, and ignores every other query, as a resolver only the host
-// can reach would.
+// loopback port and refuses every other query, as a resolver only the host
+// can reach that serves one zone would.
 func fakeResolver(t *testing.T, name string, answer netip.Addr) netip.AddrPort {
 	t.Helper()
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
@@ -34,8 +34,13 @@ func fakeResolver(t *testing.T, name string, answer netip.Addr) netip.AddrPort {
 			return nil
 		}
 		q, err := p.Question()
-		if err != nil || q.Name.String() != name || q.Type != dnsmessage.TypeA {
+		if err != nil {
 			return nil
+		}
+		if q.Name.String() != name || q.Type != dnsmessage.TypeA {
+			b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: h.ID, Response: true, RCode: dnsmessage.RCodeRefused})
+			out, _ := b.Finish()
+			return out
 		}
 		b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: h.ID, Response: true, Authoritative: true})
 		_ = b.StartQuestions()
