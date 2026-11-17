@@ -6,8 +6,9 @@ keeps running, keeps reaching its edge, and still finds its update.
 
 **Status:** approved by the owner, 2026-11-16. The rename and the new
 domain are the owner's decisions of 2026-11-15; the choices under
-[Decisions](#decisions-2026-11-16) are the owner's of 2026-11-16. Phase 0,
-phase 1 and the code of phase 2 are merged; phases 3 to 5 are being built.
+[Decisions](#decisions-2026-11-16) are the owner's of 2026-11-16. Phases 0,
+1 and 5 and the code of phase 2 are merged. Phase 2 waits on the owner's
+switch steps, phase 3 on item 20 (#1025) and phase 4 on item 23 (#1026).
 
 ## The rule
 
@@ -145,6 +146,7 @@ they are.
   `aether/`. A changed prefix would make saved environment images look like
   registry images and pull them from Docker Hub.
 - `refs/aether/*` and the `aether.*` git config keys in every checkout.
+- The client's git remote `aether` (item 24 as built).
 - In-container paths `/run/aether`, `/opt/aether`, `/aether-cache`.
 - Edge cookies, dashboard storage keys and service-worker message types.
   Renaming them signs everyone out for nothing.
@@ -465,8 +467,9 @@ request 943 and its eleven implementation pull requests.
 - Its pull requests 7 and 8 edit `promote-edge.yml` and
   `scripts/edge-update.sh`. The two-identity change goes directly after
   them, so operators copy the script once.
-- As released: `v0.8.7`, the first stable, already carries phase 0 and
-  the phase 1 copy, so it says Cloudfield (its dashboard title, for one).
+- As released: `v0.8.7`, the first stable, carries phase 0 and phase 1
+  except item 13. Its dashboard, CLI, docs and Android app say Cloudfield;
+  its desktop app is still named Aether (#1010 merged after the tag).
   Because phase 0 is in that stable release, phase 3 lands on `main` in the
   `v0.9.0` line.
 - Its pull requests 4 and 11 add dashboard copy and docs that say Aether.
@@ -597,9 +600,10 @@ if the per-address counters show servers staying behind.
 
 ### 11. First release and directory listings
 
-- `v0.9.0` is the first release that says Cloudfield. `v0.8.7`, the first
-  stable, ships as Aether. As released, `v0.8.7` already says Cloudfield:
-  phase 1 merged before it was cut.
+- Decided: `v0.9.0` is the first release that says Cloudfield, and
+  `v0.8.7`, the first stable, ships as Aether. As released, most of phase 1
+  merged before `v0.8.7` was cut, so it says Cloudfield everywhere but the
+  desktop app's name (item 13, #1010, came after).
 - The Claude and ChatGPT listings are resubmitted with the new name, title
   and description at phase 1, keeping the old connector address. Each
   directory re-reviews on a lead time the project does not control.
@@ -778,13 +782,16 @@ Each is one session. Phase and dependencies are in brackets.
     edge protocol change and is the owner's decision.
     [2; after steps 1 to 4 of the switch]
 18. `feat(cli)`: installers create the new command names and the unit
-    link; printed `systemctl` lines use the new name. As built: systemd
-    refuses `systemctl enable` on an alias name, so every `enable` line
-    keeps `aether-server`, and `journalctl -u` keeps it too. Only `restart`
-    and `status` lines print `cloudfield-server`, and only where systemd
-    resolves the link. `scripts/install.sh`,
+    link; printed `systemctl` lines use the new name. `scripts/install.sh`,
     `install.ps1`, `internal/macinstall`, `cmd/aether-server/install.go`,
-    `internal/localgw/update.go`. [3; after 2, 3 and 4 are in a stable
+    `internal/localgw/update.go`.
+    As built (#1016): systemd refuses `systemctl enable` on an alias name,
+    so every `enable` line keeps `aether-server`, and `journalctl -u` and
+    printed `status` lines keep it too. Only the restart lines that `aether
+    update` and the dashboard print use `cloudfield-server`, and only where
+    systemd resolves the link. The unit's names live in
+    `internal/serverunit`, so the CLI does not build in the server's setup
+    code. [3; after 2, 3 and 4 are in a stable
     release, and after release-channels 1]
 19. `feat(server)`: prompts and role cards name `cloudfield-internal` in
     containers that have it. Hook and plugin files written into homes keep
