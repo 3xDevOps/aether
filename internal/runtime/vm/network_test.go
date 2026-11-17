@@ -54,11 +54,12 @@ func TestNetworkAddressing(t *testing.T) {
 		t.Errorf("search = %v", search)
 	}
 	for conf, want := range map[string][]string{
-		"search corp.example tailnet.ts.net.\n": {"corp.example", "tailnet.ts.net"},
-		"search .\n":                            nil,
-		"search a.example\ndomain b.example\n":  {"b.example"},
-		"search bad_label.example ok.example\n": {"ok.example"},
-		"search a b c d e f g\n":                {"a", "b", "c", "d", "e", "f"},
+		"search corp.example tailnet.ts.net.\n":             {"corp.example", "tailnet.ts.net"},
+		"search .\n":                                        nil,
+		"search a.example\ndomain b.example\n":              {"b.example"},
+		"search bad_label.example ok.example\n":             {"ok.example"},
+		"search a b c d e f g\n":                            {"a", "b", "c", "d", "e", "f"},
+		"search corp.example # managed by NetworkManager\n": {"corp.example"},
 		"search " + strings.Repeat("x", 63) + ".example " + strings.Repeat("y", 63) + ".example " + strings.Repeat("z", 63) + ".example " + strings.Repeat("w", 63) + ".example\n": {strings.Repeat("x", 63) + ".example", strings.Repeat("y", 63) + ".example", strings.Repeat("z", 63) + ".example"},
 	} {
 		if _, got := resolvConf(strings.NewReader(conf)); !slices.Equal(got, want) {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"math"
 	"net/netip"
 	"os"
@@ -431,6 +432,11 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		}
 	}
 	cmdline, err := cfg.KernelArgs(cmdlineBase)
+	if errors.Is(err, guest.ErrCmdlineTooLong) && cfg.Network != nil && len(cfg.Network.Search) > 0 {
+		slog.Warn("vm runtime: boot without the host's search domains, which do not fit the kernel command line", "vm", rec.Key, "search", cfg.Network.Search)
+		cfg.Network.Search = nil
+		cmdline, err = cfg.KernelArgs(cmdlineBase)
+	}
 	if err != nil {
 		return launch{}, fmt.Errorf("vm runtime: kernel command line: %w", err)
 	}

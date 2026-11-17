@@ -324,7 +324,9 @@ func hostDNS() []netip.Addr {
 func resolvConf(r io.Reader) (servers []netip.Addr, search []string) {
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
-		fields := strings.Fields(sc.Text())
+		line, _, _ := strings.Cut(sc.Text(), "#")
+		line, _, _ = strings.Cut(line, ";")
+		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
 		}

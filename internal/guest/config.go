@@ -184,10 +184,14 @@ func (c Config) KernelArgs(base string) (string, error) {
 	}
 	line := strings.TrimSpace(strings.Join(append(args, "--", "guest"), " "))
 	if len(line) > maxCmdline {
-		return "", fmt.Errorf("guest: kernel command line is %d bytes, over the %d-byte limit", len(line), maxCmdline)
+		return "", fmt.Errorf("guest: kernel command line is %d bytes, over the %d-byte limit: %w", len(line), maxCmdline, ErrCmdlineTooLong)
 	}
 	return line, nil
 }
+
+// ErrCmdlineTooLong is KernelArgs' error for a configuration the kernel's
+// command line cannot hold.
+var ErrCmdlineTooLong = errors.New("the configuration does not fit the kernel command line")
 
 // ParseCmdline reads the configuration KernelArgs wrote from a kernel
 // command line. Arguments without the aether. prefix are ignored.

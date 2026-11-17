@@ -1,6 +1,7 @@
 package guest
 
 import (
+	"errors"
 	"net/netip"
 	"reflect"
 	"strings"
@@ -69,7 +70,7 @@ func TestConfigRejects(t *testing.T) {
 	for range 100 {
 		long.Mounts = append(long.Mounts, Mount{Volume: VolumeShare, Source: "some/long/source/path", Target: "/some/long/target/path"})
 	}
-	if _, err := long.KernelArgs(""); err == nil || !strings.Contains(err.Error(), "limit") {
+	if _, err := long.KernelArgs(""); !errors.Is(err, ErrCmdlineTooLong) || !strings.Contains(err.Error(), "limit") {
 		t.Errorf("a command line past the kernel's limit: got %v", err)
 	}
 	if _, err := ParseCmdline("aether.unknown=1 -- guest"); err == nil {
