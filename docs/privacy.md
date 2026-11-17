@@ -1,8 +1,9 @@
 # Privacy policy
 
 Cloudfield is self-hosted software. Nothing about you reaches the people who
-publish it unless you sign in to the edge they run, at `auth.onaether.dev`
-and `edge.onaether.dev` ([What an edge stores](#what-an-edge-stores)). This page is the privacy
+publish it unless you sign in to the edge they run, at `auth.cloudfield.ai`
+and `edge.cloudfield.ai`, or `auth.onaether.dev` and `edge.onaether.dev`
+([What an edge stores](#what-an-edge-stores)). This page is the privacy
 policy for the Cloudfield Android app (package `io.aether.android`), whether it
 came from a GitHub release or from Google Play, for the dashboard the app
 shows, and for that edge. Effective 2026-10-16.
@@ -287,9 +288,10 @@ or removing the bot does not delete messages already sent. The tokens stay in
 An **edge** is the relay and sign-in service that lets a computer running
 `aether` reach a server over SSH without Tailscale ([edge.md](edge.md)). The
 Android app uses it only in Edge mode. Whoever runs an edge, the publisher for
-`auth.onaether.dev` and `edge.onaether.dev`, holds the following. The edge
-cannot read terminal, agent, file or dashboard content you reach over SSH,
-which is encrypted end to end between your computer and your server. An MCP
+`auth.cloudfield.ai`, `edge.cloudfield.ai`, `auth.onaether.dev` and
+`edge.onaether.dev`, holds the following. The edge cannot read terminal,
+agent, file or dashboard content you reach over SSH, which is encrypted end to
+end between your computer and your server. An MCP
 connector's traffic is different: TLS ends at the edge, which decrypts each
 request, answer and token in memory to relay it ([edge.md](edge.md#mcp-connectors))
 and keeps none of them. Its journal logs requests it refuses before relaying,
@@ -321,8 +323,8 @@ accepted connections only at debug level, which the server does not emit.
 
 Revoking your devices removes them from the edge; the account record stays.
 To delete it yourself, open the edge's Account page,
-`https://auth.onaether.dev/account` for the project's edge; `aether logout
---delete-account` prints that address. The page asks you to sign in with
+`https://auth.cloudfield.ai/account` or `https://auth.onaether.dev/account`
+for the project's edge; `aether logout --delete-account` prints that address. The page asks you to sign in with
 GitHub in that browser within the last 5 minutes and to type your
 login ([edge.md](edge.md#deleting-an-account)). The edge then deletes the
 account, its devices and sessions, and tells each server it reached to

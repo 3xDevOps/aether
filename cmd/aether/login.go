@@ -26,16 +26,23 @@ func init() {
 	})
 }
 
-const edgeFlagUsage = "edge URL (default: the one edge you are signed in to, else " + edgeclient.DefaultURL + ")"
+const edgeFlagUsage = "edge URL (default: the one edge you are signed in to, else the project's edge at the address you are signed in to or linked through, else " +
+	edgeclient.DefaultURL + ")"
 
-// edgeClient is the client for the --edge flag's value. Without one it is
-// the only edge this machine is signed in to, or the project's edge.
+// edgeClient is the client for the --edge flag's value, or the edge
+// edgeclient.Choose picks without one.
 func edgeClient(edgeURL string) (*edgeclient.Client, error) {
 	dir, err := cli.Dir()
 	if err != nil {
 		return nil, err
 	}
-	return edgeclient.Choose(dir, edgeURL)
+	var linked []string
+	if edgeURL == "" {
+		if linked, err = cli.LinkedEdges(); err != nil {
+			return nil, err
+		}
+	}
+	return edgeclient.Choose(dir, edgeURL, linked)
 }
 
 func runLogin(args []string) error {

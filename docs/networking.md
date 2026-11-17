@@ -122,7 +122,7 @@ The shipped unit runs as root. For another user, run `sudo tailscale set
 An edge is a relay on the public internet. The server and the client both dial
 out to it, so neither needs an open port, a tailnet or a copied SSH key, and
 people sign in with GitHub. The project runs one at
-`https://edge.onaether.dev`. `aether-server setup` turns it on when the host has
+`https://edge.cloudfield.ai`. `aether-server setup` turns it on when the host has
 no tailscaled or you answer no to its tailnet question. You can also
 [run your own](edge.md#running-your-own-edge).
 

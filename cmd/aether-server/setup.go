@@ -17,6 +17,7 @@ import (
 	"time"
 
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -366,7 +367,7 @@ func askEdge(p *prompter, current map[string]string, tailscaled, tailnet bool, v
 		edgeURL = edgeagent.DefaultURL
 	}
 	operator := ""
-	if edgeURL == edgeagent.DefaultURL {
+	if edgeclient.Hosted(edgeURL) {
 		operator = ", run by the Cloudfield project"
 	}
 	if tailnet {

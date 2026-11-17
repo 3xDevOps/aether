@@ -20,6 +20,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/disk"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
@@ -361,7 +362,7 @@ const clientInstall = "curl -fsSL https://raw.githubusercontent.com/3xDevOps/clo
 // so a server on another edge needs --edge on both commands.
 func claimCommands(edgeURL, code string) []string {
 	edge := ""
-	if edgeURL != edgeagent.DefaultURL {
+	if !edgeclient.Hosted(edgeURL) {
 		edge = " --edge " + edgeURL
 	}
 	return []string{"aether login" + edge, "aether link --claim " + code + edge}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -449,5 +450,36 @@ func TestLinkingAnotherServerStopsForwardsToTheOldOne(t *testing.T) {
 	rec := do(g, http.MethodPost, "/local/v1/forward.status", `{}`, true)
 	if rec.Code != http.StatusOK || rec.Body.String() != "{\"forwards\":[]}\n" {
 		t.Fatalf("forward.status after linking another server = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+// The dashboard's edge verbs pick the edge as `aether login` does: a
+// machine linked through the hosted edge's former address keeps it, and
+// one with no link takes the new one.
+func TestChooseEdgeKeepsTheLinkedHostedAddress(t *testing.T) {
+	useTempConfigDir(t)
+	if c, perr := chooseEdge(""); perr != nil || c.URL() != "https://edge.cloudfield.ai" {
+		t.Fatalf("with nothing linked: %v, %v", c, perr)
+	}
+	if err := cli.Save(cli.Config{ServerID: "srv", EdgeURL: "https://edge.onaether.dev",
+		Links: []cli.NamedLink{{Name: "home", Addr: "home:2222"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if c, perr := chooseEdge(""); perr != nil || c.URL() != "https://edge.onaether.dev" {
+		t.Fatalf("linked through https://edge.onaether.dev: %v, %v", c, perr)
+	}
+	if c, perr := chooseEdge("https://edge.example"); perr != nil || c.URL() != "https://edge.example" {
+		t.Fatalf("an edge named: %v, %v", c, perr)
+	}
+	// A named edge needs no readable config.
+	path, err := cli.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, perr := chooseEdge("https://edge.example"); perr != nil || c.URL() != "https://edge.example" {
+		t.Fatalf("an edge named, with a config that does not parse: %v, %v", c, perr)
 	}
 }

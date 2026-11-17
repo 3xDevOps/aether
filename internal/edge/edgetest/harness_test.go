@@ -1,6 +1,7 @@
 package edgetest
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -125,16 +126,30 @@ func (h *harness) advance(d time.Duration) {
 	h.skew += d
 }
 
+// listen listens on addr and, the first time, holds its port for the rest
+// of the test: startEdge binds the same addresses again after stopEdge.
+func (h *harness) listen(addr string) (net.Listener, error) {
+	lc := net.ListenConfig{Control: reusePort}
+	ln, err := lc.Listen(context.Background(), "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	if got := ln.Addr().String(); got != addr {
+		holdPort(h.t, got)
+	}
+	return ln, nil
+}
+
 // startEdge starts the edge and its proxy, on the same addresses as the
 // previous run once there was one.
 func (h *harness) startEdge() {
 	t := h.t
 	t.Helper()
-	back, err := net.Listen("tcp", h.backAddr)
+	back, err := h.listen(h.backAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	front, err := net.Listen("tcp", h.frontAddr)
+	front, err := h.listen(h.frontAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +168,7 @@ func (h *harness) startEdge() {
 			if addr == "" {
 				addr = host + ":0"
 			}
-			ln, lerr := net.Listen("tcp", addr)
+			ln, lerr := h.listen(addr)
 			if lerr != nil {
 				t.Skipf("%s is not a loopback address on this host: %v", host, lerr)
 			}
@@ -744,6 +759,10 @@ type serverNode struct {
 	ssh           *sshd.Server
 	agent         *edgeagent.Agent
 	stop          func()
+
+	// edge is the server's edge-url, the harness's relay origin when
+	// empty.
+	edge string
 }
 
 func (h *harness) newServer(policy edgeproto.AccessPolicy) *serverNode {
@@ -754,7 +773,7 @@ func (h *harness) newServer(policy edgeproto.AccessPolicy) *serverNode {
 // newMCPServer is newServer with mcp serving its MCP connector requests.
 func (h *harness) newMCPServer(policy edgeproto.AccessPolicy, mcp http.Handler) *serverNode {
 	h.t.Helper()
-	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, mcp: mcp, addr: "127.0.0.1:0"}
+	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, mcp: mcp}
 	s.start()
 	h.t.Cleanup(func() { s.stop() })
 	return s
@@ -794,7 +813,7 @@ func (s *serverNode) start() {
 		runs = launcher{db: db, started: s.launchStarted, release: s.launchRelease}
 	}
 	srv, err := sshd.New(sshd.Config{
-		Addr: s.addr, HostKeyPath: hostKeyPath, Store: db, Bus: bus,
+		Addr: "127.0.0.1:0", HostKeyPath: hostKeyPath, Store: db, Bus: bus,
 		Git: noGit{}, PTY: noPTY{}, Runs: runs,
 		InvitesDir: filepath.Join(s.dir, "invites"), EdgeAccess: s.policy, EdgeReviewer: s.reviewer, Services: services,
 	})
@@ -805,16 +824,17 @@ func (s *serverNode) start() {
 	if err != nil {
 		t.Fatal(err)
 	}
+	edgeURL := cmp.Or(s.edge, s.h.relayURL)
 	mcp := s.mcp
 	if s.client != nil {
 		// A first start is backdated by ClockSkew so a test signs in right
 		// away; a restart is not, so sign-ins from before it stay refused.
 		var started time.Time
-		if s.addr == "127.0.0.1:0" {
+		if s.addr == "" {
 			started = time.Now().Add(-edgeproto.ClockSkew)
 		}
 		mcp, err = connector.New(connector.Config{
-			BaseURL: s.h.relayURL + edgeproto.MCPPath(edgeproto.ServerID(hostKey.PublicKey())),
+			BaseURL: edgeURL + edgeproto.MCPPath(edgeproto.ServerID(hostKey.PublicKey())),
 			Store:   db, SSH: srv, KeyPath: filepath.Join(s.dir, "connector", "hmac.key"),
 			ClientHosts: []string{s.client.host}, Transport: s.client.srv.Client().Transport, LoopbackClients: s.client.loopback,
 			Started: started,
@@ -823,7 +843,7 @@ func (s *serverNode) start() {
 			t.Fatal(err)
 		}
 	}
-	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: s.h.relayURL, DataDir: s.dir, HostKey: hostKey, SSH: srv,
+	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: edgeURL, DataDir: s.dir, HostKey: hostKey, SSH: srv,
 		AccessPolicy: s.policy, HTTP: mcp})
 	if err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // InstallResult reports what Install put on disk.
@@ -56,11 +57,86 @@ func Install(unitPath, configPath string, values map[string]string, force bool) 
 // WriteConfig renders values into the config file at path, creating its
 // directory if needed.
 func WriteConfig(path string, values map[string]string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("serversetup: create %s: %w", filepath.Dir(path), err)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("serversetup: create %s: %w", dir, err)
 	}
-	if err := os.WriteFile(path, []byte(Render(values)), 0o644); err != nil {
+	if err := replaceFile(path, []byte(Render(values))); err != nil {
 		return fmt.Errorf("serversetup: write %s: %w", path, err)
 	}
 	return nil
+}
+
+// replaceFile writes data to path, or to the file a symlink at path names,
+// by a rename beside it that keeps the file's mode and group, so a crash
+// leaves the old content or the new, never a torn file. It writes in place
+// where the writer does not own the file or cannot give a new file its
+// group, where the file is not a regular one, or where the directory takes
+// no new file. Root renames only onto a
+// file root owns: the path is resolved again for the rename, and whoever
+// owns the file may have swapped a directory on it since.
+func replaceFile(path string, data []byte) error {
+	target, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return os.WriteFile(path, data, 0o644)
+	}
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return err
+	}
+	mode := info.Mode().Perm()
+	uid, gid := fileOwner(info)
+	if !info.Mode().IsRegular() || (uid >= 0 && uid != os.Geteuid()) {
+		return os.WriteFile(target, data, mode)
+	}
+	dir := filepath.Dir(target)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(target)+"-*")
+	if errors.Is(err, os.ErrPermission) {
+		return os.WriteFile(target, data, mode)
+	}
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) //nolint:errcheck // gone after the rename
+	if uid >= 0 && tmp.Chown(-1, gid) != nil {
+		_ = tmp.Close()
+		return os.WriteFile(target, data, mode)
+	}
+	_, err = tmp.Write(data)
+	if err == nil {
+		err = tmp.Chmod(mode)
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), target)
+	}
+	if err != nil {
+		return err
+	}
+	return syncDir(dir)
+}
+
+// syncDir makes the rename in dir survive a power loss. Windows cannot
+// open a directory to flush it.
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }

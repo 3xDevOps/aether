@@ -86,7 +86,7 @@ func TestConnectorLongCallsLeaveConnections(t *testing.T) {
 	h := newHarness(t)
 	client := newConnectorClient(t)
 	started, release := make(chan struct{}, edgeproto.MaxHTTPConnsPerServer), make(chan struct{})
-	s := &serverNode{h: h, dir: t.TempDir(), policy: edgeproto.PolicyAccount, client: client, addr: "127.0.0.1:0",
+	s := &serverNode{h: h, dir: t.TempDir(), policy: edgeproto.PolicyAccount, client: client,
 		launchStarted: started, launchRelease: release}
 	s.start()
 	t.Cleanup(func() { s.stop() })

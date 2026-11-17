@@ -79,7 +79,7 @@ func newClient(t *testing.T, loopback bool) *connectorClient {
 // team features.
 func (h *harness) newConnectorServer(policy edgeproto.AccessPolicy, client *connectorClient, services sshd.Services) *serverNode {
 	h.t.Helper()
-	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, client: client, services: services, addr: "127.0.0.1:0"}
+	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, client: client, services: services}
 	s.start()
 	h.t.Cleanup(func() { s.stop() })
 	return s

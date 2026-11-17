@@ -162,10 +162,15 @@ example:
 	"edge": `usage: aether-server edge status [--config <file>]
        aether-server edge claim-code [--admin <member-id>] [--config <file>]
        aether-server edge trust [--config <file>]
+       aether-server edge move <address> [--config <file>]
        aether-server edge leave [--config <file>]
 
 status prints the edge, access policy, server id and connection; it exits 0
 when connected, 3 when not connected yet, and 1 on an error
+
+move sets edge-url to another address of the same edge, once that edge
+speaks edge protocol 6 or later and announces both addresses; links and
+connectors made at the old address keep working (docs/edge.md)
 
 example:
   sudo aether-server edge status

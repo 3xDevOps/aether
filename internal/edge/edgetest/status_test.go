@@ -30,7 +30,7 @@ func TestServerProcess(t *testing.T) {
 		t.Skip("runs only as the server process of TestKilledServerStatusIsStale")
 	}
 	s := &serverNode{h: &harness{t: t, relayURL: os.Getenv(childEdgeEnv)}, dir: dir,
-		policy: edgeproto.PolicyApprovedDevices, addr: "127.0.0.1:0"}
+		policy: edgeproto.PolicyApprovedDevices}
 	s.start()
 	select {}
 }

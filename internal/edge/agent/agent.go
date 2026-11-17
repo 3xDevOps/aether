@@ -17,13 +17,14 @@ import (
 	"sync"
 	"time"
 
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/version"
 	"golang.org/x/crypto/ssh"
 )
 
-// DefaultURL is the edge the project runs.
-const DefaultURL = "https://edge.onaether.dev"
+// DefaultURL is the edge the project runs, as new setups name it.
+const DefaultURL = edgeclient.DefaultURL
 
 // SSH is the part of the SSH server the agent hands relayed connections
 // and the edge's notices to. *sshd.Server implements it.

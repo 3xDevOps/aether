@@ -286,7 +286,7 @@ layer that failed, so the dashboard never reports one layer as another:
 
 ```json
 {"refusal":{"kind":"server-not-connected","refusal":"server is not connected to the edge"},
- "edge_path":{"layer":"server-registration","server_id":"<server id>","edge":"edge.onaether.dev",
+ "edge_path":{"layer":"server-registration","server_id":"<server id>","edge":"edge.cloudfield.ai",
                             "account":"github account dana",
               "online":[{"id":"<other id>","name":"prod","online":true,"role":"admin",
                          "access_policy":"approved-devices","kind":"self-hosted"}]}}
@@ -1932,7 +1932,7 @@ authority.
 | --- | --- | --- |
 | `link.apply` | `{"addr":"host[:port]","invite":"...","name":"..."}` (`invite` and `name` optional) | `{"addr":"host:2222","user":"aether","member":{"id":"...","display_name":"...","role":"..."},"key_generated":"/home/u/.ssh/id_ed25519"}` (`key_generated` omitted when no key was created) |
 | `link.status` | `{}` | `{"linked":bool,"server_configured":bool,"addr":"...","user":"...","repo":"...","edge_url":"...","server_id":"...","links":[{"name":"...","addr":"...","repo":"..."}],"active":"..."}` (`edge_url` and `server_id` are present only on an edge link; `links` is present whenever a named profile is saved, `active` only when the gateway runs on one; a profile's `repo` is omitted when it records no clone of its own and inherits the top-level one; `server_configured` reports a configured server even when no repository is linked) |
-| `edge.login` | `{"edge":"https://...","label":"..."}` (both optional) | `{"state":"pending","edge":"https://edge.onaether.dev","signin_origin":"https://auth.onaether.dev","user_code":"...","verification_uri":"https://auth.onaether.dev/device"}` |
+| `edge.login` | `{"edge":"https://...","label":"..."}` (both optional) | `{"state":"pending","edge":"https://edge.cloudfield.ai","signin_origin":"https://auth.cloudfield.ai","user_code":"...","verification_uri":"https://auth.cloudfield.ai/device"}` |
 | `edge.status` | `{}` | `{"edges":[{"edge":"https://...","signin_origin":"https://...","account":{"id":"acct_...","provider":"github","subject":"...","login":"...","email":"...","name":"..."},"device":{"id":"...","label":"...","key":"ssh-ed25519 ..."},"error":"..."}],"login":{"state":"pending"\|"signed_in"\|"failed","edge":"...","signin_origin":"...","user_code":"...","verification_uri":"...","account":{...},"error":"..."}}` (`login` only once `edge.login` ran in this process; an entry's `error` replaces its `signin_origin`, `account` and `device` when its stored sign-in cannot be read) |
 | `edge.servers` | `{"edge":"https://..."}` (optional) | `{"edge":"https://...","servers":[{"id":"...","name":"...","online":bool,"role":"admin","access_policy":"account"\|"approved-devices","kind":"self-hosted"\|"hosted"}]}` |
 | `edge.hostkey` | `{"server_id":"...","edge":"https://..."}` (`edge` optional) | `{"edge":"https://...","server_id":"...","fingerprint":"SHA256:..."}` |
@@ -1981,7 +1981,9 @@ does, with the same files in the config directory:
 | `edge.logout` | `aether logout` |
 
 - `edge` names the edge by its relay origin. Without it a verb uses the one
-  edge this machine is signed in to, else `https://edge.onaether.dev`. An
+  edge this machine is signed in to, else the project's edge at the address
+  this machine already uses, else `https://edge.cloudfield.ai`
+  ([edge.md](edge.md#moving-to-another-address-of-the-edge)). An
   address that is not `https://host[:port]`, or `http://` on loopback,
   answers `-32602`.
 - `edge.login` answers once the edge has registered the sign-in. The person

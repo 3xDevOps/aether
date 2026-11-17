@@ -398,7 +398,7 @@ func fromLoopback(cm ssh.ConnMetadata) bool {
 // both client commands.
 func firstAdminBanner(origin string, cm ssh.ConnMetadata) string {
 	edge := ""
-	if origin != edgeclient.DefaultURL {
+	if !edgeclient.Hosted(origin) {
 		edge = " --edge " + origin
 	}
 	_, port, _ := net.SplitHostPort(cm.LocalAddr().String())

@@ -119,14 +119,20 @@ func (e *edgeLogin) forget(origin string) {
 	}
 }
 
-// chooseEdge is the client for the edge a verb names, or for the only
-// edge this machine is signed in to, else the project's edge.
+// chooseEdge is the client for the edge a verb names, or the one
+// edgeclient.Choose picks without one.
 func chooseEdge(edgeURL string) (*edgeclient.Client, *protocol.Error) {
 	dir, err := cli.Dir()
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
-	client, err := edgeclient.Choose(dir, edgeURL)
+	var linked []string
+	if edgeURL == "" {
+		if linked, err = cli.LinkedEdges(); err != nil {
+			return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+		}
+	}
+	client, err := edgeclient.Choose(dir, edgeURL, linked)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
 	}

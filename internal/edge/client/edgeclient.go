@@ -26,8 +26,34 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
 
-// DefaultURL is the relay origin of the edge the project runs.
-const DefaultURL = "https://edge.onaether.dev"
+// DefaultURL is the relay origin new setups use for the edge the project
+// runs. FormerURL is that edge's first relay origin, which it keeps
+// serving for the servers and clients set up there.
+const (
+	DefaultURL = "https://edge.cloudfield.ai"
+	FormerURL  = "https://edge.onaether.dev"
+)
+
+// Hosted reports whether edgeURL names a relay origin of the edge the
+// project runs. That edge relays a client at either origin to a server
+// enrolled at either.
+func Hosted(edgeURL string) bool {
+	o, err := Canonical(edgeURL)
+	return err == nil && (o == DefaultURL || o == FormerURL)
+}
+
+// Canonical is edgeURL as an edgeproto.Origin without the default https
+// port, the form an edge announces its relay origins in.
+func Canonical(edgeURL string) (string, error) {
+	o, err := edgeproto.Origin(edgeURL)
+	if err != nil {
+		return "", err
+	}
+	if rest, ok := strings.CutPrefix(o, "https://"); ok {
+		o = "https://" + strings.TrimSuffix(rest, ":443")
+	}
+	return o, nil
+}
 
 const (
 	requestTimeout  = 30 * time.Second
@@ -68,19 +94,35 @@ func New(dir, edgeURL string) (*Client, error) {
 }
 
 // Choose returns the client for edgeURL. An empty edgeURL means the only
-// edge dir holds a device token for, else DefaultURL.
-func Choose(dir, edgeURL string) (*Client, error) {
+// edge dir holds a device token for; else the project's edge at the
+// origin dir holds a token for, DefaultURL before FormerURL; else at the
+// origin one of linked, the edge URLs of the stored links, names; else
+// DefaultURL. So a machine set up at FormerURL stays there.
+func Choose(dir, edgeURL string, linked []string) (*Client, error) {
 	if edgeURL == "" {
-		edgeURL = DefaultURL
 		signedIn, err := SignedIn(dir)
 		if err != nil {
 			return nil, err
 		}
-		if len(signedIn) == 1 {
-			edgeURL = signedIn[0]
-		}
+		edgeURL = chooseHosted(signedIn, linked)
 	}
 	return New(dir, edgeURL)
+}
+
+func chooseHosted(signedIn, linked []string) string {
+	if len(signedIn) == 1 {
+		return signedIn[0]
+	}
+	for _, set := range [][]string{signedIn, linked} {
+		for _, hosted := range []string{DefaultURL, FormerURL} {
+			for _, u := range set {
+				if o, err := Canonical(u); err == nil && o == hosted {
+					return u
+				}
+			}
+		}
+	}
+	return DefaultURL
 }
 
 // URL is the edge's canonical relay origin, "https://host[:port]".
