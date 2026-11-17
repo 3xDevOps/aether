@@ -6,8 +6,9 @@ keeps running, keeps reaching its edge, and still finds its update.
 
 **Status:** approved by the owner, 2026-11-16. The rename and the new
 domain are the owner's decisions of 2026-11-15; the choices under
-[Decisions](#decisions-2026-11-16) are the owner's of 2026-11-16. Phase 0
-is being built.
+[Decisions](#decisions-2026-11-16) are the owner's of 2026-11-16. Phases 0,
+1 and 5 and the code of phase 2 are merged. Phase 2 waits on the owner's
+switch steps, phase 3 on item 20 (#1025) and phase 4 on item 23 (#1026).
 
 ## The rule
 
@@ -145,6 +146,7 @@ they are.
   `aether/`. A changed prefix would make saved environment images look like
   registry images and pull them from Docker Hub.
 - `refs/aether/*` and the `aether.*` git config keys in every checkout.
+- The client's git remote `aether` (item 24 as built).
 - In-container paths `/run/aether`, `/opt/aether`, `/aether-cache`.
 - Edge cookies, dashboard storage keys and service-worker message types.
   Renaming them signs everyone out for nothing.
@@ -465,12 +467,11 @@ request 943 and its eleven implementation pull requests.
 - Its pull requests 7 and 8 edit `promote-edge.yml` and
   `scripts/edge-update.sh`. The two-identity change goes directly after
   them, so operators copy the script once.
-- `v0.8.7`, the first stable, ships as Aether. Cloudfield starts with the
-  `v0.9.0` line: phase 0 and phase 1 land as nightlies, and `v0.9.0` is the
-  first stable that says Cloudfield
-  ([decision 11](#11-first-release-and-directory-listings)). Phase 3 needs
-  phase 0 in a stable release, so it lands on `main` after `v0.9.0` and
-  ships in `v0.10.0`; `v0.9.1` would be a hotfix cut from `release/0.9`.
+- As released: `v0.8.7`, the first stable, carries phase 0 and phase 1
+  except item 13. Its dashboard, CLI, docs and Android app say Cloudfield;
+  its desktop app is still named Aether (#1010 merged after the tag).
+  Because phase 0 is in that stable release, phase 3 lands on `main` in the
+  `v0.9.0` line.
 - Its pull requests 4 and 11 add dashboard copy and docs that say Aether.
   The phase 1 sweep runs after them, and the name check keeps later ones
   clean.
@@ -599,8 +600,10 @@ if the per-address counters show servers staying behind.
 
 ### 11. First release and directory listings
 
-- `v0.9.0` is the first release that says Cloudfield. `v0.8.7`, the first
-  stable, ships as Aether.
+- Decided: `v0.9.0` is the first release that says Cloudfield, and
+  `v0.8.7`, the first stable, ships as Aether. As released, most of phase 1
+  merged before `v0.8.7` was cut, so it says Cloudfield everywhere but the
+  desktop app's name (item 13, #1010, came after).
 - The Claude and ChatGPT listings are resubmitted with the new name, title
   and description at phase 1, keeping the old connector address. Each
   directory re-reviews on a lead time the project does not control.
@@ -746,6 +749,10 @@ Each is one session. Phase and dependencies are in brackets.
     `scripts/update-smoke.ps1`, and the app paths in `docs/install.md`.
     `desktop/package.json` is unchanged, so the data directory stays
     `aether-desktop`. Design review. [1; after 9 and 9b are released]
+    As built (#1010): install locations follow the product name
+    (`~/.local/share/cloudfield/desktop`, `Cloudfield.app`,
+    `%LOCALAPPDATA%\Programs\Cloudfield Desktop`); the data directory
+    stays `aether-desktop` for every install.
 14. `feat(android)`: app name, strings, launcher and notification icons,
     Play listing. `android/app/src/main/res/`, `android/listing/`. Design
     review. [1]
@@ -766,11 +773,25 @@ Each is one session. Phase and dependencies are in brackets.
     `edge move` refuses or warns unless the edge negotiates protocol 6 or
     later and announces both addresses: otherwise the moved server accepts
     connector tokens only for the address it is enrolled at.
+    As built (#1003): `edge move` refuses, with no override, when the
+    target presents a different edge key than the pin, when no key is
+    pinned, below protocol 6, or when the edge does not announce both
+    addresses. It does not prove the target holds the edge's private key:
+    the handshake carries no edge signature, and the target's TLS
+    certificate authenticates it as at first enrolment. A proof needs an
+    edge protocol change and is the owner's decision.
     [2; after steps 1 to 4 of the switch]
 18. `feat(cli)`: installers create the new command names and the unit
     link; printed `systemctl` lines use the new name. `scripts/install.sh`,
     `install.ps1`, `internal/macinstall`, `cmd/aether-server/install.go`,
-    `internal/localgw/update.go`. [3; after 2, 3 and 4 are in a stable
+    `internal/localgw/update.go`.
+    As built (#1016): systemd refuses `systemctl enable` on an alias name,
+    so every `enable` line keeps `aether-server`, and `journalctl -u` and
+    printed `status` lines keep it too. Only the restart lines that `aether
+    update` and the dashboard print use `cloudfield-server`, and only where
+    systemd resolves the link. The unit's names live in
+    `internal/serverunit`, so the CLI does not build in the server's setup
+    code. [3; after 2, 3 and 4 are in a stable
     release, and after release-channels 1]
 19. `feat(server)`: prompts and role cards name `cloudfield-internal` in
     containers that have it. Hook and plugin files written into homes keep
@@ -803,6 +824,12 @@ Each is one session. Phase and dependencies are in brackets.
     CLI older than 8 does not fetch the new branches until it updates,
     though `aether pull` still does, and a server put back to a release
     below 8 stops refusing a force-push to them.
+    As built (#1024): the branch prefix only. The remote stays `aether`,
+    with the daemon's `--remote` default, `internal/localops` and the
+    dashboard's commands unchanged: a second remote name would split every
+    linked clone for no gain a reader sees. A workspace whose repository has
+    a branch named `cloudfield` keeps `aether/run-` for new sessions, since
+    git cannot create `cloudfield/run-*` beside it.
     [5; after 8 is in a stable release]
 
 The website's pull requests are listed in its own repository.
