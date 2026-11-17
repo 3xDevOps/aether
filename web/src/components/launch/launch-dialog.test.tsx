@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
+import { setDictationState } from '@/components/dictation/state'
 import type { LaunchDraft } from '@/components/launch/draft'
 import { useIsMobile } from '@/lib/breakpoints'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
@@ -87,6 +88,33 @@ describe('reopening', () => {
 
 describe('saved launch draft', () => {
   const resume = () => screen.getByRole('button', { name: 'Resume new session draft' })
+
+  it('discards an untouched blank draft without saving an automatic mode fallback', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([claude({ enhanced_installed: false })])
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 3, defaults: { agent: 'claude', agents: { claude: { mode: 'acp' } } } })
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.launch', 'agent.list', 'account.list', 'launch.defaults.get', 'launch.defaults.set'], ws: [] } })
+    render(<><button>Main chat</button><PaletteDialogs /></>)
+    await waitFor(() => expect(modeSegment('Standard').getAttribute('aria-checked')).toBe('true'))
+    expect(useLaunchDefaults.getState().result?.defaults.agents?.claude.mode).toBe('acp')
+    await userEvent.click(screen.getByRole('button', { name: 'Main chat' }))
+    await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
+    expect(useStore.getState().launchDraft).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Resume new session draft' })).toBeNull()
+    expect(api.launchDefaultsSet).not.toHaveBeenCalled()
+  })
+
+  it('keeps the blank draft when an outside click interrupts active dictation', async () => {
+    const box = { current: null }
+    render(<><button>Main chat</button><PaletteDialogs /></>)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    act(() => setDictationState(box, { active: true }))
+    try {
+      await userEvent.click(screen.getByRole('button', { name: 'Main chat' }))
+      await waitFor(() => expect(resume()).toBeTruthy())
+    } finally {
+      act(() => setDictationState(box, { active: false }))
+    }
+  })
 
   it('collapses on an outside click, keeps that click and restores the task and mode', async () => {
     const mainClick = vi.fn()

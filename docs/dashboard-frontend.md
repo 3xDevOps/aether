@@ -2692,13 +2692,14 @@ scroll inside the field. A shared prompt grows without that cap so the whole
 prompt is visible.
 
 On desktop, clicking outside the form with a blank or whitespace-only **Task**
-saves the selected agent, mode and model as launch defaults and discards the
-draft. With task text or a launch in progress, the outside click slides the form
-away and leaves a resume arrow. The outside click still reaches the view behind
-the form. **Escape** also leaves the arrow, unless a picker handles Escape
-first. The arrow sits at the sidebar edge or, when the sidebar is hidden, the
-window edge. The arrow and **New session** restore the draft. **X** and
-**Cancel** discard the draft and keep saved launch defaults.
+saves the agent, mode and model from an edited or recovered form as launch
+defaults and discards the draft. With task text, active dictation or a launch
+in progress, the outside click slides the form away and leaves a resume
+arrow. The outside click still reaches the view behind the form. **Escape**
+also leaves the arrow, unless a picker handles Escape first. The arrow sits
+at the sidebar edge or, when the sidebar is hidden, the window edge. The arrow
+and **New session** restore the draft. **X** and **Cancel** discard the draft
+and keep saved launch defaults.
 
 The task and launch settings save on change in browser-local storage, scoped
 to the server and signed-in member. Refreshing or reopening the dashboard in

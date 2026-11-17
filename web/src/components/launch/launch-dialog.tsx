@@ -43,6 +43,7 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
   const ended = useRef(false)
   const outsideClick = useRef(false)
   const storageFailed = useRef(false)
+  const choiceEdited = useRef(false)
   const [pickedWorkspace, setPickedWorkspace] = useState<string | null>(restored?.workspace ?? null)
   const [last] = useState(() => (window.matchMedia(mobileScreen).matches ? lastSession(useStore.getState()) : undefined))
   const activeWorkspace = useStore((s) => s.activeWorkspace)
@@ -410,11 +411,11 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
           event.preventDefault()
           if (!open) return
           outsideClick.current = true
-          if (launching || task.trim()) {
+          if (launching || dictating || task.trim()) {
             collapse()
             return
           }
-          if (harness && useStore.getState().identityKey === identityKey) {
+          if ((choiceEdited.current || restored) && harness && useStore.getState().identityKey === identityKey) {
             rememberChoice(harness, mode, model.trim())
           }
           discard()
@@ -433,7 +434,7 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
           onSubmit={(event) => { event.preventDefault(); if (!dictating) void submit() }}
         >
           {permissionOffered && <PermissionControl value={permission} onChange={choosePermission} disabled={launching} />}
-          <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus shared={shared !== '' && task === shared} account={accountChoice} owner={sharedAccount ? accountName : undefined} />
+          <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => { choiceEdited.current = true; setError(null) }} disabled={launching} autoFocus shared={shared !== '' && task === shared} account={accountChoice} owner={sharedAccount ? accountName : undefined} />
           {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
           {childRunsOffered && <ChildRunsSwitch value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} settings={childSettings} readError={childReadError} unavailable={mode === 'headless' ? 'Background sessions cannot start subsessions.' : undefined} disabled={launching} />}
           {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />}
