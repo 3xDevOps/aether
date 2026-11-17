@@ -257,7 +257,7 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
       >
         <div className={scale === undefined ? 'flex size-full items-center justify-center' : 'm-auto shrink-0'}>{image}</div>
       </div>
-      {gallery && <span aria-hidden className={cn('absolute right-4 top-[calc(var(--safe-top)_+_1rem)] rounded-control coarse:hidden bg-chrome px-3 py-2 text-ui-sm text-muted transition-opacity duration-300', showHint ? 'opacity-100' : 'opacity-0')}>{name}</span>}
+      {gallery && <span aria-hidden className={cn('absolute right-4 top-[calc(var(--safe-top)_+_1rem)] rounded-control coarse:hidden bg-chrome px-3 py-2 text-ui-sm text-muted transition-opacity duration-300 motion-reduce:transition-none', showHint ? 'opacity-100' : 'opacity-0')}>{name}</span>}
       <DialogTitle className="sr-only">{name}</DialogTitle>
       <DialogDescription className="sr-only">
         {[
