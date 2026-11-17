@@ -1,14 +1,16 @@
 package helper
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/guest"
 	"golang.org/x/sys/unix"
 )
 
@@ -31,11 +33,23 @@ func TestDenyVsockFailsOnlyVsockSocketsAndIOURing(t *testing.T) {
 		fmt.Printf("vsock=%v pair=%v unix=%v ring=%v\n", errors.Is(vsockErr, unix.EPERM), errors.Is(pairErr, unix.EPERM), unixErr == nil, ringErr == unix.ENOSYS)
 		return
 	}
-	cmd := exec.Command(os.Args[0], "-test.run", "^TestDenyVsockFailsOnlyVsockSocketsAndIOURing$")
-	cmd.Env = append(os.Environ(), "AETHER_DENY_VSOCK_CHILD=1")
-	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(out), "vsock=true pair=true unix=true ring=true") {
-		t.Fatalf("filtered child: %v\n%s", err, out)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, client := startHelper(t)
+	p := spawn(t, client, guest.ProcessSpec{
+		ID:   rand.Text(),
+		Argv: []string{exe, "-test.run", "^TestDenyVsockFailsOnlyVsockSocketsAndIOURing$"},
+		Env:  []string{"AETHER_DENY_VSOCK_CHILD=1"},
+	})
+	a := p.Attach(true)
+	defer func() { _ = a.Close() }()
+	out, _ := io.ReadAll(a.Stdout())
+	stderr, _ := io.ReadAll(a.Stderr())
+	code, err := p.Wait(testContext(t))
+	if err != nil || code != 0 || !strings.Contains(string(out), "vsock=true pair=true unix=true ring=true") {
+		t.Fatalf("filtered child: exit %d, %v\n%s%s", code, err, out, stderr)
 	}
 }
 
