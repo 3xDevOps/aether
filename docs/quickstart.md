@@ -88,7 +88,7 @@ claim link: aether://claim?edge=https%3A%2F%2Fedge.cloudfield.ai&server=<server 
 
 next:
   1. start the server on this machine:
-       sudo systemctl daemon-reload && sudo systemctl enable --now cloudfield-server
+       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
   2. on your computer, install Cloudfield if it is not there yet (Windows: docs/install.md):
        curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client
   3. on your computer: in the Cloudfield app's Connect step choose Cloudfield relay, sign in

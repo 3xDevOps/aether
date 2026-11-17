@@ -715,12 +715,7 @@ for name in $order; do
 done
 replacing=no staged=no
 
-# --- the cloudfield names ----------------------------------------------
-
-# cloudfield and cloudfield-server are relative links to the real files,
-# made only where nothing holds the name, as internal/selfupdate's Link
-# makes them on every update. Anything else at the name is left as it is,
-# and no failure to link fails the install.
+# The same relative links internal/selfupdate's Link makes on update.
 for pair in aether:cloudfield aether-server:cloudfield-server; do
 	target="${pair%%:*}" link="${BIN_DIR}/${pair#*:}"
 	if [ ! -e "${BIN_DIR}/${target}" ] || [ -e "$link" ] || [ -L "$link" ]; then
@@ -899,8 +894,6 @@ next_step() {
 	fi
 }
 
-# link_steps HEADING HOST CLI: CLI is the command name on the machine the
-# steps are for.
 link_steps() {
 	printf '  %s\n' "$1"
 	next_step "$3 link $2" "on a tailnet: the server's tailnet name"
@@ -928,13 +921,8 @@ server)
 		if [ -n "$setup_sudo" ] || [ -n "${SUDO_USER:-}" ]; then
 			as_root="sudo "
 		fi
-		# setup links the unit's second name beside the unit it writes.
-		service=aether-server
-		unit_alias="${UNIT_PATH%/*}/cloudfield-server.service"
-		if [ -L "$unit_alias" ] && [ "$unit_alias" -ef "$UNIT_PATH" ]; then
-			service=cloudfield-server
-		fi
-		next_step "${as_root}systemctl daemon-reload && ${as_root}systemctl enable --now ${service}"
+		# systemctl enable refuses the cloudfield-server alias.
+		next_step "${as_root}systemctl daemon-reload && ${as_root}systemctl enable --now aether-server"
 	elif [ -f "$UNIT_PATH" ]; then
 		next_step "sudo ${server_name} update --version ${VERSION}" "restart the running server onto this binary"
 	else

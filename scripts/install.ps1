@@ -837,10 +837,7 @@ function Install-AetherCli {
     return $destination
 }
 
-# cloudfield.cmd runs aether.exe beside it, byte for byte the shim
-# internal/selfupdate's Link writes on every update. It is written only
-# where nothing holds the name, never replaces anything, and no failure to
-# write it fails the install.
+# Byte for byte the cloudfield.cmd internal/selfupdate's writeShim writes.
 function Add-AetherShim {
     param([Parameter(Mandatory = $true)][string] $Directory)
     $shim = Join-Path $Directory 'cloudfield.cmd'

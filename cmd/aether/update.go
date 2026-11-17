@@ -19,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/envname"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/serversetup"
 	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
@@ -139,7 +140,11 @@ func runUpdate(args []string) error {
 		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
 	}
 	if len(replaced) > 1 {
-		fmt.Printf("aether-server on disk is now %s; the running server keeps its old version until you restart it: sudo systemctl restart aether-server\n", *tag)
+		service := serversetup.ServiceName
+		if serversetup.UnitAliasResolves() {
+			service = strings.TrimSuffix(serversetup.UnitAlias, ".service")
+		}
+		fmt.Printf("aether-server on disk is now %s; the running server keeps its old version until you restart it: sudo systemctl restart %s\n", *tag, service)
 		if offerSysbox(ctx, "/etc/os-release", dockerRuntimes) {
 			fmt.Println("Let agents use Docker inside sessions: sudo aether-server sysbox install (or Settings → Server in the dashboard)")
 		}

@@ -25,7 +25,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
-	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/shellquote"
 	"golang.org/x/term"
 )
@@ -116,8 +115,7 @@ func writeInstall(w io.Writer, unitPath, configPath string, values map[string]st
 		sysbox = false
 	}
 	docker := checkDocker(w)
-	service, err := writeAndReport(w, unitPath, configPath, values, force)
-	if err != nil {
+	if err = writeAndReport(w, unitPath, configPath, values, force); err != nil {
 		return err
 	}
 	if sysbox {
@@ -137,7 +135,7 @@ func writeInstall(w io.Writer, unitPath, configPath string, values map[string]st
 	if _, err := reportEdge(w, options, false); err != nil {
 		return err
 	}
-	return printNextSteps(w, configPath, options, "", docker, "", service)
+	return printNextSteps(w, configPath, options, "", docker, "")
 }
 
 // installsVMs reports whether the config file install leaves behind, the
@@ -238,40 +236,35 @@ func installValues(fs *flag.FlagSet) map[string]string {
 	return values
 }
 
-// writeAndReport writes the unit, slice and config, says what it wrote,
-// and returns the service name the activation line starts.
-func writeAndReport(w io.Writer, unitPath, configPath string, values map[string]string, force bool) (string, error) {
+// writeAndReport writes the unit, slice and config and says what it wrote.
+func writeAndReport(w io.Writer, unitPath, configPath string, values map[string]string, force bool) error {
 	res, err := serversetup.Install(unitPath, configPath, values, force)
 	if err != nil {
-		return "", err
+		return err
 	}
 	_, _ = fmt.Fprintf(w, "wrote %s\nwrote %s\n", res.UnitPath, res.SlicePath)
-	service := linkUnitAlias(w, res.UnitPath)
+	linkUnitAlias(w, res.UnitPath)
 	if res.ConfigSkipped {
 		_, _ = fmt.Fprintf(w, "kept %s (already exists; pass --force to overwrite)\n", res.ConfigPath)
 	} else {
 		_, _ = fmt.Fprintf(w, "wrote %s\n", res.ConfigPath)
 	}
 	_, _ = fmt.Fprintf(w, "\nchange options later with:\n  aether-server config set <key> <value>\n")
-	return service, nil
+	return nil
 }
 
 // linkUnitAlias gives the unit just written its second name, the link the
-// updater makes, and returns the name to start it by: the second name when
-// that link is ours, else the unit's own. A name held by anything else is
-// left as it is, and no failure to link fails the install.
-func linkUnitAlias(w io.Writer, unitPath string) string {
+// updater makes. A name held by anything else is left as it is, and no
+// failure to link fails the install.
+func linkUnitAlias(w io.Writer, unitPath string) {
 	unit := filepath.Base(unitPath)
 	if unit != filepath.Base(serversetup.UnitPath) {
-		return serversetup.ServiceName
+		return
 	}
-	if _, err := selfupdate.Symlink(filepath.Dir(unitPath), unit, serverupdate.UnitAlias); err != nil {
-		if !errors.Is(err, selfupdate.ErrNameTaken) {
-			_, _ = fmt.Fprintln(w, "warning:", err)
-		}
-		return serversetup.ServiceName
+	_, err := selfupdate.Symlink(filepath.Dir(unitPath), unit, serversetup.UnitAlias)
+	if err != nil && !errors.Is(err, selfupdate.ErrNameTaken) {
+		_, _ = fmt.Fprintln(w, "warning:", err)
 	}
-	return strings.TrimSuffix(serverupdate.UnitAlias, ".service")
 }
 
 // configuredOptions reads the config file back into the serve options, so
@@ -296,9 +289,8 @@ func configuredOptions(configPath string) (*flag.FlagSet, error) {
 // - render and tell). claimCode is the code reportEdge issued, or "";
 // docker is whether the Docker daemon answered; tailnetHost is this host's
 // MagicDNS name, or "". The tailnet line follows the saved config: a key
-// requirement means a tailnet login alone does not link. service is the
-// name the activation line starts.
-func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claimCode string, docker bool, tailnetHost, service string) error {
+// requirement means a tailnet login alone does not link.
+func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claimCode string, docker bool, tailnetHost string) error {
 	sudo := sudoPrefix()
 	show := func(s string) string { return s }
 	// NO_COLOR: https://no-color.org
@@ -364,7 +356,7 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 	install := "on your computer, install Cloudfield if it is not there yet (Windows: docs/install.md):\n       " + show(clientInstall)
 	reach := append(here, append([]string{install}, computer...)...)
 	steps := append([]string{
-		"start the server on this machine:\n       " + show(strings.ReplaceAll(strings.TrimSuffix(serversetup.ActivateCommand, serversetup.ServiceName)+service, "systemctl", sudo+"systemctl")),
+		"start the server on this machine:\n       " + show(strings.ReplaceAll(serversetup.ActivateCommand, "systemctl", sudo+"systemctl")),
 	}, reach...)
 	if !docker {
 		steps = slices.Insert(steps, 0, "install or start Docker on this machine:\n       "+show(dockerInstall))

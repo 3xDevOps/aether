@@ -54,9 +54,8 @@ echo "installed /home/tester/.local/share/cloudfield/desktop"
 echo "open it from your application menu as Cloudfield"
 EOF
 
-# Stands in for the real binary. A completed setup writes the systemd unit
-# and links its second name to it, which is what the installer checks
-# afterwards, and ends on its next steps.
+# Stands in for the real binary. A completed setup writes the systemd unit,
+# which is what the installer checks afterwards, and ends on its next steps.
 # It usually writes within the installer's marker's file time, which counts
 # as written. SETUP_FAILS is a setup that errors;
 # SETUP_DECLINES is the operator answering no to the summary, which the real
@@ -70,10 +69,9 @@ if [ "${SETUP_DECLINES:-0}" = 1 ]; then
 	exit 0
 fi
 touch "$AETHER_UNIT_PATH"
-ln -s aether-server.service "${AETHER_UNIT_PATH%/*}/cloudfield-server.service" 2>/dev/null || :
 echo "next:"
 echo "  1. start the server on this machine:"
-echo "       sudo systemctl daemon-reload && sudo systemctl enable --now cloudfield-server"
+echo "       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
 EOF
 
 # $fixtures/releases/<tag>/ holds what each tag publishes, $fixtures/latest
@@ -386,7 +384,7 @@ reset() {
 	: >"$out"
 	: >"$err"
 	rm -f "$bindir/aether" "$bindir/aether-server" "$bindir/cloudfield" "$bindir/cloudfield-server" \
-		"$AETHER_UNIT_PATH" "$tmp/cloudfield-server.service"
+		"$AETHER_UNIT_PATH"
 	chmod 0755 "$sysbin"
 	rm -rf "${sysbin:?}"/* "$home/.local"
 	rm -f "$answers"
@@ -435,7 +433,7 @@ not_ran "aether gui build"
 grep -q "^sudo .*aether-server setup$" "$log" || fail "setup did not go through sudo"
 [ "$(activations)" = 1 ] || fail "printed the activation line $(activations) times, want once"
 [ "$(sed -n '/systemctl daemon-reload/,$p' "$out")" = "$(printf '%s\n\n%s' \
-	"       sudo systemctl daemon-reload && sudo systemctl enable --now cloudfield-server" \
+	"       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server" \
 	"Read the quickstart before going further: $quickstart")" ] ||
 	fail "more than the guide follows setup's next steps"
 plain
@@ -475,21 +473,6 @@ SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 |
 printed "  sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
 [ "$(activations)" = 1 ] || fail "printed the activation line $(activations) times, want once"
 ends_with "  aether link '<invite link>'    # or with an invite link from an admin"
-
-# A unit that a release with the second names linked starts by the new
-# name; a cloudfield-server.service that is not our link leaves the old one.
-reset "--role server, declined, the unit already linked"
-touch -t 200001010000 "$AETHER_UNIT_PATH"
-ln -s aether-server.service "$tmp/cloudfield-server.service"
-SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
-printed "  sudo systemctl daemon-reload && sudo systemctl enable --now cloudfield-server"
-
-reset "--role server, declined, cloudfield-server.service is another file"
-touch -t 200001010000 "$AETHER_UNIT_PATH"
-echo "[Unit]" >"$tmp/cloudfield-server.service"
-SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
-printed "  sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
-[ "$(cat "$tmp/cloudfield-server.service")" = "[Unit]" ] || fail "the installer changed $tmp/cloudfield-server.service"
 
 reset "--role server as root, declined but a unit is already installed"
 touch -t 200001010000 "$AETHER_UNIT_PATH"

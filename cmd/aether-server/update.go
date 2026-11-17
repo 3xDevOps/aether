@@ -195,7 +195,7 @@ func linkUnitAndReload() {
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
 	}
-	if !created || unitAliasResolved() {
+	if !created || serversetup.UnitAliasResolves() {
 		return
 	}
 	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {

@@ -122,22 +122,22 @@ func TestInstallForVMsWithoutKVMWritesNothing(t *testing.T) {
 	}
 }
 
-// Install links cloudfield-server.service to the unit as the updater does
-// and starts the unit by that name only when the link is ours. Whatever
-// else holds the name is left as it is, and a rerun keeps one link.
-func TestInstallStartsTheUnitByItsSecondName(t *testing.T) {
+// Install links cloudfield-server.service to the unit as the updater does,
+// leaves whatever else holds the name as it is, and keeps one link on a
+// rerun. systemctl enable refuses an alias, so the activation line keeps
+// the unit's own name.
+func TestInstallLinksTheUnitsSecondName(t *testing.T) {
 	t.Setenv("SUDO_USER", "")
 	fakeDocker(t, nil)
 	for name, tc := range map[string]struct {
-		before  func(alias, unit string) error
-		link    string
-		service string
+		before func(alias, unit string) error
+		link   string
 	}{
-		"fresh":                  {nil, "aether-server.service", "cloudfield-server"},
-		"linked by the updater":  {func(alias, _ string) error { return os.Symlink("aether-server.service", alias) }, "aether-server.service", "cloudfield-server"},
-		"an absolute link to it": {func(alias, unit string) error { return os.Symlink(unit, alias) }, "", "cloudfield-server"},
-		"another unit's file":    {func(alias, _ string) error { return os.WriteFile(alias, []byte("[Unit]\n"), 0o644) }, "", "aether-server"},
-		"a link to another unit": {func(alias, _ string) error { return os.Symlink("other.service", alias) }, "other.service", "aether-server"},
+		"fresh":                  {nil, "aether-server.service"},
+		"linked by the updater":  {func(alias, _ string) error { return os.Symlink("aether-server.service", alias) }, "aether-server.service"},
+		"an absolute link to it": {func(alias, unit string) error { return os.Symlink(unit, alias) }, ""},
+		"another unit's file":    {func(alias, _ string) error { return os.WriteFile(alias, []byte("[Unit]\n"), 0o644) }, ""},
+		"a link to another unit": {func(alias, _ string) error { return os.Symlink("other.service", alias) }, "other.service"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -156,7 +156,7 @@ func TestInstallStartsTheUnitByItsSecondName(t *testing.T) {
 				if err := writeInstall(&out, unitPath, configPath, map[string]string{"data-dir": filepath.Join(dir, "data")}, false, false); err != nil {
 					t.Fatal(err)
 				}
-				want := "  1. start the server on this machine:\n       systemctl daemon-reload && systemctl enable --now " + tc.service + "\n"
+				want := "  1. start the server on this machine:\n       systemctl daemon-reload && systemctl enable --now aether-server\n"
 				if got := nextSteps(t, out.String()); !strings.HasPrefix(got, want) || strings.Contains(out.String(), alias) {
 					t.Errorf("next steps:\n%s\nwant them to start:\n%s", out.String(), want)
 				}

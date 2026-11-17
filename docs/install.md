@@ -1119,8 +1119,10 @@ and git history. Follow the steps in order.
 sudo aether-server edge leave
 # 1. Stop the service.
 sudo systemctl disable --now aether-server
-sudo rm -f /etc/systemd/system/aether-server.service /etc/systemd/system/cloudfield-server.service \
-  /etc/systemd/system/aether.slice
+sudo rm -f /etc/systemd/system/aether-server.service /etc/systemd/system/aether.slice
+# The cloudfield-* names, only where they are the installer's links.
+u=/etc/systemd/system/cloudfield-server.service
+[ "$(readlink $u)" = aether-server.service ] && sudo rm $u
 sudo systemctl daemon-reload
 # 2. Containers and VMs. Stopping the server does NOT remove them.
 sudo docker rm -f $(sudo docker ps -aq --filter label=aether.managed=true)
@@ -1131,7 +1133,8 @@ sudo docker volume rm $(sudo docker volume ls -q --filter label=aether.managed=t
 # image retention policy.
 # 3. State, config, binary.
 sudo rm -rf /var/lib/aether /etc/aether
-sudo rm -f /usr/local/bin/aether-server /usr/local/bin/cloudfield-server
+sudo rm -f /usr/local/bin/aether-server
+[ "$(readlink /usr/local/bin/cloudfield-server)" = aether-server ] && sudo rm /usr/local/bin/cloudfield-server
 sudo rm -rf /usr/local/bin/cloud-hypervisor /usr/local/lib/aether   # with session-runtime vm
 # The VM firewall rules and IP forwarding stay until the next reboot.
 sudo rm -rf /tmp/aether-patch-*
@@ -1158,8 +1161,9 @@ systemctl --user daemon-reload
 # The client.
 rm -rf ~/.config/aether ~/.config/aether-desktop
 ssh-keygen -R '[<server-host>]:2222'
-rm -f ~/.local/bin/aether ~/.local/bin/cloudfield   # the client default
-# sudo rm -f /usr/local/bin/aether /usr/local/bin/cloudfield if you installed there instead
+rm -f ~/.local/bin/aether       # the client default
+[ "$(readlink ~/.local/bin/cloudfield)" = aether ] && rm ~/.local/bin/cloudfield
+# Installed in /usr/local/bin instead: the same two lines there, with sudo.
 # only if you ran `aether gui build`:
 rm -rf ~/.local/share/cloudfield/desktop ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.desktop
 rm -rf ~/.cache/aether ~/.cache/electron ~/.cache/electron-builder
