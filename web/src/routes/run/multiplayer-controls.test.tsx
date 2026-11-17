@@ -150,6 +150,19 @@ it('moves the red takeover hold copy with the other dots', async () => {
   expect(positions(group.querySelector('[data-takeover-hold] .control-matrix-grid'))).toEqual(positions(neutral))
 })
 
+it('cancels a throttled frame when the strip unmounts', () => {
+  const view = render(<MultiplayerControls run={run} agent={agent(vi.fn())} onPeople={vi.fn()} />)
+  const group = strip()
+  fireEvent.pointerMove(group, { pointerType: 'mouse', clientX: 40, clientY: 12 })
+  tick()
+  fireEvent.pointerMove(group, { pointerType: 'mouse', clientX: 52, clientY: 12 })
+  expect(timers.size).toBe(1)
+
+  view.unmount()
+  expect(timers.size).toBe(0)
+  expect(frames.size).toBe(0)
+})
+
 it('supports touch drag and cancellation', () => {
   useStore.setState({
     roomStatus: {

@@ -129,7 +129,7 @@ export function useDotFade(ref: RefObject<HTMLElement | null>) {
       const rect = matrix.getBoundingClientRect()
       if (!rect.width || !rect.height) return
       if (!layers) build(rect.width, rect.height)
-      const dt = lastFrame ? clamp((now - lastFrame) / 16.67, 0.25, 2) : 1
+      const dt = lastFrame ? clamp((now - lastFrame) / 16.67, 0.25, 10) : 1
       lastFrame = now
       zones = [...strip.querySelectorAll('.control-matrix-clear')].map((element) => {
         const box = element.getBoundingClientRect()
