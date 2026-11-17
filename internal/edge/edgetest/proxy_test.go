@@ -45,7 +45,9 @@ type proxy struct {
 }
 
 type controlLink struct {
-	serverID    string
+	serverID string
+	// host is the host the agent dialed, which picks the relay origin.
+	host        string
 	agent, edge *websocket.Conn
 }
 
@@ -126,7 +128,7 @@ func (p *proxy) serveControl(w http.ResponseWriter, r *http.Request, backAddr st
 	for _, c := range []*websocket.Conn{edgeWS, agentWS} {
 		c.SetReadLimit(edgeproto.MaxControlMessageSize)
 	}
-	l := &controlLink{agent: agentWS, edge: edgeWS}
+	l := &controlLink{host: r.Host, agent: agentWS, edge: edgeWS}
 	p.mu.Lock()
 	p.links = append(p.links, l)
 	p.mu.Unlock()

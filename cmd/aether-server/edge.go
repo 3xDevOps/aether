@@ -122,9 +122,9 @@ func edgeCmd(args []string) error {
 	case "trust":
 		return edgeTrust(os.Stdout, os.Stdin, *o.dataDir, edgeURL)
 	case "move":
-		return edgeMove(os.Stdout, *o.dataDir, edgeURL, target, configPath)
+		return edgeMove(os.Stdout, *o.dataDir, edgeURL, edgeproto.AccessPolicy(*o.edgeAccess), target, configPath)
 	case "leave":
-		return edgeLeave(os.Stdout, *o.dataDir, edgeURL, configPath)
+		return edgeLeave(os.Stdout, *o.dataDir, edgeURL, edgeproto.AccessPolicy(*o.edgeAccess), configPath)
 	default:
 		return fmt.Errorf("unknown edge command %q (want status, claim-code, trust, move, or leave)", sub)
 	}
@@ -183,6 +183,9 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	_, _ = fmt.Fprintf(tw, "edge access\t%s\n", policy)
 	_, _ = fmt.Fprintf(tw, "server id\t%s\n", id)
 	stale := status.Stale(now)
+	if status.Connected && stale == nil && status.Edge != "" && status.Edge != origin {
+		_, _ = fmt.Fprintf(tw, "running\tthe running server is at %s; restart to apply edge-url: %s%s\n", status.Edge, sudoPrefix(), serversetup.RestartCommand)
+	}
 	_, _ = fmt.Fprintf(tw, "connector\t%s  (add it to ChatGPT or Claude; get a code: aether mcp)\n", origin+edgeproto.MCPPath(id))
 	if status.Connected && stale == nil && status.Protocol >= edgeproto.VersionUniversalMCP {
 		_, _ = fmt.Fprintf(tw, "universal\t%s  (the connector URL for members with a GitHub account linked; aether mcp prints each member's)\n",
@@ -401,12 +404,13 @@ func edgeTrust(w io.Writer, in io.Reader, dataDir, edgeURL string) error {
 
 // edgeMove moves the server to target, another relay address of the edge
 // it is enrolled with, once edgeagent.Agent.Move found the move safe.
-func edgeMove(w io.Writer, dataDir, edgeURL, target, configPath string) error {
+func edgeMove(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPolicy, target, configPath string) error {
 	hostKey, err := sshd.LoadOrCreateHostKey(server.HostKeyPath(dataDir))
 	if err != nil {
 		return err
 	}
-	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: edgeURL, DataDir: dataDir, HostKey: hostKey})
+	// The hello states the policy, and the edge records it.
+	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: edgeURL, DataDir: dataDir, HostKey: hostKey, AccessPolicy: policy})
 	if err != nil {
 		return err
 	}
@@ -414,6 +418,12 @@ func edgeMove(w io.Writer, dataDir, edgeURL, target, configPath string) error {
 	if err != nil {
 		return err
 	}
+	return applyMove(w, dataDir, edgeURL, to, configPath)
+}
+
+// applyMove writes to, the address edgeagent.Agent.Move checked, as
+// edge-url and says how to apply and undo it.
+func applyMove(w io.Writer, dataDir, edgeURL, to, configPath string) error {
 	pinned, err := edgeagent.OpenState(dataDir).PinnedKey()
 	if err != nil {
 		return err
@@ -427,12 +437,13 @@ func edgeMove(w io.Writer, dataDir, edgeURL, target, configPath string) error {
 	return nil
 }
 
-func edgeLeave(w io.Writer, dataDir, edgeURL, configPath string) error {
+func edgeLeave(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPolicy, configPath string) error {
 	hostKey, err := sshd.LoadOrCreateHostKey(server.HostKeyPath(dataDir))
 	if err != nil {
 		return err
 	}
-	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: edgeURL, DataDir: dataDir, HostKey: hostKey})
+	// The hello states the policy, and the edge records it.
+	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: edgeURL, DataDir: dataDir, HostKey: hostKey, AccessPolicy: policy})
 	if err != nil {
 		return err
 	}

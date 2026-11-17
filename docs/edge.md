@@ -93,9 +93,10 @@ sudo systemctl restart aether-server
 `edge move <address>` works for any edge that serves
 [more than one address pair](#more-than-one-address-pair). It enrolls at the
 current address, then at the new one, and writes `edge-url` only when every
-check passes; otherwise it prints the refusal and changes nothing. Each
-enrollment takes over the running server's control connection, which the
-server dials again within seconds.
+check passes; otherwise it prints the refusal and writes nothing on the
+server. Each enrollment replaces the running server's control connection at
+the edge, which the server dials again within seconds, and states the
+server's `edge-access`, so the edge's record of the server stays as it was.
 
 | Check | Refusal |
 | --- | --- |
@@ -114,7 +115,8 @@ After the move:
 - The edge key stays pinned and the owner stays: the server keeps both per edge
   key, not per address.
 - `aether-server edge status` names the new address and the connector URLs at
-  it.
+  it. Until the restart it also prints `running      the running server is at
+  <old address>; restart to apply edge-url: sudo systemctl restart aether-server`.
 - Connectors registered at the old address keep working while the edge
   announces it. The Claude and ChatGPT listings stay at
   `https://edge.onaether.dev/mcp`.
@@ -125,6 +127,15 @@ After the move:
   new address, but accepts connector tokens only for it, so connectors
   registered at the old address fail until the server is updated or moved back.
 - To move back, run `sudo aether-server edge move <old address>` and restart.
+
+A client keeps the address it already uses, before and after a server moves.
+Without `--edge`, `aether login`, `logout`, `servers`, `link --claim` and the
+dashboard's edge verbs use the one edge the machine is signed in to; with
+several, the project's edge at an address it holds a token for, the new one
+first; with none, the project's edge at an address a saved link names, the new
+one first; else `https://edge.cloudfield.ai`. So a client set up at
+`https://edge.onaether.dev` signs in there again after updating, and its links
+keep finding their token.
 
 ### Server id and claiming
 
@@ -223,8 +234,9 @@ aether logout             # revokes this device's token at the edge and deletes 
 ```
 
 Confirm only a code you started. `--edge <url>` takes the relay origin; without
-it commands use the one edge this machine is signed in to, else
-`https://edge.cloudfield.ai`. The device key `edge-device-key` and the token file
+it commands use the one edge this machine is signed in to, else the project's
+edge at the address this machine already uses, else `https://edge.cloudfield.ai`
+([Moving to another address of the edge](#moving-to-another-address-of-the-edge)). The device key `edge-device-key` and the token file
 `edge-tokens.json` live in the client's config directory with mode 0600.
 `aether servers` shows the access policy the edge reports; the server enforces
 its own.
@@ -234,7 +246,7 @@ you: it opens no browser, prints one JSON line, then waits for you to confirm
 and prints a second:
 
 ```
-{"state":"pending","edge":"https://edge.cloudfield.ai","signin_origin":"https://edge.cloudfield.ai","user_code":"<code>","verification_uri":"https://edge.cloudfield.ai/device","expires_at":"<RFC 3339 time>"}
+{"state":"pending","edge":"https://edge.cloudfield.ai","signin_origin":"https://auth.cloudfield.ai","user_code":"<code>","verification_uri":"https://auth.cloudfield.ai/device","expires_at":"<RFC 3339 time>"}
 {"state":"signed_in",...,"account":{...},"device":{"id":"<device id>","label":"<label>","key":"<public key>"}}
 ```
 

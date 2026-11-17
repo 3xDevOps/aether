@@ -451,3 +451,23 @@ func TestLinkingAnotherServerStopsForwardsToTheOldOne(t *testing.T) {
 		t.Fatalf("forward.status after linking another server = %d: %s", rec.Code, rec.Body)
 	}
 }
+
+// The dashboard's edge verbs pick the edge as `aether login` does: a
+// machine linked through the hosted edge's former address keeps it, and
+// one with no link takes the new one.
+func TestChooseEdgeKeepsTheLinkedHostedAddress(t *testing.T) {
+	useTempConfigDir(t)
+	if c, perr := chooseEdge(""); perr != nil || c.URL() != "https://edge.cloudfield.ai" {
+		t.Fatalf("with nothing linked: %v, %v", c, perr)
+	}
+	if err := cli.Save(cli.Config{ServerID: "srv", EdgeURL: "https://edge.onaether.dev",
+		Links: []cli.NamedLink{{Name: "home", Addr: "home:2222"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if c, perr := chooseEdge(""); perr != nil || c.URL() != "https://edge.onaether.dev" {
+		t.Fatalf("linked through https://edge.onaether.dev: %v, %v", c, perr)
+	}
+	if c, perr := chooseEdge("https://edge.example"); perr != nil || c.URL() != "https://edge.example" {
+		t.Fatalf("an edge named: %v, %v", c, perr)
+	}
+}

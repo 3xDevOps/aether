@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
 
@@ -24,11 +25,15 @@ import (
 // tokens only for the origin it is enrolled at, so connectors registered
 // at the current one would stop working.
 func (a *Agent) Move(ctx context.Context, target string) (string, error) {
-	to, err := edgeproto.Origin(target)
+	to, err := edgeclient.Canonical(target)
 	if err != nil {
 		return "", fmt.Errorf("edgeagent: %w", err)
 	}
-	if to == a.origin {
+	from, err := edgeclient.Canonical(a.origin)
+	if err != nil {
+		return "", fmt.Errorf("edgeagent: %w", err)
+	}
+	if to == from {
 		return "", fmt.Errorf("edge-url already is %s", to)
 	}
 	pinned, err := a.state.PinnedKey()
@@ -39,22 +44,8 @@ func (a *Agent) Move(ctx context.Context, target string) (string, error) {
 		return "", fmt.Errorf("no edge key is pinned for %s yet, so nothing shows that %s is the same edge; "+
 			"start the server, let it connect once, and run edge move again", a.origin, to)
 	}
-	ready, protocol, err := a.probe(ctx, a.origin)
-	if err != nil {
+	if err = a.probeMove(ctx, a.origin, from, to); err != nil {
 		return "", err
-	}
-	if protocol < edgeproto.VersionRelayOrigin {
-		return "", fmt.Errorf("%s speaks edge protocol %d; a server moved to %s would accept connector tokens only for that address, "+
-			"so connectors registered at %s would stop working. Moving needs edge protocol %d or later: the edge's operator upgrades it",
-			a.origin, protocol, to, a.origin, edgeproto.VersionRelayOrigin)
-	}
-	announced := ready.RelayOrigins
-	if len(announced) == 0 {
-		announced = []string{a.origin}
-	}
-	if !slices.Contains(announced, a.origin) || !slices.Contains(announced, to) {
-		return "", fmt.Errorf("the edge at %s announces the relay addresses %s; moving needs both %s and %s among them: the edge's operator adds the address first",
-			a.origin, strings.Join(announced, ", "), a.origin, to)
 	}
 	info, err := FetchEdgeInfo(ctx, to)
 	if err != nil {
@@ -65,10 +56,41 @@ func (a *Agent) Move(ctx context.Context, target string) (string, error) {
 			"edge move only changes the address of one edge; changing edges is in docs/edge.md#turning-it-on",
 			to, edgeproto.EdgeKeyFingerprint(info.Key), edgeproto.EdgeKeyFingerprint(pinned), a.origin)
 	}
-	if _, _, err := a.probe(ctx, to); err != nil {
+	if err := a.probeMove(ctx, to, from, to); err != nil {
 		return "", err
 	}
 	return to, nil
+}
+
+// probeMove enrolls at origin and checks that the edge answering there
+// speaks edgeproto.VersionRelayOrigin or later and announces both from
+// and to, all canonical: the edge at either address must, since a client
+// may come in on either.
+func (a *Agent) probeMove(ctx context.Context, origin, from, to string) error {
+	ready, protocol, err := a.probe(ctx, origin)
+	if err != nil {
+		return err
+	}
+	if protocol < edgeproto.VersionRelayOrigin {
+		return fmt.Errorf("%s speaks edge protocol %d; a server moved to %s would accept connector tokens only for that address, "+
+			"so connectors registered at %s would stop working. Moving needs edge protocol %d or later: the edge's operator upgrades it",
+			origin, protocol, to, from, edgeproto.VersionRelayOrigin)
+	}
+	announced := ready.RelayOrigins
+	if len(announced) == 0 {
+		announced = []string{origin}
+	}
+	canonical := make([]string, 0, len(announced))
+	for _, o := range announced {
+		if c, cerr := edgeclient.Canonical(o); cerr == nil {
+			canonical = append(canonical, c)
+		}
+	}
+	if !slices.Contains(canonical, from) || !slices.Contains(canonical, to) {
+		return fmt.Errorf("the edge at %s announces the relay addresses %s; moving needs both %s and %s among them: the edge's operator adds the address first",
+			origin, strings.Join(announced, ", "), from, to)
+	}
+	return nil
 }
 
 // probe enrolls at origin and closes the connection once the edge is

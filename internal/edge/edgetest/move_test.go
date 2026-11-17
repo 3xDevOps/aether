@@ -47,6 +47,16 @@ func TestEdgeMove(t *testing.T) {
 	if want := "edge-url already is " + relayA; err == nil || err.Error() != want {
 		t.Errorf("move to the address in use: %v, want %q", err, want)
 	}
+	// The refused move's probe replaced the server's control connection,
+	// stating the policy the server has: the server is back at A as it was.
+	backOnline(t, h, s)
+	if m := h.relay().Metrics().ServersByOrigin; m[relayA] != 1 {
+		t.Errorf("servers by origin after a refused move %v, want the server at %s", m, relayA)
+	}
+	srv, err := h.edgeStore().Server(t.Context(), s.id)
+	if err != nil || srv.AccessPolicy != policy {
+		t.Errorf("edge records policy %q (%v) after a refused move, want %s", srv.AccessPolicy, err, policy)
+	}
 
 	h.stopEdge()
 	h.pairB = true
@@ -98,6 +108,7 @@ func TestEdgeMove(t *testing.T) {
 	if err != nil || to != relayA {
 		t.Fatalf("move back to %s: %q, %v", relayA, to, err)
 	}
+	backOnline(t, h, s)
 	s.edge = relayA
 	s.restart(policy)
 	backOnline(t, h, s)
@@ -167,15 +178,104 @@ func TestEdgeMoveRefusesAnotherEdge(t *testing.T) {
 	}
 }
 
+// The edge must announce the address in use too, and an announced target
+// that does not answer refuses the move after the probe at the current
+// address: in both cases nothing changes and the server stays at A.
+func TestEdgeMoveRefusesAMissingOrUnreachableAddress(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	s := h.newServer(edgeproto.PolicyAccount)
+	h.claimServer(h.login(alice)[0], s)
+	relayA := h.relayURL
+	const elsewhere, unreachable = "http://127.0.0.1:2", "http://127.0.0.1:1"
+	for _, tc := range []struct {
+		announced []string
+		want      func(error) bool
+		wantText  string
+	}{
+		{[]string{elsewhere, unreachable}, nil, fmt.Sprintf("the edge at %s announces the relay addresses %s, %s; moving needs both %s and %s among them: "+
+			"the edge's operator adds the address first", relayA, elsewhere, unreachable, relayA, unreachable)},
+		{[]string{relayA, unreachable}, func(err error) bool {
+			return err != nil && strings.HasPrefix(err.Error(), `edgeagent: Get "`+unreachable+`/v1/edge": `)
+		}, ""},
+	} {
+		h.proxy.setTamper(t, func(e logEntry) (edgeproto.Message, bool) {
+			if r, ok := e.msg.(edgeproto.Ready); ok {
+				r.RelayOrigins = tc.announced
+				return r, true
+			}
+			return e.msg, true
+		})
+		_, err := moveAgent(t, s, relayA).Move(t.Context(), unreachable)
+		if tc.want != nil && !tc.want(err) || tc.want == nil && (err == nil || err.Error() != tc.wantText) {
+			t.Errorf("announced %v: %v, want %q", tc.announced, err, tc.wantText)
+		}
+		backOnline(t, h, s)
+		if st, _, err := s.state().Status(); err != nil || st.Edge != relayA {
+			t.Errorf("announced %v: status names edge %q (%v), want %s", tc.announced, st.Edge, err, relayA)
+		}
+	}
+}
+
+// The edge answering at the target must pass the same checks as the one
+// at the current address: a target that speaks protocol 5, or announces
+// only itself, refuses the move after the probe there.
+func TestEdgeMoveChecksTheTargetToo(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	s := h.newServer(edgeproto.PolicyAccount)
+	h.claimServer(h.login(alice)[0], s)
+	relayA := h.relayURL
+	h.stopEdge()
+	h.pairB = true
+	h.startEdge()
+	backOnline(t, h, s)
+	relayB := h.relayB
+	hostB := strings.TrimPrefix(relayB, "http://")
+	for _, tc := range []struct {
+		name   string
+		tamper func(edgeproto.Message) edgeproto.Message
+		want   string
+	}{
+		{"protocol 5 at the target", func(m edgeproto.Message) edgeproto.Message {
+			if ch, ok := m.(edgeproto.Challenge); ok {
+				ch.Version = edgeproto.VersionRelayOrigin - 1
+				return ch
+			}
+			return m
+		}, fmt.Sprintf("%s speaks edge protocol 5; a server moved to %s would accept connector tokens only for that address, "+
+			"so connectors registered at %s would stop working. Moving needs edge protocol 6 or later: the edge's operator upgrades it", relayB, relayB, relayA)},
+		{"the target announces only itself", func(m edgeproto.Message) edgeproto.Message {
+			if r, ok := m.(edgeproto.Ready); ok {
+				r.RelayOrigins = []string{relayB}
+				return r
+			}
+			return m
+		}, fmt.Sprintf("the edge at %s announces the relay addresses %s; moving needs both %s and %s among them: the edge's operator adds the address first",
+			relayB, relayB, relayA, relayB)},
+	} {
+		h.proxy.setTamper(t, func(e logEntry) (edgeproto.Message, bool) {
+			if e.link.host != hostB {
+				return e.msg, true
+			}
+			return tc.tamper(e.msg), true
+		})
+		if _, err := moveAgent(t, s, relayA).Move(t.Context(), relayB); err == nil || err.Error() != tc.want {
+			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+		backOnline(t, h, s)
+	}
+}
+
 // moveAgent is the agent `aether-server edge move` builds over s's data
-// directory, with edge-url from.
+// directory, with edge-url from and the server's edge-access.
 func moveAgent(t *testing.T, s *serverNode, from string) *edgeagent.Agent {
 	t.Helper()
 	hostKey, err := sshd.LoadOrCreateHostKey(filepath.Join(s.dir, "ssh", "host_ed25519_key"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := edgeagent.New(edgeagent.Config{EdgeURL: from, DataDir: s.dir, HostKey: hostKey})
+	a, err := edgeagent.New(edgeagent.Config{EdgeURL: from, DataDir: s.dir, HostKey: hostKey, AccessPolicy: s.policy})
 	if err != nil {
 		t.Fatal(err)
 	}

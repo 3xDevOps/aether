@@ -1981,7 +1981,9 @@ does, with the same files in the config directory:
 | `edge.logout` | `aether logout` |
 
 - `edge` names the edge by its relay origin. Without it a verb uses the one
-  edge this machine is signed in to, else `https://edge.cloudfield.ai`. An
+  edge this machine is signed in to, else the project's edge at the address
+  this machine already uses, else `https://edge.cloudfield.ai`
+  ([edge.md](edge.md#moving-to-another-address-of-the-edge)). An
   address that is not `https://host[:port]`, or `http://` on loopback,
   answers `-32602`.
 - `edge.login` answers once the edge has registered the sign-in. The person

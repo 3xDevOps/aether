@@ -251,6 +251,57 @@ func TestEdgeMoveNeedsAPinnedKey(t *testing.T) {
 	}
 }
 
+// A move that passed its checks writes the new edge-url, then says how
+// to apply it and how to move back, both as an admin types them under
+// sudo. Until the restart, edge status says the running server is still
+// at the old address.
+func TestApplyMoveAndThePendingRestart(t *testing.T) {
+	t.Setenv("SUDO_USER", "ubuntu")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "server.conf")
+	const from, to = "https://edge.onaether.dev", "https://edge.cloudfield.ai"
+	if err := serversetup.WriteConfig(path, map[string]string{"data-dir": dir, "edge-url": from}); err != nil {
+		t.Fatal(err)
+	}
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	if err := edgeagent.OpenState(dir).Pin(pub); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := applyMove(&out, dir, from, to, path); err != nil {
+		t.Fatal(err)
+	}
+	want := "enrolled at " + to + ", an address of the same edge (edge key " + edgeproto.EdgeKeyFingerprint(pub) + ", still pinned); " +
+		"the edge announces " + from + " too, so links and connectors made there keep working\n" +
+		path + ": edge-url = " + to + " (was " + from + ")\n" +
+		"apply it with:\n  sudo systemctl restart aether-server\n" +
+		"to move back:\n  sudo aether-server edge move " + from + " --config " + path + "\n"
+	if out.String() != want {
+		t.Errorf("move output:\n%s\nwant:\n%s", out.String(), want)
+	}
+	if got, err := serversetup.Load(path); err != nil || got["edge-url"] != to {
+		t.Errorf("config after the move: %v, %v", got, err)
+	}
+
+	if _, err := serverID(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(edgeagent.Status{Edge: from, Connected: true, Since: time.Now(), PID: os.Getpid(), Heartbeat: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(edgeagent.StateDir(dir), "status.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := edgeStatus(&out, dir, to, edgeproto.PolicyAccount, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if want := "running      the running server is at " + from + "; restart to apply edge-url: sudo systemctl restart aether-server\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("status before the restart lacks %q:\n%s", want, out.String())
+	}
+}
+
 // Turning the edge on at install names a policy; nothing defaults it.
 func TestInstallWithAnEdgeNeedsAnAccessPolicy(t *testing.T) {
 	for args, want := range map[string]string{
