@@ -426,17 +426,23 @@ func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStat
 	c.mu.Lock()
 	done := c.done
 	c.mu.Unlock()
+	// Like Docker, an exited container answers at once even when ctx expired
+	// meanwhile; a two-way select would pick ctx at random.
 	select {
-	case <-ctx.Done():
-		return runtime.ExitStatus{}, ctx.Err()
 	case <-done:
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if done != c.done {
-			return c.prevExit, nil
+	default:
+		select {
+		case <-ctx.Done():
+			return runtime.ExitStatus{}, ctx.Err()
+		case <-done:
 		}
-		return *c.exit, nil
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if done != c.done {
+		return c.prevExit, nil
+	}
+	return *c.exit, nil
 }
 
 func (r *fakeRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.ContainerInfo, error) {
