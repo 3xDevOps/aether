@@ -125,6 +125,10 @@ export async function startServer(dir: string, options: ServerOptions = {}): Pro
     {
       ...process.env,
       AETHER_FAKE_AGENT: fakeAgent,
+      // The live release feed would decide the channel of a server that has
+      // not chosen one, so the suite's results would follow what GitHub
+      // publishes.
+      AETHER_NO_UPDATE_CHECK: '1',
       ...(options.githubProvider ? {
         AETHER_E2E_GITHUB_ROOT: dir,
         AETHER_E2E_GITHUB_ADDR: addr,
