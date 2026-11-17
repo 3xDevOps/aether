@@ -258,7 +258,7 @@ aether: refused 1: the server has a different file at each of those paths; read 
 ```
 
 If the server stops answering mid-push, the files it may not have are printed
-as `unconfirmed <path>`, and the error ends with `cloudfield config ls -r <agent>
+as `unconfirmed <path>`, and the error ends with `aether config ls -r <agent>
 shows what the server has`. A server older than the CLI fails with `the server
 is older than this CLI, and an admin updates it with aether server update`.
 

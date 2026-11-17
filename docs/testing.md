@@ -317,7 +317,7 @@ process (`internal/server/mockmodel_integration_test.go`) serves streaming
 Anthropic `/v1/messages` and OpenAI `/v1/responses`. Each prompt the test
 sends carries a tag, `aether-script:<turn>;`, naming the script the mock
 plays for that turn: one tool call per step, then a text answer. The mock
-answers each report reminder Cloudfield sends with `cloudfield-internal report`.
+answers each report reminder Cloudfield sends with `aether-internal report`.
 
 One Standard and one Enhanced session per agent play these turns in order. The
 launch starts `turn`, mail starts `wake`, and `run.inject` starts the rest:

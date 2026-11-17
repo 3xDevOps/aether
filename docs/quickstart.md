@@ -93,10 +93,10 @@ next:
        curl -fsSL https://raw.githubusercontent.com/3xDevOps/cloudfield/main/scripts/install.sh | sh -s -- --client
   3. on your computer: in the Cloudfield app's Connect step choose Cloudfield relay, sign in
      with GitHub and paste the claim link above; in a terminal:
-       cloudfield login
-       cloudfield link --claim <server id>-<secret>
+       aether login
+       aether link --claim <server id>-<secret>
   4. optional, to run agents from ChatGPT or Claude, on that computer:
-       cloudfield mcp
+       aether mcp
 ```
 
 On a tailnet, item 3 names this host instead, and the dashboard address when
@@ -107,7 +107,7 @@ first link makes its account the super admin:
 ```
   3. on your computer, on the same tailnet: in the Cloudfield app's Connect step choose
      Tailscale and enter my-server.tail1234.ts.net; in a terminal:
-       cloudfield link my-server.tail1234.ts.net
+       aether link my-server.tail1234.ts.net
      or, with nothing installed, open https://my-server.tail1234.ts.net/ in a browser there
 ```
 

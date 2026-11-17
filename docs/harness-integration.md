@@ -80,7 +80,7 @@ chmod +x "$adapter_dir/aether-context.sh"
 rm -rf "$adapter_dir"
 ```
 
-It calls `cloudfield-internal hook generic context` and prints only Cloudfield's own
+It calls `aether-internal hook generic context` and prints only Cloudfield's own
 guidance: an instruction to read the inbox, plus any overlap notes. It
 prints nothing when there is no mail. Peer message bodies are never in the output.
 They stay in the inbox as attributed data.

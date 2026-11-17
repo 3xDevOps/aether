@@ -36,7 +36,7 @@ shown beside the status says why it is there.
 | A session runs out of memory | Timeline note `Out of memory: the kernel killed a process in this session at its <n> GiB memory limit (peak <n> GiB)`. | Nothing automatic. The killed process may be a tool, the agent or the shell. | Check whether the agent is still running. Raise `--run-memory` if it keeps happening. |
 | The kernel's file-watch limits are spent | Server log `gitengine: cannot watch checkout for file changes; polling for diff snapshots instead`. | Launches the session anyway and checks its files every 60 seconds. | [Raise file-watch limits](#raise-file-watch-limits). |
 | Another process holds the database at startup | `store: begin migration <n>: database is locked (5) (SQLITE_BUSY)` | The server exits. | Find and stop the other writer, then start again. Never delete the database. |
-| The first start after an upgrade takes minutes | Clients cannot connect and the server logs nothing yet. `sudo cloudfield-server update` prints `cloudfield-server is migrating the database at schema <n> to <m>; waiting for it`. | Migrates the database before it serves. Migration 109 reads every stored event to build three indexes: on a 9 GB event log that took 1-2 minutes in testing, longer on a busy disk. | Wait. A restart starts the migration over, and an update rolls back a release that starts twice without finishing. Before the update, free the database's size again plus a tenth of it: the update copies the database into `server-update/`, and the migration adds indexes of about 4% of the event log's size (400 MB on 9 GB in testing), as much again in `aether.db-wal`, and sort files in `/var/tmp`. |
+| The first start after an upgrade takes minutes | Clients cannot connect and the server logs nothing yet. `sudo cloudfield-server update` prints `aether-server is migrating the database at schema <n> to <m>; waiting for it`. | Migrates the database before it serves. Migration 109 reads every stored event to build three indexes: on a 9 GB event log that took 1-2 minutes in testing, longer on a busy disk. | Wait. A restart starts the migration over, and an update rolls back a release that starts twice without finishing. Before the update, free the database's size again plus a tenth of it: the update copies the database into `server-update/`, and the migration adds indexes of about 4% of the event log's size (400 MB on 9 GB in testing), as much again in `aether.db-wal`, and sort files in `/var/tmp`. |
 | `sudo cloudfield-server update` takes minutes while many sessions are open | The update waits after the new server starts. The server log shows `scheduler: recovery: reconnecting sessions sessions=<n> at_once=4`, then `scheduler: recovery: session started run=<id>` and `scheduler: recovery: session done run=<id> took=<duration>` for each session, then `scheduler: recovery: sessions done`. | Reconnects every open session before it counts as started, 4 at a time, so one slow session does not hold up the rest. An update still rolls back if a session has not finished 5 minutes after the database migration. | Wait. `sudo journalctl -u aether-server -f` shows each session; a session with `session started` and no `session done` is the one still reconnecting, and a long `took` names a slow one. |
 | The server is down when a schedule is due | Nothing. | Skips the missed occurrence and waits for the next one. | Launch the session by hand if it matters. |
 
@@ -457,7 +457,7 @@ exists, the CLI prints a one-off retry from it:
 
 ```text
 retry from cached <commit> with:
-  cloudfield session --agent <agent> --mode <mode> --workspace <workspace> --account <member-id> --cached-base <commit> -- <task>
+  aether session --agent <agent> --mode <mode> --workspace <workspace> --account <member-id> --cached-base <commit> -- <task>
 ```
 
 `--cached-base` applies to that launch only, and is refused when the base has
@@ -484,7 +484,7 @@ in:
 ```text
 sessions cannot launch until an admin adopts revision <sha>
 check that it is the upstream commit you expect on <branch>, then run:
-  cloudfield workspace mirror adopt --workspace <workspace-id> --generation <n> --commit <sha> --yes
+  aether workspace mirror adopt --workspace <workspace-id> --generation <n> --commit <sha> --yes
 ```
 
 Compare `<sha>` with the upstream branch, for example with
@@ -592,7 +592,7 @@ conversation survives a restart. Sessions in VMs sleep differently: see
 
 Activity is any of these within the window: a turn, queued prompt, open
 permission request or question; agent output or a file change in the
-checkout; output or typing in the session's terminal or a shell tab; an
+checkout; output or typing in the session's terminal or a shell tab; a
 `cloudfield ssh` process or port forward still open; a Browser tab action such as
 navigating or clicking (an open Browser tab's own polling does not count); a
 member typing in the composer while another member watches the session, the

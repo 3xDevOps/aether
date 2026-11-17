@@ -1361,10 +1361,10 @@ Removal also repairs the selection and open route before any refresh awaits.
   recorded the server's owner, and the server has not applied the claim to
   its live connection yet; says to retry), `edge-refused`
   (the edge's other refusals), `signed-out` (no valid device token; gives
-  the `cloudfield login --edge` command), `not-member`, `device-revoked`,
+  the `aether login --edge` command), `not-member`, `device-revoked`,
   `device-pending`, and `server-refused` for the server's other refusals.
   The `device-pending` page says an admin approves the device from Needs
-  you, or the member from an approved device, and shows `sudo cloudfield-server
+  you, or the member from an approved device, and shows `sudo aether-server
   device approve <code>` only when the refusal carries `approval_code`. A
   failure without a refusal on a link through an edge is `edge` when the
   error names the edge's host: the edge did not answer, so it refused
@@ -3768,7 +3768,7 @@ title is the alert's ("Claude Code is signed out" or "Claude Code's sign-in
 was refused"); a login-file problem shows verbatim, while a refusal is
 already the failure quoted below. On a run on another member's account it
 says that member signs in again on their Agents page or with
-`cloudfield agent login <agent>`.
+`aether agent login <agent>`.
 
 ### Dictation
 
@@ -6515,7 +6515,7 @@ tailnet login, SSH key fingerprint, GitHub accounts and devices with their
 status, re-read whenever the devices are (a `member.device` event or a
 wake), since approving a device binds an account. **Link a GitHub account**
 sends `member.identity.link` for the viewer and shows the join link with
-the next step: open it on a device signed in as that account, or `cloudfield
+the next step: open it on a device signed in as that account, or `aether
 link '<link>'`, then approve that device. **Merge with another member**
 opens a dialog with two tabs:
 

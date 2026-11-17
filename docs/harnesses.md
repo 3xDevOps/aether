@@ -98,7 +98,7 @@ You do this once per agent, per person.
    pick Standard or Enhanced, installs the agent, and opens a terminal. Use
    **Copy login command**, paste at a shell prompt, review it, then press Enter.
 
-   The environment has no `cloudfield` command (only `cloudfield-internal`), so run
+   The environment has no `cloudfield` command, so run
    `cloudfield` commands on your computer, never in this shell.
 
 2. Sign in:
@@ -136,7 +136,7 @@ You do this once per agent, per person.
 
    ```text
    aether: claude signs in with claude auth login, which needs typed input, so it needs a terminal. The human runs this in their own terminal:
-     cloudfield agent login claude
+     aether agent login claude
    An API key stored as a workspace secret works instead: docs/harnesses.md#use-an-api-key
    ```
 
@@ -238,7 +238,7 @@ While the server knows a login is signed out:
 | **Agents** page, **Settings → Agents** | **Signed out** or **Sign-in refused** with the problem, and **Log in** |
 | Launch dialog | **Signed out** or **Sign-in refused** on the account or agent, with the problem and the way to sign in |
 | `cloudfield agent list` | `signed out` under `LOGIN FILE`, then `claude is signed out: <problem>` and `sign in again: ...` |
-| `cloudfield status` | `agent: claude: installed, signed out: <problem>` and `next:` naming `cloudfield agent login claude` |
+| `cloudfield status` | `agent: claude: installed, signed out: <problem>` and `next:` naming `aether agent login claude` |
 | `cloudfield agent list --json`, `agent.list` | `login_problem`, and `login_blocks_launch` |
 | Connector `aether_launch_options`, `aether_list_workspaces` | `signed_in: false` and `signed_out` with the problem, the way to sign in, and whether a launch is refused until then |
 | A refused turn or open | The session's reason ends with whose login it is and where to sign in ([enhanced-sessions.md](enhanced-sessions.md)) |
