@@ -408,8 +408,16 @@ export function LaunchDialog({ open = true, visible = true }: { open?: boolean; 
         }}
         onPointerDownOutside={(event) => {
           event.preventDefault()
+          if (!open) return
           outsideClick.current = true
-          collapse()
+          if (launching || task.trim()) {
+            collapse()
+            return
+          }
+          if (harness && useStore.getState().identityKey === identityKey) {
+            rememberChoice(harness, mode, model.trim())
+          }
+          discard()
         }}
         onEscapeKeyDown={(event) => { event.preventDefault(); collapse() }}
         onInteractOutside={(event) => event.preventDefault()}

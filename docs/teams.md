@@ -741,8 +741,9 @@ out from them ([Launch options](connectors.md#launch-options)).
 
 The dashboard's launch panel opens on them, the right half of **New session**
 launches the last agent, mode, model and permission tier at once, and the
-panel saves the agent, mode and model of each launch, and the permission tier
-as soon as you change it. It saves the account and fallback only when you select
+panel saves the agent, mode and model after a launch or when an outside click
+discards a blank task. It saves the permission tier as soon as you change it.
+It saves the account and fallback only when you select
 **Save as my default** under **Account**. **Settings → Launch** shows them,
 with each invalid choice and its reason, and changes or clears them.
 

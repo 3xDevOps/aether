@@ -340,10 +340,9 @@ top to bottom:
 2. **New session**, the only filled button in the shell, for a member who may
    launch. A slanted cut splits it in two. The left half, **New session** (`n`),
    slides the launch panel out of the sidebar's right edge over the view, with
-   no scrim; clicking outside or pressing Escape slides it away to an arrow
-   that restores it. The outside click reaches the view behind it. **Close**
-   dismisses the form and its draft. The right half appears once a launch has
-   been saved: it shows the saved agent's glyph and launches that agent, mode,
+   no scrim. See [the forms](#the-forms) for how it closes and resumes drafts.
+   The right half appears once a launch choice has been saved. It shows the
+   saved agent's glyph and launches that agent, mode,
    model, account and fallback at once with no task and with `children: "on"`,
    so subsessions are allowed whatever your Settings choice (`quick-launch.ts`).
    Hovering or focusing it slides out the saved choices.
@@ -2692,12 +2691,14 @@ The Task textarea grows as text is typed or pasted, up to 12rem; longer tasks
 scroll inside the field. A shared prompt grows without that cap so the whole
 prompt is visible.
 
-On desktop, clicking outside the form or pressing **Escape** slides it away
-and leaves an arrow at the sidebar edge (the window edge when the sidebar is
-hidden). The outside click still reaches the view behind it. The arrow and
-**New session** restore the task and launch settings. **X** and **Cancel**
-discard this draft; they do not reset saved launch defaults. A picker handles
-its own Escape first.
+On desktop, clicking outside the form with a blank or whitespace-only **Task**
+saves the selected agent, mode and model as launch defaults and discards the
+draft. With task text or a launch in progress, the outside click slides the form
+away and leaves a resume arrow. The outside click still reaches the view behind
+the form. **Escape** also leaves the arrow, unless a picker handles Escape
+first. The arrow sits at the sidebar edge or, when the sidebar is hidden, the
+window edge. The arrow and **New session** restore the draft. **X** and
+**Cancel** discard the draft and keep saved launch defaults.
 
 The task and launch settings save on change in browser-local storage, scoped
 to the server and signed-in member. Refreshing or reopening the dashboard in
@@ -2815,9 +2816,10 @@ assistant may have saved since. The first pick waits for that read and for
 the saved account to be applied, then
 preselects the saved agent if it can launch, else the agent of the newest
 session, else the first launchable one, in that agent's saved mode, else
-Enhanced, with its saved model. A successful launch saves only the
-agent, mode and model through `launch.defaults.set` with the revision it
-read; when another device saved since, the refusal carries the current
+Enhanced, with its saved model. A successful launch or an outside click that
+discards a blank task saves the agent, mode and model through
+`launch.defaults.set` with the revision it read. When another device has
+saved since that read, the refusal carries the current
 choices, and the form applies its change to those and saves once more. A
 failed save shows "Launch choices not saved: " and the server's error. The
 saved account is preselected when `account.list` still lists it and `get`

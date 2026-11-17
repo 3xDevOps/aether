@@ -113,6 +113,15 @@ describe('saved launch draft', () => {
     expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('Escape preserves this')
   })
 
+  it('keeps a blank draft collapsed with Escape when the page is clicked during the exit', async () => {
+    render(<><button>Main chat</button><PaletteDialogs /></>)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    await userEvent.keyboard('{Escape}')
+    expect(useStore.getState().paletteDialog).toBeNull()
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Main chat' }), { pointerType: 'mouse' })
+    await waitFor(() => expect(resume()).toBeTruthy())
+  })
+
   it('recovers the task, mode and model collapsed after a reload without applying saved defaults over them', async () => {
     allowDraftStorage()
     useStore.getState().setIdentityKey('server/alice')
@@ -154,14 +163,13 @@ describe('saved launch draft', () => {
     expect((await screen.findByLabelText('Task') as HTMLTextAreaElement).value).toBe('')
   })
 
-  it('preserves a pending launch through collapse and clears the draft when it succeeds', async () => {
+  it('keeps a pending blank-task launch on an outside click and clears the draft on success', async () => {
     let finish!: (value: ReturnType<typeof run>) => void
     vi.mocked(api.runLaunch).mockImplementation(() => new Promise((resolve) => { finish = resolve }))
-    render(<PaletteDialogs />)
+    render(<><button>Main chat</button><PaletteDialogs /></>)
     await waitFor(() => expect(launchButton().disabled).toBe(false))
-    setTask('launch once')
     fireEvent.click(launchButton())
-    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: 'Main chat' }))
     await waitFor(() => expect(screen.queryByLabelText('Task')).toBeNull())
     await userEvent.click(resume())
     expect((screen.getByRole('button', { name: 'Launching…' }) as HTMLButtonElement).disabled).toBe(true)
