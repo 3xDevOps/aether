@@ -83,17 +83,23 @@ The project's edge answers at `https://edge.cloudfield.ai`, which new setups
 use, and at `https://edge.onaether.dev`. Updates never change `edge-url` in
 `/etc/aether/server.conf`, and `aether-server setup` keeps it, so a server set
 up at `https://edge.onaether.dev` stays there, with its links, connectors and
-join links. To move it:
+join links. To move it, at a quiet time:
 
-1. Check that the server is connected, and note its edge key:
+1. Check where the server reads its edge from. `edge-url` comes only from
+   the config file or a flag on `ExecStart`:
 
    ```sh
+   systemctl cat aether-server | grep ExecStart
+   grep edge-url /etc/aether/server.conf
    sudo aether-server edge status
    ```
 
-   It exits 0 and prints `edge         https://edge.onaether.dev`, `connection
-   connected since <time>; ...` and `edge key     SHA256:<fingerprint>`. The
-   same fingerprint is in `curl -s https://edge.cloudfield.ai/v1/edge`.
+   Expect `ExecStart=/usr/local/bin/aether-server serve --config
+   /etc/aether/server.conf` with no `--edge-url`, `edge-url =
+   https://edge.onaether.dev`, and a status that exits 0 with
+   `edge         https://edge.onaether.dev`, `connection   connected since
+   <time>; the edge last answered <n>s ago` and `edge key     SHA256:<fingerprint>`.
+   `curl -s https://edge.cloudfield.ai/v1/edge` shows the same fingerprint.
 2. Move. The server keeps running:
 
    ```sh
@@ -109,27 +115,45 @@ join links. To move it:
      sudo aether-server edge move https://edge.onaether.dev
    ```
 
-   A refusal prints one of the lines in the table below and changes nothing.
-3. Apply it:
+   A refusal prints one line from the table below, exits 1 and writes
+   nothing. Each of the two enrollments replaces the running server's
+   control connection at the edge; the server dials again within 1 to 3
+   seconds. Relayed connections already open stay open; a new one in that
+   gap can fail with `server is not connected to the edge`. A status run in
+   those seconds can say `disconnected since <time>: ... reason = "replaced by
+   a newer connection of this server"`.
+3. Apply it. The restart ends every relayed connection, and new ones fail
+   until the server is back:
 
    ```sh
    sudo systemctl restart aether-server
    ```
 
-4. Check again with `sudo aether-server edge status`. It exits 0 and prints
+4. Check with `sudo aether-server edge status`: it exits 0, prints
    `edge         https://edge.cloudfield.ai`, the connector URLs under
    `https://edge.cloudfield.ai/mcp`, the same `edge key` and `owner`, and
-   `connection   connected since <time>; ...`.
+   `connection   connected since <time>; ...`, with no `running` line.
 
-To move back, run the `to move back` line and restart.
+To move back, run the `to move back` line, then restart.
 
-Nobody else redoes anything. The owner and members keep their roles; CLI,
-desktop app and Android app links and device links made at the old address
-keep working, and those apps keep signing in there; unused join links and
-claim codes work until they expire; Claude and ChatGPT connectors keep working,
-and the directory listings stay at `https://edge.onaether.dev/mcp` on purpose
-until every server they reach accepts the new address. Links, join links and
-claim codes made after the move name the new address.
+What each person redoes afterwards:
+
+- Owner: nothing.
+- Member with a CLI link: nothing.
+- Member on the Android app: nothing.
+- Member on the desktop app: nothing.
+- Someone holding an unused join link: nothing; it works until it expires.
+- Claude or ChatGPT connector user: nothing. The directory listings stay at
+  `https://edge.onaether.dev/mcp` on purpose.
+
+Grants name the address the server is enrolled at and are checked whichever
+address the client used, and connector tokens are checked against the address
+the request came in on, which the edge still announces. Device tokens are
+stored per address, though, and join links, claim codes and connector URLs
+the server issues after the move name the new address. A member whose
+machine holds a token only for the old address gets `not signed in to
+edge.cloudfield.ai; run: aether login --edge https://edge.cloudfield.ai` from
+such a link, and runs that once.
 
 `edge move <address>` works for any edge that serves
 [more than one address pair](#more-than-one-address-pair). It enrolls at the

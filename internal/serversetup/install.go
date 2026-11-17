@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // InstallResult reports what Install put on disk.
@@ -54,9 +55,7 @@ func Install(unitPath, configPath string, values map[string]string, force bool) 
 }
 
 // WriteConfig renders values into the config file at path, creating its
-// directory if needed. It replaces the file by a rename, keeping its mode
-// and owner, so a crash leaves the old config or the new one, never a
-// torn file the server cannot start from.
+// directory if needed.
 func WriteConfig(path string, values map[string]string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -68,15 +67,34 @@ func WriteConfig(path string, values map[string]string) error {
 	return nil
 }
 
+// replaceFile writes data to path, or to the file a symlink at path names,
+// by a rename beside it that keeps the file's mode and owner, so a crash
+// leaves the old content or the new, never a torn file. Where a rename
+// would change the owner, because the writer is not root and does not own
+// the file, or the directory takes no new file, it writes in place.
 func replaceFile(path string, data []byte) error {
-	mode, uid, gid := os.FileMode(0o644), -1, -1
-	if info, err := os.Stat(path); err == nil {
-		mode = info.Mode().Perm()
-		uid, gid = fileOwner(info)
-	} else if !errors.Is(err, os.ErrNotExist) {
+	target, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return os.WriteFile(path, data, 0o644)
+	}
+	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
+	info, err := os.Stat(target)
+	if err != nil {
+		return err
+	}
+	mode := info.Mode().Perm()
+	uid, gid := fileOwner(info)
+	euid := os.Geteuid()
+	if uid >= 0 && euid != 0 && uid != euid {
+		return os.WriteFile(target, data, mode)
+	}
+	dir := filepath.Dir(target)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(target)+"-*")
+	if errors.Is(err, os.ErrPermission) {
+		return os.WriteFile(target, data, mode)
+	}
 	if err != nil {
 		return err
 	}
@@ -85,7 +103,7 @@ func replaceFile(path string, data []byte) error {
 	if err == nil {
 		err = tmp.Chmod(mode)
 	}
-	if err == nil && uid >= 0 {
+	if err == nil && euid == 0 && uid >= 0 {
 		err = tmp.Chown(uid, gid)
 	}
 	if err == nil {
@@ -94,8 +112,28 @@ func replaceFile(path string, data []byte) error {
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), target)
+	}
 	if err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return syncDir(dir)
+}
+
+// syncDir makes the rename in dir survive a power loss. Windows cannot
+// open a directory to flush it.
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
