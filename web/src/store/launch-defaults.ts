@@ -58,7 +58,9 @@ export function useLaunchDefaultsRead(client: Api = api, attempt = 0): LaunchDef
     if (!readable) return
     let live = true
     setFresh(false)
-    void read(client).finally(() => { if (live) setFresh(true) })
+    void saving.then(() => {
+      if (live) return read(client)
+    }).finally(() => { if (live) setFresh(true) })
     return () => { live = false }
   }, [client, readable, identity, attempt])
   return readable ? { result, error, fresh } : { result: null, error: null, fresh: true }

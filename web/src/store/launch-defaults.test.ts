@@ -34,18 +34,20 @@ describe('saved launch defaults', () => {
     expect(useLaunchDefaults.getState().result?.defaults).toMatchObject({ agent: 'codex', account_member_id: 'mem_bo' })
   })
 
-  it('keeps a save\'s answer over a read that started while it was saving', async () => {
-    let read: (result: LaunchDefaultsResult) => void = () => {}
+  it('reads fresh defaults after an in-flight save settles', async () => {
     let stored: (result: LaunchDefaultsResult) => void = () => {}
-    vi.mocked(api.launchDefaultsGet).mockReturnValueOnce(new Promise((resolve) => { read = resolve }))
+    const updated: LaunchDefaultsResult = { revision: 4, defaults: { agent: 'codex' } }
+    vi.mocked(api.launchDefaultsGet).mockResolvedValueOnce(updated)
     vi.mocked(api.launchDefaultsSet).mockReturnValueOnce(new Promise((resolve) => { stored = resolve }))
     const save = saveLaunchDefaults((d) => ({ ...d, agent: 'codex' }))
     await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalled())
     const { result } = renderHook(() => useLaunchDefaultsRead())
-    await act(async () => { stored({ revision: 4, defaults: { agent: 'codex' } }); await save })
-    await act(async () => read({ revision: 3, defaults: { agent: 'claude' } }))
+    expect(api.launchDefaultsGet).not.toHaveBeenCalled()
+    expect(result.current.fresh).toBe(false)
+    await act(async () => { stored(updated); await save })
     await waitFor(() => expect(result.current.fresh).toBe(true))
-    expect(useLaunchDefaults.getState().result?.defaults.agent).toBe('codex')
+    expect(api.launchDefaultsGet).toHaveBeenCalledOnce()
+    expect(result.current.result).toEqual(updated)
   })
 
   it('does not save once another member signed in', async () => {

@@ -55,10 +55,11 @@ request ([What an edge stores](#what-an-edge-stores)).
   dashboard origin, server hostname and signed-in member. It holds the task,
   repository choices, agent, account and fallback choices, mode, model,
   effort, permission, subsession choice and resource limits. Changes save
-  immediately. Clicking outside the desktop form or pressing Escape keeps
-  the draft; X, Cancel or a successful launch deletes it. Edge-linked pages
-  keep drafts in memory only because another app could serve script from the
-  gateway's loopback port. Elsewhere, reopening the same dashboard in the
+  immediately. X, Cancel, a successful launch or clicking outside the desktop
+  form with a blank task deletes the draft. Outside clicks with task text,
+  active dictation or a launch in progress keep it, as does Escape.
+  Edge-linked pages keep drafts in memory only because another app could serve
+  script from the gateway's loopback port. Elsewhere, reopening the same dashboard in the
   same browser profile restores it collapsed. It is not
   synchronized to another browser, device or the desktop app. Clearing site
   data deletes it; private browsing usually deletes it when the private

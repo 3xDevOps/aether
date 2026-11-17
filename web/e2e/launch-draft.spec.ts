@@ -1,22 +1,45 @@
 import { expect, test } from './fixtures'
-import { seedWorkspace } from './harness/setup'
+import { memberID, seedWorkspace } from './harness/setup'
 
-test('outside clicks and Escape collapse the new session draft, which resumes after reload', async ({ page, aether }, testInfo) => {
+test('outside clicks discard blank drafts and preserve drafts with tasks', async ({ page, aether }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.emulateMedia({ colorScheme: 'dark' })
   const alice = await aether.member('alice')
   await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('project'))
+  aether.installClaudeACPMock(await memberID(alice))
 
   await page.goto(alice.url)
   const nav = page.getByRole('navigation', { name: 'Cloudfield' })
-  await nav.getByRole('button', { name: 'New session' }).click()
+  const open = nav.getByRole('button', { name: 'New session' })
+  const search = nav.getByRole('button', { name: 'Search' })
   const dialog = page.getByRole('dialog', { name: 'New session' })
-  await dialog.getByLabel('Task').fill('keep this draft')
-  await nav.getByRole('button', { name: 'Search' }).click()
-  await expect(dialog).toBeHidden()
-  await expect(page.getByRole('dialog', { name: 'Command Palette' })).toBeVisible()
-  await page.keyboard.press('Escape')
+  const palette = page.getByRole('dialog', { name: 'Command Palette' })
   const resume = page.getByRole('button', { name: 'Resume new session draft' })
+  const modes = dialog.getByRole('radiogroup', { name: 'Mode' })
+  const standard = modes.getByRole('radio', { name: 'Standard' })
+  await open.click()
+  await expect(modes.getByRole('radio', { name: 'Enhanced' })).toBeChecked()
+  await standard.click()
+  await dialog.getByLabel('Task').fill('   ')
+  await search.click()
+  await expect(dialog).toBeHidden()
+  await expect(palette).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(resume).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('closed-blank-new-session.png'), fullPage: true })
+
+  await expect.poll(() => alice.api.rpc('launch.defaults.get')).toMatchObject({
+    defaults: { agent: 'claude', agents: { claude: { mode: 'tui' } } },
+  })
+  await page.reload()
+  await open.click()
+  await expect(standard).toBeChecked()
+  await expect(dialog.getByLabel('Task')).toHaveValue('')
+  await dialog.getByLabel('Task').fill('keep this draft')
+  await search.click()
+  await expect(dialog).toBeHidden()
+  await expect(palette).toBeVisible()
+  await page.keyboard.press('Escape')
   await expect(resume).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('collapsed-new-session.png'), fullPage: true })
 
