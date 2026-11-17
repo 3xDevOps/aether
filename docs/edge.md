@@ -225,7 +225,8 @@ and without `--admin` while it has members.
 1. Start the server: `sudo systemctl daemon-reload && sudo systemctl enable
    --now aether-server`.
 2. On your computer, open the claim link (the desktop app's Connect step also
-   accepts it pasted), or run `cloudfield link --claim '<claim link>'`. The claim
+   accepts it pasted), or run `cloudfield link --claim '<claim link>'` (`aether`
+   on Windows, where `cloudfield.cmd` splits a link at its `&`). The claim
    link names its edge, so `--edge` is not needed; `cloudfield link --claim <code>`
    takes the bare code and claims through `--edge`, else the one edge you are
    signed in to.

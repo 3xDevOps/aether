@@ -133,6 +133,9 @@ cloudfield link '<invite link>'         # anyone an admin invited, with the link
 cloudfield status                       # what this computer is linked to, and the next step
 ```
 
+On Windows, run the two `link` lines with `aether`: `cloudfield.cmd` splits a
+link at its `&`.
+
 A bare name such as `my-server` is always an SSH address. Only a server id, a
 claim code or link after `--claim`, or a join link goes through the edge. A
 claim link or code given without `--claim`, or any other value with `://`,

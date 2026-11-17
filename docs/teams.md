@@ -69,7 +69,7 @@ the desktop app, or in a terminal runs:
 
 ```sh
 cloudfield login            # or cloudfield login --json, for a script or coding agent
-cloudfield link '<invite link>'
+cloudfield link '<invite link>'   # aether link on Windows: cloudfield.cmd splits a link at its &
 ```
 
 What happens next depends on the server's `edge-access` policy

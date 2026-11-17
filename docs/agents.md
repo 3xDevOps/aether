@@ -249,7 +249,7 @@ cloudfield invite --github <login> --role collaborator
 ```
 
 It prints an invite link once. The teammate runs `cloudfield login`, then
-`cloudfield link '<invite link>'`. Under `approved-devices`, **Human:** approve
+`cloudfield link '<invite link>'` (`aether link` on Windows). Under `approved-devices`, **Human:** approve
 their device as above.
 
 With Tailscale, the teammate runs `cloudfield link <host>:2222`; **Human:** run the

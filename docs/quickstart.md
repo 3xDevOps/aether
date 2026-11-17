@@ -171,6 +171,10 @@ Or in a terminal:
   `cloudfield link --claim '<claim link>'`, or
   `cloudfield link --claim <server id>-<secret>`.
 
+On Windows, type `aether` instead of `cloudfield` for a command that takes a
+link: `cloudfield.cmd` passes it to `cmd.exe`, which splits it at the `&`
+([install.md](install.md#old-names)).
+
 It worked if the step shows **Connected**, or `cloudfield link` ends with `linked
 to <server>` and your role, such as `linked to server <server id> through
 edge.cloudfield.ai as <your name> (super_admin)`.
