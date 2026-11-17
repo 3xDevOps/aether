@@ -163,10 +163,11 @@ type Config struct {
 	// HarnessUpdateDisabled stops pre-launch updates of shipped harnesses
 	// installed in the member home.
 	HarnessUpdateDisabled bool
-	// Test-only overrides of the matching default* constants.
+	// Test-only overrides: turnTail of defaultTurnTail, and
+	// harnessUpdateContext of context.WithTimeout for a harness update.
 	sleepAnyAgent        bool
 	turnTail             time.Duration
-	harnessUpdateTimeout time.Duration
+	harnessUpdateContext func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	filesystemCapacity   func(string) (disk.Usage, error)
 }
 

@@ -24,7 +24,7 @@ import (
 const (
 	harnessUpdateInterval       = 6 * time.Hour
 	harnessUpdateRetry          = 15 * time.Minute
-	defaultHarnessUpdateTimeout = 10 * time.Minute
+	harnessUpdateTimeout        = 10 * time.Minute
 	harnessUpdateDestroyTimeout = 30 * time.Second
 	harnessVersionTimeout       = 15 * time.Second
 	maxHarnessVersion           = 64
@@ -158,15 +158,15 @@ func (s *Scheduler) updateHarness(run *domain.Run, plan *EnvironmentPlan, profil
 }
 
 func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessUpdateRun, workspace domain.WorkspaceID, runID domain.RunID, spec runtime.Spec, exe string, profile harness.Profile) {
-	timeout := s.cfg.harnessUpdateTimeout
-	if timeout <= 0 {
-		timeout = defaultHarnessUpdateTimeout
+	withTimeout := s.cfg.harnessUpdateContext
+	if withTimeout == nil {
+		withTimeout = context.WithTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := withTimeout(context.Background(), harnessUpdateTimeout)
 	defer cancel()
 	before, after, err := s.updateInContainer(ctx, spec, exe, profile.UpdateScript)
 	if err != nil && ctx.Err() != nil {
-		err = fmt.Errorf("the updater did not finish within %s", timeout)
+		err = fmt.Errorf("the updater did not finish within %s", harnessUpdateTimeout)
 	}
 	next := harnessUpdateInterval
 	switch {

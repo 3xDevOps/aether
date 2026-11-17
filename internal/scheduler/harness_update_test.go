@@ -303,13 +303,28 @@ func TestHarnessUpdateFailureStillLaunches(t *testing.T) {
 
 func TestHarnessUpdateTimeoutStillLaunches(t *testing.T) {
 	t.Parallel()
-	e, rt, _ := newUpdateEnv(t, func(cfg *Config) { cfg.harnessUpdateTimeout = 50 * time.Millisecond })
+	// The deadline passes once the updater is running, never on a clock
+	// that a slow container start would also spend.
+	e, rt, _ := newUpdateEnv(t, func(cfg *Config) {
+		started := cfg.Runtime.(*updateRuntime).started
+		cfg.harnessUpdateContext = func(parent context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+			ctx, cancel := context.WithCancel(parent)
+			go func() {
+				select {
+				case <-started:
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
+			return ctx, cancel
+		}
+	})
 	installInHome(t, e, "claude")
 	rt.release = make(chan struct{})
 
 	notes := launchNotes(t, e, "claude", domain.LaunchTUI)
 	want := []string{"could not update claude from 2.1.0 (Claude Code): " +
-		"the updater did not finish within 50ms"}
+		"the updater did not finish within 10m0s"}
 	if got := noteMessages(notes); !slices.Equal(got, want) {
 		t.Fatalf("notes = %q, want %q", got, want)
 	}
