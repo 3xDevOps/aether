@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Opening } from '@/components/launch-splash-opening'
 import { desktopBridge } from '@/components/shell/window-bar'
 import { prefersReducedMotion } from '@/lib/hooks'
 import { useStore } from '@/store'
@@ -33,25 +34,13 @@ function firstLaunch(): boolean {
   }
 }
 
-const stars = [
-  ['14%', '16%', 'mint'],
-  ['8%', '74%', 'pale'],
-  ['61%', '31%', 'violet'],
-  ['49%', '89%', 'amber'],
-  ['81%', '53%', 'pale'],
-  ['72%', '7%', 'mint'],
-  ['27%', '44%', 'pale'],
-  ['90%', '82%', 'violet'],
-  ['38%', '5%', 'amber'],
-] as const
-
 export function LaunchSplash() {
   // Read at first render, marked in an effect: StrictMode runs both twice, and
   // a claim made while rendering would hide the splash from its own remount.
   const [show] = useState(firstLaunch)
   const hydrated = useStore((s) => s.hydrated)
   // A hydrate that failed is also over: the connection error page below is
-  // what the member needs to read, not a night sky that never ends.
+  // what the member needs to read, not an opening that never ends.
   const failed = useStore((s) => s.hydrationError !== null)
   const [held, setHeld] = useState(true)
   const [capped, setCapped] = useState(false)
@@ -88,47 +77,7 @@ export function LaunchSplash() {
 
   return (
     <div className={`launch-splash${leaving ? ' launch-splash--leaving' : ''}`} aria-hidden="true">
-      <div className="launch-splash__sky" aria-hidden="true">
-        <img className="launch-splash__grain" src="/grain.png" alt="" />
-        <div className="launch-splash__cloud launch-splash__cloud--one">
-          <img src="/cloud-soft-1.png" alt="" />
-        </div>
-        <div className="launch-splash__cloud launch-splash__cloud--two">
-          <img src="/cloud-soft-2.png" alt="" />
-        </div>
-        <div className="launch-splash__cloud launch-splash__cloud--three">
-          <img src="/cloud-soft-3.png" alt="" />
-        </div>
-        <div className="launch-splash__starfield" data-testid="launch-splash-stars" />
-        <div className="launch-splash__big-stars">
-          {stars.map(([top, left, color], index) => (
-            <span
-              key={`${top}-${left}`}
-              className={`launch-splash__big-star launch-splash__big-star--${color}`}
-              style={{ top, left, animationDelay: `${-index * 0.55}s` }}
-            />
-          ))}
-        </div>
-        <span className="launch-splash__satellite launch-splash__satellite--pale" />
-        <span className="launch-splash__satellite launch-splash__satellite--mint" />
-        <div className="launch-splash__shooting-stars" data-testid="launch-splash-shooting-stars">
-          <span className="launch-splash__shooting-star launch-splash__shooting-star--one" />
-          <span className="launch-splash__shooting-star launch-splash__shooting-star--two" />
-          <span className="launch-splash__shooting-star launch-splash__shooting-star--three" />
-        </div>
-      </div>
-
-      <div className="launch-splash__logo">
-        <img src="/cloudfield-mark.svg" alt="" data-testid="launch-splash-mark" />
-        <span className="launch-splash__wordmark" data-testid="launch-splash-wordmark">
-          cloudfield
-        </span>
-        <span
-          className="launch-splash__status"
-          data-testid="launch-splash-status"
-          aria-label="Starting Cloudfield"
-        />
-      </div>
+      <Opening />
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { LaunchSplash } from '@/components/launch-splash'
 import type { AetherDesktop } from '@/components/shell/window-bar'
 import { useStore } from '@/store'
+import logoSource from '../../public/cloudfield-logo-small.svg?raw'
 
 const shellWindow = window as Window & { aetherDesktop?: AetherDesktop }
 
@@ -137,5 +138,56 @@ describe('LaunchSplash', () => {
     act(() => vi.advanceTimersByTime(600))
     act(() => vi.advanceTimersByTime(260))
     expect(container.firstElementChild).toBeNull()
+  })
+
+  it('draws the opening from the logo file, each dash in its own colour', () => {
+    const { getByTestId } = render(<LaunchSplash />)
+    const lockup = getByTestId('launch-splash-lockup')
+    const source = new DOMParser().parseFromString(logoSource, 'image/svg+xml')
+    const sourceDashes = [...source.querySelectorAll('path')].filter((path) => path.getAttribute('d')!.split('M').length === 2)
+
+    const dashes = [...lockup.querySelectorAll<SVGPathElement>('.launch-splash__dash')]
+    expect(dashes.map((dash) => dash.getAttribute('stroke'))).toEqual(sourceDashes.map((dash) => dash.getAttribute('stroke')))
+    expect(dashes[0].style.animationDelay).toBe('30ms')
+    expect(lockup.querySelectorAll('.launch-splash__dot')).toHaveLength(1)
+
+    const letters = [...lockup.querySelectorAll<SVGGElement>('.launch-splash__letter')]
+    expect(letters).toHaveLength('loudfield'.length)
+    expect(letters.map((letter) => letter.style.animationDelay)).toEqual(letters.map((_, n) => `${450 + n * 40}ms`))
+    // l, o, u, d, f, i, e, l, d: every stroke is two lines.
+    expect(letters.map((letter) => letter.querySelectorAll('path').length)).toEqual([2, 2, 6, 4, 6, 2, 4, 2, 4])
+    expect(letters[5].querySelector('circle')).not.toBeNull()
+  })
+
+  it('shows the logo file as a plain image when it cannot be split', async () => {
+    vi.resetModules()
+    vi.doMock('../../public/cloudfield-logo-small.svg?raw', () => ({ default: '<svg xmlns="http://www.w3.org/2000/svg"/>' }))
+    const { LaunchSplash: Fallback } = await import('@/components/launch-splash')
+    const { getByTestId } = render(<Fallback />)
+
+    expect(getByTestId('launch-splash-lockup').querySelector('img')?.getAttribute('src')).toBe('/cloudfield-logo-small.svg')
+    vi.doUnmock('../../public/cloudfield-logo-small.svg?raw')
+  })
+
+  it('sleeps until the wake, then stops drawing the field when it unmounts', () => {
+    const context = {
+      setTransform: () => {},
+      clearRect: vi.fn(),
+      beginPath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      stroke: () => {},
+    }
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D)
+    const { unmount } = render(<LaunchSplash />)
+
+    act(() => vi.advanceTimersByTime(800))
+    expect(context.clearRect).toHaveBeenCalledTimes(1)
+    act(() => vi.advanceTimersByTime(200))
+    const drawn = context.clearRect.mock.calls.length
+    expect(drawn).toBeGreaterThan(1)
+    unmount()
+    act(() => vi.advanceTimersByTime(100))
+    expect(context.clearRect.mock.calls.length).toBe(drawn)
   })
 })

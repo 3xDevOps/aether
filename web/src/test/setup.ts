@@ -77,6 +77,9 @@ if (!Element.prototype.animate) {
   }
 }
 if (!Element.prototype.getAnimations) Element.prototype.getAnimations = () => []
+// jsdom has no canvas and logs that on every getContext call; the launch
+// splash's field, like any canvas without a context, then draws nothing.
+HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext
 // jsdom implements every SVG element as the base SVGElement, with no
 // geometry support; the scratch-off animation only needs a positive length
 // to animate toward.

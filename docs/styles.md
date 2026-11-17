@@ -6,7 +6,7 @@ The dashboard is a dense developer workbench on graphite surfaces with one
 teal accent. Adjoining panes are flat and quiet. Elevation is restrained:
 cards and secondary buttons carry a light shadow, floating surfaces a deeper
 one, panes none. Do not add saturated colours, gradients or backdrop blur.
-The desktop launch splash is an intentional original-animation exception;
+The desktop launch splash is the exception: it plays the website's opening;
 see [Session state and motion](#session-state-and-motion).
 
 ### Surface the common actions
@@ -31,7 +31,7 @@ Fonts ship in the bundle; nothing is fetched from Google.
 | --- | --- | --- |
 | DM Sans (variable, Latin subset) | All UI text | `@fontsource-variable/dm-sans`, one WOFF2 |
 | Saira (variable, Latin subset) | `text-title` only | `web/public/fonts/saira-latin.woff2` |
-| VT323 (Latin subset, 400) | Launch-splash wordmark | `web/public/fonts/vt323-latin.woff2` |
+| VT323 (Latin subset, 400) | Play listing wordmark drawn by `scripts/make-icons.py`; the dashboard does not load it | `web/public/fonts/vt323-latin.woff2` |
 | JetBrainsMono NFM | xterm primary font; UI private-use symbols through `Aether Nerd Symbols` | `web/public/fonts/jetbrains-mono-nfm-*.woff2` |
 | Noto Sans Symbols 2 | Braille and geometric symbols through `Aether Symbols` | `web/public/fonts/noto-sans-symbols-2-spinners.woff2` |
 | `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-code`), after symbol fallbacks | system |
@@ -55,11 +55,9 @@ Where the navigation's destinations do not all fit beside the 162px logo, the
 32px `cloudfield-favicon.svg` tile replaces it, and the navigation still counts
 90px, the old brand's width, when it decides what fits, so it collapses at the
 same widths as before and the spare space falls at the row's empty right end.
-The launch splash shows `cloudfield-mark.svg` at `clamp(150px, 22vw, 260px)`
-wide, with no glow, above the wordmark: lowercase `cloudfield` in
-`--font-pixel`, in the logo's Cream `#f7f0e4`, at its original
-`clamp(32px, 4vw, 48px)` size and `0.12em` letter spacing; other headings stay
-Saira.
+The launch splash draws `cloudfield-logo-small.svg` itself, at
+`clamp(260px, 38vw, 520px)` wide; see
+[Session state and motion](#session-state-and-motion).
 
 The type scale, in `web/src/index.css`:
 
@@ -743,17 +741,43 @@ shimmer leaves plain muted text, the spinner shows a still arc and a
 skeleton a flat fill. Holds and timers do not change. `useReducedMotion()` and `prefersReducedMotion()` in
 `web/src/lib/hooks.ts` answer the query in scripts.
 
-The desktop launch splash deliberately retains its original animation,
-independent of these workbench motion tokens: the grain, three drifting cloud
-layers, stepped starfield and coloured stars, satellites and shooting stars,
-700ms logo entrance and 260ms fade. Its status dot uses the local
-`launch-status-pulse`: the original 1.8s `ease-in-out` loop from opacity 1
-to 0.4 and back, not the shared `state-pulse`. The splash's original
-palette and keyframes stay scoped to `launch-splash` in `web/src/index.css`;
-do not restyle them to match the workbench. Only the logo follows the
-Cloudfield set: its mark, and the wordmark in the set's Cream. Reduced motion skips the splash
-entirely, and its CSS stops animation if the preference changes while it is
-visible. [Launch splash](dashboard-frontend.md#launch-splash) defines the
+The desktop launch splash plays the website's opening on `#0b0911` in every
+theme. Its keyframes are scoped to `launch-splash` in `web/src/index.css`.
+`web/src/components/launch-splash-opening.tsx` inlines
+`web/public/cloudfield-logo-small.svg` at build time and splits it into the
+parts that move when the splash mounts, so a new logo file changes the splash
+with no code edit. A file it cannot split shows as a plain image. The lockup
+is `clamp(260px, 38vw, 520px)` wide, raised 3vh above centre. Times are from
+the splash's first paint:
+
+| Time | What happens |
+| --- | --- |
+| 30ms, then every 30ms | An outer-ring dash of the c draws in over 120ms |
+| 170ms, then every 30ms | An inner-ring dash draws in over 120ms |
+| 420ms | The c's centre dot appears |
+| 450ms, then every 40ms | A letter rises 26 units over 150ms |
+| With its letter, 24ms apart | Each line of the letter draws over 200ms |
+| 820ms | The field wakes outward from the c's centre over 620ms |
+
+The field is the website's slope field: one stroke per 12px lattice point,
+turned along four drifting vortices and coloured in the logo's teal and blue
+family, the website's field run: `#8fbaff` at the top left through `#266ce1`,
+`#4a8dff`, `#4bb9ea` and `#54e0d0` to `#aaf5ea` at the bottom right, the run
+stretched about its middle so the pale ends reach the corners. On a window
+large enough for more than 15,000 strokes the lattice widens to stay under
+that. Until it wakes, every stroke is a short flat dash at 2/6 opacity, drawn
+once; the frame loop starts at the wake.
+Awake, the field runs at 0.85 opacity, and within 95px of the lockup strokes
+shorten by up to half and dim to 0.46, so the name stays the brightest thing
+on screen. The c's dashes and the letters take their colours from the logo
+file; the field's colours are constants in the same TypeScript file.
+
+When the splash leaves, whatever the opening has not drawn yet appears at
+once, so the whole name dissolves: the lockup fades out over
+the first 140ms of the 260ms fade, so the logo never shows over the app's own
+header logo. Reduced motion skips the splash entirely; if the preference turns
+on while it is visible, the lockup stops animating and the field holds its
+last frame. [Launch splash](dashboard-frontend.md#launch-splash) defines the
 session and startup timing.
 
 The bar that holds **Take control** and **Release** shows who steers: the
