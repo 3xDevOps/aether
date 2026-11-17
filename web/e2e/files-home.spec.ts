@@ -81,6 +81,9 @@ test('Files creates, renames, uploads and deletes in the remote home', async ({ 
   expect([...readFileSync(onDisk('notes/logo.bin'))]).toEqual([0, 255, 137, 80])
   await replace.getByRole('button', { name: 'Replace', exact: true }).click()
   await expect(replace).toBeHidden()
+  // The server writes the bytes before the browser has its reply, and the
+  // tree refuses a drop until the upload's status is gone.
+  await expect(tree.getByRole('status').filter({ hasText: 'Uploading' })).toBeHidden()
   await expect.poll(() => [...readFileSync(onDisk('notes/logo.bin'))]).toEqual([1, 2, 3])
 
   // A file dropped on a folder's row lands in that folder.
