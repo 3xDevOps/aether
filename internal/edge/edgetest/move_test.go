@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
@@ -63,6 +64,9 @@ func TestEdgeMove(t *testing.T) {
 	h.startEdge()
 	relayB := h.relayB
 	backOnline(t, h, s)
+	// The connector the Claude and ChatGPT listings name: the universal
+	// URL at the address the server is leaving.
+	universalA := universalAt(t, h, client, al, s, policy, h.signinURL, relayA)
 
 	to, err := moveAgent(t, s, relayA).Move(t.Context(), relayB)
 	if err != nil || to != relayB {
@@ -94,6 +98,7 @@ func TestEdgeMove(t *testing.T) {
 	}
 
 	mustCall(t, baseA, before.AccessToken)
+	mustCall(t, relayA+edgeproto.PathUniversalMCP, universalA.AccessToken)
 	dialVia(t, h, al, s, relayA, relayB)
 	if !strings.HasPrefix(join, relayA+"/") {
 		t.Fatalf("join link %s is not at %s", join, relayA)
@@ -115,6 +120,29 @@ func TestEdgeMove(t *testing.T) {
 	mustCall(t, baseA, before.AccessToken)
 	mustCall(t, relayB+edgeproto.MCPPath(s.id), atB.AccessToken)
 	dialVia(t, h, al, s, relayA, relayA)
+}
+
+// A claim code issued before a move claims the server after it, through
+// the address the server left: the code is kept per edge key, and the
+// edge relays the claim to the server at its new address.
+func TestEdgeMoveKeepsAPendingClaimCode(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.stopEdge()
+	h.pairB = true
+	h.startEdge()
+	s := h.newServer(edgeproto.PolicyAccount)
+	relayA, relayB := h.relayURL, h.relayB
+	code := s.claimCode(t, time.Now())
+	if _, err := moveAgent(t, s, relayA).Move(t.Context(), relayB); err != nil {
+		t.Fatalf("move to %s: %v", relayB, err)
+	}
+	s.edge = relayB
+	s.restart(edgeproto.PolicyAccount)
+	res, err := h.claim(h.login(alice)[0], code)
+	if err != nil || res.Config.ServerID != s.id {
+		t.Fatalf("claim through %s of the server moved to %s: %+v, %v", relayA, relayB, res.Config, err)
+	}
 }
 
 // Below edge protocol 6 a moved server would accept connector tokens only

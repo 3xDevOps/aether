@@ -85,10 +85,51 @@ use, and at `https://edge.onaether.dev`. Updates never change `edge-url` in
 up at `https://edge.onaether.dev` stays there, with its links, connectors and
 join links. To move it:
 
-```sh
-sudo aether-server edge move https://edge.cloudfield.ai
-sudo systemctl restart aether-server
-```
+1. Check that the server is connected, and note its edge key:
+
+   ```sh
+   sudo aether-server edge status
+   ```
+
+   It exits 0 and prints `edge         https://edge.onaether.dev`, `connection
+   connected since <time>; ...` and `edge key     SHA256:<fingerprint>`. The
+   same fingerprint is in `curl -s https://edge.cloudfield.ai/v1/edge`.
+2. Move. The server keeps running:
+
+   ```sh
+   sudo aether-server edge move https://edge.cloudfield.ai
+   ```
+
+   ```
+   enrolled at https://edge.cloudfield.ai, an address of the same edge (edge key SHA256:<fingerprint>, still pinned); the edge announces https://edge.onaether.dev too, so links and connectors made there keep working
+   /etc/aether/server.conf: edge-url = https://edge.cloudfield.ai (was https://edge.onaether.dev)
+   apply it with:
+     sudo systemctl restart aether-server
+   to move back:
+     sudo aether-server edge move https://edge.onaether.dev
+   ```
+
+   A refusal prints one of the lines in the table below and changes nothing.
+3. Apply it:
+
+   ```sh
+   sudo systemctl restart aether-server
+   ```
+
+4. Check again with `sudo aether-server edge status`. It exits 0 and prints
+   `edge         https://edge.cloudfield.ai`, the connector URLs under
+   `https://edge.cloudfield.ai/mcp`, the same `edge key` and `owner`, and
+   `connection   connected since <time>; ...`.
+
+To move back, run the `to move back` line and restart.
+
+Nobody else redoes anything. The owner and members keep their roles; CLI,
+desktop app and Android app links and device links made at the old address
+keep working, and those apps keep signing in there; unused join links and
+claim codes work until they expire; Claude and ChatGPT connectors keep working,
+and the directory listings stay at `https://edge.onaether.dev/mcp` on purpose
+until every server they reach accepts the new address. Links, join links and
+claim codes made after the move name the new address.
 
 `edge move <address>` works for any edge that serves
 [more than one address pair](#more-than-one-address-pair). It enrolls at the
@@ -126,7 +167,6 @@ After the move:
 - A server binary put back to a release below edge protocol 6 enrolls at the
   new address, but accepts connector tokens only for it, so connectors
   registered at the old address fail until the server is updated or moved back.
-- To move back, run `sudo aether-server edge move <old address>` and restart.
 
 A client keeps the address it already uses, before and after a server moves.
 Without `--edge`, `aether login`, `logout`, `servers`, `link --claim` and the

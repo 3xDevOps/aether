@@ -67,7 +67,7 @@ func TestConnectorAtEveryRelayOrigin(t *testing.T) {
 	}
 
 	atB := connectAt(t, h, client, al, s, baseB)
-	universalB := universalAt(t, h, client, al, s, policy)
+	universalB := universalAt(t, h, client, al, s, policy, h.signinB, h.relayB)
 	mustCall(t, baseA, before.AccessToken)
 	list := call[protocol.ConnectorListResult](t, h.control(al, s), protocol.MethodConnectorList, struct{}{})
 	if want := []string{relayA + edgeproto.PathUniversalMCP, relayB + edgeproto.PathUniversalMCP}; !slices.Equal(list.UniversalURLs, want) ||
@@ -219,15 +219,15 @@ func connectAt(t *testing.T, h *harness, client *connectorClient, c *client, s *
 	return token
 }
 
-// universalAt authorizes a connector at the universal URL of the edge's
-// second pair, signed in at its sign-in origin, and lists the workspaces
-// with it.
-func universalAt(t *testing.T, h *harness, client *connectorClient, c *client, s *serverNode, policy edgeproto.AccessPolicy) *oauth2.Token {
+// universalAt authorizes a connector at the universal URL of relay, the
+// relay origin of the edge's pair with sign-in origin signin, signed in
+// there, and lists the workspaces with it.
+func universalAt(t *testing.T, h *harness, client *connectorClient, c *client, s *serverNode, policy edgeproto.AccessPolicy, signin, relay string) *oauth2.Token {
 	t.Helper()
 	code := call[protocol.ConnectorCodeResult](t, h.control(c, s), protocol.MethodConnectorCode, struct{}{})
-	signin, relayURL := h.signinURL, h.relayURL
-	h.signinURL, h.relayURL = h.signinB, h.relayB
-	defer func() { h.signinURL, h.relayURL = signin, relayURL }()
+	before, relayURL := h.signinURL, h.relayURL
+	h.signinURL, h.relayURL = signin, relay
+	defer func() { h.signinURL, h.relayURL = before, relayURL }()
 	b, err := h.signIn(alice)
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func universalAt(t *testing.T, h *harness, client *connectorClient, c *client, s
 		RedirectURL:                    client.redirect,
 		AuthorizationCodeFetcher: func(_ context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
 			res, _ := universalConsent(t, b, args.URL, "", s.memberOf(t, alice).DisplayName, code.Code, policy)
-			if want := h.relayB + edgeproto.PathUniversalMCP; res.Iss != want {
+			if want := relay + edgeproto.PathUniversalMCP; res.Iss != want {
 				return nil, errors.New("iss " + res.Iss + ", want " + want)
 			}
 			return res, nil
@@ -252,7 +252,7 @@ func universalAt(t *testing.T, h *harness, client *connectorClient, c *client, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := connectMCP(t, &mcp.StreamableClientTransport{Endpoint: h.relayB + edgeproto.PathUniversalMCP, OAuthHandler: handler})
+	session := connectMCP(t, &mcp.StreamableClientTransport{Endpoint: relay + edgeproto.PathUniversalMCP, OAuthHandler: handler})
 	callTool(t, session, "aether_list_workspaces", nil)
 	return token
 }
