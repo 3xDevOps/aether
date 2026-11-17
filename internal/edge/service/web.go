@@ -39,17 +39,37 @@ func parsePages() (*template.Template, error) {
 	return t, nil
 }
 
-func serveCSS(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	http.ServeFileFS(w, r, templateFS, "templates/edge.css")
+// pageAssets are the files every page may load, by URL path, served
+// from templates/ with their content types.
+var pageAssets = []struct{ path, file, contentType string }{
+	{"/edge.css", "edge.css", "text/css; charset=utf-8"},
+	{"/fonts/dm-sans-latin-wght-normal.woff2", "fonts/dm-sans-latin-wght-normal.woff2", "font/woff2"},
+	{"/fonts/saira-latin.woff2", "fonts/saira-latin.woff2", "font/woff2"},
+	{"/cloudfield-logo-small.svg", "images/cloudfield-logo-small.svg", "image/svg+xml"},
+	{"/cloudfield-favicon.svg", "images/cloudfield-favicon.svg", "image/svg+xml"},
+	{"/favicon-32.png", "images/favicon-32.png", "image/png"},
+	{"/apple-touch-icon.png", "images/apple-touch-icon.png", "image/png"},
 }
 
-func serveJoinScript(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	http.ServeFileFS(w, r, templateFS, "templates/join.js")
+func registerAssets(mux *http.ServeMux) {
+	for _, a := range pageAssets {
+		mux.HandleFunc("GET "+a.path, serveAsset(a.file, a.contentType))
+	}
 }
 
-const pageCSP = "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+// serveAsset serves a file whose URL does not change with its content,
+// so browsers keep it for an hour, not for good.
+func serveAsset(file, contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Content-Type", contentType)
+		http.ServeFileFS(w, r, templateFS, "templates/"+file)
+	}
+}
+
+var serveJoinScript = serveAsset("join.js", "text/javascript; charset=utf-8")
+
+const pageCSP = "default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 
 // pageHeaders sets the headers every page carries.
 func (s *Service) pageHeaders(csp string, next http.Handler) http.Handler {

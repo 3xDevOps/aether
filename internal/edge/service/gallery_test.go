@@ -207,7 +207,7 @@ func TestPageGallery(t *testing.T) {
 	s := &Service{pages: pages, pairs: []*pair{{signin: "http://" + addr}}}
 	states := galleryStates(t)
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /edge.css", serveCSS)
+	registerAssets(mux)
 	mux.HandleFunc("GET /join.js", serveJoinScript)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		var b strings.Builder

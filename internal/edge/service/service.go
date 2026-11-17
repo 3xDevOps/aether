@@ -315,7 +315,7 @@ func (s *Service) Handler() http.Handler {
 	pages.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/servers", http.StatusSeeOther)
 	})
-	pages.HandleFunc("GET /edge.css", serveCSS)
+	registerAssets(pages)
 	pages.HandleFunc("GET /signin", s.signinPage)
 	pages.HandleFunc("GET "+signinPath, s.signinStart)
 	pages.HandleFunc("GET "+signinPath+"/callback", s.signinCallback)
@@ -349,7 +349,7 @@ func (s *Service) Handler() http.Handler {
 	join := http.NewServeMux()
 	join.HandleFunc("GET /join/{server_id}/{invitation_id}", s.joinPage)
 	join.HandleFunc("GET /join.js", serveJoinScript)
-	join.HandleFunc("GET /edge.css", serveCSS)
+	registerAssets(join)
 	joinPages := s.pageHeaders(pageCSP+"; script-src 'self'", join)
 
 	relay := http.NewServeMux()
