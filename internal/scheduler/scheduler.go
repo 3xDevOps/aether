@@ -166,7 +166,7 @@ type Config struct {
 	// Test-only overrides of the matching default* constants.
 	sleepAnyAgent        bool
 	turnTail             time.Duration
-	harnessUpdateTimeout time.Duration
+	harnessUpdateContext func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	filesystemCapacity   func(string) (disk.Usage, error)
 }
 
