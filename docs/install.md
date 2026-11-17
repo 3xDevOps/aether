@@ -166,7 +166,7 @@ in `/usr/local/bin` that would run first.
 Beside `aether` and `aether-server` the script adds `cloudfield` and
 `cloudfield-server`, relative symlinks to them; the files keep the `aether`
 names. A name that already holds anything is left as it is. If the
-filesystem refuses the link, the script warns with the `ln -s` line and the
+filesystem refuses the link, the script prints the `ln` error and the
 install still succeeds. `next:` names a command on this machine by its new
 name only where that link exists and its directory is on `PATH`.
 

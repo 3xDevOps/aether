@@ -841,10 +841,10 @@ function Install-AetherCli {
 function Add-AetherShim {
     param([Parameter(Mandatory = $true)][string] $Directory)
     $shim = Join-Path $Directory 'cloudfield.cmd'
-    # Test-Path follows a link, so it misses one that dangles.
-    if ([System.IO.Directory]::GetFileSystemEntries($Directory, 'cloudfield.cmd').Length -gt 0) { return }
     $stage = Join-Path $Directory ('.cloudfield.cmd.{0}.tmp' -f ([Guid]::NewGuid().ToString('N')))
     try {
+        # Test-Path follows a link, so it misses one that dangles.
+        if ([System.IO.Directory]::GetFileSystemEntries($Directory, 'cloudfield.cmd').Length -gt 0) { return }
         [System.IO.File]::WriteAllBytes($stage, [System.Text.Encoding]::ASCII.GetBytes('@"%~dp0aether.exe" %*' + "`r`n"))
         # File.Move refuses an existing destination, so a file that appeared
         # since the check is not replaced.
