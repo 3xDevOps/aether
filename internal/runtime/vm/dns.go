@@ -159,15 +159,25 @@ func (r *dnsRelay) serveTCP() {
 	}
 }
 
-// exchange answers SERVFAIL when no upstream answers, as Docker's resolver
-// does, so the guest fails at once rather than after its own retries.
+// exchange moves on to the next upstream after a SERVFAIL or REFUSED, as
+// glibc and Docker's resolver do: the guest knows only the relay. With no
+// answer at all it answers SERVFAIL, as Docker's resolver does, so the
+// guest fails at once rather than after its own retries.
 func (r *dnsRelay) exchange(network string, query []byte) []byte {
+	var failed []byte
 	for _, server := range r.upstreams() {
 		reply, err := exchangeWith(network, server, query)
-		if err == nil {
+		if err != nil {
+			slog.Debug("vm runtime: DNS relay upstream", "server", server, "network", network, "error", err)
+			continue
+		}
+		if rcode := dnsmessage.RCode(reply[3] & 0x0f); rcode != dnsmessage.RCodeServerFailure && rcode != dnsmessage.RCodeRefused {
 			return reply
 		}
-		slog.Debug("vm runtime: DNS relay upstream", "server", server, "network", network, "error", err)
+		failed = reply
+	}
+	if failed != nil {
+		return failed
 	}
 	return servfail(query)
 }

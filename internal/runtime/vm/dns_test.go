@@ -70,6 +70,35 @@ func fakeResolver(t *testing.T, name string, answer netip.Addr) netip.AddrPort {
 	return addr
 }
 
+// refusingResolver answers every query REFUSED, as a resolver that does not
+// serve the host's network would.
+func refusingResolver(t *testing.T) netip.AddrPort {
+	t.Helper()
+	udp, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = udp.Close() })
+	go func() {
+		buf := make([]byte, 1<<16)
+		for {
+			n, from, err := udp.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			var p dnsmessage.Parser
+			h, err := p.Start(buf[:n])
+			if err != nil {
+				continue
+			}
+			b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: h.ID, Response: true, RCode: dnsmessage.RCodeRefused})
+			out, _ := b.Finish()
+			_, _ = udp.WriteTo(out, from)
+		}
+	}()
+	return udp.LocalAddr().(*net.UDPAddr).AddrPort()
+}
+
 func lookupVia(network, server string, timeout time.Duration) ([]netip.Addr, error) {
 	r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, server)
@@ -97,6 +126,16 @@ func TestDNSRelayAnswersFromTheHostsResolver(t *testing.T) {
 	}
 	defer r.close()
 	udpPort, tcpPort := r.ports()
+	refusing := refusingResolver(t)
+	past, err := listenDNS(loopback, netip.MustParsePrefix("127.0.0.0/8"), func() []netip.AddrPort { return []netip.AddrPort{refusing, resolver} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer past.close()
+	pastPort, _ := past.ports()
+	if got, lookupErr := lookupVia("udp", netip.AddrPortFrom(loopback, pastPort).String(), 2*dnsTimeout); lookupErr != nil || !slices.Equal(got, []netip.Addr{want}) {
+		t.Errorf("lookup past a resolver that refuses = %v, %v", got, lookupErr)
+	}
 	for network, port := range map[string]uint16{"udp": udpPort, "tcp": tcpPort} {
 		got, lookupErr := lookupVia(network, netip.AddrPortFrom(loopback, port).String(), 2*dnsTimeout)
 		if lookupErr != nil || !slices.Equal(got, []netip.Addr{want}) {
