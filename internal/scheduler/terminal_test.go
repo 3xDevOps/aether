@@ -672,9 +672,24 @@ func TestEnsureTerminalAfterSaveKeepsContainer(t *testing.T) {
 	}
 }
 
+// heldSupervisorRuntime keeps the terminal supervisor's unbounded Wait
+// pending, so the supervisor never takes the terminal lock that
+// DestroyStoppedTerminal only tries. Bounded exit probes see the fake as is.
+type heldSupervisorRuntime struct{ *fakeRuntime }
+
+func (r heldSupervisorRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
+	if _, bounded := ctx.Deadline(); bounded {
+		return r.fakeRuntime.Wait(ctx, id)
+	}
+	<-ctx.Done()
+	return runtime.ExitStatus{}, ctx.Err()
+}
+
 func TestDestroyStoppedTerminalSkipsRunningTerminal(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.Runtime = heldSupervisorRuntime{cfg.Runtime.(*fakeRuntime)}
+	})
 	terminal, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
 	if err != nil {
 		t.Fatalf("EnsureTerminal: %v", err)
