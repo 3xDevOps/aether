@@ -8,7 +8,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/Aether/internal/serverunit"
 )
 
 const unitText = "[Service]\nExecStart=/usr/local/bin/aether-server serve\n"
@@ -37,9 +37,9 @@ func assertHostLayout(t *testing.T, dir, units, cli, server string) {
 		}
 	}
 	for link, target := range map[string]string{
-		filepath.Join(dir, "cloudfield"):            "aether",
-		filepath.Join(dir, "cloudfield-server"):     "aether-server",
-		filepath.Join(units, serversetup.UnitAlias): "aether-server.service",
+		filepath.Join(dir, "cloudfield"):        "aether",
+		filepath.Join(dir, "cloudfield-server"): "aether-server",
+		filepath.Join(units, serverunit.Alias):  "aether-server.service",
 	} {
 		if got, err := os.Readlink(link); err != nil || got != target {
 			t.Fatalf("%s -> %q, %v; want %s", link, got, err, target)
@@ -104,7 +104,7 @@ func TestTrialRollbackKeepsTheLinks(t *testing.T) {
 
 func TestLinkUnitLeavesAnythingElseAtTheName(t *testing.T) {
 	units := unitDir(t)
-	alias := filepath.Join(units, serversetup.UnitAlias)
+	alias := filepath.Join(units, serverunit.Alias)
 	if err := os.WriteFile(alias, []byte("someone else's unit"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +121,8 @@ func TestLinkUnitWithoutTheUnitLinksNothing(t *testing.T) {
 	if created, err := (Host{UnitDir: units}).LinkUnit(); err != nil || created {
 		t.Fatalf("LinkUnit = %v, %v", created, err)
 	}
-	if _, err := os.Lstat(filepath.Join(units, serversetup.UnitAlias)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("%s without the unit: %v", serversetup.UnitAlias, err)
+	if _, err := os.Lstat(filepath.Join(units, serverunit.Alias)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("%s without the unit: %v", serverunit.Alias, err)
 	}
 }
 

@@ -15,7 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/macinstall"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/Aether/internal/serverunit"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -376,7 +376,7 @@ func restartCommand(updated []string) string {
 }
 
 // restartUnit is a variable so no test asks the host's systemd.
-var restartUnit = serversetup.RestartUnit
+var restartUnit = serverunit.RestartName
 
 // checkRelease runs the release check, mapping an unreachable GitHub to
 // the same code every other unavailable dependency uses.

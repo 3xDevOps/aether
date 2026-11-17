@@ -32,6 +32,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/Aether/internal/serverunit"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -566,8 +567,8 @@ func linkSecondNames(host serverupdate.Host) {
 	// reloads systemd itself, because a daemon-reload has host-wide effects.
 	if created {
 		go func() {
-			if !serversetup.UnitAliasResolves() {
-				slog.Warn("systemd does not resolve " + serversetup.UnitAlias + " to " + serversetup.ServiceName +
+			if !serverunit.AliasResolves() {
+				slog.Warn("systemd does not resolve " + serverunit.Alias + " to " + serversetup.ServiceName +
 					" yet; it does after: sudo systemctl daemon-reload")
 			}
 		}()

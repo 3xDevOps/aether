@@ -1,18 +1,16 @@
 package serversetup
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
-	"time"
+
+	"github.com/3xDevOps/Aether/internal/serverunit"
 )
 
 // ServiceName is the system service identifier.
-const ServiceName = "aether-server"
+const ServiceName = serverunit.Name
 
 // UnitPath is where the system unit belongs.
 const UnitPath = "/etc/systemd/system/" + ServiceName + ".service"
@@ -24,30 +22,6 @@ const ActivateCommand = "systemctl daemon-reload && systemctl enable --now " + S
 
 // RestartCommand applies a changed config file to a running service.
 const RestartCommand = "systemctl restart " + ServiceName
-
-// UnitAlias is the second name of the server's unit, a symlink to its
-// unit file. The unit keeps its name and text, because a binary from
-// before the second name restarts it by that name after a rollback.
-// systemctl enable refuses an alias, so enabling keeps ServiceName.
-const UnitAlias = "cloudfield-server.service"
-
-// RestartUnit is the unit name to print in a restart line: UnitAlias
-// when systemd resolves it, else ServiceName.
-func RestartUnit() string {
-	if UnitAliasResolves() {
-		return strings.TrimSuffix(UnitAlias, ".service")
-	}
-	return ServiceName
-}
-
-// UnitAliasResolves reports whether systemd loads UnitAlias as the
-// server's unit, which takes the link and a systemd that has read it.
-func UnitAliasResolves() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "systemctl", "show", "-p", "Id", "--value", UnitAlias).Output()
-	return err == nil && strings.TrimSpace(string(out)) == ServiceName+".service"
-}
 
 // ServiceDefaults are the options the packaged unit used to hardcode in its
 // ExecStart before they moved into the config file. They are the posture of

@@ -12,6 +12,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/Aether/internal/serverunit"
 )
 
 // Host carries the three things a self-update does to the machine it runs
@@ -44,7 +45,7 @@ type Host struct {
 	UnitDir string
 }
 
-// LinkUnit makes serversetup.UnitAlias in UnitDir a link to the server's
+// LinkUnit makes serverunit.Alias in UnitDir a link to the server's
 // unit file when the unit file is there and nothing holds the name, and
 // reports whether it did. A name held by anything else is left as it is and
 // is no error. It never reloads systemd: a daemon-reload acts on every unit
@@ -57,7 +58,7 @@ func (h Host) LinkUnit() (bool, error) {
 	if _, err := os.Stat(filepath.Join(h.UnitDir, unit)); err != nil {
 		return false, nil
 	}
-	created, err := selfupdate.Symlink(h.UnitDir, unit, serversetup.UnitAlias)
+	created, err := selfupdate.Symlink(h.UnitDir, unit, serverunit.Alias)
 	if errors.Is(err, selfupdate.ErrNameTaken) {
 		return false, nil
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/Aether/internal/serverunit"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
@@ -195,7 +196,7 @@ func linkUnitAndReload() {
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "warning:", err)
 	}
-	if !created || serversetup.UnitAliasResolves() {
+	if !created || serverunit.AliasResolves() {
 		return
 	}
 	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {

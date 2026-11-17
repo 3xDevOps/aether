@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/disk"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
@@ -25,8 +27,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/server"
 	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/Aether/internal/serverunit"
 	"github.com/3xDevOps/Aether/internal/shellquote"
-	"golang.org/x/term"
 )
 
 func install(args []string) error {
@@ -261,7 +263,7 @@ func linkUnitAlias(w io.Writer, unitPath string) {
 	if unit != filepath.Base(serversetup.UnitPath) {
 		return
 	}
-	_, err := selfupdate.Symlink(filepath.Dir(unitPath), unit, serversetup.UnitAlias)
+	_, err := selfupdate.Symlink(filepath.Dir(unitPath), unit, serverunit.Alias)
 	if err != nil && !errors.Is(err, selfupdate.ErrNameTaken) {
 		_, _ = fmt.Fprintln(w, "warning:", err)
 	}
