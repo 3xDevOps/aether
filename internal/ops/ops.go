@@ -251,7 +251,8 @@ func opOf[In any](name, title string, scope Scope, idempotent bool, next, does s
 			summary, out, err := run(ctx, c, in)
 			if err != nil {
 				var ended errLongCalls
-				if errors.As(context.Cause(ctx), &ended) {
+				var mixed *untrustedError
+				if errors.As(context.Cause(ctx), &ended) && !errors.As(err, &mixed) {
 					again := "call again shortly"
 					if !o.waits && !o.ReadOnly() {
 						again = "check whether it took effect before calling again"

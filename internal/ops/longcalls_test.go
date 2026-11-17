@@ -76,10 +76,12 @@ func TestLongCallsEndWaitingCallsFirst(t *testing.T) {
 	}
 	running("a waiting call inside the bound", first, second)
 
-	lists := []<-chan string{list(), list()}
+	lists := []<-chan string{list()}
 	if got := <-first; got != early {
 		t.Fatalf("the oldest waiting call, when a call that does not wait reached the bound: %q, want %q", got, early)
 	}
+	running("the newer waiting call, when the oldest was ended", second)
+	lists = append(lists, list())
 	if got := <-second; got != early {
 		t.Fatalf("the other waiting call, when a second call that does not wait reached the bound: %q, want %q", got, early)
 	}

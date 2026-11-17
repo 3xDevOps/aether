@@ -552,10 +552,9 @@ longer than 5 seconds at once, across all its connectors, so calls that wait
 cannot hold all 8 requests the edge forwards to it
 ([edge.md](edge.md#limits)). Past that, the server ends an
 `aether_launch_session` or `aether_ask_assistant` call early before any other:
-the launch answers as one still starting, and the ask fails with `ended early:
-this server runs at most 4 connector calls longer than 5s at once; call again
-shortly`. Calling `aether_ask_assistant` again with the same prompt within a
-minute, or with the `turn_id`, reaches the same turn.
+the launch answers as one still starting, and the ask with its `turn_id` to
+poll. Any other call ended early fails with a message that starts `ended
+early: this server runs at most 4 connector calls longer than 5s at once`.
 
 The other writes repeat safely without a key. Each `aether_session_lifecycle` action
 but `relaunch` sets a state, so a repeat changes nothing, and

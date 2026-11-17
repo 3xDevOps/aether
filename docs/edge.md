@@ -584,10 +584,13 @@ at https://<relay host>/mcp; upgrade it ...` for a server at protocol 2.
   `aether_ask_assistant`, which wait by design and are safe to call again,
   else the oldest of those two in progress, else that call. An ended launch
   keeps starting and is answered as a launch still starting is, within 5 more
-  seconds; any other ended call fails with `ended early: this server runs at
-  most 4 connector calls longer than 5s at once; call again shortly`, or for a
-  write that is neither of the two, `...; check whether it took effect before
-  calling again` ([connectors.md](connectors.md)). The server answers an MCP
+  seconds, and an ended ask with its `turn_id` to poll. Any other ended call
+  fails with a message that starts `ended early: this server runs at most 4
+  connector calls longer than 5s at once`, followed by `call again shortly`
+  for a read and `check whether it took effect before calling again` for a
+  write ([connectors.md](connectors.md)). The count is of calls, not
+  connections: an ended call holds its connection until it returns. The
+  server answers an MCP
   `subscriptions/listen` request at once instead of holding it open: its tool
   list never changes while a client listens.
 - Universal connector URL: 20 server choices and consent pages at once, then 1
