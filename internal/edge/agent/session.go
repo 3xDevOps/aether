@@ -464,13 +464,16 @@ func (a *Agent) serve(ctx context.Context, s *session) error {
 		if err != nil {
 			return fmt.Errorf("control connection: %w", err)
 		}
-		// Ending ctx also closes the relayed connections, and the edge can
-		// send an open in their place before this read sees ctx end. Their
-		// slots are freed only as those connections finish closing, so
-		// answering it could refuse it as over the limit; unanswered, the
+		// Ending Run's context closes the relayed connections, and the edge
+		// can send an open in their place before ctx, derived from it, ends.
+		// Their slots are freed only as those connections finish closing,
+		// so answering it could refuse it as over the limit; unanswered, the
 		// edge holds it for the server's return.
-		if ctx.Err() != nil {
-			return ctx.Err()
+		a.mu.Lock()
+		runCtx := a.runCtx
+		a.mu.Unlock()
+		if err := runCtx.Err(); err != nil {
+			return err
 		}
 		switch m := m.(type) {
 		case edgeproto.Ping:
