@@ -107,7 +107,7 @@ func connectorSession(t *testing.T, f *fakeServer, scopes ...Scope) *mcp.ClientS
 func callSession(t *testing.T, call Call, scopes ...Scope) *mcp.ClientSession {
 	t.Helper()
 	srv := mcp.NewServer(&mcp.Implementation{Name: "aether", Version: "v0"}, nil)
-	RegisterConnector(srv, call, func(s Scope) bool { return s == ScopeRead || slices.Contains(scopes, s) })
+	RegisterConnector(srv, call, func(s Scope) bool { return s == ScopeRead || slices.Contains(scopes, s) }, nil)
 	st, ct := mcp.NewInMemoryTransports()
 	if _, err := srv.Connect(t.Context(), st, nil); err != nil {
 		t.Fatal(err)

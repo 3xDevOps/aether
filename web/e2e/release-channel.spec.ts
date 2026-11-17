@@ -1,8 +1,8 @@
 // The Release channel section against a real gateway and server. The real
 // server answers server.update_status, so the channel on screen is the one
 // the wire carries; only server.release_channel_set is answered here, since
-// a real answer needs GitHub's channel pointers and saving would change the
-// server under test.
+// the harness keeps the server off GitHub's channel pointers, which a real
+// answer needs, and saving would change the server under test.
 
 import type { Page, Route } from '@playwright/test'
 import type { ServerReleaseChannelSet } from '../src/lib/types'

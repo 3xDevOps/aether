@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"unicode"
@@ -38,6 +39,10 @@ const (
 
 var defaultSocketPath = coordtransport.SocketPath
 
+// newCLIPath is where a container created since the command got its new
+// name has it; tests point it elsewhere.
+var newCLIPath = coordtransport.CloudfieldCLIPath
+
 // Config makes Run testable without changing the command's wire contract.
 // Socket is intentionally not a command-line option: production always uses
 // the run-mounted v3 socket. Tests may point it at a temporary socket.
@@ -46,6 +51,12 @@ type Config struct {
 	In     io.Reader
 	Out    io.Writer
 	ErrOut io.Writer
+	// Name is the name the command was run by, which usage text shows;
+	// empty means coordhooks.OldCLI.
+	Name string
+	// cli is the name guidance gives the command: the one this container
+	// has.
+	cli string
 }
 
 // Envelope is the stable output wrapper for state commands. Skill and help
@@ -64,11 +75,16 @@ type CLIError struct {
 }
 
 // Main runs the command with process standard streams and returns its exit
-// status. cmd/aether-server uses this when argv0 is aether-internal.
+// status. cmd/aether-server uses this when argv0 is aether-internal or
+// cloudfield-internal.
 func Main(args []string) int {
-	code, err := Run(context.Background(), args, Config{})
+	name := coordhooks.OldCLI
+	if filepath.Base(os.Args[0]) == coordhooks.NewCLI {
+		name = coordhooks.NewCLI
+	}
+	code, err := Run(context.Background(), args, Config{Name: name})
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "aether-internal: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
 	}
 	return code
 }
@@ -89,14 +105,18 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 	if cfg.ErrOut == nil {
 		cfg.ErrOut = os.Stderr
 	}
+	if cfg.Name == "" {
+		cfg.Name = coordhooks.OldCLI
+	}
+	cfg.cli = coordhooks.LocalCLI(newCLIPath)
 	if len(args) == 0 {
 		return fail(cfg.Out, protocol.CodeInvalidRequest, "a command is required; use --help for command usage")
 	}
 	if args[0] == "-h" || args[0] == "--help" {
-		return writeHelp(cfg.Out, "")
+		return writeHelp(cfg.Out, "", cfg.Name)
 	}
 	if len(args) >= 2 && (args[len(args)-1] == "-h" || args[len(args)-1] == "--help") {
-		return writeHelp(cfg.Out, strings.Join(args[:len(args)-1], " "))
+		return writeHelp(cfg.Out, strings.Join(args[:len(args)-1], " "), cfg.Name)
 	}
 
 	var result any
@@ -105,7 +125,7 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 	case "status":
 		result, err = status(ctx, cfg.Socket, args[1:])
 	case "skill":
-		return skill(ctx, cfg.Socket, args[1:], cfg.Out)
+		return skill(ctx, cfg, args[1:])
 	case "hook":
 		return hook(ctx, cfg, args[1:])
 	case "send":
@@ -261,7 +281,8 @@ captures before a terminal report can clean up the session; pass its packet_id a
 `,
 }
 
-func writeHelp(out io.Writer, command string) (int, error) {
+// writeHelp writes command's usage, naming the command name as it was run.
+func writeHelp(out io.Writer, command, name string) (int, error) {
 	text, ok := commandUsages[command]
 	if !ok {
 		text, ok = memoryUsages[command]
@@ -278,7 +299,7 @@ func writeHelp(out io.Writer, command string) (int, error) {
 	if !ok {
 		return fail(out, protocol.CodeMethodNotFound, "unknown command: "+command)
 	}
-	if _, err := io.WriteString(out, text); err != nil {
+	if _, err := io.WriteString(out, coordhooks.Named(text, name)); err != nil {
 		return ExitFailure, fmt.Errorf("write help: %w", err)
 	}
 	return ExitOK, nil
@@ -306,7 +327,8 @@ func status(ctx context.Context, socket string, args []string) (protocol.CoordSt
 	return out, nil
 }
 
-func skill(ctx context.Context, socket string, args []string, out io.Writer) (int, error) {
+func skill(ctx context.Context, cfg Config, args []string) (int, error) {
+	socket, out, named := cfg.Socket, cfg.Out, namedWriter{cfg.Out, cfg.cli}
 	fs := newFlags("skill")
 	hooks := fs.Bool("hooks", false, "print hook installation checks and steps for every harness")
 	if err := parseFlags(fs, args); err != nil {
@@ -316,7 +338,7 @@ func skill(ctx context.Context, socket string, args []string, out io.Writer) (in
 		if fs.NArg() != 0 {
 			return fail(out, protocol.CodeInvalidParams, "skill --hooks takes no topic")
 		}
-		if err := writeHookInstallation(out); err != nil {
+		if err := writeHookInstallation(out, cfg.cli); err != nil {
 			return ExitFailure, fmt.Errorf("write hook installation guidance: %w", err)
 		}
 		return ExitOK, nil
@@ -333,12 +355,12 @@ func skill(ctx context.Context, socket string, args []string, out io.Writer) (in
 	}
 	write := func(status *protocol.CoordStatusResult) (int, error) {
 		if topic == "subsessions" {
-			return writeSubsessionSkill(out, status)
+			return writeSubsessionSkill(named, status)
 		}
 		if topic != "" {
-			return writeDevelopmentSkill(out, status, topic)
+			return writeDevelopmentSkill(named, status, topic)
 		}
-		return writeSkill(out, status)
+		return writeSkill(out, status, cfg.cli)
 	}
 	if socket == "" {
 		return write(nil)
@@ -404,7 +426,10 @@ key. Save the generated key printed to stderr if you omitted --idempotency-key.
 Use a new key only for a new operation; receipt means durable storage, not read.
 `
 
-func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) {
+// writeSkill writes the skill to out, naming the command cli everywhere but
+// in the task it quotes.
+func writeSkill(raw io.Writer, status *protocol.CoordStatusResult, cli string) (int, error) {
+	out := namedWriter{raw, cli}
 	if _, err := fmt.Fprintf(out, "Cloudfield coordination skill %s\nCLI build: %s\n", SchemaVersion, version.String()); err != nil {
 		return ExitFailure, fmt.Errorf("write skill header: %w", err)
 	}
@@ -424,7 +449,7 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 		if len(summary) > protocol.CoordMaxStatusTaskBytes {
 			summary = summary[:protocol.CoordMaxStatusTaskBytes] + "…"
 		}
-		if _, err := fmt.Fprintf(out, "Task summary (bounded): %s\n", summary); err != nil {
+		if _, err := fmt.Fprintf(raw, "Task summary (bounded): %s\n", summary); err != nil {
 			return ExitFailure, fmt.Errorf("write skill task summary: %w", err)
 		}
 	}
@@ -439,7 +464,9 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 	}
 	if hasSkillCapability(status, protocol.MethodCoordInbox) {
 		var guide string
-		switch g := coordhooks.StatusGuide(*status); g.Role {
+		g := coordhooks.StatusGuide(*status)
+		g.CLI = cli
+		switch g.Role {
 		case "":
 		case coordhooks.RoleInteractive:
 			guide = coordhooks.ReportGuide(g) + ordinaryOutcomes
@@ -452,10 +479,24 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 	} else if _, err := io.WriteString(out, "Use aether-internal status for current authority and --help for syntax.\nNo coordination mailbox is implied by a session socket.\n"); err != nil {
 		return ExitFailure, fmt.Errorf("write skill discovery: %w", err)
 	}
-	if err := writeHookSummary(out); err != nil {
+	if err := writeHookSummary(raw, cli); err != nil {
 		return ExitFailure, fmt.Errorf("write hook summary: %w", err)
 	}
 	return ExitOK, nil
+}
+
+// namedWriter names the command cli in what it writes, which must be text
+// Cloudfield generates, each piece in one Write.
+type namedWriter struct {
+	w   io.Writer
+	cli string
+}
+
+func (n namedWriter) Write(p []byte) (int, error) {
+	if _, err := io.WriteString(n.w, coordhooks.Named(string(p), n.cli)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func boundedSkillField(value string) string {

@@ -303,7 +303,7 @@ func (m modeSwitch) writeTerminal(ctx context.Context) (string, harness.Reporter
 	}
 	tui := *m.run
 	tui.Mode, tui.ACP = domain.LaunchTUI, false
-	instructions, err := m.s.launchInstructions(ctx, &tui, m.profile, native)
+	instructions, err := m.s.launchInstructions(ctx, &tui, m.profile, native, m.s.containerCLI(ctx, m.cid))
 	if err != nil {
 		return "", 0, err
 	}

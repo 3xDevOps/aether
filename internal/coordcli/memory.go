@@ -100,7 +100,7 @@ func memoryCommand(ctx context.Context, cfg Config, args []string) (int, error) 
 		case "add":
 			text, err = memoryAdd(ctx, cfg.Socket, args[1:])
 		case "search":
-			text, err = memorySearch(ctx, cfg.Socket, args[1:])
+			text, err = memorySearch(ctx, cfg.Socket, args[1:], cfg.cli)
 		case "show":
 			text, err = memoryShow(ctx, cfg.Socket, args[1:])
 		case "brief":
@@ -112,7 +112,7 @@ func memoryCommand(ctx context.Context, cfg Config, args []string) (int, error) 
 	if err != nil {
 		message := err.Error() + "\n"
 		if _, usage := err.(*CLIUsageError); usage {
-			message += memoryUsages[command]
+			message += coordhooks.Named(memoryUsages[command], cfg.Name)
 		}
 		if _, werr := io.WriteString(cfg.ErrOut, message); werr != nil {
 			return ExitFailure, fmt.Errorf("write %s error %q: %w", command, err.Error(), werr)
@@ -199,7 +199,7 @@ func memoryAdd(ctx context.Context, socket string, args []string) (string, error
 	return b.String(), nil
 }
 
-func memorySearch(ctx context.Context, socket string, args []string) (string, error) {
+func memorySearch(ctx context.Context, socket string, args []string, cli string) (string, error) {
 	fs := newFlags("memory search")
 	kind := fs.String("kind", "", "only notes of this kind")
 	file := fs.String("file", "", "only notes citing this repository path")
@@ -222,7 +222,7 @@ func memorySearch(ctx context.Context, socket string, args []string) (string, er
 	for _, item := range out.Items[:min(len(out.Items), protocol.MemorySearchLimit)] {
 		b.WriteString(memoryLine(item, now) + "\n")
 	}
-	b.WriteString("Full note: aether-internal memory show <id>\n")
+	b.WriteString(coordhooks.Named("Full note: aether-internal memory show <id>\n", cli))
 	return b.String(), nil
 }
 

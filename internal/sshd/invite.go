@@ -167,8 +167,15 @@ func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display st
 		_ = restoreInvite(s.cfg.InvitesDir, code, rec)
 		return nil, fmt.Errorf("sshd: invite join: %w", err)
 	}
-	if display == "" {
+	// The display name comes from the client-chosen SSH user name, so it gets
+	// the same validation as member.rename: reject control characters and an
+	// over-long name rather than persisting them for other members' terminals.
+	// A blank or rejected name falls back to the default so a formatting slip
+	// does not waste the (already burned) invite code.
+	if cleaned, err := cleanDisplayName(display); err != nil {
 		display = "collaborator"
+	} else {
+		display = cleaned
 	}
 	m := &domain.Member{
 		DisplayName: display,

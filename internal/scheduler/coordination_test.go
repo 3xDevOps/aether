@@ -532,7 +532,7 @@ func TestDisabledCoordinationKeepsTasklessDiscoveryWithoutLifecycleHooks(t *test
 			}
 			// Instructions are still launch-scoped; no fake user task or
 			// lifecycle callback may be substituted to get them delivered.
-			card := e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID)})
+			card := e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), CLI: coordhooks.NewCLI})
 			if strings.Contains(card, "--outcome") {
 				t.Fatalf("instructions without lifecycle reporting carry the report rule: %q", card)
 			}
@@ -580,7 +580,8 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				g := coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive}
+				// The container it creates has the new command name.
+				g := coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, CLI: coordhooks.NewCLI}
 				if tc.mode == domain.LaunchHeadless {
 					g.Role, g.Background = coordhooks.RoleBackground, true
 				}
@@ -608,7 +609,7 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 						}
 						return
 					}
-					if want := withInstructions(tc.task, e.sched.runInstructions(coordhooks.Guide{Role: g.Role, Background: g.Background})); !strings.Contains(command, want) {
+					if want := withInstructions(tc.task, e.sched.runInstructions(coordhooks.Guide{Role: g.Role, Background: g.Background, CLI: g.CLI})); !strings.Contains(command, want) {
 						t.Fatalf("command %q lacks the task with the role card", command)
 					}
 					return
@@ -617,7 +618,7 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 					t.Fatalf("a launch carrying the card in its system prompt lacks %s", coordtransport.RoleCardEnv)
 				}
 				card := e.sched.runInstructions(g)
-				if !strings.Contains(card, string(run.ID)) || !strings.Contains(card, "waiting") || !strings.Contains(card, coordhooks.PeerRule) {
+				if !strings.Contains(card, string(run.ID)) || !strings.Contains(card, "waiting") || !strings.Contains(card, coordhooks.Named(coordhooks.PeerRule, g.CLI)) {
 					t.Fatalf("role card %q lacks the session, the waiting outcome or the peer rule", card)
 				}
 				if strings.Contains(card, "- waiting:") != g.Wake || strings.Contains(card, "- needs-input:") == g.Background {

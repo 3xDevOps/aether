@@ -465,6 +465,9 @@ func (r *fakeRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.Contain
 
 		Fingerprint: c.spec.Fingerprint,
 	}
+	for _, m := range c.spec.Mounts {
+		info.MountTargets = append(info.MountTargets, m.ContainerPath)
+	}
 	c.mu.Lock()
 	if c.exit != nil {
 		info.Exited, info.ExitCode = true, c.exit.Code

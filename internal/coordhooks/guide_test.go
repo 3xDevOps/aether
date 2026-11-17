@@ -1,6 +1,10 @@
 package coordhooks
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -49,16 +53,89 @@ func TestBriefFitsEveryLaunch(t *testing.T) {
 	for _, role := range []string{RoleInteractive, RoleBackground} {
 		for _, background := range []bool{false, true} {
 			for _, wake := range []bool{false, true} {
-				g := Guide{Role: role, Background: background, Wake: wake && !background}
-				brief := Brief(g)
-				if len(brief) > 512 || !strings.Contains(brief, "End every turn with exactly one aether_report") ||
-					(background && strings.Contains(brief, "needs-input =")) || background == strings.Contains(brief, "answered =") {
-					t.Errorf("Brief(%+v) is %d bytes: %s", g, len(brief), brief)
-				}
-				if guide := ReportGuide(g); len(guide) > 1536 {
-					t.Errorf("ReportGuide(%+v) is %d bytes: %s", g, len(guide), guide)
+				for _, cli := range []string{OldCLI, NewCLI} {
+					g := Guide{Role: role, Background: background, Wake: wake && !background, CLI: cli}
+					brief := Brief(g)
+					if len(brief) > 512 || !strings.Contains(brief, "End every turn with exactly one aether_report") ||
+						(background && strings.Contains(brief, "needs-input =")) || background == strings.Contains(brief, "answered =") {
+						t.Errorf("Brief(%+v) is %d bytes: %s", g, len(brief), brief)
+					}
+					if guide := ReportGuide(g); len(guide) > 1536 {
+						t.Errorf("ReportGuide(%+v) is %d bytes: %s", g, len(guide), guide)
+					}
 				}
 			}
+		}
+	}
+}
+
+// guideTexts renders every guide text for the runs launches make.
+func guideTexts(cli string) string {
+	var b strings.Builder
+	for _, g := range []Guide{
+		{RunID: "run-self"},
+		{RunID: "run-self", Role: RoleInteractive},
+		{RunID: "run-self", Role: RoleInteractive, Wake: true},
+		{RunID: "run-self", Role: RoleBackground, Background: true},
+		{RunID: "run-self", Role: RoleInteractive, Wake: true, Parent: "run-parent", Repos: "docs at /workspace/docs"},
+	} {
+		g.CLI = cli
+		fmt.Fprintf(&b, "=== role=%q background=%t wake=%t parent=%q\n--- brief\n%s\n--- reminder\n%s\n--- card\n%s\n", g.Role, g.Background, g.Wake, g.Parent, Brief(g), ReportReminder(g), RoleCard(g))
+	}
+	return b.String()
+}
+
+// A container without the new path, and every caller that names no
+// command, gets the text main produced before the new name existed, byte
+// for byte: testdata/old-name.golden is guideTexts as main rendered it.
+func TestOldNameTextIsUnchanged(t *testing.T) {
+	want, err := os.ReadFile(filepath.Join("testdata", "old-name.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cli := range []string{"", OldCLI} {
+		if got := guideTexts(cli); got != string(want) {
+			t.Errorf("guide texts for CLI %q differ from testdata/old-name.golden:\n%s", cli, got)
+		}
+	}
+}
+
+// A container with the new path is told the new name everywhere but in the
+// turn-end reminder's lead, which released dashboards match, and in text
+// the guide quotes.
+func TestNewNameText(t *testing.T) {
+	g := Guide{RunID: "run-self", Role: RoleInteractive, Parent: "run-parent", Repos: "aether-internal at /workspace/aether-internal", CLI: NewCLI}
+	for name, text := range map[string]string{"brief": Brief(g), "guide": ReportGuide(g), "wait": WaitRule(g)} {
+		if !strings.Contains(text, NewCLI) || strings.Contains(text, OldCLI) {
+			t.Errorf("%s names the old command or not the new one:\n%s", name, text)
+		}
+	}
+	card := RoleCard(g)
+	if quoted := strings.ReplaceAll(card, g.Repos, ""); !strings.Contains(card, g.Repos) || strings.Contains(quoted, OldCLI) ||
+		!strings.Contains(card, "`cloudfield-internal ask --to run-parent`") || !strings.Contains(card, "`cloudfield-internal skill`") {
+		t.Errorf("role card does not name the new command outside the repositories it quotes:\n%s", card)
+	}
+	if reminder := ReportReminder(g); !strings.HasPrefix(reminder, ReportReminderLead) {
+		t.Errorf("report reminder lost its lead: %s", reminder)
+	}
+}
+
+// Only an executable file at the new path makes text name it.
+func TestLocalCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows files carry no executable bit; the session CLI runs in linux containers only")
+	}
+	dir := t.TempDir()
+	exe, plain := filepath.Join(dir, "exe"), filepath.Join(dir, "plain")
+	if err := os.WriteFile(exe, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plain, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{exe: NewCLI, plain: OldCLI, dir: OldCLI, filepath.Join(dir, "missing"): OldCLI} {
+		if got := LocalCLI(path); got != want {
+			t.Errorf("LocalCLI(%s) = %s, want %s", path, got, want)
 		}
 	}
 }

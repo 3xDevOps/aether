@@ -128,7 +128,7 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		if len(rules) == 0 {
 			return ExitOK, nil
 		}
-		if err := writeHookContext(cfg.Out, harness, event, false, strings.Join(rules, " ")); err != nil {
+		if err := writeHookContext(cfg.Out, harness, event, false, coordhooks.Named(strings.Join(rules, " "), cfg.cli)); err != nil {
 			return ExitFailure, fmt.Errorf("hook: write context: %w", err)
 		}
 		return ExitOK, nil
@@ -160,9 +160,11 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		}
 		defer writeHookNotices(path, announced)
 	}
-	text := hookContext(notices, stopping)
+	text := coordhooks.Named(hookContext(notices, stopping), cfg.cli)
 	if starting && envname.Getenv(coordtransport.RoleCardEnv) != "1" {
-		card := coordhooks.RoleCard(coordhooks.StatusGuide(status))
+		g := coordhooks.StatusGuide(status)
+		g.CLI = cfg.cli
+		card := coordhooks.RoleCard(g)
 		if brief := sessionMemoryBrief(ctx, cfg.Socket, status); brief != "" {
 			card += "\n" + brief
 		}

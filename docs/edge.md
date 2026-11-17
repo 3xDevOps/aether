@@ -692,7 +692,7 @@ The edge answers `404 unknown server`, `503 server is not connected to the edge`
 aether-server update`, `403 this server does not serve MCP connectors`, `503 this
 server already has 8 MCP connector requests in progress through the edge; retry
 shortly` for a request that waited 15 seconds for one of them to finish or found
-16 others already waiting, and
+16 others already waiting, with `Retry-After: 5`, and
 `413 request body is over the edge's limit of 1048576 bytes`. A request to a
 server whose control channel ended in the last 30 seconds, as a restarting
 server's does, waits for it to enroll again and goes to it then. So does a
@@ -713,6 +713,22 @@ at https://<relay host>/mcp; upgrade it ...` for a server at protocol 2.
   connections per device. A connector request past the 8 waits up to 15 seconds
   for one to finish; at most 16 wait per server, counting those whose connection
   is being opened and those waiting up to 30 seconds for the server to return.
+- 4 connector tool calls per server running longer than 5 seconds, so calls
+  that wait leave the other 4 requests to short calls. The server, not the
+  edge, enforces it. When a call reaches 5 seconds with 4 others already past
+  it, the server ends one early: that call if it is `aether_launch_session` or
+  `aether_ask_assistant`, which wait by design and are safe to call again,
+  else the oldest of those two in progress, else that call. An ended launch
+  keeps starting and is answered as a launch still starting is, within 5 more
+  seconds, and an ended ask with its `turn_id` to poll. Any other ended call
+  fails with a message that starts `ended early: this server runs at most 4
+  connector calls longer than 5s at once`, followed by `call again shortly`
+  for a read and `check whether it took effect before calling again` for a
+  write ([connectors.md](connectors.md)). The count is of calls, not
+  connections: an ended call holds its connection until it returns. The
+  server answers an MCP
+  `subscriptions/listen` request at once instead of holding it open: its tool
+  list never changes while a client listens.
 - Universal connector URL: 20 server choices and consent pages at once, then 1
   every 3 seconds per address; 60 token requests at once, then 1 a second per
   address and server.
@@ -1159,7 +1175,9 @@ The metrics listener serves Prometheus text at `/metrics` on loopback; scrape it
 on the edge host or over an SSH tunnel. Alert on `aether_edge_throttled` equal to
 1 (the egress budget is spent), on `aether_edge_servers{state="claimed"}` falling
 to near zero, and on a sustained rise in one
-`aether_edge_refusals_total{reason="..."}`. `aether_edge_egress_month_bytes`,
+`aether_edge_refusals_total{reason="..."}`; `reason="MCP connection limit"`
+counts the `503 this server already has 8 MCP connector requests in progress`
+answers. `aether_edge_egress_month_bytes`,
 `aether_edge_github_errors_total` and `aether_edge_mcp_waiting` (connector
 requests waiting for a connection or for their server to return) are also
 exported.
@@ -1171,7 +1189,11 @@ outside the edge's network, probe `/healthz` on every host name and each one's c
 expiry (`openssl x509 -noout -checkend 1814400`).
 
 The edge logs to the journal (`journalctl -u aether-edge`), including client
-addresses for refused enrollments and failed TLS handshakes. Those are personal
+addresses for refused enrollments and failed TLS handshakes. When it refuses a
+connector request for the 8-request limit it logs `relay: refusing MCP connector
+requests for the connection limit` with the server id and how many of the
+server's requests are in progress and waiting, once until a minute passes
+without such a refusal for that server. Those are personal
 data: set `MaxRetentionSec=` in `/etc/systemd/journald.conf.d/retention.conf`,
 restart `systemd-journald`, and state the period in your privacy notice
 ([privacy.md](privacy.md#what-an-edge-stores)). nginx keeps its own access log in

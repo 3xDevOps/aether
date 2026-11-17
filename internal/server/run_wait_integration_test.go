@@ -99,7 +99,9 @@ func TestIntegrationRunWaitWakesTheAgent(t *testing.T) {
 	if err := env.srv.sched.Kill(ctx, target, ada.ID); err != nil {
 		t.Fatalf("kill %s: %v", target, err)
 	}
-	waitPrompted(ctx, t, env.srv, waiter, protocol.CoordInboxContext(1))
+	// The waiter's container has the new command name, which its wake names.
+	wake := coordhooks.Named(protocol.CoordInboxContext(1), coordhooks.NewCLI)
+	waitPrompted(ctx, t, env.srv, waiter, wake)
 	for _, run := range []domain.RunID{waiter, satisfied} {
 		quiesce(ctx, t, env.srv, run)
 	}
@@ -114,7 +116,7 @@ func TestIntegrationRunWaitWakesTheAgent(t *testing.T) {
 	}
 	// The mock ends the wake's turn without a report, so Aether asks it for
 	// one: that reminder is the only turn after the wake.
-	if inboxes, reminders, turns := countPrompts(t, env.srv, waiter, protocol.CoordInboxContext(1)),
+	if inboxes, reminders, turns := countPrompts(t, env.srv, waiter, wake),
 		countPrompts(t, env.srv, waiter, coordhooks.ReportReminderLead), turnsEnded(t, env.srv, waiter); inboxes != 1 || reminders != 1 || turns != 3 {
 		t.Fatalf("waiter: %d inbox prompts, %d reminders, %d turns; want its task's turn, one wake and its reminder", inboxes, reminders, turns)
 	}

@@ -87,6 +87,26 @@ func (a *askAssistant) finish(id string) {
 	a.entries[id].State, a.entries[id].Reply = protocol.AssistantQueueDone, "all done"
 }
 
+// An assistant.ask whose caller gives up before the wait is over answers
+// with the turn it started, so the caller polls it instead of asking again.
+func TestAssistantAskEndedEarlyNamesItsTurn(t *testing.T) {
+	svc := &askAssistant{entries: map[string]*assistant.Entry{}, keys: map[string]string{}}
+	e := newTestEnv(t, func(c *Config) { c.Services.Assistant = svc })
+	con := e.srv.ConnectorLocal(ConnectorGrant{Member: e.member.ID}, "con-a", "ChatGPT", []string{ConnectorScopeRead, ConnectorScopeWrite})
+	raw, _ := json.Marshal(protocol.AssistantAskParams{Prompt: "fix the login test"})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*askPoll)
+	defer cancel()
+	start := time.Now()
+	result, perr := con.Call(ctx, protocol.MethodAssistantAsk, raw)
+	var got protocol.AssistantAskResult
+	if perr == nil {
+		_ = json.Unmarshal(result, &got)
+	}
+	if perr != nil || got.TurnID != "turn-1" || got.State != protocol.AssistantAskRunning || time.Since(start) > askWait/2 {
+		t.Fatalf("an ask ended early = %+v, %v after %s, want turn-1 running at once", got, perr, time.Since(start))
+	}
+}
+
 // A turn still running when assistant.ask stops waiting returns its
 // turn_id; polling it from the same connector returns the reply once done,
 // and no other connector or door reaches it.

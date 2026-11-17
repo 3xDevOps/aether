@@ -30,6 +30,8 @@ type hookInstallInputs struct {
 	cwd       string
 	env       func(string) string
 	lookupEnv func(string) (string, bool)
+	// cli is the name guidance gives the command.
+	cli string
 }
 
 type hookInstallPlan struct {
@@ -82,27 +84,27 @@ type hookInstallResult struct {
 	details []string
 }
 
-func writeHookInstallation(out io.Writer) error {
+func writeHookInstallation(out io.Writer, cli string) error {
 	home, homeErr := os.UserHomeDir()
 	cwd, cwdErr := os.Getwd()
 	if homeErr != nil || cwdErr != nil {
-		_, err := fmt.Fprintf(out, "\nHook installation: unverified: %v. Run aether-internal hook file to list copyable assets.\n", errors.Join(homeErr, cwdErr))
+		_, err := fmt.Fprintf(out, "\nHook installation: unverified: %v. Run %s hook file to list copyable assets.\n", errors.Join(homeErr, cwdErr), cli)
 		return err
 	}
-	return writeHookInstallationWithInputs(out, hookInstallInputs{home: home, cwd: cwd, env: os.Getenv, lookupEnv: os.LookupEnv})
+	return writeHookInstallationWithInputs(out, hookInstallInputs{home: home, cwd: cwd, env: os.Getenv, lookupEnv: os.LookupEnv, cli: cli})
 }
 
 // writeHookSummary reports only the inbox integration for this run's harness,
 // named by AETHER_HARNESS; the full matrix stays behind skill --hooks.
-func writeHookSummary(out io.Writer) error {
+func writeHookSummary(out io.Writer, cli string) error {
 	harness := envname.Getenv(coordtransport.HarnessEnv)
 	home, homeErr := os.UserHomeDir()
 	cwd, cwdErr := os.Getwd()
 	if (harness == "" && envname.Getenv(coordtransport.EnhancedEnv) != "1") || homeErr != nil || cwdErr != nil {
-		_, err := io.WriteString(out, "Inbox hooks: aether-internal skill --hooks checks and installs them for your harness.\n")
+		_, err := io.WriteString(out, coordhooks.Named("Inbox hooks: aether-internal skill --hooks checks and installs them for your harness.\n", cli))
 		return err
 	}
-	return writeHookSummaryWithInputs(out, harness, hookInstallInputs{home: home, cwd: cwd, env: os.Getenv, lookupEnv: os.LookupEnv})
+	return writeHookSummaryWithInputs(out, harness, hookInstallInputs{home: home, cwd: cwd, env: os.Getenv, lookupEnv: os.LookupEnv, cli: cli})
 }
 
 func managedHooksLine(harness string, in hookInstallInputs) string {
@@ -139,9 +141,9 @@ func writeHookSummaryWithInputs(out io.Writer, harness string, in hookInstallInp
 		text.WriteString(".\n")
 	}
 	if text.Len() == 0 {
-		fmt.Fprintf(&text, "Inbox hooks: no packaged integration for harness %s; see aether-internal skill --hooks.\n", shellquote.Quote(harness))
+		fmt.Fprintf(&text, "Inbox hooks: no packaged integration for harness %s; see %s skill --hooks.\n", shellquote.Quote(harness), in.cli)
 	} else {
-		text.WriteString("Install or inspect: aether-internal skill --hooks\n")
+		text.WriteString(coordhooks.Named("Install or inspect: aether-internal skill --hooks\n", in.cli))
 	}
 	_, err := io.WriteString(out, text.String())
 	return err
@@ -228,7 +230,7 @@ func writeHookInstallationWithInputs(out io.Writer, in hookInstallInputs) error 
 		fmt.Fprintf(&text, ". %s\n", plan.note)
 		fmt.Fprintf(&text, "  Inspect/install destination: %s; project alternative: %s\n", shellquote.Quote(plan.paths[0]), shellquote.Quote(plan.paths[1]))
 		for _, asset := range plan.assets {
-			fmt.Fprintf(&text, "  aether-internal hook file %s\n", asset)
+			fmt.Fprintf(&text, "  %s hook file %s\n", in.cli, asset)
 		}
 		fmt.Fprintf(&text, "  %s\n", plan.activate)
 	}
@@ -236,8 +238,8 @@ func writeHookInstallationWithInputs(out io.Writer, in hookInstallInputs) error 
 		text.WriteString("Hook executable: missing/unverified /usr/local/bin/aether-internal (must be a regular executable in the harness environment).\n")
 	}
 	text.WriteString("Safe self-install: inspect/export/diff, edit only the chosen harness with normal authorization, preserve unrelated config, and do not edit trust records, managed policy or disable flags. Restart/reload as above, then verify a real native boundary; disk checks alone never establish activation.\n")
-	text.WriteString("Generic integration: aether-internal hook file generic.sh adapts the host's documented context hook. A custom native receiver may call hook generic wake once per bounded wait; see docs/harness-integration.md for conversation ownership and cancellation. No standard installation path or activation claim.\n")
-	text.WriteString("JSON command hooks run only at lifecycle boundaries. Managed Claude Code launches and loaded omp/pi/OpenCode native integrations can also wait for inbox changes and wake a live idle root session, subject to human Stop and server admission; they never restart an exited run or type into a terminal. Verify actual loading and a real idle wake, not just configured files. All hooks emit trusted inbox pointers, not peer instructions. Read aether-internal inbox; your next read or aether-internal ack <ack_token> acknowledges the batch, and hook output never does.\n")
+	text.WriteString(coordhooks.Named("Generic integration: aether-internal hook file generic.sh adapts the host's documented context hook. A custom native receiver may call hook generic wake once per bounded wait; see docs/harness-integration.md for conversation ownership and cancellation. No standard installation path or activation claim.\n", in.cli))
+	text.WriteString(coordhooks.Named("JSON command hooks run only at lifecycle boundaries. Managed Claude Code launches and loaded omp/pi/OpenCode native integrations can also wait for inbox changes and wake a live idle root session, subject to human Stop and server admission; they never restart an exited run or type into a terminal. Verify actual loading and a real idle wake, not just configured files. All hooks emit trusted inbox pointers, not peer instructions. Read aether-internal inbox; your next read or aether-internal ack <ack_token> acknowledges the batch, and hook output never does.\n", in.cli))
 	_, err := io.WriteString(out, text.String())
 	return err
 }

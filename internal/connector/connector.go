@@ -115,6 +115,7 @@ type handler struct {
 	fetch           *http.Client
 	mux             *http.ServeMux
 	now             func() time.Time
+	long            *ops.LongCalls
 
 	// mu guards codes, nonces, wrong, wrongAll, wrongSwept, writes and
 	// writesSwept.
@@ -166,7 +167,8 @@ func New(cfg Config) (http.Handler, error) {
 			return http.ErrUseLastResponse
 		}},
 		mux: http.NewServeMux(), now: time.Now, started: cmp.Or(cfg.Started, time.Now()), codes: map[string]authCode{}, nonces: map[string]nonceUse{}, wrong: map[netip.Prefix]wrongCodes{},
-		writes: map[string]*rate.Limiter{}}
+		writes: map[string]*rate.Limiter{},
+		long:   &ops.LongCalls{After: edgeproto.HTTPShortCall, Max: edgeproto.MaxHTTPLongCallsPerServer}}
 
 	streamable := mcp.NewStreamableHTTPHandler(h.server, &mcp.StreamableHTTPOptions{
 		Stateless:    true,
@@ -264,8 +266,15 @@ func grantOf(c *store.Connector) sshd.ConnectorGrant {
 func (h *handler) server(r *http.Request) *mcp.Server {
 	c := auth.TokenInfoFromContext(r.Context()).Extra["connector"].(*store.Connector)
 	local := h.ssh.ConnectorLocal(grantOf(c), c.ID, c.ClientName, c.Scopes)
+	// The server lives for one request, so its tool list never changes
+	// under a client. Advertising listChanged would make the SDK hold a
+	// subscriptions/listen request, and one of the edge's few connections
+	// to this server, until the client gave up.
 	srv := mcp.NewServer(&mcp.Implementation{Name: mcpbridge.ServerName, Title: "Cloudfield", Version: version.String()},
-		&mcp.ServerOptions{Instructions: instructions})
+		&mcp.ServerOptions{Instructions: instructions, Capabilities: &mcp.ServerCapabilities{
+			// Logging is the SDK's default, which setting Capabilities drops.
+			Logging: &mcp.LoggingCapabilities{}, //nolint:staticcheck
+			Tools:   &mcp.ToolCapabilities{}}})
 	ops.RegisterConnector(srv, func(ctx context.Context, method string, params, out any) error {
 		var raw json.RawMessage
 		if params != nil {
@@ -291,7 +300,7 @@ func (h *handler) server(r *http.Request) *mcp.Server {
 		slog.Info("connector: write call", "connector", c.ID, "member", c.Member, "method", method,
 			"target", callTarget(raw), "result", result)
 		return err
-	}, func(s ops.Scope) bool { return slices.Contains(c.Scopes, string(s)) })
+	}, func(s ops.Scope) bool { return slices.Contains(c.Scopes, string(s)) }, h.long)
 	return srv
 }
 

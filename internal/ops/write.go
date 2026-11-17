@@ -98,7 +98,7 @@ var writeOps = []Op{
 			idempotencyRule+"without one, a repeat within 60s, or of a template while it starts, returns the first session.", launchRun).
 		enum("mode", "tui", "headless", "acp").enum("children", "on", "off").
 		enum("permission", string(domain.PermissionRoot), string(domain.PermissionDefault), string(domain.PermissionIsolated)).enum("saved_defaults", savedApply, savedIgnore).hints(false, true).hide(Connector, "reason").
-		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodAgentList, protocol.MethodRunList,
+		waiting().offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodLaunchDefaultsGet, protocol.MethodAgentList, protocol.MethodRunList,
 		protocol.MethodRunLaunch, protocol.MethodTemplateLaunch),
 	opOf("aether_message_session", "Message session", ScopeWrite, false, nextRuns,
 		"Use this when the user wants to tell a session's agent something, which cannot be taken back; it waits up to 45s if another member controls the session."+

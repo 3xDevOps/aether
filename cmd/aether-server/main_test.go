@@ -30,7 +30,9 @@ func TestSessionCLINames(t *testing.T) {
 	if old == server || !strings.HasPrefix(old, "usage: aether-internal <command>") {
 		t.Fatalf("aether-internal --help printed the server usage:\n%s", old)
 	}
-	if got := help("cloudfield-internal"); got != old {
-		t.Fatalf("cloudfield-internal --help =\n%s\nwant the aether-internal help:\n%s", got, old)
+	// Usage shows the name the command was run by; no help line names a
+	// persisted path.
+	if got, want := help("cloudfield-internal"), strings.ReplaceAll(old, "aether-internal", "cloudfield-internal"); got != want {
+		t.Fatalf("cloudfield-internal --help =\n%s\nwant the aether-internal help under its own name:\n%s", got, want)
 	}
 }
