@@ -92,9 +92,14 @@ func (s *Server) assistantAsk(ctx context.Context, member domain.MemberID, raw j
 			continue
 		case <-time.After(askPoll):
 		}
-		if entry, err = svc.Entry(ctx, member, entry.ID); err != nil {
+		next, err := svc.Entry(ctx, member, entry.ID)
+		if ctx.Err() != nil {
+			break
+		}
+		if err != nil {
 			return nil, assistantError(err)
 		}
+		entry = next
 	}
 	return s.askResult(context.WithoutCancel(ctx), svc, member, id, entry)
 }
