@@ -310,14 +310,26 @@ func TestRunDeletionPrunesEvidenceOnceInTheBackground(t *testing.T) {
 		t.Fatal(writeErr)
 	}
 	// A loaded machine can space the removals wider than the test's short
-	// debounce, so the burst runs under a debounce it cannot outlast and the
-	// test then fires the one prune it scheduled.
+	// debounce, so the burst runs under a debounce it cannot outlast, each
+	// removal must restart the first one's timer, and the test then fires it.
 	e.mu.Lock()
 	e.evidencePruneDelay = time.Hour
 	e.mu.Unlock()
+	var burst *evidencePrune
+	var burstTimer *time.Timer
 	for _, packet := range packets {
 		if removeErr := e.RemoveEvidence(ctx, "ws1", packet); removeErr != nil {
 			t.Fatalf("RemoveEvidence(%s) with a failing gc: %v", packet, removeErr)
+		}
+		e.mu.Lock()
+		p := e.evidencePrunes["ws1"]
+		if burst == nil {
+			burst, burstTimer = p, p.timer
+		}
+		same := p == burst && p.timer == burstTimer
+		e.mu.Unlock()
+		if !same {
+			t.Fatalf("RemoveEvidence(%s) scheduled a prune of its own instead of restarting the burst's", packet)
 		}
 	}
 	if removeErr := e.RemoveRunHistory(ctx, "run-delete"); removeErr != nil {
