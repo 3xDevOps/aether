@@ -1,4 +1,4 @@
-// Aether desktop shell: a thin Electron window around `aether gui`.
+// Cloudfield desktop shell: a thin Electron window around `aether gui`.
 //
 // The CLI sidecar owns all authority - the SSH identity, the repo, the
 // per-process gateway token. This process only spawns it, reads the one
@@ -290,7 +290,9 @@ function main() {
   // menu is dead weight - on win32/linux it is drawn *inside* the frameless
   // window and would sit on top of that bar. darwin is different: its menu
   // lives in the system menu bar, not the window, and nulling it strips the
-  // renderer of Cmd+C/V/A and Cmd+Q. So darwin keeps a roles-only menu.
+  // renderer of Cmd+C/V/A and Cmd+Q. So darwin keeps a roles-only menu. The
+  // roles' default labels use app.name, which is package.json's name
+  // (aether-desktop): it names the data directory, so it cannot change.
   function installMenu() {
     if (process.platform !== 'darwin') {
       Menu.setApplicationMenu(null)
@@ -301,17 +303,17 @@ function main() {
         {
           role: 'appMenu',
           submenu: [
-            { role: 'about' },
+            { role: 'about', label: 'About Cloudfield' },
             { type: 'separator' },
             { label: 'Check for Updates…', click: checkForUpdates },
             { type: 'separator' },
             { role: 'services' },
             { type: 'separator' },
-            { role: 'hide' },
+            { role: 'hide', label: 'Hide Cloudfield' },
             { role: 'hideOthers' },
             { role: 'unhide' },
             { type: 'separator' },
-            { role: 'quit' },
+            { role: 'quit', label: 'Quit Cloudfield' },
           ],
         },
         { role: 'editMenu' },
@@ -465,6 +467,9 @@ function main() {
       return
     }
     win = new BrowserWindow({
+      // Shown until the page sets its own, and on Windows and Linux would
+      // otherwise be app.name (aether-desktop).
+      title: 'Cloudfield',
       width: 1280,
       height: 840,
       minWidth: zoom.MIN_WIDTH,

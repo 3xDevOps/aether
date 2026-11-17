@@ -1,4 +1,4 @@
-# electron-builder configuration for the Aether desktop shell.
+# electron-builder configuration for the Cloudfield desktop shell.
 #
 # The aether CLI binary is NOT bundled. The shell discovers it at launch:
 # AETHER_BIN first, then the CLI `aether gui build` recorded in
@@ -6,7 +6,7 @@
 # locations (/usr/local/bin, ~/.local/bin). Install the CLI and link it
 # before launching the app - see docs/install.md.
 appId: io.aether.desktop
-productName: Aether
+productName: Cloudfield
 
 # The linux launcher file `aether gui build` writes, which Electron names as
 # the handler of the app's link schemes. Fixed here, not derived from

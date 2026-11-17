@@ -191,10 +191,9 @@ full-bleed icon, `icon-maskable-*.png` keep the mark inside the 80% safe zone,
 and `favicon-16.png`, `favicon-32.png` and `favicon-48.png` are the small
 drawings the layout links as `rel="icon"`. The header logo and tile, the splash
 mark and the session overview's mask are the set's SVG files from
-`public/cloudfield/`, in `web/public/`. `python3 scripts/make-icons.py` draws
-only the desktop app's icons and the Play feature graphic, from
-`web/public/aether-mark.png`. The Android app's icons come from
-`scripts/android-icons.py` ([CONTRIBUTING.md](../CONTRIBUTING.md)).
+`public/cloudfield/`, in `web/public/`. The desktop app's icons are the same
+set's files, and the Android app's come from `scripts/android-icons.py`
+([CONTRIBUTING.md](../CONTRIBUTING.md)).
 
 CI installs Bun with `oven-sh/setup-bun` (version pinned in
 `web/.bun-version`) in jobs that run `make build` or `make release-binaries`,

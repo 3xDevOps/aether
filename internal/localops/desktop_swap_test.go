@@ -79,7 +79,7 @@ func TestInstallDesktopSwapsUnderARunningApp(t *testing.T) {
 func TestInstallDesktopSweepsEarlierLeftovers(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", "")
-	parent := filepath.Join(home, ".local", "share", "aether")
+	parent := filepath.Join(home, ".local", "share", "cloudfield")
 	if err := os.MkdirAll(filepath.Join(parent, installOldPrefix+"stale", "desktop"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestInstallDesktopSweepsEarlierLeftovers(t *testing.T) {
 func TestInstallDesktopRestoresTheAppASwapKilledMidwayLeftAside(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", "")
-	parent := filepath.Join(home, ".local", "share", "aether")
+	parent := filepath.Join(home, ".local", "share", "cloudfield")
 	aside := filepath.Join(parent, installOldPrefix+"killed", "desktop")
 	if err := os.MkdirAll(aside, 0o755); err != nil {
 		t.Fatal(err)

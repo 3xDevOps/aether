@@ -62,14 +62,13 @@ fi
 # The product is named Cloudfield. Each exception below still names
 # something called Aether and goes when that thing is renamed: the
 # connector entry a member adds in ChatGPT or Claude, the Slack bot, the
-# desktop app, the wake prompt the server sends, the symbol fonts, and two
-# listing images not yet shot again.
+# wake prompt the server sends, the symbol fonts, and two listing images not
+# yet shot again.
 check_old_name() {
 	if matches=$(git grep --untracked -n -I -w -e Aether -- "$@" |
 		grep -v -E \
 			-e "^web/src/routes/settings/connectors\\.tsx:[0-9]+:.*(Name it <strong>Aether</strong>|Install Aether from the|Add Aether again in|Connect Aether again)" \
 			-e "^web/src/routes/settings/notifications\\.tsx:[0-9]+:.*the Aether bot" \
-			-e "^web/src/components/palette/forward-dialog\\.tsx:[0-9]+:.*or quit Aether\\." \
 			-e "^web/src/store/session-rows\\.ts:[0-9]+:.*/\\^Aether has" \
 			-e "^web/src/index\\.css:[0-9]+:.*'Aether (Nerd )?Symbols'" \
 			-e "^android/listing/README\\.md:[0-9]+:.*The Aether (mark and wordmark|board on a phone)"); then

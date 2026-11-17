@@ -1,30 +1,14 @@
 #!/usr/bin/env python3
-"""Regenerate the desktop app icons and the Play feature graphic from the
-Aether mark.
-
-Run after web/public/aether-mark.png changes:
+"""Regenerate the Play feature graphic from the Aether mark and wordmark.
 
     python3 scripts/make-icons.py
 
-Writes desktop/build/icons/ and desktop/build/icon.ico, which electron-builder
-resolves for every platform, converting the set to .icns for macOS; only
-Windows needs a prebuilt file. Writes android/listing/feature-graphic.png for
-the Play listing. Needs `pillow`, and `fonttools[woff]` to read the
-dashboard's own woff2 type for the Play banner: the extra is brotli, which the
-plain fontTools install leaves out and woff2 cannot be decoded without. The
-Android app's launcher and notification icons come from
-scripts/android-icons.py instead, and the dashboard's icons are the Cloudfield
-logo set's files (docs/dashboard-frontend.md).
-
-The mark is thin light-blue line art on transparency, so it is composited onto
-a tile in the dashboard's --background color rather than shipped bare:
-transparent line art disappears against a light desktop, taskbar or home
-screen. Small rasters give the mark proportionally more of the tile, because
-holding the large-icon padding at 16px thins the strokes below one pixel and
-the shape turns to mush.
-
-The desktop tile is rounded, which is what a desktop or a taskbar that applies
-no mask of its own expects.
+Writes android/listing/feature-graphic.png. Needs `pillow`, and
+`fonttools[woff]` to read the dashboard's own woff2 type: the extra is brotli,
+which the plain fontTools install leaves out and woff2 cannot be decoded
+without. The graphic still shows the Aether name until the owner replaces it.
+The desktop and dashboard icons are the Cloudfield logo set's files
+(CONTRIBUTING.md); the Android app's come from scripts/android-icons.py.
 """
 
 import io
@@ -36,22 +20,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "web" / "public" / "aether-mark.png"
 FONTS = ROOT / "web" / "public" / "fonts"
-DESKTOP_BUILD = ROOT / "desktop" / "build"
 ANDROID_LISTING = ROOT / "android" / "listing"
-
-# The ground every Aether icon is drawn on, #0a0a0a. It is darker than the
-# dashboard's own dark `--canvas`, #141516: an icon has to read as an
-# object on a launcher rather than blend into a page.
-BACKGROUND = (10, 10, 10, 255)
-CORNER_RADIUS_RATIO = 0.2237
-
-# Fraction of the tile's width the mark spans, per output size.
-COVERAGE = {16: 0.86, 32: 0.82, 48: 0.78, 64: 0.74, 128: 0.68, 256: 0.64, 512: 0.62, 1024: 0.62}
-
-# Windows shows this icon everywhere from the taskbar to Explorer's detail
-# rows, so the .ico carries its own sizes rather than letting Windows
-# downscale one large bitmap. 24px has no tuned entry of its own.
-ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 
 # Google Play's feature graphic is a fixed 1024x500 banner in JPEG or 24-bit
 # PNG with no alpha (android/listing/README.md). Play's highly-recommended
@@ -80,66 +49,11 @@ FEATURE_TAGLINE_INK = (234, 242, 251)
 WORDMARK_FONT = FONTS / "vt323-latin.woff2"
 TAGLINE_FONT = FONTS / "jetbrains-mono-nfm-regular.woff2"
 
-# Supersampling factor: render large, then box down, so the rounded corners and
-# the mark's diagonals land antialiased.
-SUPERSAMPLE = 8
-
 
 def load_mark() -> Image.Image:
     """The mark, cropped to its ink so padding is computed here, not inherited."""
     mark = Image.open(SOURCE).convert("RGBA")
     return mark.crop(mark.getbbox())
-
-
-def coverage_for(size: int) -> float:
-    """The tuned coverage of the nearest size COVERAGE was hand-checked at."""
-    return COVERAGE[min(COVERAGE, key=lambda tuned: abs(tuned - size))]
-
-
-def paste_mark(mark: Image.Image, tile: Image.Image, coverage: float) -> None:
-    width = round(tile.width * coverage)
-    height = round(mark.height * (width / mark.width))
-    scaled = mark.resize((width, height), Image.LANCZOS)
-    tile.alpha_composite(scaled, ((tile.width - width) // 2, (tile.height - height) // 2))
-
-
-def render(mark: Image.Image, size: int, coverage: float) -> Image.Image:
-    supersampled = size * SUPERSAMPLE
-    tile = Image.new("RGBA", (supersampled, supersampled), (0, 0, 0, 0))
-
-    background = Image.new("RGBA", (supersampled, supersampled), BACKGROUND)
-    mask = Image.new("L", (supersampled, supersampled), 0)
-    ImageDraw.Draw(mask).rounded_rectangle(
-        [0, 0, supersampled - 1, supersampled - 1],
-        radius=round(supersampled * CORNER_RADIUS_RATIO),
-        fill=255,
-    )
-    tile.paste(background, (0, 0), mask)
-
-    paste_mark(mark, tile, coverage)
-    return tile.resize((size, size), Image.LANCZOS)
-
-
-def write_desktop(mark: Image.Image) -> None:
-    icons = DESKTOP_BUILD / "icons"
-    icons.mkdir(parents=True, exist_ok=True)
-
-    rendered = {size: render(mark, size, coverage) for size, coverage in COVERAGE.items()}
-    for size, image in rendered.items():
-        image.save(icons / f"{size}x{size}.png")
-
-    frames = [
-        rendered[size] if size in rendered else render(mark, size, COVERAGE[32])
-        for size in ICO_SIZES
-    ]
-    frames[-1].save(
-        DESKTOP_BUILD / "icon.ico",
-        format="ICO",
-        sizes=[(size, size) for size in ICO_SIZES],
-        append_images=frames[:-1],
-    )
-
-    print(f"wrote desktop/build/icons/ ({len(rendered)} sizes) and icon.ico ({len(ICO_SIZES)} sizes)")
 
 
 def load_font(path: Path, size: int) -> ImageFont.FreeTypeFont:
@@ -203,9 +117,7 @@ def write_listing(mark: Image.Image) -> None:
 
 
 def main() -> None:
-    mark = load_mark()
-    write_desktop(mark)
-    write_listing(mark)
+    write_listing(load_mark())
 
 
 if __name__ == "__main__":

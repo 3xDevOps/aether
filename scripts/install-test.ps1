@@ -527,12 +527,12 @@ func main() {
         AETHER_BASE_URL = $baseUrl
         LOCALAPPDATA = $freshLocal
         AETHER_FIXTURE_LOG = $freshLog
-        AETHER_DESKTOP_TARGET = (Join-Path $freshLocal 'Programs\Aether Desktop\aether-desktop.exe')
+        AETHER_DESKTOP_TARGET = (Join-Path $freshLocal 'Programs\Cloudfield Desktop\aether-desktop.exe')
         AETHER_BIN = 'caller-sentinel'
     }
     $freshBin = Join-Path $freshLocal 'Programs\Aether'
     $freshCli = Join-Path $freshBin 'aether.exe'
-    $freshDesktop = Join-Path $freshLocal 'Programs\Aether Desktop\aether-desktop.exe'
+    $freshDesktop = Join-Path $freshLocal 'Programs\Cloudfield Desktop\aether-desktop.exe'
     Assert-AetherEqual 0 $result.ExitCode ("fresh default install failed: " + $result.Output)
     Assert-AetherTest (Get-AetherTestBytesEqual $fixture $freshCli) 'fresh install did not retain the CLI executable'
     Assert-AetherTest (Test-Path -LiteralPath $freshDesktop -PathType Leaf) 'GUI build did not create the sibling desktop executable'

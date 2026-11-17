@@ -221,7 +221,7 @@ x64 or ARM64 CLI from the newest complete release, checks its SHA-256 and size
 against `checksums.txt` and `aether-release.json`, installs it as
 `%LOCALAPPDATA%\Programs\Aether\aether.exe`, and adds that directory to your
 user `PATH`. Then it runs `aether gui build`, which installs the
-[desktop app](#desktop-app) and adds **Aether** to the Start Menu. It does not
+[desktop app](#desktop-app) and adds **Cloudfield** to the Start Menu. It does not
 ask for administrator rights or change the execution policy or Defender
 settings: `-ExecutionPolicy Bypass` applies to that one process only. Open a
 new terminal afterwards: open ones keep their old `PATH`.
@@ -337,9 +337,19 @@ and `--json` prints one JSON line per build phase.
 
 | OS | App | Launcher |
 | --- | --- | --- |
-| Linux | `~/.local/share/aether/desktop/` | `~/.local/share/applications/aether-desktop.desktop` |
-| macOS | `/Applications/Aether.app`, or `~/Applications/Aether.app` without administrator rights | Applications folder and Spotlight |
-| Windows | `%LOCALAPPDATA%\Programs\Aether Desktop\` | Start Menu → **Aether** |
+| Linux | `~/.local/share/cloudfield/desktop/` | `~/.local/share/applications/aether-desktop.desktop` |
+| macOS | `/Applications/Cloudfield.app`, or `~/Applications/Cloudfield.app` without administrator rights | Applications folder and Spotlight |
+| Windows | `%LOCALAPPDATA%\Programs\Cloudfield Desktop\` | Start Menu → **Cloudfield** |
+
+Before the rename the app was named Aether: `~/.local/share/aether/desktop/`,
+`Aether.app`, `%LOCALAPPDATA%\Programs\Aether Desktop\` and the Start Menu
+entry `Aether.lnk`. An update installs Cloudfield beside it. The first start of
+Cloudfield removes the old app and, on Windows, `Aether.lnk`; if the old app is
+running then, a later start does. An old app installed before
+v0.7.0-alpha.13 on Linux or Windows stays; delete it by hand. Both apps use
+the same saved settings and sign-ins (`aether-desktop`, see
+[Uninstalling](#uninstalling)). Dock, taskbar and Start pins of the old app
+stop working; pin Cloudfield again.
 
 The app does not contain the CLI: `gui build` records the path of the CLI
 that ran it, and the app starts that one (`AETHER_BIN` overrides it). If that
@@ -1132,13 +1142,14 @@ ssh-keygen -R '[<server-host>]:2222'
 rm -f ~/.local/bin/aether       # the client default
 # sudo rm -f /usr/local/bin/aether if you installed there instead
 # only if you ran `aether gui build`:
-rm -rf ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.desktop
+rm -rf ~/.local/share/cloudfield/desktop ~/.local/share/aether/desktop ~/.local/share/applications/aether-desktop.desktop
 rm -rf ~/.cache/aether ~/.cache/electron ~/.cache/electron-builder
 ```
 
 On macOS the client's files are in `~/Library/Application Support/aether`
 and `~/Library/Application Support/aether-desktop` instead. Remove those, the
-app (`/Applications/Aether.app` or `~/Applications/Aether.app`) and
+app (`Cloudfield.app`, or `Aether.app` from before the rename, in
+`/Applications` or `~/Applications`) and
 `~/Library/Caches/{aether,electron,electron-builder}`. Run `ssh-keygen -R` for
 every address you linked through: a reinstalled server has a new host key, and
 a stale entry makes `aether link` fail with a host key mismatch. Keep your SSH
@@ -1155,8 +1166,8 @@ something you never installed prints an error; the rest still run:
 schtasks /End /TN aether-daemon
 schtasks /Delete /TN aether-daemon /F
 Remove-Item "$env:USERPROFILE\aether-daemon.xml"
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\Aether Desktop", "$env:LOCALAPPDATA\Programs\.aether-*"
-Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'Aether.lnk')
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\Cloudfield Desktop", "$env:LOCALAPPDATA\Programs\Aether Desktop", "$env:LOCALAPPDATA\Programs\.aether-*"
+Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'Cloudfield.lnk'), (Join-Path ([Environment]::GetFolderPath('Programs')) 'Aether.lnk')
 Remove-Item -Recurse HKCU:\Software\Classes\aether
 Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\Aether"
 Remove-Item -Recurse -Force "$env:APPDATA\aether", "$env:APPDATA\aether-desktop"
@@ -1168,8 +1179,10 @@ rundll32 'sysdm.cpl,EditEnvironmentVariables'
 ```
 
 - The Scheduled Task goes first because it runs `aether.exe`.
-- `.aether-*` are app copies an update set aside while the app was running.
-- `Aether.lnk` is the Start Menu entry. Folder redirection can move the
+- `Aether Desktop` and `Aether.lnk` are the app and its Start Menu entry from
+  before the rename, if Cloudfield has not removed them yet.
+- `.aether-*` are app copies an update or that removal set aside.
+- `Cloudfield.lnk` is the Start Menu entry. Folder redirection can move the
   Programs folder, so `GetFolderPath('Programs')` finds it.
 - `HKCU:\Software\Classes\aether` is the `aether://` link handler.
 - `%LOCALAPPDATA%\Programs\Aether` is the default CLI directory, with the
@@ -1226,13 +1239,13 @@ to your originals, holding local edits from when it paused.
 | `aether link` fails with `knownhosts: key mismatch` after the server was reinstalled | The server has a new host key. Run `ssh-keygen -R '[<server-host>]:2222'` for every address you linked through, then link again. |
 | The sync daemon fails with exit status 2 after an upgrade | Its service passes a flag that no longer exists, such as `--sync-origin`. Rerun both commands in [The client-side sync daemon](#the-client-side-sync-daemon). |
 
-### Aether is missing from the Windows Start Menu
+### Cloudfield is missing from the Windows Start Menu
 
 `-Role none` and a manual install add no shortcut. Check what Windows has:
 
 ```powershell
-$link = Join-Path ([Environment]::GetFolderPath('Programs')) 'Aether.lnk'
-Test-Path "$env:LOCALAPPDATA\Programs\Aether Desktop\aether-desktop.exe"
+$link = Join-Path ([Environment]::GetFolderPath('Programs')) 'Cloudfield.lnk'
+Test-Path "$env:LOCALAPPDATA\Programs\Cloudfield Desktop\aether-desktop.exe"
 if (Test-Path $link) { (New-Object -ComObject WScript.Shell).CreateShortcut($link).TargetPath }
 ```
 

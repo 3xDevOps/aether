@@ -10,8 +10,8 @@
   },
   "StringFileInfo": {
     "CompanyName": "3xDevOps",
-    "ProductName": "Aether",
-    "FileDescription": "Aether client - self-hosted development environment for coding agents",
+    "ProductName": "Cloudfield",
+    "FileDescription": "Cloudfield client - self-hosted development environment for coding agents",
     "InternalName": "aether",
     "OriginalFilename": "aether.exe",
     "LegalCopyright": "Copyright (C) 3xDevOps. Licensed under GPL-3.0.",

@@ -367,10 +367,25 @@ Gatekeeper warn, and auto-update refuses them. Treat them as test builds.
 
 </details>
 
-The desktop icons and the Play feature graphic are generated from
-`web/public/aether-mark.png`. After changing it, run
-`python3 scripts/make-icons.py` (needs `pillow` and `fonttools[woff]`) and
-commit what it writes.
+The desktop app's icons are the Cloudfield logo set's files from
+`public/cloudfield/png/` of `3xDevOps/aether-web`, in
+`desktop/build/icons/`: `favicon-16.png`, `favicon-32.png` and
+`favicon-48.png` as `16x16.png`, `32x32.png` and `48x48.png`, and
+`app-icon-256.png`, `app-icon-512.png` and `app-icon-1024.png` as
+`256x256.png`, `512x512.png` and `1024x1024.png`. The set has no 64 or 128 px
+file, so `64x64.png` and `128x128.png` are `cloudfield-app-icon.svg` rendered
+at those sizes the way the website's `scripts/cloudfield-logo/render.mjs`
+renders its PNGs (Chromium through Playwright, transparent background).
+`desktop/build/icon.ico` holds those six sizes from 16 to 256 px:
+
+```sh
+python3 -c 'from PIL import Image; d = "desktop/build/icons/"; f = [Image.open(f"{d}{s}x{s}.png") for s in (16, 32, 48, 64, 128, 256)]; f[-1].save("desktop/build/icon.ico", sizes=[i.size for i in f], append_images=f[:-1])'
+```
+
+After the set changes, copy, render and build them again. The Play feature
+graphic still shows the Aether mark and name: `python3 scripts/make-icons.py`
+(needs `pillow` and `fonttools[woff]`) draws it from
+`web/public/aether-mark.png`.
 
 The dashboard's icons, favicons and logo are the Cloudfield logo set's files,
 copied unchanged from `public/cloudfield/` of `3xDevOps/aether-web`:

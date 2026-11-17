@@ -19,20 +19,21 @@ import (
 	"github.com/3xDevOps/Aether/internal/localops"
 )
 
-// While the product name is the legacy one, `aether gui --json` started by
-// an installed shell serves as before and removes no install: neither the
-// one that started it nor one in the other location.
-func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
-	if os.Getenv("AETHER_GUI_RETIRE_HELPER") == "1" {
-		os.Args = []string{os.Args[0], "gui", "--json", "--port", "0"}
-		main()
-		return
-	}
-	root := t.TempDir()
+// installedApps installs complete fakes of the renamed app and of the old
+// app in both linux locations, each as InstallDesktop leaves it, plus the
+// data directory the two share.
+func installedApps(t *testing.T) (root, renamed string, legacy []string, data string) {
+	t.Helper()
+	root = t.TempDir()
 	home := filepath.Join(root, "home")
 	xdg := filepath.Join(root, "data")
+	apps := []string{
+		filepath.Join(xdg, "cloudfield", "desktop"),
+		filepath.Join(xdg, "aether", "desktop"),
+		filepath.Join(home, ".local", "share", "aether", "desktop"),
+	}
 	var exes []string
-	for _, app := range []string{filepath.Join(xdg, "aether", "desktop"), filepath.Join(home, ".local", "share", "aether", "desktop")} {
+	for _, app := range apps {
 		exe := localops.DesktopAppExe("linux", app)
 		binding := filepath.Join(app, "resources", "aether-cli.json")
 		if err := os.MkdirAll(filepath.Dir(binding), 0o755); err != nil {
@@ -44,14 +45,24 @@ func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
 		writeTestExecutable(t, exe, "#!/bin/sh\nexit 0\n")
 		exes = append(exes, exe)
 	}
-	exe := exes[0]
+	data = filepath.Join(root, "config", "aether-desktop", "Local Storage")
+	if err := os.MkdirAll(data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return root, exes[0], exes[1:], data
+}
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGUIKeepsTheAppThatStartedIt$")
+// runGUIAsShell runs `aether gui --json` in the helper process of the
+// calling test, as the app at shellExe starts it, reads the handshake and
+// stops it. It returns stderr.
+func runGUIAsShell(t *testing.T, root, shellExe string) string {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
 	cmd.Env = append(os.Environ(),
 		"AETHER_GUI_RETIRE_HELPER=1",
-		localops.ShellExeEnv+"="+exe,
-		"HOME="+home,
-		"XDG_DATA_HOME="+xdg,
+		localops.ShellExeEnv+"="+shellExe,
+		"HOME="+filepath.Join(root, "home"),
+		"XDG_DATA_HOME="+filepath.Join(root, "data"),
 		"XDG_CONFIG_HOME="+filepath.Join(root, "config"),
 		"XDG_CACHE_HOME="+filepath.Join(root, "cache"),
 		"AETHER_CONFIG_DIR=",
@@ -102,10 +113,57 @@ func TestGUIKeepsTheAppThatStartedIt(t *testing.T) {
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("aether gui: %v; stderr: %s", err, stderr.String())
 	}
-	for _, exe := range exes {
-		if _, err := os.Stat(exe); err != nil {
-			t.Errorf("%s was removed: %v; stderr: %s", exe, err, stderr.String())
+	return stderr.String()
+}
+
+func guiRetireHelper() bool {
+	if os.Getenv("AETHER_GUI_RETIRE_HELPER") != "1" {
+		return false
+	}
+	os.Args = []string{os.Args[0], "gui", "--json", "--port", "0"}
+	main()
+	return true
+}
+
+// Once the renamed app has started `aether gui`, the old app goes from both
+// locations; the renamed app and the data directory stay.
+func TestGUIStartedByTheRenamedAppRemovesTheOldApp(t *testing.T) {
+	if guiRetireHelper() {
+		return
+	}
+	root, renamed, legacy, data := installedApps(t)
+	stderr := runGUIAsShell(t, root, renamed)
+	for _, exe := range legacy {
+		if _, err := os.Stat(filepath.Dir(exe)); !os.IsNotExist(err) {
+			t.Errorf("the old app %s is still there: %v; stderr: %s", filepath.Dir(exe), err, stderr)
 		}
+	}
+	for _, keep := range []string{renamed, data} {
+		if _, err := os.Stat(keep); err != nil {
+			t.Errorf("%s was removed: %v; stderr: %s", keep, err, stderr)
+		}
+	}
+}
+
+// Before the renamed app has started, nothing is removed: an old shell
+// does not name itself, and the old app's own shell is not the renamed app.
+func TestGUIKeepsEveryAppUntilTheRenamedOneStarts(t *testing.T) {
+	if guiRetireHelper() {
+		return
+	}
+	for _, shell := range []string{"", "legacy"} {
+		t.Run(shell, func(t *testing.T) {
+			root, renamed, legacy, data := installedApps(t)
+			if shell == "legacy" {
+				shell = legacy[0]
+			}
+			stderr := runGUIAsShell(t, root, shell)
+			for _, keep := range append([]string{renamed, data}, legacy...) {
+				if _, err := os.Stat(keep); err != nil {
+					t.Errorf("%s was removed: %v; stderr: %s", keep, err, stderr)
+				}
+			}
+		})
 	}
 }
 

@@ -50,8 +50,8 @@ if [ "${GUI_INTERRUPTS:-0}" = 1 ] && [ "${1:-}" = gui ]; then
 	exit 130
 fi
 printf 'aether %s\n' "$*" >>"$CMD_LOG"
-echo "installed /home/tester/.local/share/aether/desktop"
-echo "open it from your application menu as Aether"
+echo "installed /home/tester/.local/share/cloudfield/desktop"
+echo "open it from your application menu as Cloudfield"
 EOF
 
 # Stands in for the real binary. A completed setup writes the systemd unit,
