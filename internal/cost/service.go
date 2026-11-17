@@ -42,8 +42,9 @@ type Service struct {
 	wg   sync.WaitGroup
 	stop context.CancelFunc
 
-	// publishMu orders budget events as their states change, so each
-	// event's From is the State of the one before it.
+	// publishMu orders each budget read with the event it publishes, so
+	// each event's From is the State of the one before it and a read made
+	// before a budget edit or a spend cannot overwrite a newer state.
 	publishMu sync.Mutex
 
 	mu      sync.Mutex
@@ -366,11 +367,10 @@ func (s *Service) SetBudget(ctx context.Context, workspace domain.WorkspaceID, c
 			reason += " (override on: the cap admits new sessions)"
 		}
 	}
-	st, err := s.status(ctx, workspace)
+	st, err := s.publish(ctx, workspace, reason, true)
 	if err != nil {
 		return Status{}, fmt.Errorf("cost: set budget %s: %w", workspace, err)
 	}
-	s.publish(ctx, st, reason)
 	return st, nil
 }
 
@@ -392,7 +392,9 @@ func (s *Service) Admit(ctx context.Context, workspace domain.WorkspaceID, membe
 	}
 	refusal := fmt.Sprintf("new session refused: $%.2f metered spend has reached the $%.2f cap",
 		st.Spend.CostUSD, st.Budget.LimitUSD)
-	s.publish(ctx, st, refusal)
+	if _, err := s.publish(ctx, workspace, refusal, true); err != nil {
+		slog.Warn("cost: publish a refused session failed", "workspace", workspace, "error", err)
+	}
 	advisory := ""
 	if st.Spend.Advisory() {
 		advisory = fmt.Sprintf(" (%d of %d sessions are unmetered, so the real spend is higher)",
@@ -448,33 +450,34 @@ func (s *Service) status(ctx context.Context, workspace domain.WorkspaceID) (Sta
 // the last announcement, so ok -> warn -> exceeded is a signal and steady
 // state is silence.
 func (s *Service) announce(ctx context.Context, workspace domain.WorkspaceID) {
-	st, err := s.status(ctx, workspace)
-	if err != nil {
+	if _, err := s.publish(ctx, workspace, "", false); err != nil {
 		slog.Warn("cost: budget evaluation failed", "workspace", workspace, "error", err)
-		return
 	}
-	s.mu.Lock()
-	changed := s.state[workspace] != st.State
-	s.mu.Unlock()
-	if !changed {
-		return
-	}
-	s.publish(ctx, st, "")
 }
 
-func (s *Service) publish(ctx context.Context, st Status, reason string) {
+// publish reads a workspace's budget state and publishes it with reason,
+// always or only when it moved since the last event.
+func (s *Service) publish(ctx context.Context, workspace domain.WorkspaceID, reason string, always bool) (Status, error) {
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
+	st, err := s.status(ctx, workspace)
+	if err != nil {
+		return Status{}, err
+	}
 	s.mu.Lock()
-	from := s.state[st.Workspace]
-	s.state[st.Workspace] = st.State
+	from := s.state[workspace]
+	s.state[workspace] = st.State
 	s.mu.Unlock()
+	if !always && from == st.State {
+		return st, nil
+	}
 	if _, err := s.bus.Publish(ctx, events.Event{
-		WorkspaceID: st.Workspace,
+		WorkspaceID: workspace,
 		Payload:     st.payload(from, reason),
 	}); err != nil {
-		slog.Warn("cost: publish budget state failed", "workspace", st.Workspace, "error", err)
+		slog.Warn("cost: publish budget state failed", "workspace", workspace, "error", err)
 	}
+	return st, nil
 }
 
 func (s *Service) subscription() events.Subscription {
