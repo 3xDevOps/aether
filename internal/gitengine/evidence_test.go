@@ -225,13 +225,14 @@ func TestRunDeletionPrunesEvidenceOnceInTheBackground(t *testing.T) {
 	}
 	bin := t.TempDir()
 	gcLog, failGC, slowGC := filepath.Join(bin, "gc.log"), filepath.Join(bin, "fail"), filepath.Join(bin, "slow")
+	prepared := filepath.Join(bin, "prepared")
 	// The slow gc holds packed-refs.lock in a real git, as gc's pack-refs
 	// does, and its sleep holds stderr like a repack child would.
 	wrapper := "#!/bin/sh\nfor arg in \"$@\"; do\n\tif [ \"$arg\" = gc ]; then\n" +
 		"\t\techo gc >> '" + gcLog + "'\n" +
 		"\t\t[ -e '" + failGC + "' ] && exit 1\n" +
 		"\t\t[ -e '" + slowGC + "' ] && { printf 'start\\ndelete refs/aether/gc-probe\\nprepare\\n'; sleep 60; } |\n" +
-		"\t\t\t'" + realGit + "' -C \"$2\" update-ref --stdin\n" +
+		"\t\t\t'" + realGit + "' -C \"$2\" update-ref --stdin > '" + prepared + "'\n" +
 		"\tfi\ndone\nexec '" + realGit + "' \"$@\"\n"
 	gitPath := filepath.Join(bin, "git")
 	if writeErr := os.WriteFile(gitPath, []byte(wrapper), 0o755); writeErr != nil {
@@ -348,7 +349,15 @@ func TestRunDeletionPrunesEvidenceOnceInTheBackground(t *testing.T) {
 	if retryErr := e.RetryEvidencePrunes(); retryErr != nil {
 		t.Fatal(retryErr)
 	}
-	waitUntil("the slow gc to lock packed-refs", locked)
+	// git prints "prepare: ok" once it holds every lock and removes them on
+	// a signal; the lock file alone appears before that.
+	waitUntil("the slow gc to lock packed-refs", func() bool {
+		out, _ := os.ReadFile(prepared)
+		return strings.Contains(string(out), "prepare: ok")
+	})
+	if !locked() {
+		t.Fatal("the slow gc holds no packed-refs.lock")
+	}
 	closed := time.Now()
 	if closeErr := e.Close(); closeErr != nil {
 		t.Fatal(closeErr)
