@@ -817,6 +817,12 @@ Each is one session. Phase and dependencies are in brackets.
     CLI older than 8 does not fetch the new branches until it updates,
     though `aether pull` still does, and a server put back to a release
     below 8 stops refusing a force-push to them.
+    As built (#1024): the branch prefix only. The remote stays `aether`,
+    with the daemon's `--remote` default, `internal/localops` and the
+    dashboard's commands unchanged: a second remote name would split every
+    linked clone for no gain a reader sees. A workspace whose repository has
+    a branch named `cloudfield` keeps `aether/run-` for new sessions, since
+    git cannot create `cloudfield/run-*` beside it.
     [5; after 8 is in a stable release]
 
 The website's pull requests are listed in its own repository.
