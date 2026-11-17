@@ -84,17 +84,24 @@ func (s *Server) assistantAsk(ctx context.Context, member domain.MemberID, raw j
 	if err != nil {
 		return nil, assistantError(err)
 	}
-	for !settled(entry.State) && time.Now().Before(deadline) {
+	// A call ended before its wait is over, as a connector's is when the
+	// server runs too many long ones, still answers with the turn to poll.
+	for !settled(entry.State) && time.Now().Before(deadline) && ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
-			return nil, assistantError(ctx.Err())
+			continue
 		case <-time.After(askPoll):
 		}
-		if entry, err = svc.Entry(ctx, member, entry.ID); err != nil {
+		next, err := svc.Entry(ctx, member, entry.ID)
+		if ctx.Err() != nil {
+			break
+		}
+		if err != nil {
 			return nil, assistantError(err)
 		}
+		entry = next
 	}
-	return s.askResult(ctx, svc, member, id, entry)
+	return s.askResult(context.WithoutCancel(ctx), svc, member, id, entry)
 }
 
 // grantEntry is the member's queue entry id when grant's connector sent

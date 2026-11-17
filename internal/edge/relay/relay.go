@@ -172,6 +172,9 @@ type Relay struct {
 	// httpWaiting counts, per server id, the requests waiting for one of
 	// its http connections or for it to enroll again.
 	httpWaiting map[string]int
+	// httpLimited holds, per server id, when a request to it was last
+	// refused with errHTTPLimit, for httpLimitQuiet.
+	httpLimited map[string]time.Time
 	// away holds, per claimed server whose control channel ended within
 	// returnWait, when it ended and a channel closed when the server
 	// enrolls again.
@@ -264,6 +267,7 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		servers:            map[string]*registration{},
 		conns:              map[string]*relayConn{},
 		httpWaiting:        map[string]int{},
+		httpLimited:        map[string]time.Time{},
 		away:               map[string]*absence{},
 		claims:             map[string]claimGrant{},
 		directories:        map[string]*directoryWrite{},

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
@@ -331,12 +332,32 @@ func TestHTTPConnWait(t *testing.T) {
 		a := claimedAgent(t, e)
 		release := make(chan struct{})
 		answers := busy(t, e, a, holdData(t, a, release), edgeproto.MaxHTTPConnsPerServer, edgeproto.MaxHTTPConnsPerServer)
+		var logged bytes.Buffer
+		previous := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+		defer slog.SetDefault(previous)
 		start := time.Now()
 		if got := post(e, a); got != want {
 			t.Errorf("a request past the busy connections: %q, want %q", got, want)
 		}
 		if waited := time.Since(start); waited < e.r.httpConnWait {
 			t.Errorf("refused after %s, before the %s wait", waited, e.r.httpConnWait)
+		}
+		resp, err := http.Post(e.base+edgeproto.MCPPath(a.id), "application/json", strings.NewReader("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if got := resp.Header.Get("Retry-After"); resp.StatusCode != http.StatusServiceUnavailable || got != "5" {
+			t.Errorf("a second refusal: %s, Retry-After %q; want 503 and 5", resp.Status, got)
+		}
+		slog.SetDefault(previous)
+		line := "refusing MCP connector requests for the connection limit; logged once until a minute passes without one\" server=" + a.id + " in_progress=8 waiting=1\n"
+		if got := logged.String(); strings.Count(got, "refusing MCP connector requests") != 1 || !strings.HasSuffix(got, line) {
+			t.Errorf("two refusals in one burst logged %q, want one line ending %q", got, line)
+		}
+		if got := e.r.Metrics().Refusals["MCP connection limit"]; got != 2 {
+			t.Errorf("refusals counted for the connection limit = %d, want 2", got)
 		}
 		close(release)
 		for range edgeproto.MaxHTTPConnsPerServer {

@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/http/httputil"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,6 +67,35 @@ type noMCPEndpoint struct{ name, id, agentVersion string }
 func (e noMCPEndpoint) Error() string {
 	return fmt.Sprintf("server %s (%s) runs aether-server %s, which has no MCP endpoint; upgrade it: sudo aether-server update",
 		e.name, e.id, e.agentVersion)
+}
+
+// httpLimitQuiet is how long a server's requests go without an
+// errHTTPLimit refusal before the next one starts a new burst and is
+// logged.
+const httpLimitQuiet = time.Minute
+
+// noteHTTPLimit logs the first errHTTPLimit refusal of each burst of
+// serverID's, with how many of its requests are in progress and waiting.
+func (r *Relay) noteHTTPLimit(serverID string) {
+	now := time.Now()
+	r.mu.Lock()
+	maps.DeleteFunc(r.httpLimited, func(_ string, last time.Time) bool { return now.Sub(last) >= httpLimitQuiet })
+	_, burst := r.httpLimited[serverID]
+	r.httpLimited[serverID] = now
+	inProgress := 0
+	if !burst {
+		for _, o := range r.conns {
+			if o.serverID == serverID && o.kind == edgeproto.KindHTTP {
+				inProgress++
+			}
+		}
+	}
+	waiting := r.httpWaiting[serverID]
+	r.mu.Unlock()
+	if !burst {
+		slog.Warn("relay: refusing MCP connector requests for the connection limit; logged once until a minute passes without one",
+			"server", serverID, "in_progress", inProgress, "waiting", waiting)
+	}
 }
 
 // admitHTTPLocked returns why reg takes no more http connections, if it
@@ -370,6 +402,8 @@ func (r *Relay) refuseHTTP(w http.ResponseWriter, req *http.Request, serverID st
 		status, text = http.StatusNotImplemented, oldUniversal.Error()
 	case errors.Is(err, errHTTPLimit):
 		r.countRefusal("MCP connection limit")
+		r.noteHTTPLimit(serverID)
+		w.Header().Set("Retry-After", strconv.Itoa(int(edgeproto.HTTPShortCall/time.Second)))
 		status, text = http.StatusServiceUnavailable, err.Error()
 	case errors.Is(err, edgeproto.RefusalNotConnected):
 		ctx, cancel := context.WithTimeout(req.Context(), directoryTimeout)

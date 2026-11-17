@@ -547,7 +547,14 @@ controls in the dashboard, or to a session you control, reaches the agent at onc
 about 45 seconds for the member in control to approve it. `aether_decide_approval` allows
 or denies a permission request once; it never picks an "always" option, so it
 cannot change what the agent may do next time. Any other tool call is cut off
-after 40 seconds, inside ChatGPT's wait.
+after 40 seconds, inside ChatGPT's wait. A server runs at most 4 tool calls
+longer than 5 seconds at once, across all its connectors, so calls that wait
+cannot hold all 8 requests the edge forwards to it
+([edge.md](edge.md#limits)). Past that, the server ends an
+`aether_launch_session` or `aether_ask_assistant` call early before any other:
+the launch answers as one still starting, and the ask with its `turn_id` to
+poll. Any other call ended early fails with a message that starts `ended
+early: this server runs at most 4 connector calls longer than 5s at once`.
 
 The other writes repeat safely without a key. Each `aether_session_lifecycle` action
 but `relaunch` sets a state, so a repeat changes nothing, and
@@ -822,6 +829,7 @@ A tool call can fail with:
 | --- | --- |
 | `<method> needs the <scope> scope, which <client> connector <id> was not granted; ...` | Select **Reconnect** next to the connector and check the box the message names |
 | `<method>: <client> connector <id> cannot call this method; ...` | No connector can. Use the app or the CLI |
+| `503 this server already has 8 MCP connector requests in progress through the edge; retry shortly` | 8 calls to the server were in progress for the 15 seconds this one waited, or 16 others were already waiting. Call again after the `Retry-After` seconds; if it persists, the edge's log and `aether_edge_refusals_total{reason="MCP connection limit"}` show it ([edge.md](edge.md#monitoring)) |
 | `503 server is not connected to the edge` | The server is down or cannot reach the edge; an admin runs `sudo aether-server edge status`. For 30 seconds after the edge sees the server's control channel end, it holds up to 16 calls and sends them to the server once it is back, so a quick restart does not fail them. A host that drops off the network without closing the channel is noticed only after 60 seconds of silence. If the client marks the connector failed, reconnect it (in Claude Code, `/mcp`) |
 
 On the page that opens when you connect:
