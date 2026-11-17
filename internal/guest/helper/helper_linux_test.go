@@ -313,6 +313,23 @@ func TestStartLeavesGoSettingsToTheProgram(t *testing.T) {
 	}
 }
 
+func TestProcessesStartAtTheSoftFileLimit(t *testing.T) {
+	_, client := startHelper(t)
+	var lim unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &lim); err != nil {
+		t.Fatal(err)
+	}
+	for _, nnp := range []bool{false, true} {
+		p := spawn(t, client, guest.ProcessSpec{ID: fmt.Sprint(nnp), Argv: []string{"sh", "-c", "ulimit -S -n; ulimit -H -n"}, NoNewPrivileges: nnp})
+		a := p.Attach(true)
+		out, _ := io.ReadAll(a.Stdout())
+		_ = a.Close()
+		if want := fmt.Sprintf("%d\n%d\n", processSoftFileLimit, lim.Max); string(out) != want {
+			t.Errorf("NoNewPrivileges %v: the program's open-file limits are %q, want %q", nnp, out, want)
+		}
+	}
+}
+
 func TestNoNewPrivileges(t *testing.T) {
 	_, client := startHelper(t)
 	// Without the option a process keeps the helper's own setting, which a

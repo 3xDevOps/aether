@@ -12,12 +12,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// TestKVMGuestBootSettings checks the boot-time kernel settings that keep a
-// Default-tier uid-1000 agent from escalating in the VM: unprivileged BPF is
-// off and latched, io_uring is gone, kernel pointers and dmesg are hidden,
-// and ptrace is scoped. The values come from images/kernel/config-x86_64 and
-// the helper's writeBootSysctls. Low ports, ping and the open-file limit are
-// a Docker container's.
+// TestKVMGuestBootSettings checks the guest's boot-time settings. The
+// hardening ones keep a Default-tier uid-1000 agent from escalating in the
+// VM: unprivileged BPF is off and latched, io_uring is gone, kernel pointers
+// and dmesg are hidden, and ptrace is scoped. The values come from
+// images/kernel/config-x86_64 and the helper's writeBootSysctls. Low ports,
+// ping and the open-file limits match a Docker container's.
 func TestKVMGuestBootSettings(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-harden-sysctls"
@@ -45,8 +45,8 @@ func TestKVMGuestBootSettings(t *testing.T) {
 		}
 	}
 	out, _ := vmRun(t, e, key, "ulimit -S -n; ulimit -H -n")
-	if got := strings.Join(strings.Fields(out), " "); got != "524288 524288" {
-		t.Errorf("the open-file limit, soft and hard, is %q, want 524288 for both", got)
+	if got := strings.Join(strings.Fields(out), " "); got != "1024 524288" {
+		t.Errorf("the open-file limits, soft and hard, are %q, want 1024 and 524288", got)
 	}
 }
 

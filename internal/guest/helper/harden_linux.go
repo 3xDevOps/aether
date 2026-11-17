@@ -3,6 +3,8 @@ package helper
 import (
 	"errors"
 	"os"
+
+	"golang.org/x/sys/unix"
 )
 
 // bootSysctls harden the guest kernel against an unprivileged in-VM agent,
@@ -20,11 +22,26 @@ var bootSysctls = []struct{ path, value string }{
 	{"/proc/sys/net/ipv4/ping_group_range", "0 2147483647"},
 }
 
-// openFileLimit is the RLIMIT_NOFILE, soft and hard, the helper sets on
-// itself and so on every process it starts, a Docker container's. The
-// kernel's fs.nr_open, 1048576, caps it. unix.Setrlimit, unlike a raw
-// prlimit, also stops Go from restoring the kernel's soft 1024 in children.
+// openFileLimit is the helper's own RLIMIT_NOFILE, soft and hard, and so the
+// hard limit of every process it starts, as in a Docker container. The
+// kernel's fs.nr_open, 1048576, caps it.
 const openFileLimit = 524288
+
+// processSoftFileLimit is the soft RLIMIT_NOFILE a Docker container's
+// processes start with; a program that needs more raises it to the hard one.
+const processSoftFileLimit = 1024
+
+// lowerSoftFileLimit runs in the start trampolines. It keeps the hard limit
+// they inherit rather than setting openFileLimit, which a process no longer
+// root could not do if the helper's own raise failed.
+func lowerSoftFileLimit() error {
+	var lim unix.Rlimit
+	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &lim); err != nil {
+		return err
+	}
+	lim.Cur = processSoftFileLimit
+	return unix.Setrlimit(unix.RLIMIT_NOFILE, &lim)
+}
 
 // writeBootSysctls writes bootSysctls. A setting whose file is absent,
 // because the kernel lacks the feature, is skipped; any other write failure

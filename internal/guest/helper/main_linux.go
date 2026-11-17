@@ -82,6 +82,9 @@ func execStart(noNewPrivs bool, dir, program string, argv []string) int {
 	runtime.LockOSThread()
 	status := os.NewFile(3, "exec status")
 	env, err := started(status)
+	if err == nil {
+		err = lowerSoftFileLimit()
+	}
 	if err == nil && noNewPrivs {
 		err = unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
 	}
@@ -134,6 +137,9 @@ func execInRoot(root, uid, gid, dir, program string, argv []string) int {
 	runtime.LockOSThread()
 	status := os.NewFile(3, "exec status")
 	env, err := started(status)
+	if err == nil {
+		err = lowerSoftFileLimit()
+	}
 	if err == nil {
 		err = enterRoot(root)
 	}

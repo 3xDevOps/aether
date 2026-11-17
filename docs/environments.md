@@ -357,9 +357,9 @@ What changes:
 - The VM gets the CPU limit rounded up to whole vCPUs, held to the exact
   limit by the unit's `CPUQuota`, and the memory limit as its memory; the
   unit's `MemoryMax` allows 512 MiB more for the VM monitor and the file
-  service. The process limit applies inside the guest. As in a container,
-  the open-file limit is 524288 and any user may listen on ports below 1024
-  and use `ping` ([vm-guest.md](vm-guest.md#boot)).
+  service. The process limit applies inside the guest. Processes start at
+  an open-file limit of 1024 soft and 524288 hard, and any user may listen
+  on ports below 1024 and use `ping` ([vm-guest.md](vm-guest.md#boot)).
 - The checkout and each extra repository live on disks of their own, made
   in constant time from a prepared disk per workspace and base commit, and
   git work on them runs inside the VM ([vm-guest.md](vm-guest.md#checkouts)).

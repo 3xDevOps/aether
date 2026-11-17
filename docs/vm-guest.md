@@ -26,9 +26,9 @@ In order, as PID 1:
    sets in every container: `net.ipv4.ip_unprivileged_port_start=0`, so any
    user may listen on a port below 1024, and
    `net.ipv4.ping_group_range=0 2147483647`, so any user may ping. Then sets
-   its own open-file limit (`RLIMIT_NOFILE`) to 524288, soft and hard, as a
-   Docker container's; every process it starts inherits it. A VM saved
-   before an upgrade gets these at its next cold start.
+   its own open-file limit (`RLIMIT_NOFILE`) to 524288, soft and hard;
+   every process it starts begins at 1024 soft under that hard limit, as
+   in a Docker container.
 4. Reads its configuration from `/proc/cmdline` (below), mounts the volumes
    it names and binds what it names from them, then mounts each checkout
    disk ([Checkouts](#checkouts)).
