@@ -2,20 +2,27 @@ package ops
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// With two calls already running long, a third that reaches the bound is
-// ended and told why, the two finish, and their places come free.
-func TestLongCallsEndTheCallPastTheBound(t *testing.T) {
+// With two calls of an op that waits already running long, a third is
+// ended at the bound and told to call again. A call of an op that does
+// not wait takes the place of the oldest waiting one instead, and is
+// ended itself only when no waiting call is left to end.
+func TestLongCallsEndWaitingCallsFirst(t *testing.T) {
 	long := &LongCalls{After: 50 * time.Millisecond, Max: 2}
 	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
 	srv := mcp.NewServer(&mcp.Implementation{Name: "aether", Version: "v0"}, nil)
-	RegisterConnector(srv, func(ctx context.Context, _ string, _, _ any) error {
+	RegisterConnector(srv, func(ctx context.Context, method string, _, _ any) error {
+		if method != protocol.MethodAssistantAsk && method != protocol.MethodWorkspaceList {
+			return nil
+		}
 		select {
 		case <-release:
 			return nil
@@ -33,46 +40,53 @@ func TestLongCallsEndTheCallPastTheBound(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cs.Close() })
 
-	type answer struct {
-		text   string
-		failed bool
+	start := func(name string, args map[string]any) <-chan string {
+		ended := make(chan string, 1)
+		go func() {
+			res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: args})
+			if err != nil {
+				ended <- err.Error()
+				return
+			}
+			ended <- res.Content[0].(*mcp.TextContent).Text
+		}()
+		return ended
 	}
-	answers := make(chan answer, 3)
-	call := func() {
-		text, _, failed := try(t, cs, "aether_list_workspaces", nil)
-		answers <- answer{text, failed}
-	}
-	for range 3 {
-		go call()
-	}
-	const want = "ended after 50ms: this server already runs 2 connector calls longer than that, the most it runs at once; call again shortly: context canceled"
-	if got := <-answers; !got.failed || got.text != want {
-		t.Fatalf("the call past the bound: failed %v %q, want %q", got.failed, got.text, want)
-	}
-	select {
-	case got := <-answers:
-		t.Fatalf("a call inside the bound ended early: %q", got.text)
-	case <-time.After(4 * long.After):
-	}
-	close(release)
-	for range 2 {
-		if got := <-answers; got.failed {
-			t.Fatalf("a call inside the bound failed: %s", got.text)
+	ask := func() <-chan string { return start("aether_ask_assistant", map[string]any{"turn_id": "turn-1"}) }
+	list := func() <-chan string { return start("aether_list_workspaces", nil) }
+	running := func(what string, calls ...<-chan string) {
+		t.Helper()
+		for _, c := range calls {
+			select {
+			case got := <-c:
+				t.Fatalf("%s ended: %q", what, got)
+			default:
+			}
 		}
 	}
-	release = make(chan struct{})
-	for range 2 {
-		go call()
+	const early = "ended early: this server runs at most 2 connector calls longer than 50ms at once; call again shortly: context canceled"
+
+	first := ask()
+	time.Sleep(long.After / 2)
+	second := ask()
+	time.Sleep(2 * long.After)
+	third := ask()
+	if got := <-third; got != early {
+		t.Fatalf("a waiting call past the bound: %q, want %q", got, early)
 	}
-	select {
-	case got := <-answers:
-		t.Fatalf("a long call after the others finished ended early: %q", got.text)
-	case <-time.After(4 * long.After):
+	running("a waiting call inside the bound", first, second)
+
+	lists := []<-chan string{list(), list()}
+	if got := <-first; got != early {
+		t.Fatalf("the oldest waiting call, when a call that does not wait reached the bound: %q, want %q", got, early)
 	}
-	close(release)
-	for range 2 {
-		if got := <-answers; got.failed || strings.Contains(got.text, "ended after") {
-			t.Fatalf("a long call after the others finished: %q", got.text)
-		}
+	if got := <-second; got != early {
+		t.Fatalf("the other waiting call, when a second call that does not wait reached the bound: %q, want %q", got, early)
 	}
+	time.Sleep(2 * long.After)
+	running("a call that does not wait, in a waiting call's place", lists...)
+	if got := <-list(); got != early {
+		t.Fatalf("a call that does not wait, with no waiting call to end: %q, want %q", got, early)
+	}
+	running("a call that does not wait, inside the bound", lists...)
 }

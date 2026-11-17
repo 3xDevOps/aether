@@ -579,12 +579,15 @@ at https://<relay host>/mcp; upgrade it ...` for a server at protocol 2.
   is being opened and those waiting up to 30 seconds for the server to return.
 - 4 connector tool calls per server running longer than 5 seconds, so calls
   that wait leave the other 4 requests to short calls. The server, not the
-  edge, enforces it: a call that reaches 5 seconds with 4 others already past
-  it is cancelled and answered `ended after 5s: this server already runs 4
-  connector calls longer than that, the most it runs at once; call again
-  shortly`. A launch cancelled this way keeps starting and is answered as a
-  launch still starting is, within 5 more seconds
-  ([connectors.md](connectors.md)). The server answers an MCP
+  edge, enforces it. When a call reaches 5 seconds with 4 others already past
+  it, the server ends one early: that call if it is `aether_launch_session` or
+  `aether_ask_assistant`, which wait by design and are safe to call again,
+  else the oldest of those two in progress, else that call. An ended launch
+  keeps starting and is answered as a launch still starting is, within 5 more
+  seconds; any other ended call fails with `ended early: this server runs at
+  most 4 connector calls longer than 5s at once; call again shortly`, or for a
+  write that is neither of the two, `...; check whether it took effect before
+  calling again` ([connectors.md](connectors.md)). The server answers an MCP
   `subscriptions/listen` request at once instead of holding it open: its tool
   list never changes while a client listens.
 - Universal connector URL: 20 server choices and consent pages at once, then 1

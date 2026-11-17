@@ -550,10 +550,12 @@ cannot change what the agent may do next time. Any other tool call is cut off
 after 40 seconds, inside ChatGPT's wait. A server runs at most 4 tool calls
 longer than 5 seconds at once, across all its connectors, so calls that wait
 cannot hold all 8 requests the edge forwards to it
-([edge.md](edge.md#limits)); a call that reaches 5 seconds with 4 others
-already past it fails with `ended after 5s: this server already runs 4
-connector calls longer than that, the most it runs at once; call again
-shortly`, and a launch then answers as one still starting.
+([edge.md](edge.md#limits)). Past that, the server ends an
+`aether_launch_session` or `aether_ask_assistant` call early before any other:
+the launch answers as one still starting, and the ask fails with `ended early:
+this server runs at most 4 connector calls longer than 5s at once; call again
+shortly`. Calling `aether_ask_assistant` again with the same prompt within a
+minute, or with the `turn_id`, reaches the same turn.
 
 The other writes repeat safely without a key. Each `aether_session_lifecycle` action
 but `relaunch` sets a state, so a repeat changes nothing, and

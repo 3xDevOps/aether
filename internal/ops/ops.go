@@ -105,13 +105,19 @@ const toolTimeout = 40 * time.Second
 // LongCalls bounds how many of a server's connector tool calls run past
 // After at once, so calls that wait cannot hold every connection the edge
 // has to the server. A call that reaches After with Max others already
-// past it is cancelled and told to call again.
+// past it ends early: itself if it is of an op that waits, else the
+// oldest of those that is, since calling one of them again is safe.
 type LongCalls struct {
 	After time.Duration
 	Max   int
 
 	mu   sync.Mutex
-	long int
+	long []*longCall
+}
+
+type longCall struct {
+	cancel context.CancelCauseFunc
+	waits  bool
 }
 
 // errLongCalls is the cancellation cause of a call LongCalls ended.
@@ -121,36 +127,42 @@ type errLongCalls struct {
 }
 
 func (e errLongCalls) Error() string {
-	return fmt.Sprintf("ended after %s: this server already runs %d connector calls longer than that, the most it runs at once; call again shortly",
-		e.after, e.max)
+	return fmt.Sprintf("ended early: this server runs at most %d connector calls longer than %s at once", e.max, e.after)
 }
 
-// watch returns ctx, cancelled with errLongCalls if the call is over the
-// bound at After, and the func that ends the watch when the call returns.
-func (l *LongCalls) watch(ctx context.Context) (context.Context, func()) {
+// watch returns ctx, cancelled with errLongCalls if the call is ended
+// early, and the func that ends the watch when the call returns.
+func (l *LongCalls) watch(ctx context.Context, waits bool) (context.Context, func()) {
 	if l == nil {
 		return ctx, func() {}
 	}
 	ctx, cancel := context.WithCancelCause(ctx)
-	var long, done bool
+	c := &longCall{cancel: cancel, waits: waits}
+	done := false
 	t := time.AfterFunc(l.After, func() {
 		l.mu.Lock()
 		defer l.mu.Unlock()
-		switch {
-		case done:
-		case l.long >= l.Max:
-			cancel(errLongCalls{after: l.After, max: l.Max})
-		default:
-			l.long++
-			long = true
+		if done {
+			return
 		}
+		if len(l.long) >= l.Max {
+			ended := errLongCalls{after: l.After, max: l.Max}
+			i := slices.IndexFunc(l.long, func(o *longCall) bool { return o.waits })
+			if waits || i < 0 {
+				cancel(ended)
+				return
+			}
+			l.long[i].cancel(ended)
+			l.long = slices.Delete(l.long, i, i+1)
+		}
+		l.long = append(l.long, c)
 	})
 	return ctx, func() {
 		t.Stop()
 		l.mu.Lock()
 		done = true
-		if long {
-			l.long--
+		if i := slices.Index(l.long, c); i >= 0 {
+			l.long = slices.Delete(l.long, i, i+1)
 		}
 		l.mu.Unlock()
 		cancel(nil)
@@ -179,11 +191,14 @@ type Op struct {
 	Methods                []string
 	Idempotent             bool
 	Destructive, OpenWorld bool
-	Does                   string
-	enums                  map[string][]any
-	defaults               map[Surface]map[string]fieldDefault
-	hidden                 map[Surface][]string
-	add                    func(srv *mcp.Server, t *mcp.Tool, c calls, o Op)
+	// waits marks an op that waits for a person or a launch and is safe
+	// to call again when ended early: LongCalls ends these first.
+	waits    bool
+	Does     string
+	enums    map[string][]any
+	defaults map[Surface]map[string]fieldDefault
+	hidden   map[Surface][]string
+	add      func(srv *mcp.Server, t *mcp.Tool, c calls, o Op)
 }
 
 // fieldDefault is an optional input's value on one surface when the
@@ -230,16 +245,20 @@ func opOf[In any](name, title string, scope Scope, idempotent bool, next, does s
 				ctx, cancel = context.WithTimeout(ctx, budget)
 				defer cancel()
 			}
-			ctx, unwatch := c.long.watch(ctx)
+			ctx, unwatch := c.long.watch(ctx, o.waits)
 			defer unwatch()
 			stripIDPrefixes(&in)
 			summary, out, err := run(ctx, c, in)
 			if err != nil {
 				var ended errLongCalls
 				if errors.As(context.Cause(ctx), &ended) {
+					again := "call again shortly"
+					if !o.waits && !o.ReadOnly() {
+						again = "check whether it took effect before calling again"
+					}
 					perr := &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
 					errors.As(err, &perr)
-					err = &protocol.Error{Code: perr.Code, Data: perr.Data, Message: ended.Error() + ": " + perr.Message}
+					err = &protocol.Error{Code: perr.Code, Data: perr.Data, Message: ended.Error() + "; " + again + ": " + perr.Message}
 				}
 				return failed(hinted(err, next)), nil, nil
 			}
@@ -272,6 +291,11 @@ const (
 
 func (o Op) hints(destructive, openWorld bool) Op {
 	o.Destructive, o.OpenWorld = destructive, openWorld
+	return o
+}
+
+func (o Op) waiting() Op {
+	o.waits = true
 	return o
 }
 

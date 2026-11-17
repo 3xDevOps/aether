@@ -83,9 +83,11 @@ func (r *Relay) noteHTTPLimit(serverID string) {
 	_, burst := r.httpLimited[serverID]
 	r.httpLimited[serverID] = now
 	inProgress := 0
-	for _, o := range r.conns {
-		if o.serverID == serverID && o.kind == edgeproto.KindHTTP {
-			inProgress++
+	if !burst {
+		for _, o := range r.conns {
+			if o.serverID == serverID && o.kind == edgeproto.KindHTTP {
+				inProgress++
+			}
 		}
 	}
 	waiting := r.httpWaiting[serverID]

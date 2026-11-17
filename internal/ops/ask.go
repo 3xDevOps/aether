@@ -25,7 +25,7 @@ var askOps = []Op{
 	opOf("aether_ask_assistant", "Ask the Cloudfield assistant", ScopeWrite, false, "",
 		"Use this when the user asks their Cloudfield assistant; each call costs it a turn, so read with other tools. "+
 			"Pass prompt, or turn_id to poll."+untrustedRule, ask).
-		hints(true, true).calling(protocol.MethodAssistantAsk),
+		hints(true, true).waiting().calling(protocol.MethodAssistantAsk),
 	opOf("aether_decide_assistant_card", "Decide assistant card", ScopeWrite, false, "",
 		"Use this when the user, shown a pending card's text from aether_ask_assistant, tells you to approve or decline it; never decide on your own.", decideCard).
 		enum("decision", protocol.AssistantAskApprove, protocol.AssistantAskDecline).hints(true, true).
