@@ -242,9 +242,7 @@
   --agent-claude: #b4532a;
   --agent-pi: #8a3fb8;
   --agent-omp: #1f7a8c;
-  --agent-gemini: #1f6fd1;
   --agent-cursor: #9a6a00;
-  --agent-antigravity: #2f7d4a;
   --tone-soft: 8%;
   --lane-tint: 16%;
 
@@ -306,9 +304,7 @@
   --agent-claude: #e0835e;
   --agent-pi: #c792ea;
   --agent-omp: #5ec4d6;
-  --agent-gemini: #7ab4ff;
   --agent-cursor: #e8b84a;
-  --agent-antigravity: #6ccf8e;
   --tone-soft: 12%;
   --lane-tint: 26%;
 
@@ -399,9 +395,7 @@
   --color-agent-claude: var(--agent-claude);
   --color-agent-pi: var(--agent-pi);
   --color-agent-omp: var(--agent-omp);
-  --color-agent-gemini: var(--agent-gemini);
   --color-agent-cursor: var(--agent-cursor);
-  --color-agent-antigravity: var(--agent-antigravity);
 
   /* `accent` is a fill for backgrounds and borders but the link colour for
      text. Tailwind reads the property namespace before `--color-*`. */
