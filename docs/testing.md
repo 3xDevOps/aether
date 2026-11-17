@@ -681,7 +681,10 @@ Each test gets its own stack:
 
 - One `aether-server` on its own loopback port, with a temporary data
   directory, the `busybox:1.36` image and `AETHER_FAKE_AGENT`. The first
-  identity to connect becomes the admin.
+  identity to connect becomes the admin. `AETHER_NO_UPDATE_CHECK=1` keeps
+  it from reading this project's published releases and channel pointers,
+  so `server.update_status` reports no release and a channel not chosen
+  yet; a spec that needs other update state answers that method itself.
 - One `aether gui` per member, each with its own `HOME` and
   `AETHER_CONFIG_DIR`, so nothing touches your own keys or links.
 - Real git repositories on disk.
