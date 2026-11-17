@@ -1311,6 +1311,11 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 - Outbound traffic is limited only for sessions of a workspace with egress
   control on. Other sessions and environment terminals
   reach the internet, your network and ports the server host listens on.
+- Any user in a session without egress control, a Default-tier agent
+  included, can send from a source port below 1024, which the host's
+  masquerade keeps below 1024, so a service on your network that trusts
+  privileged source ports, such as an NFS export with `secure`, takes it for
+  root on the server host.
 - An egress-limited session still reaches services on the server host, and every
   allowed host can receive data. A client that ignores the proxy variables
   cannot connect at all.

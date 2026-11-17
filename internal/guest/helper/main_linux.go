@@ -82,6 +82,9 @@ func execStart(noNewPrivs bool, dir, program string, argv []string) int {
 	runtime.LockOSThread()
 	status := os.NewFile(3, "exec status")
 	env, err := started(status)
+	if err == nil {
+		err = lowerSoftFileLimit()
+	}
 	if err == nil && noNewPrivs {
 		err = unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
 	}
@@ -134,6 +137,9 @@ func execInRoot(root, uid, gid, dir, program string, argv []string) int {
 	runtime.LockOSThread()
 	status := os.NewFile(3, "exec status")
 	env, err := started(status)
+	if err == nil {
+		err = lowerSoftFileLimit()
+	}
 	if err == nil {
 		err = enterRoot(root)
 	}
@@ -191,7 +197,8 @@ func serve() error {
 	}
 	record(guest.RootStep, switchRoot())
 	record("mount system filesystems", mountSystem())
-	record("harden the kernel", harden())
+	record("write the boot sysctls", writeBootSysctls())
+	record("raise the open-file limit", unix.Setrlimit(unix.RLIMIT_NOFILE, &unix.Rlimit{Cur: openFileLimit, Max: openFileLimit}))
 	cmdline, err := os.ReadFile("/proc/cmdline")
 	record("read the kernel command line", err)
 	cfg, err := guest.ParseCmdline(string(cmdline))

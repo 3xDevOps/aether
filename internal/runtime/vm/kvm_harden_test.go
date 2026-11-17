@@ -12,12 +12,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// TestKVMGuestKernelIsHardened checks the boot-time kernel settings that
-// keep a Default-tier uid-1000 agent from escalating in the VM: unprivileged
-// BPF is off and latched, io_uring is gone, kernel pointers and dmesg are
-// hidden, and ptrace is scoped. The values come from
-// images/kernel/config-x86_64 and the helper's harden().
-func TestKVMGuestKernelIsHardened(t *testing.T) {
+// TestKVMGuestBootSettings checks the guest's boot-time settings. The
+// hardening ones keep a Default-tier uid-1000 agent from escalating in the
+// VM: unprivileged BPF is off and latched, io_uring is gone, kernel pointers
+// and dmesg are hidden, and ptrace is scoped. The values come from
+// images/kernel/config-x86_64 and the helper's writeBootSysctls. Low ports,
+// ping and the open-file limits match a Docker container's.
+func TestKVMGuestBootSettings(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-harden-sysctls"
 	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
@@ -34,12 +35,18 @@ func TestKVMGuestKernelIsHardened(t *testing.T) {
 		t.Fatal(err)
 	}
 	for s, want := range map[string]string{
-		"kptr_restrict": "2", "dmesg_restrict": "1", "yama/ptrace_scope": "1",
-		"io_uring_disabled": "2", "unprivileged_bpf_disabled": "1",
+		"kernel/kptr_restrict": "2", "kernel/dmesg_restrict": "1", "kernel/yama/ptrace_scope": "1",
+		"kernel/io_uring_disabled": "2", "kernel/unprivileged_bpf_disabled": "1",
+		"net/ipv4/ip_unprivileged_port_start": "0", "net/ipv4/ping_group_range": "0 2147483647",
 	} {
-		if out, _ := vmRun(t, e, key, "cat /proc/sys/kernel/"+s); strings.TrimSpace(out) != want {
-			t.Errorf("kernel.%s is %q, want %q", s, strings.TrimSpace(out), want)
+		out, _ := vmRun(t, e, key, "cat /proc/sys/"+s)
+		if got := strings.Join(strings.Fields(out), " "); got != want {
+			t.Errorf("/proc/sys/%s is %q, want %q", s, got, want)
 		}
+	}
+	out, _ := vmRun(t, e, key, "ulimit -S -n; ulimit -H -n")
+	if got := strings.Join(strings.Fields(out), " "); got != "1024 524288" {
+		t.Errorf("the open-file limits, soft and hard, are %q, want 1024 and 524288", got)
 	}
 }
 
