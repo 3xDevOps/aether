@@ -43,6 +43,10 @@ type Config struct {
 	Out io.WriteCloser
 }
 
+// newCLIPath is where a container created since the command got its new
+// name has it; tests point it elsewhere.
+var newCLIPath = coordtransport.CloudfieldCLIPath
+
 // Run serves MCP until the client disconnects or ctx is done.
 func Run(ctx context.Context, cfg Config) error {
 	if cfg.Socket == "" {
@@ -58,15 +62,15 @@ func Run(ctx context.Context, cfg Config) error {
 		cfg.Out = nopCloser{os.Stdout}
 	}
 
-	g := newGate()
+	g, cli := newGate(), coordhooks.LocalCLI(newCLIPath)
 	var opts *mcp.ServerOptions
 	if !cfg.Assistant {
-		opts = &mcp.ServerOptions{Instructions: instructions(ctx, cfg.Socket)}
+		opts = &mcp.ServerOptions{Instructions: instructions(ctx, cfg.Socket, cli)}
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: version.String()}, opts)
 	if cfg.Assistant {
 		registerAssistantTools(srv, cfg.Socket)
-	} else if err := registerTools(srv, cfg.Socket, g); err != nil {
+	} else if err := registerTools(srv, cfg.Socket, g, cli); err != nil {
 		return err
 	} else {
 		registerChildTools(ctx, srv, cfg.Socket)
@@ -83,14 +87,15 @@ func Run(ctx context.Context, cfg Config) error {
 // instructions are the run's role card, or only its standalone reporting
 // rules when the agent's system prompt already carries the card. Without a
 // status answer they claim no reporting rules.
-func instructions(ctx context.Context, socket string) string {
+func instructions(ctx context.Context, socket, cli string) string {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	var status protocol.CoordStatusResult
 	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &status); err != nil {
-		return coordhooks.RoleCard(coordhooks.Guide{})
+		return coordhooks.RoleCard(coordhooks.Guide{CLI: cli})
 	}
 	g := coordhooks.StatusGuide(status)
+	g.CLI = cli
 	if envname.Getenv(coordtransport.RoleCardEnv) == "1" {
 		return coordhooks.Brief(g)
 	}

@@ -144,8 +144,8 @@ export function asRow(step: Step): SessionRow {
 /** A boundary starts a segment: a person's message, a wake or a new agent session. */
 export type Part = { kind: 'boundary'; row: SessionRow } | { kind: 'step'; step: Step }
 
-/** Aether's end-of-turn report, run as a command or called as an MCP tool. */
-const reportCall = /(?:^|[;&|]\s*)(?:\S*\/)?aether-internal report\b|(?:^|[_.])aether_report$/
+/** Aether's end-of-turn report, run as a command under either of its names or called as an MCP tool. */
+const reportCall = /(?:^|[;&|]\s*)(?:\S*\/)?(?:aether|cloudfield)-internal report\b|(?:^|[_.])aether_report$/
 
 /**
  * Splits a turn into segments at each boundary. Within a segment the agent's

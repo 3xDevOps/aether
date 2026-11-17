@@ -41,7 +41,7 @@ func (s *Scheduler) HoldTurnEnd(ctx context.Context, run domain.RunID) (string, 
 	if !last.Before(started) {
 		return "", nil
 	}
-	reminder := coordhooks.ReportReminder(s.runGuide(ctx, run, false, wake))
+	reminder := coordhooks.ReportReminder(s.runGuide(ctx, run, false, wake, ""))
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.runs[run] != entry || !entry.turnStartedAt.Equal(started) || !entry.reportOwed() {

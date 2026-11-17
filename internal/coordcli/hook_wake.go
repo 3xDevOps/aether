@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -38,7 +39,7 @@ func hookWake(ctx context.Context, cfg Config) (int, error) {
 	}
 	result := hookWakeResult{WaitSupported: true, UnreadMessageIDs: ids, WakeAdmitted: status.WakeAdmitted}
 	if status.WakeAdmitted && len(ids) > 0 {
-		result.Context = protocol.CoordInboxContext(len(ids)) + protocol.CoordReportReminder
+		result.Context = coordhooks.Named(protocol.CoordInboxContext(len(ids))+protocol.CoordReportReminder, cfg.cli)
 	}
 	if err := json.NewEncoder(cfg.Out).Encode(result); err != nil {
 		return ExitFailure, fmt.Errorf("hook wake: write response: %w", err)

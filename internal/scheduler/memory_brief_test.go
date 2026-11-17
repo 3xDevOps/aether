@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -80,7 +81,7 @@ func seedTeamMemory(t *testing.T, e *testEnv) teamMemory {
 
 func (m teamMemory) check(t *testing.T, where, text string) {
 	t.Helper()
-	if rule := strings.Index(text, coAuthorInstruction); rule < 0 || strings.Index(text, "<team-memory") < rule {
+	if rule := strings.Index(text, coordhooks.Named(coAuthorInstruction, coordhooks.NewCLI)); rule < 0 || strings.Index(text, "<team-memory") < rule {
 		t.Fatalf("%s %q lacks the co-author rule before the brief", where, text)
 	}
 	if !strings.Contains(text, m.pin) || !strings.Contains(text, m.recentRun) {

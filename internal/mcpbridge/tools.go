@@ -68,14 +68,14 @@ func reportSchema() (*jsonschema.Schema, error) {
 	return schema, nil
 }
 
-func registerTools(srv *mcp.Server, socket string, g *gate) error {
+func registerTools(srv *mcp.Server, socket string, g *gate, cli string) error {
 	report, err := reportSchema()
 	if err != nil {
 		return err
 	}
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        toolStatus,
-		Description: "Report this session's v3 identity, capabilities, and the peers it may message, each with state lineage, active, grace or workspace, task summary, overlapping files, activity (what it is doing: working, waiting-agents, waiting-ci, waiting-tools, waiting, answered, needs-you, finished, failed or disconnected) with its reason, wait while it shows a reported wait: the condition's last checked status, why Cloudfield cannot vouch for it, or not verified when the wait names no condition, which goes stale after 30 minutes with no activity by default, then run_status, where needs-attention only means parked, and, for peers you wrote to, last_sent: your newest message and whether it is sent, held (a person controls that subsession), delivered, acked or retired. A viewer-owned session has none. It lists the most relevant peers; any other live session's run_id works with aether_send and aether_ask. Capabilities with no MCP tool, such as dev.terminal.* and dev.browser.*, are aether-internal CLI commands; run the shell command `aether-internal skill` for how to use them.",
+		Description: coordhooks.Named("Report this session's v3 identity, capabilities, and the peers it may message, each with state lineage, active, grace or workspace, task summary, overlapping files, activity (what it is doing: working, waiting-agents, waiting-ci, waiting-tools, waiting, answered, needs-you, finished, failed or disconnected) with its reason, wait while it shows a reported wait: the condition's last checked status, why Cloudfield cannot vouch for it, or not verified when the wait names no condition, which goes stale after 30 minutes with no activity by default, then run_status, where needs-attention only means parked, and, for peers you wrote to, last_sent: your newest message and whether it is sent, held (a person controls that subsession), delivered, acked or retired. A viewer-owned session has none. It lists the most relevant peers; any other live session's run_id works with aether_send and aether_ask. Capabilities with no MCP tool, such as dev.terminal.* and dev.browser.*, are aether-internal CLI commands; run the shell command `aether-internal skill` for how to use them.", cli),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, protocol.CoordStatusResult, error) {
 		out := protocol.CoordStatusResult{Peers: []protocol.CoordPeer{}, Capabilities: []string{}}
 		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
@@ -94,7 +94,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 		Name: toolSend,
 		Description: "Send one durable, attributed message to any live run_id, listed by aether_status or not, that your owner may message. " +
 			"Use it before editing files a peer touches or its task covers (your plan, owned files and conflicts; keep it short), or when a decision, progress or blocker affects a peer. " +
-			coordhooks.ReceiptRule + " recipient_status is the peer's status when the receipt is returned, or held while a person controls that subsession. " +
+			coordhooks.Named(coordhooks.ReceiptRule, cli) + " recipient_status is the peer's status when the receipt is returned, or held while a person controls that subsession. " +
 			"An explicit stable idempotency_key is required; retries with the same key return the original receipt.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordSendParams) (*mcp.CallToolResult, protocol.CoordSendResult, error) {
 		var out protocol.CoordSendResult
@@ -171,7 +171,8 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 			"With waiting, until lists up to 4 conditions (" + protocol.WaitGrammar + "); one already resolved comes back in resolved, so act on it in this turn; otherwise Cloudfield writes to your inbox and wakes you once when the first resolves, fails or expires, and a new waiting report with until replaces them. " +
 			"success and failure end the work you own: a Background session has one per launch, and an interactive session stays open for follow-up. " +
 			"blocked means a human must intervene and shows the summary as the Needs you reason at turn end. " +
-			"The shell command `aether-internal skill` lists your role's rules. An explicit idempotency_key is required: choose a fresh one for each new report, answered, waiting and needs-input included, and reuse it only to retry the same report; the same key with another outcome or summary is refused. The server captures evidence for success, failure and blocked before accepting them.",
+			coordhooks.Named("The shell command `aether-internal skill` lists your role's rules. ", cli) +
+			"An explicit idempotency_key is required: choose a fresh one for each new report, answered, waiting and needs-input included, and reuse it only to retry the same report; the same key with another outcome or summary is refused. The server captures evidence for success, failure and blocked before accepting them.",
 		InputSchema: report,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordReportParams) (*mcp.CallToolResult, protocol.CoordReportResult, error) {
 		var out protocol.CoordReportResult
