@@ -318,7 +318,9 @@ func hostDNS() []netip.Addr {
 
 // resolvConf reads a resolv.conf's servers and search domains. As in glibc,
 // the last search or domain line wins; a domain that is not a valid name,
-// such as systemd-resolved's "." for none, is left out.
+// such as systemd-resolved's "." for none, is left out. The domains stop at
+// glibc's old limits of six and 256 bytes, which also keep a long host list
+// from pushing the guest's kernel command line past its limit.
 func resolvConf(r io.Reader) (servers []netip.Addr, search []string) {
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
@@ -333,10 +335,16 @@ func resolvConf(r io.Reader) (servers []netip.Addr, search []string) {
 			}
 		case "search", "domain":
 			search = search[:0]
+			size := 0
 			for _, d := range fields[1:] {
-				if d = strings.TrimSuffix(d, "."); guest.ValidDomain(d) {
-					search = append(search, d)
+				d = strings.TrimSuffix(d, ".")
+				if !guest.ValidDomain(d) {
+					continue
 				}
+				if size += len(d) + 1; len(search) == dnsMaxSearch || size > dnsMaxSearchBytes {
+					break
+				}
+				search = append(search, d)
 			}
 		}
 	}

@@ -18,12 +18,15 @@ import (
 
 const (
 	dnsPort = 53
-	// dnsTimeout bounds each upstream try, so a dead first resolver leaves
-	// time for the next before the guest's own 5 s retry.
-	dnsTimeout = 2 * time.Second
+	// dnsTimeout bounds each upstream try, as long as Docker's resolver
+	// waits, so a slow host stub answers a VM whenever it answers a
+	// container.
+	dnsTimeout = 4 * time.Second
 	// dnsMaxServers is how many resolv.conf servers glibc reads.
-	dnsMaxServers = 3
-	dnsMaxQueries = 1024
+	dnsMaxServers     = 3
+	dnsMaxSearch      = 6
+	dnsMaxSearchBytes = 256
+	dnsMaxQueries     = 1024
 	// dnsMaxPerVM keeps one VM from taking every slot: Docker gives each
 	// container a resolver of its own.
 	dnsMaxPerVM  = 64
