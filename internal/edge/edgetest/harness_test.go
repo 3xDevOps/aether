@@ -126,16 +126,30 @@ func (h *harness) advance(d time.Duration) {
 	h.skew += d
 }
 
+// listen listens on addr and, the first time, holds its port for the rest
+// of the test: startEdge binds the same addresses again after stopEdge.
+func (h *harness) listen(addr string) (net.Listener, error) {
+	lc := net.ListenConfig{Control: reusePort}
+	ln, err := lc.Listen(context.Background(), "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	if got := ln.Addr().String(); got != addr {
+		holdPort(h.t, got)
+	}
+	return ln, nil
+}
+
 // startEdge starts the edge and its proxy, on the same addresses as the
 // previous run once there was one.
 func (h *harness) startEdge() {
 	t := h.t
 	t.Helper()
-	back, err := net.Listen("tcp", h.backAddr)
+	back, err := h.listen(h.backAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	front, err := net.Listen("tcp", h.frontAddr)
+	front, err := h.listen(h.frontAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +168,7 @@ func (h *harness) startEdge() {
 			if addr == "" {
 				addr = host + ":0"
 			}
-			ln, lerr := net.Listen("tcp", addr)
+			ln, lerr := h.listen(addr)
 			if lerr != nil {
 				t.Skipf("%s is not a loopback address on this host: %v", host, lerr)
 			}
@@ -759,7 +773,7 @@ func (h *harness) newServer(policy edgeproto.AccessPolicy) *serverNode {
 // newMCPServer is newServer with mcp serving its MCP connector requests.
 func (h *harness) newMCPServer(policy edgeproto.AccessPolicy, mcp http.Handler) *serverNode {
 	h.t.Helper()
-	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, mcp: mcp, addr: "127.0.0.1:0"}
+	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, mcp: mcp}
 	s.start()
 	h.t.Cleanup(func() { s.stop() })
 	return s
@@ -799,7 +813,7 @@ func (s *serverNode) start() {
 		runs = launcher{db: db, started: s.launchStarted, release: s.launchRelease}
 	}
 	srv, err := sshd.New(sshd.Config{
-		Addr: s.addr, HostKeyPath: hostKeyPath, Store: db, Bus: bus,
+		Addr: "127.0.0.1:0", HostKeyPath: hostKeyPath, Store: db, Bus: bus,
 		Git: noGit{}, PTY: noPTY{}, Runs: runs,
 		InvitesDir: filepath.Join(s.dir, "invites"), EdgeAccess: s.policy, EdgeReviewer: s.reviewer, Services: services,
 	})
@@ -816,7 +830,7 @@ func (s *serverNode) start() {
 		// A first start is backdated by ClockSkew so a test signs in right
 		// away; a restart is not, so sign-ins from before it stay refused.
 		var started time.Time
-		if s.addr == "127.0.0.1:0" {
+		if s.addr == "" {
 			started = time.Now().Add(-edgeproto.ClockSkew)
 		}
 		mcp, err = connector.New(connector.Config{

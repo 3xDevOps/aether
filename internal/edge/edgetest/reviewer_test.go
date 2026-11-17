@@ -53,7 +53,7 @@ func reviewerEdge(t *testing.T) (*harness, string, string) {
 // bob joins as a collaborator. reviewer is its edge-reviewer option.
 func (h *harness) reviewerServer(dir string, policy edgeproto.AccessPolicy, client *connectorClient, reviewer bool) (*serverNode, domain.MemberID, domain.MemberID) {
 	h.t.Helper()
-	s := &serverNode{h: h, dir: dir, policy: policy, client: client, reviewer: reviewer, addr: "127.0.0.1:0"}
+	s := &serverNode{h: h, dir: dir, policy: policy, client: client, reviewer: reviewer}
 	s.start()
 	h.t.Cleanup(func() { s.stop() })
 	clients := h.login(alice, bob)
