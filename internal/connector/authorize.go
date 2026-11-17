@@ -599,6 +599,7 @@ fieldset label>span{color:var(--text-muted)}
 fieldset strong,.warn{color:var(--text)}
 .warn{display:block;margin-top:8px;padding-left:12px;border-left:2px solid var(--state-needs-you)}
 label[for=code]{color:var(--text-muted);font-size:15px}
+label code{white-space:nowrap}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch}
 #code{flex:1 1 12ch;min-width:0;min-height:44px;padding:8px 12px;border:1px solid var(--control-border);border-radius:var(--radius-control);background:var(--chrome);color:var(--text);font:600 20px/1.2 var(--font-code);letter-spacing:.1em;text-transform:uppercase}
 button{min-height:44px;padding:8px 24px;border:0;border-radius:var(--radius-control);background:var(--accent-fill);color:var(--on-accent);font:500 15px/1.3 var(--font-sans);cursor:pointer;transition:background-color var(--duration-hover) var(--ease-hover),scale var(--duration-release) var(--ease-press)}

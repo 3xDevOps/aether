@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -173,21 +174,21 @@ func TestEveryPageRenders(t *testing.T) {
 }
 
 func TestAssetsLoadNothingFromAnotherHost(t *testing.T) {
-	entries, err := templateFS.ReadDir("templates")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if e.IsDir() || strings.HasSuffix(e.Name(), ".woff2") {
-			continue
+	err := fs.WalkDir(templateFS, "templates", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || strings.HasSuffix(path, ".woff2") {
+			return err
 		}
-		b, err := templateFS.ReadFile("templates/" + e.Name())
+		b, err := templateFS.ReadFile(path)
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		if m := externalRef.FindString(string(b)); m != "" {
-			t.Errorf("%s loads from another host: %q", e.Name(), m)
+			t.Errorf("%s loads from another host: %q", path, m)
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

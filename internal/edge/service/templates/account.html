@@ -37,7 +37,7 @@
 {{if $.Error}}<p class="error" role="alert" id="delete-error">{{$.Error}}</p>{{end}}
 {{if .Fresh}}<form method="post" action="/account/delete">
 <input type="hidden" name="csrf" value="{{$.CSRF}}">
-<label>Type <strong>{{.Confirm}}</strong> to confirm <input name="confirm" autocomplete="off" spellcheck="false" required{{if $.Error}} aria-invalid="true" aria-describedby="delete-error"{{end}}></label>
+<label>Type <strong>{{.Confirm}}</strong> to confirm <input name="confirm" autocomplete="off" spellcheck="false" required{{if $.Error}} aria-invalid="true" aria-describedby="delete-error" autofocus{{end}}></label>
 <button class="danger">Delete this account</button>
 </form>
 {{else}}<p>Deleting needs a sign-in in this browser from the last {{.Window}}. <a class="button primary" href="{{.Reauth}}">Sign in again with GitHub</a>, then delete it from this page.</p>{{end}}

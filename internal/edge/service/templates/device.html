@@ -23,7 +23,7 @@
 <form method="post" action="/device/confirm" class="actions">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <input type="hidden" name="user_code" value="{{.Data.UserCode}}">
-<button name="decision" value="approve" class="primary">Approve this device</button>
+<button name="decision" value="approve">Approve this device</button>
 <button name="decision" value="deny">Deny</button>
 </form>
 </div>
