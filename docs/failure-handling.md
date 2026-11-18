@@ -864,12 +864,11 @@ still reads it, such as another workspace's session that used it as an extra
 repository. Stores that older servers wrote with their own copy of the fork
 point shrink the same way, one at a time, after the server starts. A copy
 writes the store's whole history, fork point included; a shrink writes only
-what the session added.
-Both refuse a store while the disk has 256 MiB or less free, or less than
-what they write plus 128 MiB, with `the server has too little free disk`. A
-refused workspace deletion fails with that error; a refused store waits for
-the next start, and the server logs `server: share diff history with
-workspace repositories`.
+what the session added. Both refuse a store while the disk has 256 MiB or
+less free, or less than what they may write plus 128 MiB, with
+`the server has too little free disk`. A refused workspace deletion fails with
+that error; a refused store waits for the next start, and the server logs
+`server: share diff history with workspace repositories`.
 
 A member's containers share one uid:gid mapping, so a launch under another
 mapping is refused while one of them is live. A closed session whose cleanup

@@ -177,7 +177,7 @@ const historyPinRoot = "refs/aether/sessions/"
 // log recorded a ref first. The caller holds repoMaintenanceMu, so no
 // evidence prune that started before the pin can drop the tree, and then the
 // snapshot lock of key.
-func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo string, keep ...string) error {
+func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo string, keep ...string) (err error) {
 	base, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", "refs/aether/base")
 	if err != nil {
 		return err
@@ -194,9 +194,16 @@ func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo
 		roots += id + "\n"
 	}
 	if repo != "" {
-		if _, err = e.git(ctx, repo, "update-ref", historyPinRoot+string(key), base); err != nil {
+		pin := historyPinRoot + string(key)
+		if _, err = e.git(ctx, repo, "update-ref", pin, base); err != nil {
 			return err
 		}
+		defer func() {
+			if borrowed, _ := e.borrowedRepo(store); err != nil && borrowed != repo {
+				_, unpinErr := e.git(context.WithoutCancel(ctx), repo, "update-ref", "-d", pin)
+				err = errors.Join(err, unpinErr)
+			}
+		}()
 		roots += "^" + base + "\n"
 	}
 	packs := filepath.Join(store, "objects", "pack")
@@ -248,10 +255,13 @@ func (e *Engine) switchAlternates(ctx context.Context, store, repo string, key d
 	if err != nil {
 		return err
 	}
-	to, err := filepath.EvalSymlinks(filepath.Join(repo, "objects"))
+	// Only the repositories directory is resolved, so a store still names a
+	// repository that is itself a symlink by its place in it.
+	repos, err := filepath.EvalSymlinks(filepath.Dir(repo))
 	if err != nil {
 		return err
 	}
+	to := filepath.Join(repos, filepath.Base(repo), "objects")
 	rel, err := filepath.Rel(from, to)
 	if err != nil {
 		return err
@@ -263,36 +273,48 @@ func (e *Engine) switchAlternates(ctx context.Context, store, repo string, key d
 	if _, err = borrowObjects(store, rel, key); err != nil {
 		return err
 	}
-	if e.readsAlternate(ctx, store, to) {
+	reads, err := e.readsAlternate(ctx, store, to)
+	if reads {
 		return nil
 	}
-	if previous == nil {
-		err = os.Remove(alternates)
-	} else {
-		_, err = borrowObjects(store, strings.TrimSpace(string(previous)), key)
+	if err == nil {
+		err = fmt.Errorf("git does not read %s through %s", to, rel)
 	}
-	return errors.Join(fmt.Errorf("gitengine: the history of session %s cannot read %s through %s", key, to, rel), err)
+	var restoreErr error
+	if previous == nil {
+		restoreErr = os.Remove(alternates)
+	} else {
+		_, restoreErr = borrowObjects(store, strings.TrimSpace(string(previous)), key)
+	}
+	return errors.Join(fmt.Errorf("gitengine: the history of session %s cannot borrow from %s: %w", key, repo, err), restoreErr)
 }
 
 // readsAlternate reports whether git, in store, reads the objects directory
 // objects as an alternate.
-func (e *Engine) readsAlternate(ctx context.Context, store, objects string) bool {
+func (e *Engine) readsAlternate(ctx context.Context, store, objects string) (bool, error) {
 	want, err := os.Stat(objects)
 	if err != nil {
-		return false
+		return false, err
 	}
 	out, _, err := e.gitBareBounded(ctx, store, -1, "count-objects", "-v")
 	if err != nil {
-		return false
+		return false, err
 	}
 	for line := range strings.SplitSeq(out, "\n") {
-		if path, ok := strings.CutPrefix(line, "alternate: "); ok {
-			if got, statErr := os.Stat(path); statErr == nil && os.SameFile(got, want) {
-				return true
+		path, ok := strings.CutPrefix(line, "alternate: ")
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(path, `"`) {
+			if path, err = strconv.Unquote(path); err != nil {
+				return false, fmt.Errorf("gitengine: alternate %s: %w", line, err)
 			}
 		}
+		if got, statErr := os.Stat(path); statErr == nil && os.SameFile(got, want) {
+			return true, nil
+		}
 	}
-	return false
+	return false, nil
 }
 
 // borrowedRepo is the workspace repository whose objects the store at dir
@@ -331,22 +353,26 @@ func (e *Engine) borrowedRepo(dir string) (string, error) {
 	return filepath.Join(e.cfg.ReposDir, filepath.Base(repo)), nil
 }
 
-// reserveShare reserves, against the receive floor, the disk the objects the
-// store's refs reach beyond the tree borrowed take now, which bounds what
-// shareHistory writes. With borrowed "" that is the store's whole history.
+// reserveShare reserves, against the receive floor, a bound on what
+// shareHistory writes: the objects the store's refs reach beyond the tree
+// borrowed. With borrowed "" that is the store's whole history, as it takes
+// the disk now. Otherwise objects stored as deltas against the borrowed tree
+// are written whole, so their full size counts.
 func (e *Engine) reserveShare(ctx context.Context, store, borrowed string) (func(), error) {
 	roots, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", "refs/aether/")
 	if err != nil {
 		return nil, err
 	}
+	format := "%(objectsize:disk)"
 	if borrowed != "" {
 		roots += "^" + borrowed + "\n"
+		format = "%(objectsize)"
 	}
 	objects, err := e.gitInput(ctx, store, e.gitEnv(), []byte(roots), "rev-list", "--objects", "--no-object-names", "--stdin")
 	if err != nil {
 		return nil, err
 	}
-	sizes, err := e.gitInput(ctx, store, e.gitEnv(), []byte(objects), "cat-file", "--batch-check=%(objectsize:disk)")
+	sizes, err := e.gitInput(ctx, store, e.gitEnv(), []byte(objects), "cat-file", "--batch-check="+format)
 	if err != nil {
 		return nil, err
 	}
@@ -457,6 +483,14 @@ func (e *Engine) shareDetachedStore(ctx context.Context, key domain.RunID, works
 	if err != nil {
 		return err
 	}
+	ws, err := workspaceOf(ctx, key)
+	if err != nil || ws == "" {
+		return err
+	}
+	repo, err := e.repoPath(ws)
+	if err != nil {
+		return err
+	}
 	e.repoMaintenanceMu.Lock()
 	defer e.repoMaintenanceMu.Unlock()
 	lock := e.snapshotLock(key)
@@ -475,14 +509,6 @@ func (e *Engine) shareDetachedStore(ctx context.Context, key domain.RunID, works
 	if _, err = os.Stat(filepath.Join(store, "HEAD")); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	} else if err != nil {
-		return err
-	}
-	ws, err := workspaceOf(ctx, key)
-	if err != nil || ws == "" {
-		return err
-	}
-	repo, err := e.repoPath(ws)
-	if err != nil {
 		return err
 	}
 	base, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", "refs/aether/base")

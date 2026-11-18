@@ -3,6 +3,7 @@
 package gitengine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io/fs"
@@ -236,11 +237,11 @@ func TestShareDetachedHistoryShrinksStoresThatCopiedTheForkPoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = e.Close() })
-	base, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "refs/aether/base")
+	base, err := e.git(ctx, store, "rev-parse", "refs/aether/base")
 	if err != nil {
 		t.Fatal(err)
 	}
-	release, err := e.reserveShare(ctx, store, strings.TrimSpace(base))
+	release, err := e.reserveShare(ctx, store, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,6 +249,30 @@ func TestShareDetachedHistoryShrinksStoresThatCopiedTheForkPoint(t *testing.T) {
 		t.Fatalf("the share reserves %d bytes of disk, as if it copied the %d-byte store", reserved, whole)
 	}
 	release()
+	// A repository that holds the fork point's root tree but none of what it
+	// names, as an older server's interrupted deletion can leave, lends nothing.
+	if _, err = e.InitWorkspaceRepo(ctx, "ws2"); err != nil {
+		t.Fatal(err)
+	}
+	partial, err := e.existingRepoPath("ws2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := exec.Command("git", "-C", store, "cat-file", "tree", base).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := exec.Command("git", "-C", partial, "hash-object", "-t", "tree", "-w", "--stdin")
+	write.Stdin = bytes.NewReader(root)
+	if err = write.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.ShareDetachedHistory(ctx, func(context.Context, domain.RunID) (domain.WorkspaceID, error) { return "ws2", nil }); err != nil {
+		t.Fatal(err)
+	}
+	if pins, _ := e.git(ctx, partial, "for-each-ref", historyPinRoot); pins != "" || objectBytes(t, store) != whole {
+		t.Fatalf("a repository missing the fork point's files took the history: pins %q, store %d bytes of %d", pins, objectBytes(t, store), whole)
+	}
 	workspaceOf := func(_ context.Context, key domain.RunID) (domain.WorkspaceID, error) {
 		if key != "run1" {
 			t.Errorf("workspace of %s asked", key)
