@@ -3,8 +3,10 @@ package vmimage
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -37,8 +39,16 @@ func head(t *testing.T, path string, n int) []byte {
 	return b
 }
 
-func TestCachePoolCopiesCachesAsRawData(t *testing.T) {
-	needTools(t, "mkfs.ext4", "cp")
+// qemuWrite writes 512 bytes of pattern at the start of the qcow2 disk at path.
+func qemuWrite(t *testing.T, path string, pattern byte) {
+	t.Helper()
+	if out, err := exec.Command("qemu-io", "-f", "qcow2", "-c", fmt.Sprintf("write -P %d 0 512", pattern), path).CombinedOutput(); err != nil {
+		t.Fatalf("qemu-io: %v: %s", err, out)
+	}
+}
+
+func TestCachePoolLayersCachesOverRawBases(t *testing.T) {
+	needTools(t, "mkfs.ext4", "cp", "qemu-img", "qemu-io")
 	dir := t.TempDir()
 	s, err := Open(filepath.Join(dir, "images"), "", nil)
 	if err != nil {
@@ -64,14 +74,22 @@ func TestCachePoolCopiesCachesAsRawData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	older, err := s.SnapshotCache(t.Context(), second)
+	older, err := s.SnapshotCache(second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := s.SnapshotCache(t.Context(), disk)
+	snapshot, err := s.SnapshotCache(disk)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The VM starts again before the promotion reads its cache.
+	if err = s.UnshareCache(t.Context(), disk); err != nil {
+		t.Fatal(err)
+	}
+	if got := nlink(t, disk.Path); got != 1 || !bytes.Equal(head(t, disk.Path, len(header)), header) {
+		t.Errorf("the unshared cache disk has %d links and starts %q, want its own copy", got, head(t, disk.Path, len(header)))
+	}
+	writeAt(t, disk.Path, []byte("after the snapshot"))
 	if err = s.PromoteCache("pool1", snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -98,19 +116,83 @@ func TestCachePoolCopiesCachesAsRawData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.Format != FormatRaw || !bytes.Equal(head(t, next.Path, len(header)), header) {
-		t.Errorf("the next session's cache %+v starts %q, want a raw copy of the newest", next, head(t, next.Path, len(header)))
+	info := qemuInfo(t, next.Path)
+	if next.Format != FormatQcow2 || !sameFile(next.Backing, newest.Path) || info.Backing != next.Backing || info.BackingFormat != "raw" {
+		t.Errorf("the next session's cache is %+v, %+v; want a qcow2 disk over the newest cache as raw", next, info)
 	}
-	if sameFile(next.Path, newest.Path) || nlink(t, newest.Path) != 1 {
-		t.Errorf("the next session's cache shares the newest cache's file, which has %d links", nlink(t, newest.Path))
-	}
-	writeAt(t, next.Path, []byte("session c"))
+	qemuWrite(t, next.Path, 0xcd)
 	if got := head(t, newest.Path, len(header)); !bytes.Equal(got, header) {
 		t.Errorf("a session's write reached the pool's newest cache: %q", got)
 	}
+	// The dirty bit Cloud Hypervisor leaves on a disk it did not close makes
+	// qemu-img repair a disk it opens for writing.
+	f, err := os.OpenFile(next.Path, os.O_WRONLY, 0)
+	if err == nil {
+		_, err = f.WriteAt([]byte{1}, 79)
+		err = errors.Join(err, f.Close())
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	vmDisk, err := os.ReadFile(next.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layered, err := s.SnapshotCache(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.PromoteCache("pool1", layered); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(next.Path); !bytes.Equal(got, vmDisk) {
+		t.Error("promotion wrote the cache disk of the VM it read")
+	}
+	flat, err := s.readNewest(filepath.Join(s.cachesDir(), "pool1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := head(t, flat.Path, 2048); !bytes.Equal(got[:512], bytes.Repeat([]byte{0xcd}, 512)) || !bytes.Equal(got[1024:], head(t, newest.Path, 2048)[1024:]) {
+		t.Errorf("the cache promoted from a qcow2 disk is not its writes over its base: starts %x", got[:16])
+	}
+	if _, err = os.Stat(newest.Path); err != nil {
+		t.Errorf("the base a session's cache reads through was swept: %v", err)
+	}
+	if err = os.RemoveAll(vm); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(newest.Path); !os.IsNotExist(err) {
+		t.Errorf("a cache no disk reads through any more outlived the sweep: %v", err)
+	}
 
-	if _, err = s.SnapshotCache(t.Context(), Disk{Path: next.Path, Format: FormatQcow2}); err == nil {
-		t.Error("a qcow2 cache disk was copied")
+	// A VM deleted before its promotion runs leaves only the snapshot on
+	// the base it read through, which the promotion's own sweep deletes.
+	deleted, err := s.NewCacheDisk(t.Context(), "pool1", filepath.Join(dir, "deleted.img"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	last, err := s.SnapshotCache(deleted)
+	if err == nil {
+		err = errors.Join(os.Remove(deleted.Path), os.Remove(deleted.Backing))
+	}
+	if err == nil {
+		err = s.PromoteCache("pool1", last)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(flat.Path); !os.IsNotExist(err) {
+		t.Errorf("the promotion of a deleted VM's cache kept the base it read through: %v", err)
+	}
+	if flat, err = s.readNewest(filepath.Join(s.cachesDir(), "pool1")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = s.SnapshotCache(Disk{Path: next.Path, Format: FormatQcow2}); err == nil {
+		t.Error("a qcow2 cache disk with no base was copied")
 	}
 	if _, err = s.NewCacheDisk(t.Context(), "../escape", filepath.Join(dir, "x.img")); err == nil {
 		t.Error("a pool name with a path was accepted")

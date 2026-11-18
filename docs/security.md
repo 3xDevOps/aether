@@ -105,15 +105,19 @@ The bullets below on Docker, Sysbox and networks
 describe Docker mode; what a session is given, after them, applies to both.
 
 Every disk a VM gets names its format to Cloud Hypervisor, so nothing guesses
-a format from bytes a guest wrote. The disks a session writes directly - its
-data, cache and state disks, and a root disk made from a saved environment -
-are attached raw with backing files off. The only qcow2 disks are the root
-disk over an image, a checkout's disk over its prepared disk, and the
-browser's disk: the server makes each with `qemu-img create -F raw -u` over a
-base it built with `mkfs.ext4`, and no qcow2 disk ever sits on bytes a
-session wrote. A session's cache goes back to the member as a raw copy, and
-Save environment reads a qcow2 root disk over the base the server recorded,
-never over the backing file its header names.
+a format from bytes a guest wrote. Raw disks - data, state, an empty cache -
+are attached with backing files off. The qcow2 disks - a root disk, a cache
+disk over the member's newest cache, a checkout's disk and the browser's
+disk - are made only by the server, with `qemu-img create -F raw -u` over a
+read-only base. Their header pins the base's format to raw, and Cloud
+Hypervisor reads a backing file in the format the header names, so a base a
+session wrote, such as a saved environment or a member's newest cache, reads
+as plain bytes even when it starts like a qcow2 header that names a host
+file. A guest writes only the data of its qcow2 disk, never its header. A
+member's cache pool serves only that member's sessions, and Save
+environment and cache promotion write a qcow2 disk's data into a raw copy
+of the base the server recorded, never into the backing file its header
+names.
 
 - Agents run as uid `1000`, or as an image's own non-root user. What they may
   do as root depends on the session's [permission tier](#permission-tiers).

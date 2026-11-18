@@ -89,7 +89,7 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 		if err = e.store(rec); err != nil {
 			return err
 		}
-		e.promoteCache(ctx, rec)
+		e.promoteCache(rec)
 		return nil
 	}
 	api := newCHAPI(e.path(key, apiSocket))
@@ -178,7 +178,7 @@ func (e *engine) shutDown(ctx context.Context, rec *record) error {
 	if err = e.store(rec); err != nil {
 		return err
 	}
-	e.promoteCache(ctx, rec)
+	e.promoteCache(rec)
 	return nil
 }
 
@@ -385,8 +385,9 @@ func (e *engine) lost(ctx context.Context, key string) (int, error) {
 	return lostExitCode, e.store(rec)
 }
 
-// destroy removes the VM and every file it had; a missing VM is not an
-// error. The key's lock stays: a caller may be waiting on it.
+// destroy removes the VM, every file it had and the shared disks only it
+// read through; a missing VM is not an error. The key's lock stays: a caller
+// may be waiting on it.
 func (e *engine) destroy(ctx context.Context, key string) error {
 	if checkKey(key) != nil {
 		return nil
@@ -419,7 +420,7 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 		return err
 	}
 	if loadErr == nil && !up {
-		e.promoteCache(ctx, rec)
+		e.promoteCache(rec)
 	}
 	if err = os.RemoveAll(e.dir(key)); err != nil {
 		return fmt.Errorf("vm runtime: remove VM %s: %w", key, err)
@@ -428,6 +429,10 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 	delete(e.fresh, key)
 	delete(e.events, key)
 	e.mu.Unlock()
+	// The VM is gone either way; the hourly sweep retries what this one left.
+	if err = e.cfg.Images.Sweep(); err != nil {
+		slog.Warn("vm runtime: delete the disks only a removed VM used", "vm", key, "error", err)
+	}
 	return nil
 }
 

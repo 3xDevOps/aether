@@ -214,9 +214,10 @@ func nlink(t *testing.T, path string) int {
 }
 
 type imageInfo struct {
-	Format      string `json:"format"`
-	VirtualSize int64  `json:"virtual-size"`
-	Backing     string `json:"full-backing-filename"`
+	Format        string `json:"format"`
+	VirtualSize   int64  `json:"virtual-size"`
+	Backing       string `json:"full-backing-filename"`
+	BackingFormat string `json:"backing-filename-format"`
 }
 
 func qemuInfo(t *testing.T, path string) imageInfo {
@@ -309,11 +310,11 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if root != (Disk{Path: rootPath, Format: FormatQcow2}) {
+	basePin := rootPath + "." + dirName(base.ID) + ".base"
+	if root != (Disk{Path: rootPath, Format: FormatQcow2, Backing: basePin}) {
 		t.Errorf("root disk = %+v", root)
 	}
 	info := qemuInfo(t, rootPath)
-	basePin := rootPath + "." + dirName(base.ID) + ".base"
 	if info.Format != "qcow2" || info.VirtualSize != rootSize || info.Backing != basePin {
 		t.Errorf("qemu-img info = %+v", info)
 	}
@@ -342,7 +343,7 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(saved.ID, "local:") || saved.Path == base.Path || saved.serverBuilt() || !base.serverBuilt() {
+	if !strings.HasPrefix(saved.ID, "local:") || saved.Path == base.Path {
 		t.Errorf("saved base = %+v", saved)
 	}
 	if got := saved.Config.Labels; got["kept"] != "replaced" || got["aether.saved"] != "1" || got["org.example"] != "base" {
@@ -363,7 +364,6 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if looked, lookErr := s.LookupBase("aether/member-x:1"); lookErr != nil || looked.ID != saved.ID {
 		t.Errorf("LookupBase(saved) = %+v, %v", looked, lookErr)
 	}
-	// No root disk backs onto a saved base: each is a copy of it.
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	if _, err = s.NewRootDisk(cancelled, saved, rootPath); err == nil {
@@ -376,8 +376,9 @@ func TestStoreBaseRootSaveSweep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if root.Format != FormatRaw || !bytes.Equal(head(t, rootPath, len(header)), header) || sameFile(rootPath, saved.Path) {
-		t.Errorf("root disk over the saved base = %+v, starting %q; want a raw copy", root, head(t, rootPath, len(header)))
+	savedPin := rootPath + "." + dirName(saved.ID) + ".base"
+	if info := qemuInfo(t, rootPath); root.Format != FormatQcow2 || root.Backing != savedPin || info.Backing != savedPin || info.BackingFormat != "raw" {
+		t.Errorf("root disk over the saved base = %+v, %+v; want a qcow2 disk over it as raw", root, info)
 	}
 	if nlink(t, base.Path) != 1 || nlink(t, saved.Path) != 2 {
 		t.Errorf("after a rebuild onto the saved base: base has %d links, saved %d; want 1 and 2, the saved base pinned for the next rebuild", nlink(t, base.Path), nlink(t, saved.Path))

@@ -307,7 +307,7 @@ func TestKVMCacheStartsFromTheMembersLastSession(t *testing.T) {
 	if err := e.stop(t.Context(), "run-vmcache-a", 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("stop, with the cache copied for promotion, took %s", time.Since(start))
+	t.Logf("stop took %s", time.Since(start))
 	for newest() == first {
 		if time.Since(start) > 2*time.Minute {
 			t.Fatal("the stopped session's cache never became the pool's newest")

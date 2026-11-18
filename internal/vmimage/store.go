@@ -77,10 +77,12 @@ type ImageConfig struct {
 	Labels     map[string]string `json:"labels,omitempty"`
 }
 
-// Disk is a disk file and its Cloud Hypervisor image_type.
+// Disk is a disk file and its Cloud Hypervisor image_type. Backing is the
+// link to the raw base a qcow2 disk reads through.
 type Disk struct {
-	Path   string
-	Format string
+	Path    string
+	Format  string
+	Backing string `json:",omitempty"`
 }
 
 type record struct {
@@ -178,13 +180,12 @@ func (s *Store) LookupBase(ref string) (Base, error) {
 	return s.load(id)
 }
 
-// NewRootDisk creates a root disk at path made from base, replacing any disk
-// already there: a qcow2 disk over a base the server built, or a raw copy of
-// any other, which no qcow2 disk ever backs onto. Either way path keeps a hard
-// link to base named path.<base id>.base, so the base stays for the next
-// rebuild until the link is deleted with the session's files; path must be
-// on the store's filesystem. A failed rebuild leaves the previous root disk
-// and its base as they were.
+// NewRootDisk creates a qcow2 disk at path over base, replacing any disk
+// already there. path keeps a hard link to base named path.<base id>.base,
+// which the disk's header names, so the base stays for the next rebuild
+// until the link is deleted with the session's files; path must be on the
+// store's filesystem. A failed rebuild leaves the previous root disk and its
+// base as they were.
 func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (Disk, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -207,31 +208,20 @@ func (s *Store) NewRootDisk(ctx context.Context, base Base, path string) (Disk, 
 	if err = removeIfExists(tmp); err != nil {
 		return failed(err)
 	}
-	disk := Disk{Path: path, Format: FormatRaw}
-	if base.serverBuilt() {
-		disk.Format = FormatQcow2
-		err = newOverlay(ctx, pin, tmp)
-	} else {
-		err = copyDisk(ctx, pin, tmp)
-	}
-	if err != nil {
+	if err = newOverlay(ctx, pin, tmp); err != nil {
 		return failed(errors.Join(err, removeIfExists(tmp)))
 	}
 	if err = os.Rename(tmp, path); err != nil {
 		return failed(fmt.Errorf("vmimage: root disk %s: %w", path, err))
 	}
-	return disk, prunePins(path, pin)
-}
-
-// serverBuilt reports whether the server wrote every byte of base with
-// mkfs.ext4, which leaves the first 1024 bytes zero: an image's base or a
-// prepared checkout. A session wrote a saved base's, first bytes included.
-func (b Base) serverBuilt() bool {
-	return strings.HasPrefix(b.ID, "sha256:") || strings.HasPrefix(b.ID, preparedPrefix)
+	return Disk{Path: path, Format: FormatQcow2, Backing: pin}, prunePins(path, pin)
 }
 
 // newOverlay creates a qcow2 disk at path over the raw disk backing. The
-// header names backing and its format; -u keeps qemu-img from opening it.
+// header names backing and pins its format to raw, which Cloud Hypervisor
+// and qemu-img follow instead of probing it, so a base whose bytes a session
+// wrote reads as data even when it starts like an image header. -u keeps
+// qemu-img from opening backing.
 func newOverlay(ctx context.Context, backing, path string) error {
 	info, err := os.Stat(backing)
 	if err != nil {
@@ -280,11 +270,11 @@ func (s *Store) NewDataDisk(ctx context.Context, path string, size int64) (Disk,
 	return Disk{Path: path, Format: FormatRaw}, nil
 }
 
-// SaveBase saves disk, a copy of a root disk made from base, as a new base
-// disk tagged ref, and takes the copy: a raw one moves into the store, and a
-// qcow2 one is read over base, never over the backing file its header names.
-// The new base keeps base's image configuration, with labels replacing those
-// of the same keys.
+// SaveBase saves disk, a copy no VM uses of a root disk made from base, as
+// a new base disk tagged ref, and takes the copy: a raw one moves into the
+// store, and a qcow2 one is flattened over base, never over the backing file
+// its header names. The new base keeps base's image configuration, with
+// labels replacing those of the same keys.
 func (s *Store) SaveBase(ctx context.Context, disk Disk, base Base, ref string, labels map[string]string) (Base, error) {
 	work, err := os.MkdirTemp(s.tmpDir(), "save-")
 	if err != nil {
@@ -298,7 +288,7 @@ func (s *Store) SaveBase(ctx context.Context, disk Disk, base Base, ref string, 
 			return Base{}, fmt.Errorf("vmimage: save %s: %w", disk.Path, err)
 		}
 	case FormatQcow2:
-		if err = run(ctx, "qemu-img", "convert", "-q", "-O", "raw", "--image-opts", qcow2Over(disk.Path, base.Path), saved); err != nil {
+		if err = flatten(ctx, disk.Path, base.Path, saved); err != nil {
 			return Base{}, err
 		}
 	default:
@@ -317,12 +307,20 @@ func (s *Store) SaveBase(ctx context.Context, disk Disk, base Base, ref string, 
 	return s.commit(work, record{ID: id, Config: cfg}, ref)
 }
 
-// qcow2Over names, as qemu-img --image-opts, the qcow2 disk at path over the
-// raw backing file backing.
-func qcow2Over(path, backing string) string {
+// flatten writes the qcow2 disk at path, read over the raw file backing and
+// never over the backing file its header names, to dst as a sparse raw disk:
+// a copy of backing, cloned where the filesystem can, with path's clusters
+// committed into it, so only those take new blocks. qemu-img commit opens
+// path for writing and repairs it when its dirty bit is set, so path must be
+// a file no VM uses.
+func flatten(ctx context.Context, path, backing, dst string) error {
+	if err := copyDisk(ctx, backing, dst); err != nil {
+		return err
+	}
 	escape := strings.NewReplacer(",", ",,").Replace
-	return "driver=qcow2,file.driver=file,file.filename=" + escape(path) +
-		",backing.driver=raw,backing.file.driver=file,backing.file.filename=" + escape(backing)
+	return run(ctx, "qemu-img", "commit", "-q", "-d", "--image-opts",
+		"driver=qcow2,file.driver=file,file.filename="+escape(path)+
+			",backing.driver=raw,backing.file.driver=file,backing.file.filename="+escape(dst))
 }
 
 // Tag points target at the base source is tagged to.
