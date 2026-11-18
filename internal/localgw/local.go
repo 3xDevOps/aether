@@ -1,6 +1,7 @@
 package localgw
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -12,7 +13,6 @@ import (
 	"slices"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localops"
@@ -93,11 +93,13 @@ type localState struct {
 	// neither starts on the server being switched away from.
 	switching sync.RWMutex
 	cfg       cli.Config
-	mtime     time.Time
-	backend   Backend
-	sync      *localops.SyncManager
-	forward   *localops.ForwardManager
-	edge      edgeLogin
+	// raw is the config file the cache was read from. Comparing bytes, not
+	// the mtime, catches two saves within one filesystem timestamp tick.
+	raw     []byte
+	backend Backend
+	sync    *localops.SyncManager
+	forward *localops.ForwardManager
+	edge    edgeLogin
 }
 
 // newLocalState seeds the verb state from the gateway config. It never
@@ -106,26 +108,24 @@ type localState struct {
 func newLocalState(cfg Config) *localState {
 	state := &localState{cfg: cfg.CLI, backend: cfg.Backend, sync: localops.NewSyncManager(), forward: localops.NewForwardManager()}
 	if path, err := cli.Path(); err == nil {
-		if info, err := os.Stat(path); err == nil {
-			state.mtime = info.ModTime()
-		}
+		state.raw, _ = os.ReadFile(path)
 	}
 	return state
 }
 
-// cacheConfig updates the in-memory link and its file timestamp together.
+// cacheConfig updates the in-memory link and the file bytes together.
 // Callers hold s.mu while changing the cache.
 func (s *localState) cacheConfig(cfg cli.Config) {
 	path, err := cli.Path()
 	if err != nil {
 		return
 	}
-	info, err := os.Stat(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
 	s.cfg = cfg
-	s.mtime = info.ModTime()
+	s.raw = raw
 }
 
 // snapshot returns the current link config under the lock, with any change
@@ -147,8 +147,8 @@ func (s *localState) reload() (cli.Config, bool) {
 	if err != nil {
 		return cli.Config{}, false
 	}
-	info, err := os.Stat(path)
-	if err != nil || info.ModTime().Equal(s.mtime) {
+	raw, err := os.ReadFile(path)
+	if err != nil || bytes.Equal(raw, s.raw) {
 		return cli.Config{}, false
 	}
 	cfg, err := cli.Load()

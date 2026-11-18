@@ -1,6 +1,7 @@
 package localgw
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -329,11 +330,13 @@ func TestLocalLinkStatus(t *testing.T) {
 		t.Errorf("top-level link.status carries active: %s", rec.Body)
 	}
 }
-func TestLocalSnapshotRefreshesConfigAfterMtimeChange(t *testing.T) {
+
+// Two saves within one filesystem timestamp tick leave the mtime unchanged.
+func TestLocalSnapshotRefreshesConfigSavedWithTheSameMtime(t *testing.T) {
 	useTempConfigDir(t)
 	initial := cli.Config{Addr: "host:2222", User: "alice"}
-	initialMtime := time.Unix(1_700_000_000, 0)
-	saveConfigAt(t, initial, initialMtime)
+	mtime := time.Unix(1_700_000_000, 0)
+	saveConfigAt(t, initial, mtime)
 
 	state := newLocalState(Config{CLI: initial})
 	if got := state.snapshot(); got.Repo != "" {
@@ -345,8 +348,7 @@ func TestLocalSnapshotRefreshesConfigAfterMtimeChange(t *testing.T) {
 		User: "alice",
 		Repo: "/src/repo",
 	}
-	updatedMtime := initialMtime.Add(time.Second)
-	saveConfigAt(t, updated, updatedMtime)
+	saveConfigAt(t, updated, mtime)
 
 	if got := state.snapshot(); got.Repo != updated.Repo {
 		t.Fatalf("refreshed repo = %q, want %q", got.Repo, updated.Repo)
@@ -422,9 +424,6 @@ func TestLocalLinkRepoKeepsNewRepoForActiveNamedProfile(t *testing.T) {
 		t.Fatal("initial named link missing")
 	}
 	g := newVerbGateway(t, workspaceListBackend(`{"id":"ws_1","name":"app","base_branch":"main","created_at":""}`), selected)
-	// Force the next disk write to be observable without depending on the
-	// filesystem timestamp resolution.
-	g.local.mtime = time.Unix(1, 0)
 	repo := t.TempDir()
 	localGit(t, repo, "init")
 
@@ -474,6 +473,7 @@ func TestLocalSnapshotKeepsCachedNamedConfigWhenProfileDisappears(t *testing.T) 
 		t.Fatal("initial named link missing")
 	}
 	state := newLocalState(Config{CLI: selected})
+	initialRaw := state.raw
 
 	removed := initial
 	removed.Links = nil
@@ -484,8 +484,8 @@ func TestLocalSnapshotKeepsCachedNamedConfigWhenProfileDisappears(t *testing.T) 
 	if got.Active != "prod" || got.Addr != "prod:2222" || got.Repo != "/prod" {
 		t.Fatalf("cached named config = %+v", got)
 	}
-	if !state.mtime.Equal(initialMtime) {
-		t.Fatalf("cached mtime = %v, want unchanged %v", state.mtime, initialMtime)
+	if !bytes.Equal(state.raw, initialRaw) {
+		t.Fatalf("cached config file = %s, want unchanged %s", state.raw, initialRaw)
 	}
 
 	restored := initial
