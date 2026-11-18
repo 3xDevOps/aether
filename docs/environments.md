@@ -386,13 +386,15 @@ What changes:
   ([harnesses.md](harnesses.md#agents-in-session-vms)).
 - Each VM has its own address in `10.200.0.0/16` and a tap device
   `aethervm<n>`. It reaches the server host and whatever the host routes
-  to over its own network links, however it routes: the internet, your
-  network, a VPN's split routes, tailnet peers. It reaches no other VM, no
-  container, nothing in the link-local range `169.254.0.0/16` (which holds
-  the cloud metadata, credential and resolver endpoints), not the
-  `100.100.100.200` or `168.63.129.16` metadata addresses or Tailscale's
-  `100.100.100.100`, and nothing over IPv6, and cannot send from another
-  address.
+  to over its LAN and VPN links (listed below), however it routes: the
+  internet, your network, a VPN's split routes, tailnet peers. It reaches
+  no other session VM, nothing the host keeps behind a veth, a tap or a
+  bridge of those (Docker, libvirt and LXD containers and VMs, this host's
+  Kubernetes pods), nothing in the link-local range `169.254.0.0/16`
+  (which holds the cloud metadata, credential and resolver endpoints), not
+  the `100.100.100.200` or `168.63.129.16` metadata addresses or
+  Tailscale's `100.100.100.100`, and nothing over IPv6, and cannot send
+  from another address.
   Nothing outside starts a connection into it.
 - A VM resolves names through `10.200.0.1`, where the server passes each
   query to the first three servers in the host's `/etc/resolv.conf`, as
@@ -421,24 +423,29 @@ What changes:
   `FORWARD` or ufw's on `INPUT`, so egress-controlled VMs reach the proxy
   behind ufw. While the table is gone, the `FORWARD` policy drops all
   traffic VMs send through the host, and what they send to the host itself
-  is unfiltered. A VM's traffic leaves only by the host's own links, the
-  `oifname` set in the `forward` chain: a NIC (a link with
-  `/sys/class/net/<name>/device`), bond, team or VLAN; a bridge with one of
-  those as a port, such as `br-ens3` over `ens3`; a WireGuard link; a
-  layer-3 tun such as `tailscale0` or `tun0`; and the link
-  `ip route get 1.1.1.1` or `ip route get 128.0.0.1` names. Veths, taps,
-  dummies, Open vSwitch ports, bridges of only those and every other kind
-  are left out, since containers and VMs sit behind them: Docker's,
-  libvirt's and LXD's bridges, this host's Kubernetes pods, other
-  hypervisors' taps. A VPN on a tap, such as ZeroTier, so carries VM
-  traffic only when it takes the host's internet route. Anything else a VM
-  sends through the host gets `No route to host`. What a NIC's bridge
-  carries, such as VMs bridged onto your LAN, a VM reaches as part of your
-  network. A link counts, or stops counting, from the next server start,
-  VM boot or wake. On a Tailscale host VMs reach tailnet peers and any
-  subnet routes the host accepts. The MSS of a VM's outgoing TCP
-  connections is clamped to the MTU of the interface they leave by: 1240
-  bytes through `tailscale0`'s 1280.
+  is unfiltered. A VM's traffic leaves only by the links in the `oifname`
+  set of the `forward` chain:
+  - LAN links: a NIC (a link with `/sys/class/net/<name>/device`), a VLAN
+    on a LAN link, and a bond, team or bridge with a LAN link as a port,
+    such as `br-ens3` over `ens3`. Whatever such a bridge carries, such as
+    VMs bridged onto your LAN, a VM reaches as part of your network.
+  - VPN links: WireGuard, a layer-3 tun such as `tailscale0` or OpenVPN's
+    `tun0`, OpenVPN's data channel offload (`ovpn`, `ovpn-dco`), an IPsec
+    `xfrm` or `vti` link, and PPP. A Kubernetes network on WireGuard, such
+    as `flannel-wg` or `wireguard.cali`, so carries VMs to other nodes'
+    pods.
+  - The link `ip route get 1.1.1.1` or `ip route get 128.0.0.1` names,
+    whatever its kind, such as the veth of a server in an LXD container.
+
+  Veths, taps, dummies, overlays such as VXLAN, Open vSwitch ports,
+  bridges of only those and every other kind are left out, so a VPN on a
+  tap, such as ZeroTier, carries VM traffic only when it holds the
+  internet route. Anything else a VM sends through the host gets
+  `No route to host`. A link counts, or stops counting, from the next
+  server start, VM boot or wake. On a Tailscale host VMs reach tailnet
+  peers and any subnet routes the host accepts. The MSS of a VM's
+  outgoing TCP connections is clamped to the MTU of the interface they
+  leave by: 1240 bytes through `tailscale0`'s 1280.
 - The environment terminal runs in `aether-vm-terminal-<member id>.service`
   and keeps its root disk across a stop and start, as its container did.
   When the server starts with `vm`, it stops a member's terminal container

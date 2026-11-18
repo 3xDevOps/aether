@@ -192,9 +192,13 @@ func TestUplinksAreTheHostsOwnLinks(t *testing.T) {
 	link := func(name string, index, master int) netlink.LinkAttrs {
 		return netlink.LinkAttrs{Name: name, Index: index, MasterIndex: master}
 	}
-	tun := func(name string, index int, encap string) *netlink.Tuntap {
-		l := &netlink.Tuntap{LinkAttrs: link(name, index, 0)}
-		l.EncapType = encap
+	encap := func(l netlink.Link, encapType string) netlink.Link {
+		l.Attrs().EncapType = encapType
+		return l
+	}
+	vlan := func(name string, index, parent, master int) *netlink.Vlan {
+		l := &netlink.Vlan{LinkAttrs: link(name, index, master)}
+		l.ParentIndex = parent
 		return l
 	}
 	links := []netlink.Link{
@@ -205,32 +209,43 @@ func TestUplinksAreTheHostsOwnLinks(t *testing.T) {
 		&netlink.Bridge{LinkAttrs: link("docker0", 5, 0)},
 		&netlink.Veth{LinkAttrs: link("veth1", 6, 5)},
 		&netlink.Bridge{LinkAttrs: link("virbr0", 7, 0)},
-		tun("vnet0", 8, "ether"),
+		encap(&netlink.Tuntap{LinkAttrs: link("vnet0", 8, 7)}, "ether"),
 		&netlink.Bridge{LinkAttrs: link("lxdfan0", 9, 0)},
 		&netlink.Dummy{LinkAttrs: link("lxdfan0-mtu", 10, 9)},
 		&netlink.Vxlan{LinkAttrs: link("lxdfan0-fan", 11, 9)},
 		&netlink.Veth{LinkAttrs: link("cali1a2b3c", 12, 0)},
 		&netlink.GenericLink{LinkAttrs: link("ovn-k8s-mp0", 13, 0), LinkType: "openvswitch"},
 		&netlink.Netkit{LinkAttrs: link("lxc42", 14, 0)},
-		tun("fc-tap0", 15, "ether"),
-		tun("tailscale0", 16, "none"),
+		encap(&netlink.Tuntap{LinkAttrs: link("fc-tap0", 15, 0)}, "ether"),
+		encap(&netlink.Tuntap{LinkAttrs: link("tailscale0", 16, 0)}, "none"),
 		&netlink.Wireguard{LinkAttrs: link("wg0", 17, 0)},
 		&netlink.Bond{LinkAttrs: link("bond0", 18, 0)},
 		&netlink.Device{LinkAttrs: link("eth1", 19, 18)},
-		&netlink.Vlan{LinkAttrs: link("bond0.10", 20, 0)},
+		vlan("bond0.10", 20, 18, 0),
 		&netlink.GenericLink{LinkAttrs: link("team0", 21, 0), LinkType: "team"},
 		&netlink.Device{LinkAttrs: link("vboxnet0", 22, 0)},
 		&netlink.Dummy{LinkAttrs: link("aether-vmproxy", 23, 0)},
-		tun("aethervm1", 24, "ether"),
+		encap(&netlink.Tuntap{LinkAttrs: link("aethervm1", 24, 0)}, "ether"),
 		&netlink.Veth{LinkAttrs: link("eth0", 25, 0)},
+		&netlink.Bridge{LinkAttrs: link("vmbr1", 26, 0)},
+		encap(&netlink.Tuntap{LinkAttrs: link("tap100i0", 27, 26)}, "ether"),
+		vlan("vmbr1.10", 28, 26, 0),
+		&netlink.Bridge{LinkAttrs: link("br-lan", 29, 0)},
+		vlan("ens5.20", 30, 2, 29),
+		&netlink.GenericLink{LinkAttrs: link("tun1", 31, 0), LinkType: "ovpn-dco"},
+		&netlink.Xfrmi{LinkAttrs: link("ipsec0", 32, 0)},
+		encap(&netlink.GenericLink{LinkAttrs: link("ppp0", 33, 0), LinkType: "ppp"}, "ppp"),
+		&netlink.Bond{LinkAttrs: link("bond1", 34, 0)},
+		&netlink.Veth{LinkAttrs: link("veth2", 35, 34)},
+		&netlink.Device{LinkAttrs: link("eth2", 36, 21)},
 	}
-	physical := map[int]bool{2: true, 4: true, 19: true}
-	want := []string{"ens5", "ens3", "br-ens3", "tailscale0", "wg0", "bond0", "eth1", "bond0.10", "team0"}
+	physical := map[int]bool{2: true, 4: true, 19: true, 36: true}
+	want := []string{"ens5", "br-ens3", "ens3", "tailscale0", "wg0", "bond0", "eth1", "bond0.10", "team0", "br-lan", "ens5.20", "tun1", "ipsec0", "ppp0", "eth2"}
 	if got := uplinks(links, physical, nil); !slices.Equal(got, want) {
 		t.Errorf("uplinks = %v, want %v", got, want)
 	}
 	// A server in a system container leaves by its veth.
-	want = append(want, "eth0")
+	want = slices.Insert(want, 9, "eth0")
 	if got := uplinks(links, physical, []int{25, 2}); !slices.Equal(got, want) {
 		t.Errorf("uplinks with the internet through eth0 = %v, want %v", got, want)
 	}

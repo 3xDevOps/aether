@@ -306,36 +306,44 @@ func hostUplinks() ([]string, error) {
 	return uplinks(links, physical, internet), nil
 }
 
-// uplinks names the host's own links: a NIC, bond, team or VLAN, a bridge
-// with one of those as a port, a WireGuard link or a layer-3 tun such as
-// tailscale0 or tun0, and the links of the host's internet routes. Veths,
-// taps, dummies, Open vSwitch ports, bridges of only those and every other
-// kind are left out: containers and VMs sit behind them.
+// uplinks names the links an open VM's traffic may leave by: the host's LAN
+// and VPN links and the links of its internet routes. A LAN link is a NIC, a
+// VLAN on a LAN link, or a bond, team or bridge with one as a port. A VPN link
+// is WireGuard, a layer-3 tun such as tailscale0 or tun0, OpenVPN's offload,
+// an IPsec xfrm or vti link, or PPP. Veths, taps, dummies, overlays, Open
+// vSwitch ports, bridges of only those and every other kind are left out:
+// containers and VMs sit behind them.
 func uplinks(links []netlink.Link, physical map[int]bool, internet []int) []string {
 	byIndex := make(map[int]netlink.Link, len(links))
 	for _, l := range links {
 		byIndex[l.Attrs().Index] = l
 	}
+	var lan func(l netlink.Link) bool
+	lan = func(l netlink.Link) bool {
+		switch l.Type() {
+		case "vlan":
+			parent, ok := byIndex[l.Attrs().ParentIndex]
+			return ok && lan(parent)
+		case "bond", "team", "bridge":
+			return slices.ContainsFunc(links, func(port netlink.Link) bool {
+				return port.Attrs().MasterIndex == l.Attrs().Index && lan(port)
+			})
+		}
+		return physical[l.Attrs().Index]
+	}
+	vpn := func(l netlink.Link) bool {
+		switch l.Type() {
+		case "wireguard", "ovpn", "ovpn-dco", "xfrm", "vti", "vti6":
+			return true
+		case "tuntap":
+			return l.Attrs().EncapType == "none"
+		}
+		return l.Attrs().EncapType == "ppp"
+	}
 	var out []string
-	add := func(l netlink.Link) {
-		if !slices.Contains(out, l.Attrs().Name) {
-			out = append(out, l.Attrs().Name)
-		}
-	}
 	for _, l := range links {
-		switch {
-		case physical[l.Attrs().Index], slices.Contains([]string{"bond", "team", "vlan"}, l.Type()):
-			add(l)
-			if master, ok := byIndex[l.Attrs().MasterIndex]; ok && master.Type() == "bridge" {
-				add(master)
-			}
-		case l.Type() == "wireguard", l.Type() == "tuntap" && l.Attrs().EncapType == "none":
-			add(l)
-		}
-	}
-	for _, index := range internet {
-		if l, ok := byIndex[index]; ok {
-			add(l)
+		if lan(l) || vpn(l) || slices.Contains(internet, l.Attrs().Index) {
+			out = append(out, l.Attrs().Name)
 		}
 	}
 	return out
