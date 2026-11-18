@@ -155,9 +155,13 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	udp, tcp := e.dns.ports()
+	relayed := "10.200.0.1"
+	for _, dns := range hostDNS() {
+		relayed += ", " + dns.String()
+	}
 	for _, want := range []string{
-		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 udp dport 53 dnat ip to 10.200.0.1:%d`, udp),
-		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 tcp dport 53 dnat ip to 10.200.0.1:%d`, tcp),
+		fmt.Sprintf(`iifname "aethervm*" ip daddr { %s } udp dport 53 dnat ip to 10.200.0.1:%d`, relayed, udp),
+		fmt.Sprintf(`iifname "aethervm*" ip daddr { %s } tcp dport 53 dnat ip to 10.200.0.1:%d`, relayed, tcp),
 		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 udp dport %d meta mark set meta mark | 0x1000000 accept`, udp),
 		fmt.Sprintf(`iifname "aethervm*" ip daddr 10.200.0.1 tcp dport %d meta mark set meta mark | 0x1000000 accept`, tcp),
 		fmt.Sprintf("ip daddr 10.200.0.1 udp dport %d drop", udp),

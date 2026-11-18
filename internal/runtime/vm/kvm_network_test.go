@@ -272,7 +272,7 @@ func TestKVMNetwork(t *testing.T) {
 	}
 	// 169.254.169.253 is the AWS VPC DNS resolver: a link-local address other
 	// than the metadata IPs that an open VM must not reach, unless it is the
-	// host's own configured resolver (then it stays reachable on port 53).
+	// host's own configured resolver (then port 53 to it reaches the relay).
 	resolverIsDNS := false
 	for _, dns := range hostDNS() {
 		resolverIsDNS = resolverIsDNS || dns.String() == "169.254.169.253"
@@ -289,16 +289,20 @@ func TestKVMNetwork(t *testing.T) {
 			t.Errorf("an open VM searches %q, the host %v", out, search)
 		}
 	}
+	// A VM booted before v0.9.0-beta.2 was given the host's upstream servers,
+	// and a terminal VM runs for weeks: a lookup through each of them must
+	// reach the relay, even at a link-local address the drop would otherwise
+	// catch (169.254.169.254 on GCP, 168.63.129.16 on Azure).
+	for _, dns := range hostDNS() {
+		if out, code := vmRun(t, e, "run-vmnet-b", "echo 'nameserver "+dns.String()+"' >/etc/resolv.conf"); code != 0 {
+			t.Fatalf("write run-vmnet-b's resolv.conf: %s", out)
+		}
+		expect("a VM booted before the relay resolves through "+dns.String(), probe(t, e, "run-vmnet-b", "resolve relay.aether.test"), true)
+	}
 	expect("an open VM reaches the internet", probe(t, e, "run-vmnet-a", "dial example.com:80"), true)
 	expect("an open VM reaches the host", probe(t, e, "run-vmnet-a", "dial "+hostPort), true)
 	for what, target := range targets {
 		expect("an open VM reaches "+what, probe(t, e, "run-vmnet-a", "dial "+target), false)
-	}
-	// The DNS exception must keep every configured resolver reachable on 53,
-	// including one at a link-local address the drop above would otherwise
-	// catch (for example 169.254.169.254 on GCP, 168.63.129.16 on Azure).
-	for _, dns := range hostDNS() {
-		expect("an open VM reaches its DNS resolver "+dns.String(), probe(t, e, "run-vmnet-a", "dial "+dns.String()+":53"), true)
 	}
 	rec, err := e.load("run-vmnet-a")
 	if err != nil {
