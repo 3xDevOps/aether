@@ -133,7 +133,8 @@ type member struct {
 	// removing refuses new sessions and view contexts while the member is
 	// being removed. It is written under both op and mu.
 	removing bool
-	// raising orders raising cards, so equal calls share one.
+	// raising orders raising cards, so equal calls share one, and orders
+	// decisions with them, so a decision never lands mid-raise.
 	raising sync.Mutex
 	// settings orders changes to the member's settings with the calls they
 	// decide.
