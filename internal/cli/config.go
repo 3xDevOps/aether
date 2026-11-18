@@ -265,6 +265,11 @@ func Load() (Config, error) {
 		}
 		return Config{}, fmt.Errorf("cli: read config: %w", err)
 	}
+	return Parse(path, body)
+}
+
+// Parse decodes body, the contents of the config file at path, as Load does.
+func Parse(path string, body []byte) (Config, error) {
 	var cfg Config
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		return Config{}, fmt.Errorf("cli: parse config: %w", err)
