@@ -490,9 +490,6 @@ func TestExecRunsAsTheVMsUserWithItsEnvironment(t *testing.T) {
 	if _, _, _, err := h.engine.exec(t.Context(), "run-a", []string{"big"}, ""); err == nil || !strings.Contains(err.Error(), "byte limit") {
 		t.Errorf("oversized exec = %v", err)
 	}
-	if env := execEnv(&record{Env: []string{"PATH=/home/agent/.local/bin:/usr/bin"}}, "0:0", nil); !slices.Equal(env, []string{runtime.RootPath}) {
-		t.Errorf("root exec env = %v", env)
-	}
 }
 
 func TestManagedExecGoesThroughDevExec(t *testing.T) {
@@ -510,7 +507,7 @@ func TestManagedExecGoesThroughDevExec(t *testing.T) {
 	}
 	supervisor := h.guest("run-a").procs[identity.ExecID]
 	if supervisor == nil || !slices.Equal(supervisor.spec.Argv[1:4], []string{"dev-exec", "run", "terminal-1"}) ||
-		!slices.Contains(supervisor.spec.Env, "AETHER_DEVEXEC_CONTROL_GROUP=1000") {
+		!slices.Contains(supervisor.spec.Env, "AETHER_DEVEXEC_CONTROL_GROUP=1000") || !slices.Contains(supervisor.spec.Env, "PATH=/usr/bin:/bin") {
 		t.Fatalf("supervisor = %+v", supervisor)
 	}
 	if st, stErr := m.Status(t.Context()); stErr != nil || !st.Running || !st.Attached {

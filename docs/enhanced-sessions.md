@@ -308,7 +308,8 @@ owns the adapter's stdin and stdout and serves them on a socket in
 `/run/aether-acp/`. The server attaches to the keeper with a short-lived
 `aether-internal acp-keeper attach` exec and a token only the server holds.
 The keeper and that exec run as root, out of the agent's reach; the adapter
-runs as the session's user, as before ([security](security.md#permission-tiers)).
+runs as the session's user with the session's environment, `PATH` included, as
+before ([security](security.md#permission-tiers)).
 
 A server restart or update (`systemctl restart aether-server`,
 `cloudfield server update`, a boot trial or a rollback) leaves the keeper and the
