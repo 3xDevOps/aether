@@ -283,6 +283,7 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 		return woke{}, err
 	}
 	defer release()
+	defer s.needGuest(cid)()
 	how, err := s.startAsleep(ctx, entry)
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotFound) {

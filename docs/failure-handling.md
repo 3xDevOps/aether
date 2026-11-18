@@ -394,9 +394,10 @@ by itself once memory is free again. If it has to be saved to disk for
 that, it wakes with every process where it was.`, at most once in 5
 minutes. A session the server is working on needs its guest to answer, so
 the brake leaves it running until that is done: one it is launching,
-waking, closing, killing, finishing, saving because it is idle, or taking
-up after a restart, an Enhanced session whose agent it restarts, and a
-Background session whose turn it ends. Once
+waking once admission lets the wake go ahead, closing, killing, finishing,
+saving because it is idle, or taking up after a restart, an Enhanced
+session whose agent it restarts, and a Background session whose turn it
+ends. Once
 `MemAvailable` is back at the floor it thaws one VM each check, the longest
 frozen first; if that takes the host below the floor again, every VM
 freezes again. A woken VM still loading its saved memory keeps that memory
@@ -410,8 +411,10 @@ take its session up. It takes the session up asleep, marked to wake, and
 thaws nothing until it has taken every session up. Then the memory guard
 saves those VMs to disk as they stand while the host is short, the brake
 thaws them one a check once it is not, and the guard wakes each on its own
-once its memory fits above twice the floor, as a session it saved. A VM
-whose save the stop interrupted is saved, or woken, the same way. To thaw
+once its memory fits above twice the floor, as a session it saved; one
+that was never saved needs no room, since it holds its memory already. A
+VM whose
+save the stop interrupted is saved, or woken, the same way. To thaw
 them yourself on a host whose server stays down:
 
 ```sh
@@ -462,8 +465,9 @@ reserve plus 4 GiB, the level below which disk cleanup deletes the saved
 memory of other sleeping sessions
 ([Recover from disk pressure](#recover-from-disk-pressure)), and for 5
 minutes one whose save failed. A save waits for Cloud Hypervisor to finish
-writing the snapshot, however long that takes, and one that fails leaves
-the VM running; a VM that died instead ends its session as any VM that
+writing the snapshot, for as long as writing the VM's memory at 20 MiB/s
+takes plus 2 minutes, and one that fails leaves the VM running; a VM that
+died instead ends its session as any VM that
 died, also when the server is shutting down: `failed`, with its work
 committed from its disks. So does, at its next wake, a session recorded
 asleep whose VM stopped before it was saved, unless it can start again

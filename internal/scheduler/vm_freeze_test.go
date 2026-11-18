@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -314,22 +315,51 @@ func TestARestartTakesUpFrozenVMsWithoutLettingThemRun(t *testing.T) {
 	}
 	s2.mu.Unlock()
 
+	// A wake waits on admission holding the session's lock: its VM stays
+	// frozen until admission lets it go ahead.
+	s2.mu.Lock()
+	waiting := s2.runs[runs[0]]
+	waiting.waking = make(chan struct{})
+	s2.mu.Unlock()
+	waiting.lifecycleMu.Lock()
+	time.Sleep(3 * vmMemoryBrake)
+	frozen := fr.Frozen()
+	waiting.lifecycleMu.Unlock()
+	s2.mu.Lock()
+	waiting.waking = nil
+	s2.mu.Unlock()
+	if len(frozen) != 2 {
+		t.Fatalf("with a wake waiting on admission %v are frozen; want both", frozen)
+	}
+
 	s2.guardVMMemory(t.Context())
 	if fr.isSaved(a) == fr.isSaved(b) || !fr.foundFrozen(a) && !fr.foundFrozen(b) {
 		t.Fatalf("the guard saved a %v, b %v; want one, saved frozen", fr.isSaved(a), fr.isSaved(b))
 	}
+	saved, unsaved := runs[0], runs[1]
+	if fr.isSaved(b) {
+		saved, unsaved = runs[1], runs[0]
+	}
+	awake := func(run domain.RunID) bool {
+		sess := s2.acp.session(run)
+		return s2.Sleep(run).AsleepSince == nil && sess != nil && sess.State().TurnInFlight
+	}
 
-	fr.setAvailable(16 << 30)
+	// 0.6 GiB above twice the floor is room for no saved VM, but the one
+	// never saved holds its memory already: it wakes.
+	fr.setAvailable(7 << 30)
 	waitFor(t, "the brake thawing the VM left", func() bool { return len(fr.Frozen()) == 0 })
-	waitFor(t, "both sessions awake with their turns running", func() bool {
+	waitFor(t, "the session never saved awake with its turn running", func() bool {
 		s2.guardVMMemory(t.Context())
-		for _, run := range runs {
-			sess := s2.acp.session(run)
-			if s2.Sleep(run).AsleepSince != nil || sess == nil || !sess.State().TurnInFlight {
-				return false
-			}
-		}
-		return true
+		return awake(unsaved)
+	})
+	if s2.Sleep(saved).AsleepSince == nil {
+		t.Fatal("the guard woke a saved VM whose memory does not fit")
+	}
+	fr.setAvailable(16 << 30)
+	waitFor(t, "the saved session awake with its turn running", func() bool {
+		s2.guardVMMemory(t.Context())
+		return awake(saved)
 	})
 }
 

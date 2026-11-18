@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -227,11 +229,14 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 		s.superviseWoken(entry)
 		return woke{restored: true}, nil
 	}
-	if reason := s.coldStartRefusal(ctx, entry); reason != "" {
-		if inspectErr == nil && !closed && !saved {
-			s.finalizeAsleep(entry, info.ExitCode)
-			return woke{}, fmt.Errorf("the session's VM stopped before it was saved, so the session ends; its checkout and branch are kept: %w", restoreErr)
-		}
+	reason, err := s.coldStartRefusal(ctx, entry)
+	switch {
+	case err != nil:
+		return woke{}, fmt.Errorf("restore the saved session: %w; and whether it can start again from its disk is unknown: %w", restoreErr, err)
+	case reason != "" && inspectErr == nil && !closed && !saved:
+		s.finalizeAsleep(entry, info.ExitCode)
+		return woke{}, fmt.Errorf("the session's VM stopped before it was saved, so the session ends; its checkout and branch are kept: %w", restoreErr)
+	case reason != "":
 		return woke{}, fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason)
 	}
 	slog.Warn("scheduler: restore a sleeping session; starting it from its disk", "run", entry.runID, "error", restoreErr)
@@ -265,26 +270,34 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 // when it can: only an Enhanced session of an agent that restores its
 // conversation, in a VM created for Enhanced, whose main process is a bare
 // shell. A Standard session's would run its launch command, with the task,
-// again.
-func (s *Scheduler) coldStartRefusal(ctx context.Context, entry *supervised) string {
+// again. It fails when it cannot tell.
+func (s *Scheduler) coldStartRefusal(ctx context.Context, entry *supervised) (string, error) {
 	s.mu.Lock()
-	enhanced, saved := entry.acp && entry.launchMode == domain.LaunchACP, entry.asleepSaved
+	enhanced, saved, cid := entry.acp && entry.launchMode == domain.LaunchACP, entry.asleepSaved, entry.containerID
 	s.mu.Unlock()
 	keep := "it cannot be restored, and its disk is kept: launch a new session on its branch"
 	if saved {
 		keep = "its saved state and disk are kept: try waking it again, or launch a new session on its branch"
 	}
-	if !enhanced || !s.launchedEnhanced(ctx, entry) {
-		return "a Standard session cannot start again from its disk without running its task again; " + keep
+	standard := "a Standard session cannot start again from its disk without running its task again; " + keep
+	if !enhanced {
+		return standard, nil
+	}
+	info, err := s.cfg.Runtime.Inspect(ctx, cid)
+	if err != nil {
+		return "", fmt.Errorf("inspect the session's VM: %w", err)
+	}
+	if !slices.Contains(info.Env, coordtransport.EnhancedEnv+"=1") {
+		return standard, nil
 	}
 	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
 	if err != nil {
-		return "load the session: " + err.Error()
+		return "", fmt.Errorf("load the session: %w", err)
 	}
 	if !s.resumes(run.Harness) {
-		return fmt.Sprintf("%s cannot restore its conversation in a new process; %s", run.Harness, keep)
+		return fmt.Sprintf("%s cannot restore its conversation in a new process; %s", run.Harness, keep), nil
 	}
-	return ""
+	return "", nil
 }
 
 // superviseWoken waits on entry's container again after a wake started or

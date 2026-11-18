@@ -134,6 +134,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 				return nil, capErr
 			}
 			defer release()
+			defer s.needGuest(cid)()
 			reserved = true
 		}
 		entry.lifecycleMu.Lock()
