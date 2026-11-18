@@ -71,8 +71,10 @@ func (s *Store) buildHelper(ctx context.Context, binary, dir string) error {
 }
 
 // mkfs makes an ext4 filesystem of size bytes in a new sparse file at path,
-// filled from srcDir when it is not empty. mkfs.ext4 marks the inode tables
-// of a regular file zeroed, so the guest never writes them out.
+// filled from srcDir when it is not empty. The new file reads as zeros, so
+// neither its inode tables nor its journal need writing: mkfs.ext4 marks the
+// inode tables of a regular file zeroed, and lazy_journal_init keeps it from
+// allocating the journal's blocks to zero them.
 func mkfs(ctx context.Context, path string, size int64, label, srcDir string, extra ...string) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -82,7 +84,7 @@ func mkfs(ctx context.Context, path string, size int64, label, srcDir string, ex
 	if err = errors.Join(err, f.Close()); err != nil {
 		return fmt.Errorf("vmimage: size %s: %w", path, err)
 	}
-	args := []string{"-q", "-F", "-t", "ext4", "-L", label}
+	args := []string{"-q", "-F", "-t", "ext4", "-L", label, "-E", "lazy_journal_init=1"}
 	if srcDir != "" {
 		args = append(args, "-d", srcDir)
 	}
