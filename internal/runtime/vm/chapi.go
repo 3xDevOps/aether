@@ -16,8 +16,8 @@ type chAPI struct {
 	client *http.Client
 }
 
-// chAPITimeout backstops a monitor that stops answering; a snapshot of a
-// large guest takes seconds, not minutes.
+// chAPITimeout backstops a monitor that stops answering any call but a
+// snapshot.
 const chAPITimeout = 2 * time.Minute
 
 func newCHAPI(socket string) chAPI {
@@ -49,8 +49,12 @@ func (c chAPI) resume(ctx context.Context) error {
 	return c.call(ctx, http.MethodPut, "vm.resume", nil, nil)
 }
 
+// snapshot is bounded by ctx alone: writing a large guest's memory to a slow
+// disk takes minutes.
 func (c chAPI) snapshot(ctx context.Context, dir string) error {
-	return c.call(ctx, http.MethodPut, "vm.snapshot", map[string]string{"destination_url": "file://" + dir}, nil)
+	untimed := *c.client
+	untimed.Timeout = 0
+	return chAPI{client: &untimed}.call(ctx, http.MethodPut, "vm.snapshot", map[string]string{"destination_url": "file://" + dir}, nil)
 }
 
 // shutdownVMM ends the monitor process; the guest gets no warning.

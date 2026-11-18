@@ -250,9 +250,17 @@ type Scheduler struct {
 	vmMemoryMu         sync.Mutex
 	vmMemoryLow        bool
 	vmMemoryStallSince time.Time
+	// vmMemoryBraked holds from the brake's first freeze until every VM
+	// runs again, and vmBrakeTargets are the VMs its next check freezes;
+	// only the brake's own goroutine touches them.
+	vmMemoryBraked bool
+	vmBrakeTargets []runtime.ID
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
+	// guestsNeeded counts, by VM, the recoveries that need its guest to
+	// answer, which keeps the memory brake off it.
+	guestsNeeded map[runtime.ID]int
 	// loginRefusals are the sign-in refusals agents gave on an account.
 	loginRefusals map[loginKey]loginRefusal
 	// retentionPublished tracks only nonempty runtime metadata under mu.
@@ -585,6 +593,13 @@ type supervised struct {
 	// save, which the sleep sweep waits a full sleep delay after.
 	asleepSaved  bool
 	saveFailedAt time.Time
+	// frozenNotedAt is when the timeline last said the memory brake froze
+	// the session's VM. frozenSave is set while the memory guard saves the
+	// VM frozen, and admitting while a wake holding the lifecycle lock
+	// waits on admission; both keep the brake from thawing it.
+	frozenNotedAt time.Time
+	frozenSave    bool
+	admitting     bool
 	// awake counts callers the container must not stop under: a delivery,
 	// an exec or a browser operation in flight.
 	awake int
@@ -771,6 +786,7 @@ func New(cfg Config) (*Scheduler, error) {
 		recoveryReady:        make(chan struct{}),
 		sudoWait:             sudoTimeout,
 		runs:                 make(map[domain.RunID]*supervised),
+		guestsNeeded:         make(map[runtime.ID]int),
 		runShellLocks:        make(map[domain.RunID]*sync.Mutex),
 		runShellReservations: make(map[string]*shellTabState),
 		terminalLocks:        make(map[domain.MemberID]*sync.Mutex),
@@ -801,6 +817,16 @@ func (s *Scheduler) RecoveryReady() <-chan struct{} {
 func (s *Scheduler) Start(ctx context.Context) error {
 	s.recovering.Store(true)
 	defer s.recovering.Store(false)
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	brakeWatched := make(chan struct{})
+	go func() {
+		defer close(brakeWatched)
+		s.watchVMBrake(watchCtx)
+	}()
+	defer func() {
+		stopWatch()
+		<-brakeWatched
+	}()
 	// Subscribed before recovery, so a usage limit published meanwhile
 	// waits for the run recovery brings back.
 	var (
@@ -834,7 +860,6 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	}
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
 	s.recovering.Store(false)
-	watchCtx, stopWatch := context.WithCancel(ctx)
 	watched := make(chan struct{})
 	go func() {
 		defer close(watched)

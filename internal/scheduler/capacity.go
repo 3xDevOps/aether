@@ -223,11 +223,13 @@ func (s *Scheduler) fitMemory(ctx context.Context, available, floor uint64, clai
 // of a launch or wake still running, and after the wake of a saved VM what
 // it has not loaded back. That claim ends once a measurement shows the VM
 // stopped or holding all of it, or memoryLoadTime after what it held last
-// grew. A failed measurement changes nothing else. The memory guard calls
-// it every check, so growth is seen however rarely admission runs. Caller
-// holds capacityGate.
+// grew; a frozen VM loads nothing, so its time does not run. A failed
+// measurement changes nothing else. The memory guard calls it every check,
+// so growth is seen however rarely admission runs. Caller holds
+// capacityGate.
 func (s *Scheduler) claimedMemory(ctx context.Context) uint64 {
 	var use map[runtime.ID]uint64
+	var frozen []runtime.ID
 	measured := false
 	source, ok := s.cfg.Runtime.(runtime.MemoryUseRuntime)
 	if ok && slices.ContainsFunc(s.memoryClaims, func(c *memoryClaim) bool { return c.vm != "" }) {
@@ -237,13 +239,16 @@ func (s *Scheduler) claimedMemory(ctx context.Context) uint64 {
 			slog.Warn("scheduler: measure the memory of woken session VMs; their claims stand", "error", err)
 		}
 		measured = err == nil
+		if vms, ok := s.cfg.Runtime.(runtime.FreezeRuntime); ok {
+			frozen = vms.Frozen()
+		}
 	}
 	now := time.Now()
 	var total uint64
 	s.memoryClaims = slices.DeleteFunc(s.memoryClaims, func(c *memoryClaim) bool {
 		held, running := use[c.vm]
-		if measured && held > c.held {
-			c.held, c.grew = held, now
+		if measured && held > c.held || slices.Contains(frozen, c.vm) {
+			c.held, c.grew = max(c.held, held), now
 		}
 		if c.released && (measured && (!running || c.held >= c.bytes) || now.Sub(c.grew) >= memoryLoadTime) {
 			return true

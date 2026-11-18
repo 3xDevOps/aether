@@ -124,11 +124,17 @@ func (r *memoryRuntime) saveCount() int {
 // a new process, as Claude Code does.
 func newMemoryEnv(t *testing.T) (*testEnv, *memoryRuntime) {
 	t.Helper()
+	return newMemoryEnvWith(t, func(mr *memoryRuntime) runtime.Runtime { return mr })
+}
+
+// newMemoryEnvWith is newMemoryEnv with wrap's runtime around the host's.
+func newMemoryEnvWith(t *testing.T, wrap func(*memoryRuntime) runtime.Runtime) (*testEnv, *memoryRuntime) {
+	t.Helper()
 	var mr *memoryRuntime
 	e, _ := newACPEnv(t, func(cfg *Config) {
 		sr := &saveRuntime{acpRuntime: cfg.Runtime.(*acpRuntime), saved: map[runtime.ID]string{}}
 		mr = &memoryRuntime{saveRuntime: sr, available: 24 << 30, vm: map[runtime.ID]uint64{}, loading: map[runtime.ID]bool{}}
-		cfg.Runtime = mr
+		cfg.Runtime = wrap(mr)
 		cfg.hostMemory = mr.hostMemory
 		cfg.sleepAnyAgent = true
 	})
@@ -592,9 +598,10 @@ func TestTheMemoryGuardSkipsSavesThatFailedOrWouldNotFitOnDisk(t *testing.T) {
 	mr.saveMu.Lock()
 	mr.saveErr = nil
 	mr.saveMu.Unlock()
-	// A 100 GiB disk keeps 5 GiB; 5.5 GiB free has no room for 1 GiB.
+	// A 100 GiB disk keeps 5 GiB, and below 9 GiB free disk reclaim deletes
+	// other sessions' saved memory; 9.5 GiB free has no room for 1 GiB.
 	var free atomic.Uint64
-	free.Store(11 << 29)
+	free.Store(19 << 29)
 	setFreeBytes(e, &free)
 	e.sched.guardVMMemory(t.Context())
 	if mr.isSaved(first) || mr.isSaved(second) || mr.saveCount() != 2 {

@@ -134,6 +134,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 				return nil, capErr
 			}
 			defer release()
+			defer s.needGuest(cid)()
 			reserved = true
 		}
 		entry.lifecycleMu.Lock()
@@ -704,6 +705,9 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 			}
 			slog.Info("scheduler: recovery: session started", "run", r.ID)
 			start := time.Now()
+			if sc, err := s.readSidecar(r.ID); err == nil && sc.AsleepSince == nil && !s.sleepFrozen(ctx, r, sc) {
+				defer s.needGuest(runtime.ID(sc.ContainerID))()
+			}
 			switch r.Status {
 			case domain.RunQueued, domain.RunProvisioning:
 				s.recoverUnstarted(ctx, r)

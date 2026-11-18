@@ -445,7 +445,11 @@ saves. The saved state then holds about what the session uses: a 2 GiB VM
 whose page cache held 1400 MiB wrote 137 MiB of memory in a 21-second
 save, against 1228 to 1315 MiB in 7 seconds before the wait
 (`TestKVMSaveWritesOnlyWhatTheSessionUses`). The host has the memory back
-as each pass reports it, before the save ends.
+as each pass reports it, before the save ends. A VM frozen because the host
+was running out of memory
+([failure-handling.md](failure-handling.md#recover-from-memory-pressure))
+is saved with neither `Sync` nor the wait, which would let its guest run:
+its saved state holds its page cache too.
 
 ## Freezing the root disk
 

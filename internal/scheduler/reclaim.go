@@ -204,7 +204,10 @@ func (s *Scheduler) dropSavedState(ctx context.Context, entry *supervised) (stri
 	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero() && entry.asleepSaved && entry.waking == nil
 	cid := entry.containerID
 	s.mu.Unlock()
-	if !asleep || s.coldStartRefusal(ctx, entry) != "" {
+	if !asleep {
+		return "", nil
+	}
+	if refusal, err := s.coldStartRefusal(ctx, entry); refusal != "" || err != nil {
 		return "", nil
 	}
 	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil {

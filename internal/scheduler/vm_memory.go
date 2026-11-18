@@ -28,6 +28,7 @@ const (
 
 const (
 	memorySavedWorkingNote = "Saved to disk while it worked: the server was running out of memory. It wakes on its own once memory is free again, with every process where it was."
+	memorySavedFrozenNote  = "Saved to disk: the server was running out of memory. It wakes on its own once memory is free again, with every process where it was."
 	memorySavedIdleNote    = "Saved to disk early: the server was running out of memory. It wakes on its next use, with every process where it was."
 )
 
@@ -171,13 +172,15 @@ func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 	return saved
 }
 
-// memoryCandidate is an awake session VM a save under memory pressure may
-// take. idle is false while its agent works, since is its last activity and
-// memory is what it holds of the host's.
+// memoryCandidate is a running session VM a save under memory pressure may
+// take. asleep is one of a run recorded asleep, which this server holds
+// nothing in. idle is false while its agent works, since is its last
+// activity and memory is what it holds of the host's.
 type memoryCandidate struct {
 	e      *supervised
 	cid    runtime.ID
 	closed bool
+	asleep bool
 	idle   bool
 	since  time.Time
 	memory uint64
@@ -185,7 +188,7 @@ type memoryCandidate struct {
 
 func (c memoryCandidate) rank() int {
 	switch {
-	case c.closed:
+	case c.closed || c.asleep:
 		return 0
 	case c.idle:
 		return 1
@@ -193,11 +196,12 @@ func (c memoryCandidate) rank() int {
 	return 2
 }
 
-// memoryCandidates lists the awake session VMs in the order a save takes
-// them: closed ones, then open ones whose agent is idle, the longest idle
-// first, then the rest, the one holding the most memory first. A run that
-// must stay awake whatever the host is short of, a Background one, and one
-// whose save failed within memorySaveRetry are left out.
+// memoryCandidates lists the running session VMs in the order a save takes
+// them: closed ones and those of runs recorded asleep, then open ones whose
+// agent is idle, the longest idle first, then the rest, the one holding the
+// most memory first. A run that must stay awake whatever the host is short
+// of, a Background one, and one whose save failed within memorySaveRetry
+// are left out.
 func (s *Scheduler) memoryCandidates(ctx context.Context) []memoryCandidate {
 	type open struct {
 		e        *supervised
@@ -213,10 +217,14 @@ func (s *Scheduler) memoryCandidates(ctx context.Context) []memoryCandidate {
 	for _, e := range s.runs {
 		enhanced := e.acp && e.launchMode == domain.LaunchACP
 		_, saving := s.saver(e.containerID)
-		if !saving || e.sleeping || !e.asleepSince.IsZero() || !enhanced && e.launchMode != domain.LaunchTUI || now.Sub(e.saveFailedAt) < memorySaveRetry {
+		if !saving || e.sleeping || !enhanced && e.launchMode != domain.LaunchTUI || now.Sub(e.saveFailedAt) < memorySaveRetry {
 			continue
 		}
 		switch {
+		case !e.asleepSince.IsZero():
+			if !e.asleepSaved && memory[e.containerID] > 0 {
+				out = append(out, memoryCandidate{e: e, cid: e.containerID, asleep: true, idle: true, memory: memory[e.containerID]})
+			}
 		case e.retained && e.paused && !e.destroyPending && !e.evidencePending && e.retainedUntil != nil:
 			out = append(out, memoryCandidate{e: e, cid: e.containerID, closed: true, idle: true, memory: memory[e.containerID]})
 		case heldAwakeLocked(e) == "":
@@ -261,8 +269,9 @@ func (s *Scheduler) saveForMemory(ctx context.Context, working bool) bool {
 }
 
 // saveFits reports whether c's saved memory fits on the data filesystem,
-// which holds the VMs' disks, above the reserve that keeps them writing. A
-// VM whose memory is unknown does not: its save could write anything.
+// which holds the VMs' disks, above the level below which disk reclaim
+// deletes the saved memory of other sleeping sessions. A VM whose memory is
+// unknown does not: its save could write anything.
 func (s *Scheduler) saveFits(c memoryCandidate) bool {
 	if c.memory == 0 {
 		return false
@@ -275,7 +284,7 @@ func (s *Scheduler) saveFits(c memoryCandidate) bool {
 		slog.Warn("scheduler: memory guard: measure the data filesystem", "error", err)
 		return false
 	}
-	if data.FreeBytes < diskReserve(data.TotalBytes, s.cfg.MinFreeBytes)+c.memory {
+	if data.FreeBytes < diskReserve(data.TotalBytes, s.cfg.MinFreeBytes)+reclaimHeadroom+c.memory {
 		slog.Warn("scheduler: memory guard: no room on disk to save a session VM", "run", c.e.runID, "memory", c.memory, "free", data.FreeBytes)
 		return false
 	}
@@ -295,24 +304,41 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 	if c.closed {
 		return s.savedForMemory(ctx, c.e, s.sleepClosedLocked(ctx, c.e), "")
 	}
+	if c.asleep {
+		s.mu.Lock()
+		note := memorySavedIdleNote
+		if c.e.memorySaved > 0 {
+			note = memorySavedFrozenNote
+		}
+		s.mu.Unlock()
+		return s.savedForMemory(ctx, c.e, s.saveAsleepRunning(ctx, c.e), note)
+	}
 	s.mu.Lock()
 	cid := c.e.containerID
 	saver, saving := s.saver(cid)
-	if !saving || s.runs[c.e.runID] != c.e || c.e.sleeping || !c.e.asleepSince.IsZero() || heldAwakeLocked(c.e) != "" {
+	if !saving || s.runs[c.e.runID] != c.e || c.e.sleeping || !c.e.asleepSince.IsZero() || heldAwakeLocked(c.e) != "" || s.guestsNeeded[cid] > 0 {
 		s.mu.Unlock()
 		return false
 	}
 	c.e.sleeping = true
 	c.e.sleepDone = make(chan struct{})
 	s.mu.Unlock()
+	defer s.endFrozenSave(c.e, cid)
+	frozen := s.vmFrozen(cid) && s.freezeToSave(c.e, cid)
 	wake := !c.idle
-	if c.idle {
+	if c.idle && !frozen {
 		busy, err := s.guestBusy(ctx, cid)
 		wake = busy || err != nil
 	}
 	if wake && !working {
 		s.endSleep(c.e, false)
 		return false
+	}
+	// A guest the brake froze cannot say whether it is busy: it is saved
+	// as it stands, and wakes again as one that was.
+	unasked := frozen && c.idle
+	if frozen {
+		wake, working = true, true
 	}
 	if err := s.markAsleep(c.e); err != nil {
 		s.endSleep(c.e, false)
@@ -322,11 +348,17 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 	if !working {
 		return s.savedForMemory(ctx, c.e, s.saveLive(ctx, c.e, saver), memorySavedIdleNote)
 	}
+	if !frozen {
+		frozen = s.freezeToSave(c.e, cid)
+	}
 	// A turn the agent started since the candidates were listed carries on
 	// after the wake.
 	note := memorySavedIdleNote
 	if wake || s.agentWorking(c.e) {
 		note = memorySavedWorkingNote
+		if unasked && !s.agentWorking(c.e) {
+			note = memorySavedFrozenNote
+		}
 		s.mu.Lock()
 		c.e.memorySaved = c.memory
 		err := s.writeSidecar(c.e.sidecar())
@@ -336,7 +368,7 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 			return false
 		}
 	}
-	return s.savedForMemory(ctx, c.e, s.saveMarked(ctx, c.e, saver), note)
+	return s.savedForMemory(ctx, c.e, s.saveMarked(ctx, c.e, saver, frozen), note)
 }
 
 // savedForMemory logs a save under memory pressure and publishes its
@@ -372,17 +404,19 @@ func (s *Scheduler) vmMemoryUse(ctx context.Context) map[runtime.ID]uint64 {
 }
 
 // wakeSavedForMemory wakes the sleeping session VM the guard saved while it
-// worked that has slept longest of those whose memory fits in room. A wake
-// that admission refuses, or that a server shutdown cuts off, keeps its
-// mark for the next check. Any other failure drops it, so the guard never
-// retries one forever, and says so on the timeline: the next use wakes it
-// as any sleeping session.
+// worked that has slept longest of those whose memory fits in room; one
+// never saved, and not being saved, holds its memory already. A wake that
+// admission refuses, or that a server shutdown cuts off, keeps its mark for
+// the next check. Any other failure drops it, so the guard never retries
+// one forever, and says so on the timeline: the next use wakes it as any
+// sleeping session.
 func (s *Scheduler) wakeSavedForMemory(ctx context.Context, room uint64) {
 	s.mu.Lock()
 	var next *supervised
 	for _, e := range s.runs {
 		ending := e.retained || e.status.Terminal() || e.killRequested || e.finalizing || e.destroyPending
-		if e.memorySaved > 0 && !e.asleepSince.IsZero() && !ending && e.memorySaved <= room && (next == nil || e.asleepSince.Before(next.asleepSince)) {
+		fits := !e.asleepSaved && !e.sleeping && !e.frozenSave || e.memorySaved <= room
+		if e.memorySaved > 0 && !e.asleepSince.IsZero() && !ending && fits && (next == nil || e.asleepSince.Before(next.asleepSince)) {
 			next = e
 		}
 	}

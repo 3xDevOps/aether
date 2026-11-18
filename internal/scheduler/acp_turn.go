@@ -198,6 +198,8 @@ func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Repo
 	cid := entry.containerID
 	d.s.mu.Unlock()
 	go func() {
+		// The signal is sent once: a frozen guest would never get it.
+		defer d.s.needGuest(cid)()
 		unlock := d.lockOp(entry.runID)
 		d.mu.Lock()
 		current := d.runs[entry.runID] == r

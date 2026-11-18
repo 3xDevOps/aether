@@ -27,12 +27,18 @@ const (
 	// is about 30 s.
 	reportSettled = 16 << 20
 	reportTimeout = 40 * time.Second
+	// snapshotRate is the slowest write a snapshot gets time for: a 24 GiB
+	// guest gets over 20 minutes. A monitor still busy after that is taken
+	// to hang; the VM it holds paused is resumed by the next wake.
+	snapshotRate = 20 << 20
 )
 
 // save pauses the VM, writes its memory and device state to the snapshot
 // directory and ends the monitor. A VM with a checkout is refused: its
 // checkouts are virtio-fs shares, and a fresh virtiofsd after restore knows
 // none of the guest's open files, so every access to them fails with EBADF.
+// A frozen VM is thawed only for its monitor to pause it, and saved with
+// what it holds: a sync would let its guest run, and take memory, first.
 func (e *engine) save(ctx context.Context, key string) error {
 	unlock := e.lock(key)
 	defer unlock()
@@ -51,6 +57,12 @@ func (e *engine) save(ctx context.Context, key string) error {
 		}
 		return fmt.Errorf("vm runtime: cannot save VM %s: it shares %s over virtio-fs, which would come back unusable after a restore", key, strings.Join(sources, ", "))
 	}
+	frozen := e.frozen(key)
+	if frozen {
+		if err = e.thaw(key); err != nil {
+			return err
+		}
+	}
 	api := newCHAPI(e.path(key, apiSocket))
 	state, err := api.state(ctx)
 	if err != nil {
@@ -59,7 +71,7 @@ func (e *engine) save(ctx context.Context, key string) error {
 	// Cloud Hypervisor refuses to pause a paused VM; one the caller paused
 	// stays paused if the save fails, and cannot sync first.
 	paused := state == "Paused"
-	synced := !paused && e.syncGuest(ctx, key)
+	synced := !paused && !frozen && e.syncGuest(ctx, key)
 	if synced {
 		// The second sync writes what the session wrote during the wait.
 		e.awaitReported(ctx, key)
@@ -83,7 +95,12 @@ func (e *engine) save(ctx context.Context, key string) error {
 	if err = os.Mkdir(dir, 0o700); err != nil {
 		return resumeAfter(err)
 	}
-	if err = snapshotRestored(ctx, api, key, dir); err == nil {
+	// Not cut short with ctx: a monitor cut off goes on writing, and answers
+	// no resume until it is done.
+	snapCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chAPITimeout+time.Duration(unitMemoryMiB(rec)<<20/snapshotRate)*time.Second)
+	err = snapshotRestored(snapCtx, api, key, dir)
+	cancel()
+	if err == nil {
 		err = syncSnapshot(dir)
 	}
 	if err != nil {

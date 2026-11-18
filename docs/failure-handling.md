@@ -18,7 +18,7 @@ shown beside the status says why it is there.
 | The host reboots, or Docker restarts without `live-restore` | Live sessions read `interrupted` with `server restarted: container exited <code>` (or `server restarted` when the container is gone). | Commits the partial work as `wip: <task>`, publishes the session branch and keeps the checkout. | Pull the branch (`cloudfield pull <session-id>`) or start a new session. An interrupted session cannot be reopened. |
 | A server update is interrupted, or the new version cannot boot | `cloudfield server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
-| Host memory is low, or the server stalls on memory | Launch refused with `scheduler: insufficient host memory headroom: ...`. | For low available memory, saves idle session VMs to disk and checks once more before it refuses. Saves awake session VMs to disk, never kills one, while the host is short of memory. | [Recover from memory pressure](#recover-from-memory-pressure). |
+| Host memory is low, or the server stalls on memory | Launch refused with `scheduler: insufficient host memory headroom: ...`. | For low available memory, saves idle session VMs to disk and checks once more before it refuses. Below the floor it freezes every session VM at once, so none takes more memory, then saves awake session VMs to disk and thaws the rest; it never kills one. | [Recover from memory pressure](#recover-from-memory-pressure). |
 | An Enhanced Claude Code session is idle for `--run-sleep-after` (30 minutes) | The Chat view shows **Asleep since <time>**; `cloudfield sessions` shows `(asleep)`. | Stops the container with `docker stop`, freeing its memory and CPU, and keeps its disk and checkout. | Nothing. The next message wakes it ([Idle sleep](#idle-sleep)). |
 | A Standard or Enhanced session in a VM is idle for `--run-sleep-after` (5 minutes) | As above. | Saves the whole VM to disk with every process in it, freeing its memory and CPU. | Nothing. The next message restores it ([Sessions in VMs](#sessions-in-vms)). |
 | An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced session is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the session supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`cloudfield attach <session-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
@@ -378,7 +378,63 @@ whose agent is working. It saves none when all idle VMs together hold too
 little to admit the start, or when only the server's own memory pressure
 refused it.
 
-With `--session-runtime vm`, a memory guard reads `/proc/meminfo` and
+With `--session-runtime vm`, the server stops VMs from taking the host's
+last memory in two steps: a brake that freezes them at once, and a memory
+guard that then frees memory by saving them to disk.
+
+The brake reads `MemAvailable` from `/proc/meminfo` every 500 ms. Below the
+floor it freezes every session's VM by writing `1` to the
+`cgroup.freeze` of its unit under `/sys/fs/cgroup/aether.slice`. That takes
+one write per VM, no new process and no answer from systemd, Cloud
+Hypervisor or the guest, so it works on a host with no memory left. A
+frozen VM runs no vCPU: its guest allocates nothing, keeps all its memory,
+and answers nothing, so its terminals, messages and file views wait. Its
+timeline says `Paused: the server was running out of memory. It carries on
+by itself once memory is free again. If it has to be saved to disk for
+that, it wakes with every process where it was.`, at most once in 5
+minutes. A session the server is working on needs its guest to answer, so
+the brake leaves it running until that is done: one it is launching,
+waking once admission lets the wake go ahead, closing, killing, finishing,
+saving because it is idle, or taking up after a restart, an Enhanced
+session whose agent it restarts, and a Background session whose turn it
+ends. Once
+`MemAvailable` is back at the floor it thaws one VM each check, the longest
+frozen first; if that takes the host below the floor again, every VM
+freezes again. A woken VM still loading its saved memory keeps that memory
+set aside for as long as it stays frozen. Every frozen VM so ends either
+thawed or saved to disk and woken later.
+
+A server that stops with less than twice the floor free leaves the VMs
+frozen: thawed at once, they would run with nothing watching them. The
+server that starts, after a stop or a crash, never lets a frozen VM run to
+take its session up. It takes the session up asleep, marked to wake, and
+thaws nothing until it has taken every session up. Then the memory guard
+saves those VMs to disk as they stand while the host is short, the brake
+thaws them one a check once it is not, and the guard wakes each on its own
+once its memory fits above twice the floor, as a session it saved; one
+that was never saved needs no room, since it holds its memory already. A
+VM whose
+save the stop interrupted is saved, or woken, the same way. To thaw
+them yourself on a host whose server stays down:
+
+```sh
+echo 0 | sudo tee /sys/fs/cgroup/aether.slice/aether-vm-*.service/cgroup.freeze
+```
+
+The floor is sized for the fastest growth measured. On a 29 GiB host, three
+session VMs filling 5.5 GiB each at once took 1.4 GiB/s, 1.5 GiB/s at the
+peak, and ran the host out in about 10 seconds, before the first save had
+finished. That host's floor is 2.9 GiB, which such a burst takes 1.9
+seconds to use, so the freeze lands with at least 2.1 GiB left. If nothing
+can be saved, because no saved memory fits on the disk or every save
+fails, and nothing else frees memory, the VMs stay frozen. So does a VM
+the guard never saves while everything it can save is not enough: a
+Background session's, a session waiting for an answer or changing mode or
+account, and one with a delivery, an exec such as a port forward, or a
+browser operation in flight, which a frozen guest never finishes. Kill or
+close sessions, which thaws theirs, or free memory or disk.
+
+The memory guard reads `/proc/meminfo` and
 `/proc/pressure/memory` every 5 seconds. It starts when available memory
 falls below the floor, or when the host stalls on memory: `full avg10` at
 60% or more for 30 seconds, which means every task was blocked on memory
@@ -387,7 +443,8 @@ killing. The guard never kills a session. It saves awake session VMs to
 disk, with every process in them, as an idle sleep does
 ([Sessions in VMs](#sessions-in-vms)), in this order:
 
-1. a closed session's VM still paused in memory;
+1. a closed session's VM still paused in memory, and the still running VM
+   of a session recorded asleep, such as one a restart took up frozen;
 2. an open session whose agent is idle, the longest idle first;
 3. when none is idle, the session holding the most host memory, even while
    its agent works. A VM's host memory is what its unit holds, guest page
@@ -395,9 +452,26 @@ disk, with every process in them, as an idle sleep does
 
 While less than twice the floor is free it saves one VM each check; above
 that, one more each time a stall lasts 30 seconds again, and never one
-whose agent works: such a stall may come from outside the VMs. It skips a
-VM whose memory is unknown or would not fit on the data filesystem above
-the disk reserve, and for 5 minutes one whose save failed. It stops once
+whose agent works: such a stall may come from outside the VMs. A VM it
+saves while less than twice the floor is free is frozen first and saved as
+it stands, without
+the sync and the wait for dropped page cache an idle sleep makes
+([vm-guest.md](vm-guest.md#limits-stats-and-the-clock)), which would let its guest run and
+take memory. A guest the brake froze cannot say whether it is busy, so a
+session saved after the brake froze it always wakes on its own, also when a
+launch or wake saved it to make room. It skips a
+VM whose memory is unknown or would not leave the data filesystem its
+reserve plus 4 GiB, the level below which disk cleanup deletes the saved
+memory of other sleeping sessions
+([Recover from disk pressure](#recover-from-disk-pressure)), and for 5
+minutes one whose save failed. A save waits for Cloud Hypervisor to finish
+writing the snapshot, for as long as writing the VM's memory at 20 MiB/s
+takes plus 2 minutes, and one that fails leaves the VM running; a VM that
+died instead ends its session as any VM that
+died, also when the server is shutting down: `failed`, with its work
+committed from its disks. So does, at its next wake, a session recorded
+asleep whose VM stopped before it was saved, unless it can start again
+from its disk ([Sessions in VMs](#sessions-in-vms)). It stops once
 twice the floor is free and `full avg10` is below 60%. Then a session it
 saved while its agent worked, or while its guest still used the CPU, wakes
 on its own, one each check, the first saved first among those whose memory
@@ -409,15 +483,31 @@ carries on where it was, as across a server restart; a model call the save
 cut off fails as on a network outage, and the agent retries it. Every other
 saved session wakes on its next use. The timeline of each saved session
 says
-`Saved to disk while it worked: the server was running out of memory.` or
+`Saved to disk while it worked: the server was running out of memory.`,
+`Saved to disk: the server was running out of memory.` for an idle session
+the brake had frozen, or
 `Saved to disk early: the server was running out of memory.` The server log
 has `scheduler: memory guard:` lines. `--run-sleep-after 0` does not turn
-the guard off. Memory that grows faster than the guard saves VMs can still
-run the host out, sooner than containers would, since a VM's memory never
-goes to host swap. The host's OOM killer then ends container processes
-first (`OOMScoreAdjust=500`), then the session VM holding the most memory:
-`journalctl -k | grep -i 'out of memory'` names it `cloud-hyperviso`, the
-kernel's 15-character cut of `cloud-hypervisor`.
+the guard or the brake off.
+
+Memory the host runs out of all the same, taken by something outside the
+session VMs, such as an environment terminal's VM, which the brake does not
+freeze, or faster than the brake's check, goes to the kernel's OOM killer,
+which ends the process with the highest score first:
+
+| `oom_score_adj` | Processes | Set by |
+| --- | --- | --- |
+| 500 | Every process in a Docker session container or browser companion | The server, when it creates the container |
+| 0 | A session VM's unit: Cloud Hypervisor, which holds the guest's memory, and its file services. Also every other service on the host | systemd's default; the unit sets none |
+| -500 | The server | `OOMScoreAdjust=-500` in its unit, which the server also sets on itself when it starts |
+
+So container processes go first, one at a time, then the session VM
+holding the most memory, whose whole session ends, and the server last.
+`journalctl -k | grep -i 'out of memory'` names a killed VM
+`cloud-hyperviso`, the kernel's 15-character cut of `cloud-hypervisor`.
+Inside a VM, the guest's own OOM killer ends session processes at the
+session's memory limit and never the helper
+([vm-guest.md](vm-guest.md)).
 
 To recover, close or kill sessions. A closed session's paused container still
 holds its memory; **Free sandbox…** releases it. An idle Enhanced Claude
@@ -805,8 +895,10 @@ from its disk: processes that were running end, the conversation is
 restored, and the Chat view gives the restore's error. Any other session,
 a Standard one among them, stays asleep: the wake fails with the restore's
 error, and the VM keeps its disk and saved state. Launch a new session on
-its branch, or wake it again. A VM a failed save left running is taken up
-as it is on the next wake.
+its branch, or wake it again. One whose VM stopped before it was ever
+saved has nothing to wake from: the wake ends it, `failed`, with its work
+committed from its disk. A VM a failed save left running is taken up as it
+is on the next wake.
 
 A saved VM takes about as much disk as the memory its processes use, after
 the guest drops its page cache: 137 MiB for an idle test VM of 2 GiB whose
@@ -932,10 +1024,9 @@ sudo systemctl restart aether-server
 | `--agent-update` | `true` | Update a shipped agent in the member's home, in the background, when a session launches. | Turn off on a host without internet access, or to hold a version. |
 
 The CPU, memory and process ceilings apply to containers created after the
-change. A host-wide out-of-memory kill takes agent processes before the server
-(`OOMScoreAdjust=-500` on the server, which it also lowers itself to when it
-starts, 500 in containers). Session VMs keep the default 0, since killing a
-VM's monitor ends the whole session, so container processes go first. Under
+change. A host-wide out-of-memory kill takes container processes first, then
+session VMs, and the server last
+([Recover from memory pressure](#recover-from-memory-pressure)). Under
 CPU and disk contention the server gets a hundred shares to each container's
 one
 ([install.md](install.md#keep-the-server-reachable-under-load)).

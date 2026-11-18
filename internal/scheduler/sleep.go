@@ -276,13 +276,20 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 		return woke{}, fmt.Errorf("%w: the session is ending", ErrNoLiveEnvironment)
 	}
 	cid := entry.containerID
+	entry.admitting = true
 	s.mu.Unlock()
 
 	release, err := s.reserveWake(ctx, cid)
+	if err == nil {
+		defer release()
+		defer s.needGuest(cid)()
+	}
+	s.mu.Lock()
+	entry.admitting = false
+	s.mu.Unlock()
 	if err != nil {
 		return woke{}, err
 	}
-	defer release()
 	how, err := s.startAsleep(ctx, entry)
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotFound) {
@@ -840,24 +847,39 @@ func (s *Scheduler) recoverAsleep(ctx context.Context, r *domain.Run, sc sidecar
 		s.syncRunUserReservationsLocked()
 	}
 	s.mu.Unlock()
-	if entry != nil && err == nil && !info.Exited {
-		// Started by hand while the server was down, or a VM whose save the
-		// restart interrupted: this process holds none of its streams.
+	// Started by hand while the server was down, or a VM whose save the
+	// restart interrupted: this process holds none of its streams. A VM the
+	// memory guard marked to wake, one it was saving or the brake left
+	// frozen, is the guard's to save frozen or wake: a save here would let
+	// it run first.
+	if entry != nil && err == nil && !info.Exited && sc.MemorySaved == 0 {
 		s.stopRecoveredAsleep(ctx, entry)
 	}
 	return true
 }
 
 // stopRecoveredAsleep stops the running container of a run recovery adopted
-// asleep, or saves its VM. A wake or Relaunch that won the lifecycle lock
-// first and started the container on purpose keeps it running.
+// asleep, or saves its VM, as it stands if a server left it frozen: the
+// brake thaws a VM whose lifecycle lock is held. A wake or Relaunch that won
+// the lifecycle lock first and started the container on purpose keeps it
+// running.
 func (s *Scheduler) stopRecoveredAsleep(ctx context.Context, entry *supervised) {
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
+	frozen := s.vmFrozen(cid)
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
 	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero()
 	s.mu.Unlock()
 	if !asleep {
+		return
+	}
+	if frozen {
+		if err := s.saveAsleepRunning(ctx, entry); err != nil {
+			slog.Warn("scheduler: save a sleeping session's VM", "run", entry.runID, "error", err)
+		}
 		return
 	}
 	if saver, ok := s.entrySaver(entry); ok {
