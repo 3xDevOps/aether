@@ -375,12 +375,14 @@ Before the rename the app was named Aether: `~/.local/share/aether/desktop/`,
 `Aether.app`, `%LOCALAPPDATA%\Programs\Aether Desktop\` and the Start Menu
 entry `Aether.lnk`. An update installs Cloudfield beside it. The first start of
 Cloudfield removes the old app and, on Windows, `Aether.lnk`; if the old app is
-running then, a later start does. An old app installed before
-v0.7.0-alpha.13 on Linux or Windows stays; delete it by hand. Both apps use
-the same saved settings and sign-ins (`aether-desktop`, see
-[Uninstalling](#uninstalling)). On macOS and Windows, Dock, taskbar and Start
-pins of the old app stop working; pin Cloudfield again. On Linux the launcher
-keeps its file name and opens Cloudfield, so its pins keep working.
+running then, a later start does. Windows keeps the folder of an app that has
+just quit in use for a moment, so there the removal retries for up to 10
+seconds. An old app installed before v0.7.0-alpha.13 on Linux or Windows stays;
+delete it by hand. Both apps use the same saved settings and sign-ins
+(`aether-desktop`, see [Uninstalling](#uninstalling)). On macOS and Windows,
+Dock, taskbar and Start pins of the old app stop working; pin Cloudfield again.
+On Linux the launcher keeps its file name and opens Cloudfield, so its pins
+keep working.
 
 Going back to a release from before the rename, such as v0.8.7, installs
 Aether beside Cloudfield, because that release knows only the old name; it
