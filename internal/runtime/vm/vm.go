@@ -76,13 +76,11 @@ func New(cfg Config) (*Runtime, error) {
 // kinds are the containers besides sessions that run in VMs, by the prefix
 // of the creation key the scheduler gives them and of their VM's name: the
 // rest of the key is the member, and for the agent updater the agent too.
-// A terminal keeps its root disk across a stop and start, as a container
-// keeps its filesystem; every other VM gets a fresh one on a cold start.
 var kinds = []struct {
 	key, name string
 	opts      options
 }{
-	{"terminal:", "terminal-", options{KeepRoot: true}},
+	{"terminal:", "terminal-", options{}},
 	{"assistant:", "assistant-", options{}},
 	{"assistant-install:", "assistant-install-", options{}},
 	{"harness-update-", "harness-update-", options{Lifetime: updaterLifetime}},

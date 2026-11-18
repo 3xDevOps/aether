@@ -176,6 +176,9 @@ func TestKVMSessionLifecycle(t *testing.T) {
 	if out, _ := vmRun(t, after, key, "cat /var/tmp/setup-log | wc -l"); strings.TrimSpace(out) != "1" {
 		t.Errorf("setup ran %s times before the engine restart", out)
 	}
+	if out, code := vmRun(t, after, key, "echo installed > /usr/local/bin/kept"); code != 0 {
+		t.Fatalf("write to the root disk: %d %s", code, out)
+	}
 	start = time.Now()
 	if err := after.stop(t.Context(), key, 2*time.Second); err != nil {
 		t.Fatal(err)
@@ -187,8 +190,8 @@ func TestKVMSessionLifecycle(t *testing.T) {
 	if err := after.start(t.Context(), key); err != nil {
 		t.Fatal(err)
 	}
-	if out, _ := vmRun(t, after, key, "cat /var/tmp/setup-log | wc -l"); strings.TrimSpace(out) != "1" {
-		t.Errorf("a cold start kept the old root disk: setup log has %s lines", out)
+	if out, _ := vmRun(t, after, key, "cat /usr/local/bin/kept; wc -l < /var/tmp/setup-log"); out != "installed\n1\n" {
+		t.Errorf("after a cold start the root disk holds %q, want the file written before it and one setup run", out)
 	}
 }
 

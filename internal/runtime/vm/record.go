@@ -82,10 +82,8 @@ type record struct {
 	// own.
 	CheckoutDisks []checkoutDisk `json:"checkout_disks,omitempty"`
 	// Net is the VM's network index, or offline.
-	Net    int  `json:"net"`
-	Egress bool `json:"egress,omitempty"`
-	// KeepRoot keeps the root disk across cold starts.
-	KeepRoot  bool           `json:"keep_root,omitempty"`
+	Net       int            `json:"net"`
+	Egress    bool           `json:"egress,omitempty"`
 	Lifetime  time.Duration  `json:"lifetime,omitempty"`
 	OwnedDirs []string       `json:"owned_dirs,omitempty"`
 	Serves    []guest.Socket `json:"serves,omitempty"`
@@ -97,11 +95,12 @@ type record struct {
 	BrowserEnv   []string     `json:"browser_env,omitempty"`
 	// Companion is the browser companion created in the VM, if any.
 	Companion *companion `json:"companion,omitempty"`
-	// Booted is set once a boot was launched: the next cold start builds a
-	// fresh root disk. Boots counts them, so a wait on one boot can tell it
-	// from the next.
+	// Booted is set once a boot was launched. Boots counts them, so a wait
+	// on one boot can tell it from the next.
 	Booted bool `json:"booted,omitempty"`
 	Boots  int  `json:"boots,omitempty"`
+	// SetupDone means a boot ran the setup script and Main started.
+	SetupDone bool `json:"setup_done,omitempty"`
 	// Saved means the snapshot directory holds the VM's state; the VM reads
 	// as exited until Restore.
 	Saved bool `json:"saved,omitempty"`
