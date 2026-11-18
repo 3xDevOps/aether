@@ -106,8 +106,9 @@ func (s *Scheduler) settleFrozen(ctx context.Context, vms runtime.FreezeRuntime,
 		if _, vm := s.saver(cid); !vm {
 			continue
 		}
-		busy := !e.lifecycleMu.TryLock()
-		if !busy {
+		// Only while the brake holds: a TryLock can make another one fail.
+		busy := s.vmMemoryBraked && !e.lifecycleMu.TryLock()
+		if s.vmMemoryBraked && !busy {
 			e.lifecycleMu.Unlock()
 		}
 		switch {
