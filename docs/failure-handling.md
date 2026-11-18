@@ -856,14 +856,17 @@ removed without its history. The wait restarts from 15 minutes when the
 server restarts.
 
 That store holds only what the session's snapshots added. It reads the fork
-point from the workspace repository in `repos/`, where the ref
+point from the repository of the session's workspace in `repos/` (for an
+extra repository, the repository of that one's workspace), where the ref
 `refs/aether/sessions/<run-id>` keeps it from `git gc` until the session is
 deleted. Deleting a workspace first copies the fork point into each store that
 still reads it, such as another workspace's session that used it as an extra
 repository. Stores that older servers wrote with their own copy of the fork
-point shrink the same way, one at a time, after the server starts. Both copy
-and shrink refuse a store while the disk has 256 MiB or less free, or less
-than its size plus 128 MiB, with `the server has too little free disk`. A
+point shrink the same way, one at a time, after the server starts. A copy
+writes the store's whole history, fork point included; a shrink writes only
+what the session added.
+Both refuse a store while the disk has 256 MiB or less free, or less than
+what they write plus 128 MiB, with `the server has too little free disk`. A
 refused workspace deletion fails with that error; a refused store waits for
 the next start, and the server logs `server: share diff history with
 workspace repositories`.

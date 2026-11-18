@@ -3,6 +3,7 @@
 package gitengine
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -154,8 +155,8 @@ func TestRemovedCheckoutHistoryBorrowsOnlyTheForkPoint(t *testing.T) {
 	if _, err = e.scratchObjects(store, filepath.Join(filepath.Dir(store), "run1"), "run1"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := e.borrowedRepo(store); err != nil || got != repo {
-		t.Fatalf("the store borrows from %q, %v, not the workspace repository", got, err)
+	if got, borrowErr := e.borrowedRepo(store); borrowErr != nil || got != repo {
+		t.Fatalf("the store borrows from %q, %v, not the workspace repository", got, borrowErr)
 	}
 	orphanForkPoint(t, e, repo)
 	requireHistory(t, e, from, to)
@@ -221,13 +222,39 @@ func TestShareDetachedHistoryShrinksStoresThatCopiedTheForkPoint(t *testing.T) {
 		}
 	}
 	whole := objectBytes(t, store)
+	// Another workspace of the same sources, which sorts first, holds the
+	// fork point too.
+	seedSources(t, e, "ws0")
+	// The upgraded host keeps checkouts/ on another disk, by a symlink.
+	elsewhere := filepath.Join(t.TempDir(), "checkouts")
+	if err = errors.Join(os.Rename(e.cfg.CheckoutsDir, elsewhere), os.Symlink(elsewhere, e.cfg.CheckoutsDir)); err != nil {
+		t.Fatal(err)
+	}
 
 	e, err = New(e.cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = e.Close() })
-	if err = e.ShareDetachedHistory(ctx); err != nil {
+	base, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "refs/aether/base")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := e.reserveShare(ctx, store, strings.TrimSpace(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reserved := e.vmReceiveReserved; reserved*20 > whole {
+		t.Fatalf("the share reserves %d bytes of disk, as if it copied the %d-byte store", reserved, whole)
+	}
+	release()
+	workspaceOf := func(_ context.Context, key domain.RunID) (domain.WorkspaceID, error) {
+		if key != "run1" {
+			t.Errorf("workspace of %s asked", key)
+		}
+		return "ws1", nil
+	}
+	if err = e.ShareDetachedHistory(ctx, workspaceOf); err != nil {
 		t.Fatal(err)
 	}
 	shared := objectBytes(t, store)
@@ -239,12 +266,21 @@ func TestShareDetachedHistoryShrinksStoresThatCopiedTheForkPoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pin, _ := e.git(ctx, repo, "for-each-ref", "--format=%(refname)", historyPinRoot); pin != historyPinRoot+"run1" {
-		t.Fatalf("pins = %q", pin)
+	for ws, want := range map[domain.WorkspaceID]string{"ws0": "", "ws1": historyPinRoot + "run1"} {
+		pinned, pathErr := e.existingRepoPath(ws)
+		if pathErr != nil {
+			t.Fatal(pathErr)
+		}
+		if pin, _ := e.git(ctx, pinned, "for-each-ref", "--format=%(refname)", historyPinRoot); pin != want {
+			t.Fatalf("pins in %s = %q, want %q", ws, pin, want)
+		}
+	}
+	if got, borrowErr := e.borrowedRepo(store); borrowErr != nil || got != repo {
+		t.Fatalf("the store borrows from %q, %v, not its own workspace's repository", got, borrowErr)
 	}
 	orphanForkPoint(t, e, repo)
 	requireHistory(t, e, from, to)
-	if err = e.ShareDetachedHistory(ctx); err != nil {
+	if err = e.ShareDetachedHistory(ctx, workspaceOf); err != nil {
 		t.Fatal(err)
 	}
 	if again := objectBytes(t, store); again != shared {
