@@ -57,6 +57,10 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 		"dd if=/dev/urandom of=/var/tmp/hot bs=1M count=%d iflag=fullblock oflag=direct status=none", coldMiB, hotMiB), 0)
 	time.Sleep(5 * time.Second)
 	before := guestRAMOnHost(t, key)
+	reclaimed := func() uint64 {
+		return parseUint(t, guestFields(t, e, key, "cat /sys/module/damon_reclaim/parameters/bytes_reclaimed_regions", 1)[0])
+	}
+	reclaimedBefore := reclaimed()
 	free := parseUint(t, guestFields(t, e, key, "cat /var/tmp/cold >/dev/null && awk '/^MemFree:/ {print $2}' /proc/meminfo", 1)[0])
 	read := time.Now()
 	if free*5 > memTotalKiB {
@@ -85,9 +89,8 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	t.Logf("reading %d MiB left %d of %d KiB free; the host's share of the guest went %d -> %d -> %d bytes, a third back %s after the read (min_age %s)",
 		coldMiB, free, memTotalKiB, before, held, guestRAMOnHost(t, key), time.Since(read).Round(time.Second), minAge)
 
-	reclaimed := parseUint(t, guestFields(t, e, key, "cat /sys/module/damon_reclaim/parameters/bytes_reclaimed_regions", 1)[0])
-	if reclaimed < coldMiB<<20/3 {
-		t.Errorf("DAMON_RECLAIM paged out %d bytes, under a third of the %d MiB file that left", reclaimed, coldMiB)
+	if n := reclaimed() - reclaimedBefore; n < coldMiB<<20/3 {
+		t.Errorf("DAMON_RECLAIM paged out %d bytes after the read, under a third of the %d MiB file that left", n, coldMiB)
 	}
 	if n := rootReads() - readIn; n > hotMiB<<20/8 {
 		t.Errorf("while the cold file left, the guest read %d bytes from its root disk: DAMON_RECLAIM evicted the file Main keeps reading", n)

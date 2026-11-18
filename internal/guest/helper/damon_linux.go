@@ -14,9 +14,10 @@ const damonReclaimParams = "/sys/module/damon_reclaim/parameters"
 // startDAMONReclaim turns on the kernel's DAMON_RECLAIM, which pages out
 // memory left untouched for a minute so free page reporting returns it to
 // the host; docs/vm-guest.md#memory-the-guest-returns says why each value.
-// A kernel built without it is skipped.
+// It skips a kernel that lacks any of the parameters, and one running
+// MGLRU, under which a read no longer marks a page used for DAMON.
 func startDAMONReclaim() error {
-	if _, err := os.Stat(damonReclaimParams); errors.Is(err, os.ErrNotExist) {
+	if mglru, err := os.ReadFile("/sys/kernel/mm/lru_gen/enabled"); err == nil && strings.TrimSpace(string(mglru)) != "0x0000" {
 		return nil
 	}
 	iomem, err := os.ReadFile("/proc/iomem")
@@ -27,14 +28,20 @@ func startDAMONReclaim() error {
 	if err != nil {
 		return err
 	}
-	for _, p := range []struct{ name, value string }{
+	params := []struct{ name, value string }{
 		{"min_age", "60000000"},
 		{"wmarks_high", "1000"}, {"wmarks_mid", "1000"}, {"wmarks_low", "0"},
 		{"sample_interval", "50000"}, {"aggr_interval", "1000000"},
 		{"monitor_region_end", strconv.FormatUint(end, 10)},
 		{"skip_anon", "Y"},
 		{"enabled", "Y"},
-	} {
+	}
+	for _, p := range params {
+		if _, err := os.Stat(filepath.Join(damonReclaimParams, p.name)); errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+	}
+	for _, p := range params {
 		if err := os.WriteFile(filepath.Join(damonReclaimParams, p.name), []byte(p.value), 0); err != nil {
 			return err
 		}
