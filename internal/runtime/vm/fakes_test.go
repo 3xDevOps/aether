@@ -361,10 +361,11 @@ type fakeVMM struct {
 	// restoring counts the snapshots refused while an on-demand restore
 	// still loads memory.
 	restoring int
-	// snapshotFails refuses every snapshot, and stuck every resume, as a
-	// monitor that stopped answering does.
+	// snapshotFails refuses every snapshot. A snapshot sends on
+	// snapshotHold, when set, as it starts, and finishes once it receives
+	// from it.
 	snapshotFails bool
-	stuck         bool
+	snapshotHold  chan struct{}
 }
 
 func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
@@ -392,10 +393,6 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 		case "vm.pause":
 			v.state = "Paused"
 		case "vm.resume":
-			if v.stuck {
-				http.Error(w, "no answer", http.StatusGatewayTimeout)
-				return
-			}
 			v.state = "Running"
 			if v.failResume {
 				http.Error(w, "reply lost", http.StatusGatewayTimeout)
@@ -409,6 +406,10 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 			if v.snapshotFails {
 				http.Error(w, "no space left on device", http.StatusInternalServerError)
 				return
+			}
+			if v.snapshotHold != nil {
+				v.snapshotHold <- struct{}{}
+				<-v.snapshotHold
 			}
 			var req struct {
 				Destination string `json:"destination_url"`

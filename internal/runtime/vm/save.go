@@ -35,8 +35,6 @@ const (
 // none of the guest's open files, so every access to them fails with EBADF.
 // A frozen VM is thawed only for its monitor to pause it, and saved with
 // what it holds: a sync would let its guest run, and take memory, first.
-// A save that fails after the pause leaves the VM running, or stops one
-// whose monitor no longer resumes it, so it is never left paused.
 func (e *engine) save(ctx context.Context, key string) error {
 	unlock := e.lock(key)
 	defer unlock()
@@ -228,29 +226,11 @@ func (e *engine) savedMemory(key string) (uint64, error) {
 	return uint64(n), nil
 }
 
-// resumeAfter resumes the VM a failed save paused. A snapshot that outlasts
-// chAPITimeout keeps the monitor, which answers one call at a time, from
-// answering the resume for another chAPITimeout: a VM whose monitor then
-// neither answers nor resumes it is stopped, so the caller finds a VM that
-// died, never one paused behind its back.
 func (e *engine) resumeAfter(ctx context.Context, api chAPI, key string, cause error) error {
-	ctx = context.WithoutCancel(ctx)
-	err := api.resume(ctx)
-	if err != nil {
-		stateCtx, cancel := context.WithTimeout(ctx, helperCallTimeout)
-		state, stateErr := api.state(stateCtx)
-		cancel()
-		// The reply was lost, or the monitor answers again and gets the
-		// resume it was too busy for.
-		if stateErr == nil && (state == "Running" || state == "Paused" && api.resume(ctx) == nil) {
-			err = nil
-		}
+	if err := api.resume(context.WithoutCancel(ctx)); err != nil {
+		return fmt.Errorf("vm runtime: save VM %s: %w; and it stays paused: %w", key, cause, err)
 	}
-	if err == nil {
-		return fmt.Errorf("vm runtime: save VM %s: %w", key, cause)
-	}
-	e.kill(ctx, key)
-	return fmt.Errorf("vm runtime: save VM %s: %w; its monitor did not resume it, so the VM was stopped: %w", key, cause, err)
+	return fmt.Errorf("vm runtime: save VM %s: %w", key, cause)
 }
 
 func (e *engine) awaitStopped(ctx context.Context, key string) error {

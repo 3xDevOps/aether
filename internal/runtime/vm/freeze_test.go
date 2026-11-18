@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"context"
 	"os"
 	"slices"
 	"strings"
@@ -75,7 +76,7 @@ func TestSaveOfAFrozenVMPausesItWithoutLettingItsGuestRun(t *testing.T) {
 	}
 }
 
-func TestAFailedSaveLeavesTheVMRunningOrStopsIt(t *testing.T) {
+func TestAFailedSaveLeavesTheVMRunning(t *testing.T) {
 	h := newHarness(t)
 	h.createStarted("run-a", sessionSpec("run-a"))
 	vmm := h.units.vmm("run-a")
@@ -88,19 +89,28 @@ func TestAFailedSaveLeavesTheVMRunningOrStopsIt(t *testing.T) {
 	if h.engine.halted(t.Context(), "run-a") {
 		t.Fatal("a failed save left the VM paused")
 	}
+}
 
-	// A monitor that answers no resume holds a VM nothing can run again.
+// A snapshot runs to its end however long it takes: cut short, the monitor
+// would go on writing it with the VM paused.
+func TestASnapshotOutlastsTheSavesContext(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	vmm := h.units.vmm("run-a")
+	hold := make(chan struct{})
 	vmm.mu.Lock()
-	vmm.stuck = true
+	vmm.snapshotHold = hold
 	vmm.mu.Unlock()
-	err := h.engine.save(t.Context(), "run-a")
-	if err == nil || !strings.Contains(err.Error(), "the VM was stopped") {
-		t.Fatalf("save with a monitor that does not resume = %v", err)
+	ctx, cancel := context.WithCancel(t.Context())
+	saved := make(chan error, 1)
+	go func() { saved <- h.engine.save(ctx, "run-a") }()
+	<-hold
+	cancel()
+	hold <- struct{}{}
+	if err := <-saved; err != nil {
+		t.Fatalf("a save whose context ended during the snapshot = %v", err)
 	}
-	if info, err := h.engine.inspect(t.Context(), "run-a"); err != nil || !info.Exited {
-		t.Fatalf("a VM left paused by a failed save inspects as %+v, %v; want it stopped", info, err)
-	}
-	if rec, _ := h.engine.load("run-a"); rec.Saved {
-		t.Error("the stopped VM counts as saved")
+	if rec, err := h.engine.load("run-a"); err != nil || !rec.Saved {
+		t.Fatalf("after the snapshot the record is %+v, %v; want it saved", rec, err)
 	}
 }
