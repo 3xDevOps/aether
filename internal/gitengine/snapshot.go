@@ -355,7 +355,7 @@ func (e *Engine) writeSnapshotTreeLocked(ctx context.Context, run domain.RunID, 
 	if err = e.initSnapshotStore(ctx, run, checkout, store); err != nil {
 		return "", err
 	}
-	index, err := scratchIndex(store, checkout, run)
+	index, err := e.scratchIndex(store, checkout, run)
 	if err != nil {
 		return "", err
 	}
@@ -626,7 +626,14 @@ func (e *Engine) requireSnapshotTree(ctx context.Context, store, id string) erro
 // provisioning chowned it to the run's user, and objects or fan-out
 // directories created here as the server user would leave the agent unable
 // to commit.
-func scratchObjects(dir, checkout string, run domain.RunID) (string, error) {
+//
+// A store that borrows a workspace repository's objects is the history of a
+// removed checkout and is left as it is: a checkout read racing that removal
+// must not point it at objects that are about to go.
+func (e *Engine) scratchObjects(dir, checkout string, run domain.RunID) (string, error) {
+	if repo, err := e.borrowedRepo(dir); err != nil || repo != "" {
+		return filepath.Join(dir, "index"), err
+	}
 	return borrowObjects(dir, filepath.Join(checkout, ".git", "objects"), run)
 }
 
@@ -667,8 +674,8 @@ func borrowObjects(dir, borrowed string, run domain.RunID) (string, error) {
 
 // scratchIndex is scratchObjects plus a staging index, for the commands
 // that write one.
-func scratchIndex(dir, checkout string, run domain.RunID) (string, error) {
-	index, err := scratchObjects(dir, checkout, run)
+func (e *Engine) scratchIndex(dir, checkout string, run domain.RunID) (string, error) {
+	index, err := e.scratchObjects(dir, checkout, run)
 	if err != nil {
 		return "", err
 	}

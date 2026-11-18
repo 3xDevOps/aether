@@ -148,7 +148,7 @@ func (e *Engine) livePatch(ctx context.Context, run domain.RunID, checkout, base
 		return Patch{}, fmt.Errorf("gitengine: scratch index for session %s: %w", run, err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	index, err := scratchIndex(dir, checkout, run)
+	index, err := e.scratchIndex(dir, checkout, run)
 	if err != nil {
 		return Patch{}, err
 	}

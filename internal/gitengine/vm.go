@@ -246,11 +246,19 @@ func (e *Engine) detachVMStore(ctx context.Context, run domain.RunID) error {
 	if err != nil {
 		return err
 	}
+	if err = e.retainRecordedSnapshotTrees(ctx, meta.Workspace, run, store); err != nil {
+		return err
+	}
 	repo, err := e.repoPath(meta.Workspace)
 	if err != nil {
 		return err
 	}
-	if err = e.shareHistory(ctx, run, store, repo); err != nil {
+	// Evidence that read the final tree before this removal may still read it.
+	var keep []string
+	if meta.FinalTree != "" && e.hasObject(ctx, store, meta.FinalTree) {
+		keep = append(keep, meta.FinalTree)
+	}
+	if err = e.shareHistory(ctx, run, store, repo, keep...); err != nil {
 		return fmt.Errorf("gitengine: detach the history of session %s: %w", run, err)
 	}
 	return nil

@@ -23,7 +23,7 @@ func (e *Engine) initSnapshotStore(ctx context.Context, run domain.RunID, checko
 	if err := e.ensureScratchGitDir(ctx, store, checkout); err != nil {
 		return err
 	}
-	if _, err := scratchObjects(store, checkout, run); err != nil {
+	if _, err := e.scratchObjects(store, checkout, run); err != nil {
 		return err
 	}
 	meta, err := e.readRunMeta(run)
@@ -168,13 +168,15 @@ func (e *Engine) detachSnapshotStore(ctx context.Context, run domain.RunID, chec
 // git gc keeps what refs reach, so the tree outlives every branch that held it.
 const historyPinRoot = "refs/aether/sessions/"
 
-// shareHistory repacks the store of key to exactly what its refs/aether refs
-// reach beyond the fork-point tree, which it then borrows from repo under a
-// pin. With repo empty, or a repo that lacks the tree, the store keeps all of
-// it and borrows nothing. Older packs, and loose objects a pack holds, go.
-// The caller holds repoMaintenanceMu, so no evidence prune that started
-// before the pin can drop the tree, and then the snapshot lock of key.
-func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo string) error {
+// shareHistory repacks the store of key to exactly what keep and its
+// refs/aether refs reach beyond the fork-point tree, which it then borrows
+// from repo under a pin. With repo empty, or a repo that lacks the tree, the
+// store keeps all of it and borrows nothing. Older packs, and loose objects a
+// pack holds, go, so a caller that can gives every tree the event log
+// recorded a ref first. The caller holds repoMaintenanceMu, so no evidence
+// prune that started before the pin can drop the tree, and then the snapshot
+// lock of key.
+func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo string, keep ...string) error {
 	base, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", "refs/aether/base")
 	if err != nil {
 		return err
@@ -187,6 +189,9 @@ func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo
 	if err != nil {
 		return err
 	}
+	for _, id := range keep {
+		roots += id + "\n"
+	}
 	if repo != "" {
 		if _, err = e.git(ctx, repo, "update-ref", historyPinRoot+string(key), base); err != nil {
 			return err
@@ -198,7 +203,8 @@ func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	name, err := e.gitInput(ctx, store, e.gitEnv(), []byte(roots), "pack-objects", "--revs", "--non-empty", filepath.Join(packs, "pack"))
+	// One thread: this runs in the background, on hosts short of memory too.
+	name, err := e.gitInput(ctx, store, e.gitEnv(), []byte(roots), "pack-objects", "--revs", "--non-empty", "--threads=1", filepath.Join(packs, "pack"))
 	if err != nil {
 		return err
 	}
@@ -222,19 +228,57 @@ func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo
 	return err
 }
 
-// unpinHistory drops the pin of key in the workspace repository its store
-// borrows from, if it borrows from one.
-func (e *Engine) unpinHistory(ctx context.Context, key domain.RunID, store string) error {
-	data, err := os.ReadFile(filepath.Join(store, "objects", "info", "alternates"))
+// borrowedRepo is the workspace repository whose objects the store at dir
+// borrows, or "" when it borrows none.
+func (e *Engine) borrowedRepo(dir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "objects", "info", "alternates"))
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return "", nil
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	repo := filepath.Dir(strings.TrimSpace(string(data)))
 	if filepath.Dir(repo) != filepath.Clean(e.cfg.ReposDir) {
-		return nil
+		return "", nil
+	}
+	return repo, nil
+}
+
+// reserveRepack reserves, against the receive floor, the disk that a rewrite
+// of the packs in dirs may write into store.
+func (e *Engine) reserveRepack(store string, dirs ...string) (func(), error) {
+	var size int64
+	for _, dir := range dirs {
+		packs, err := os.ReadDir(filepath.Join(dir, "objects", "pack"))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		for _, pack := range packs {
+			info, err := pack.Info()
+			if err != nil {
+				return nil, err
+			}
+			size += info.Size()
+		}
+	}
+	grant, err := e.reserveVMReceive(store, size)
+	if err != nil {
+		return nil, err
+	}
+	if grant < size {
+		e.releaseVMReceive(grant)
+		return nil, fmt.Errorf("%w: the server has too little free disk", ErrSnapshotStorageLimit)
+	}
+	return func() { e.releaseVMReceive(grant) }, nil
+}
+
+// unpinHistory drops the pin of key in the workspace repository its store
+// borrows from, if it borrows from one.
+func (e *Engine) unpinHistory(ctx context.Context, key domain.RunID, store string) error {
+	repo, err := e.borrowedRepo(store)
+	if err != nil || repo == "" {
+		return err
 	}
 	if _, err = os.Stat(repo); errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -243,25 +287,27 @@ func (e *Engine) unpinHistory(ctx context.Context, key domain.RunID, store strin
 	return err
 }
 
-// unshareHistory gives every store pinned in repo its own copy of what it
-// borrows, before repo is removed.
+// unshareHistory gives every store that borrows repo's objects its own copy
+// of what it borrows, before repo is removed. The stores, not the pins in
+// repo, say who borrows: a repo whose removal stopped halfway may not read.
 func (e *Engine) unshareHistory(ctx context.Context, repo string) error {
-	if _, err := os.Stat(repo); errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	keys, err := e.git(ctx, repo, "for-each-ref", "--format=%(refname:lstrip=3)", historyPinRoot)
+	entries, err := os.ReadDir(e.cfg.CheckoutsDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("gitengine: list diff history: %w", err)
 	}
-	for name := range strings.FieldsSeq(keys) {
-		if err = e.unshareStore(ctx, domain.RunID(name)); err != nil {
-			return fmt.Errorf("gitengine: copy the fork point into the history of session %s: %w", name, err)
+	for _, entry := range entries {
+		key, ok := strings.CutSuffix(entry.Name(), snapshotStoreSuffix)
+		if !ok || !entry.IsDir() {
+			continue
+		}
+		if err = e.unshareStore(ctx, domain.RunID(key), repo); err != nil {
+			return fmt.Errorf("gitengine: copy the fork point into the history of session %s: %w", key, err)
 		}
 	}
 	return nil
 }
 
-func (e *Engine) unshareStore(ctx context.Context, key domain.RunID) error {
+func (e *Engine) unshareStore(ctx context.Context, key domain.RunID, repo string) error {
 	store, err := e.snapshotStorePath(key)
 	if err != nil {
 		return err
@@ -269,11 +315,14 @@ func (e *Engine) unshareStore(ctx context.Context, key domain.RunID) error {
 	lock := e.snapshotLock(key)
 	lock.Lock()
 	defer lock.Unlock()
-	// A pin outlives its store when a share failed before the store
-	// borrowed anything and the session was deleted since.
-	if _, err = os.Stat(filepath.Join(store, "HEAD")); errors.Is(err, fs.ErrNotExist) {
-		return nil
+	if borrowed, borrowErr := e.borrowedRepo(store); borrowErr != nil || borrowed != filepath.Clean(repo) {
+		return borrowErr
 	}
+	release, err := e.reserveRepack(store, store, repo)
+	if err != nil {
+		return err
+	}
+	defer release()
 	return e.shareHistory(ctx, key, store, "")
 }
 
@@ -342,35 +391,16 @@ func (e *Engine) shareDetachedStore(ctx context.Context, key domain.RunID, repos
 	if err != nil {
 		return err
 	}
-	repo := ""
-	for _, candidate := range repos {
-		if e.hasObject(ctx, candidate, strings.TrimSpace(base)) {
-			repo = candidate
-			break
+	for _, repo := range repos {
+		if !e.hasObject(ctx, repo, strings.TrimSpace(base)) {
+			continue
 		}
-	}
-	if repo == "" {
-		return nil
-	}
-	packs, err := os.ReadDir(filepath.Join(store, "objects", "pack"))
-	if err != nil {
-		return err
-	}
-	var size int64
-	for _, pack := range packs {
-		info, infoErr := pack.Info()
-		if infoErr != nil {
-			return infoErr
+		release, reserveErr := e.reserveRepack(store, store)
+		if reserveErr != nil {
+			return reserveErr
 		}
-		size += info.Size()
+		defer release()
+		return e.shareHistory(ctx, key, store, repo)
 	}
-	grant, err := e.reserveVMReceive(store, size)
-	if err != nil {
-		return err
-	}
-	defer e.releaseVMReceive(grant)
-	if grant < size {
-		return fmt.Errorf("%w: the server has too little free disk", ErrSnapshotStorageLimit)
-	}
-	return e.shareHistory(ctx, key, store, repo)
+	return nil
 }

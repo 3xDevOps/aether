@@ -168,7 +168,7 @@ func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T
 	if err := e.ensureScratchGitDir(ctx, store, checkout); err != nil {
 		t.Fatal(err)
 	}
-	index, err := scratchIndex(store, checkout, "run1")
+	index, err := e.scratchIndex(store, checkout, "run1")
 	if err != nil {
 		t.Fatal(err)
 	}

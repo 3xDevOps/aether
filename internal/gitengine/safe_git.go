@@ -269,7 +269,7 @@ func (e *Engine) checkoutHead(ctx context.Context, run domain.RunID, checkout st
 	if err != nil {
 		return "", err
 	}
-	if _, objectsErr := scratchObjects(store, checkout, run); objectsErr != nil {
+	if _, objectsErr := e.scratchObjects(store, checkout, run); objectsErr != nil {
 		return "", objectsErr
 	}
 	if ensureErr := e.ensureScratchGitDir(ctx, store, checkout); ensureErr != nil {
@@ -416,7 +416,7 @@ func (e *Engine) gitCheckoutBounded(ctx context.Context, run domain.RunID, check
 	if err != nil {
 		return "", false, err
 	}
-	if _, objectsErr := scratchObjects(store, checkout, run); objectsErr != nil {
+	if _, objectsErr := e.scratchObjects(store, checkout, run); objectsErr != nil {
 		return "", false, objectsErr
 	}
 	index := filepath.Join(checkout, ".git", "index")

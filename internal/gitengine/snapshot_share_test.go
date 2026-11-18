@@ -150,6 +150,10 @@ func TestRemovedCheckoutHistoryBorrowsOnlyTheForkPoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A checkout read that raced the removal leaves the store as it is.
+	if _, err = e.scratchObjects(store, filepath.Join(filepath.Dir(store), "run1"), "run1"); err != nil {
+		t.Fatal(err)
+	}
 	if got, _ := os.ReadFile(filepath.Join(store, "objects", "info", "alternates")); strings.TrimSpace(string(got)) != filepath.Join(repo, "objects") {
 		t.Fatalf("the store borrows %q, not the workspace repository", got)
 	}
@@ -239,4 +243,11 @@ func TestShareDetachedHistoryShrinksStoresThatCopiedTheForkPoint(t *testing.T) {
 		t.Fatalf("history still borrows from a removed workspace: %v", err)
 	}
 	requireHistory(t, e, "run1", from, to)
+	// A removal that stopped halfway leaves a directory git cannot read.
+	if err = os.MkdirAll(filepath.Join(repo, "objects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.RemoveWorkspaceRepo(ctx, "ws1"); err != nil {
+		t.Fatalf("removing what is left of a workspace repository: %v", err)
+	}
 }
