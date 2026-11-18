@@ -41,6 +41,8 @@ type saveRuntime struct {
 
 func (r *saveRuntime) Saves(runtime.ID) bool { return true }
 
+func (r *saveRuntime) SavedMemory(runtime.ID) (uint64, error) { return 0, nil }
+
 func (r *saveRuntime) Save(_ context.Context, id runtime.ID) error {
 	r.saveMu.Lock()
 	saving, release, saveErr := r.saving, r.release, r.saveErr

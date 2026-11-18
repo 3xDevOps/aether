@@ -406,6 +406,11 @@ can drop and counts what the guest's figure misses: guest page cache,
 which the guest counts as available but lives in the VM's RAM, and the
 memory of Cloud Hypervisor and the VM's file services. A VM whose cgroup
 cannot be read counts as its unit's cap, its memory plus 512 MiB.
+`SavedMemory` reports the disk a saved VM's state takes, which a restore
+loads back, after waiting for a save or restore of that VM under way. A
+saved state that cannot be read counts as the unit's cap, one that is gone
+as nothing. A wake is admitted only when that fits
+([failure-handling.md](failure-handling.md#recover-from-memory-pressure)).
 
 A restored VM's clock stopped while it was saved. The server calls
 `SetClock`, through `guest.Client.SyncClock`, after every restore. Before a

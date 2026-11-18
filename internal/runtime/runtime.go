@@ -88,11 +88,14 @@ type MemoryUseRuntime interface {
 // state to disk and ends it, then later restores it with every process
 // where it was. A container that was saved and not restored is stopped:
 // Inspect reports it exited and Wait returns; Stop or Start discards the
-// saved state. Saves reports whether a container can be saved at all.
+// saved state. Saves reports whether a container can be saved at all, and
+// SavedMemory the memory a Restore loads back, 0 for one not saved, once a
+// save or restore under way has finished; with an error, the most it may.
 type SaveRuntime interface {
 	Saves(ID) bool
 	Save(context.Context, ID) error
 	Restore(context.Context, ID) error
+	SavedMemory(ID) (uint64, error)
 }
 
 // CaptureRuntime optionally starts a stopped session container with a main

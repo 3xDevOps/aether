@@ -107,7 +107,7 @@ func TestCapacityDiskAdmissionBoundaries(t *testing.T) {
 						host.Filesystems = append(host.Filesystems, runtime.FilesystemCapacity{Name: resource, TotalBytes: tc.total, FreeBytes: free})
 					}
 					s := &Scheduler{cfg: Config{Runtime: &admissionRuntime{host: host}, MinFreeBytes: tc.override, filesystemCapacity: measure}, capacityGate: make(chan struct{}, 1)}
-					release, err := s.tryReserveCapacity(t.Context())
+					release, err := s.tryReserveCapacity(t.Context(), &memoryClaim{bytes: startupMemoryBytes})
 					if delta != 0 {
 						if !errors.Is(err, ErrDiskFull) || !strings.Contains(err.Error(), resource) {
 							t.Fatalf("one byte below headroom: %v", err)
@@ -184,7 +184,7 @@ func TestCapacityRuntimeWithoutProbeStillChecksData(t *testing.T) {
 		}
 		return healthyAdmissionData(path)
 	}}, capacityGate: make(chan struct{}, 1)}
-	if _, err := s.tryReserveCapacity(t.Context()); !errors.Is(err, ErrDiskFull) {
+	if _, err := s.tryReserveCapacity(t.Context(), &memoryClaim{bytes: startupMemoryBytes}); !errors.Is(err, ErrDiskFull) {
 		t.Fatalf("data guard bypassed by custom runtime: %v", err)
 	}
 	s.cfg.MinFreeBytes = -1
@@ -613,13 +613,13 @@ func TestCapacityMemoryPressureAdmission(t *testing.T) {
 	s := &Scheduler{cfg: Config{Runtime: &admissionRuntime{host: healthyAdmissionHost()}, MinFreeBytes: -1}, capacityGate: make(chan struct{}, 1)}
 
 	writeFile(serverPressure, psi("99.00", "10.00"))
-	_, err := s.tryReserveCapacity(t.Context())
+	_, err := s.tryReserveCapacity(t.Context(), &memoryClaim{bytes: startupMemoryBytes})
 	if !errors.Is(err, ErrMemoryPressure) || !strings.Contains(err.Error(), "10.0% of the last 60s") || s.capacityReservations != 0 {
 		t.Fatalf("high pressure: %v (reservations %d)", err, s.capacityReservations)
 	}
 
 	writeFile(serverPressure, psi("99.00", "9.99"))
-	release, err := s.tryReserveCapacity(t.Context())
+	release, err := s.tryReserveCapacity(t.Context(), &memoryClaim{bytes: startupMemoryBytes})
 	if err != nil {
 		t.Fatalf("a short burst with low avg60 refused: %v", err)
 	}
@@ -628,7 +628,7 @@ func TestCapacityMemoryPressureAdmission(t *testing.T) {
 	// A session thrashing inside its own limit stalls the host-wide file, not the server's cgroup.
 	writeFile(serverPressure, psi("0.00", "0.00"))
 	writeFile(filepath.Join(proc, "pressure", "memory"), psi("100.00", "100.00"))
-	release, err = s.tryReserveCapacity(t.Context())
+	release, err = s.tryReserveCapacity(t.Context(), &memoryClaim{bytes: startupMemoryBytes})
 	if err != nil {
 		t.Fatalf("host-wide pressure refused with the server's cgroup idle: %v", err)
 	}
@@ -637,7 +637,7 @@ func TestCapacityMemoryPressureAdmission(t *testing.T) {
 	if err = os.Remove(serverPressure); err != nil {
 		t.Fatal(err)
 	}
-	release, err = s.tryReserveCapacity(t.Context())
+	release, err = s.tryReserveCapacity(t.Context(), &memoryClaim{bytes: startupMemoryBytes})
 	if err != nil {
 		t.Fatalf("cgroup without memory.pressure refused: %v", err)
 	}
@@ -646,7 +646,7 @@ func TestCapacityMemoryPressureAdmission(t *testing.T) {
 	// A server in the root cgroup would read the host-wide file.
 	writeFile(filepath.Join(proc, strconv.Itoa(os.Getpid()), "cgroup"), "0::/\n")
 	writeFile(filepath.Join(cgroups, "memory.pressure"), psi("100.00", "100.00"))
-	release, err = s.tryReserveCapacity(t.Context())
+	release, err = s.tryReserveCapacity(t.Context(), &memoryClaim{bytes: startupMemoryBytes})
 	if err != nil {
 		t.Fatalf("root cgroup refused: %v", err)
 	}
@@ -654,7 +654,7 @@ func TestCapacityMemoryPressureAdmission(t *testing.T) {
 	writeFile(filepath.Join(proc, strconv.Itoa(os.Getpid()), "cgroup"), "0::/system.slice/aether-server.service\n")
 
 	writeFile(serverPressure, "garbage\n")
-	if _, err = s.tryReserveCapacity(t.Context()); !errors.Is(err, ErrCapacityUnknown) {
+	if _, err = s.tryReserveCapacity(t.Context(), &memoryClaim{bytes: startupMemoryBytes}); !errors.Is(err, ErrCapacityUnknown) {
 		t.Fatalf("malformed memory.pressure: %v, want ErrCapacityUnknown", err)
 	}
 }

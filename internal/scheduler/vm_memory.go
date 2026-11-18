@@ -42,6 +42,9 @@ func (s *Scheduler) watchVMMemory(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+			s.capacityGate <- struct{}{}
+			s.claimedMemory(ctx)
+			<-s.capacityGate
 			s.guardVMMemory(ctx)
 		}
 	}
@@ -133,20 +136,32 @@ func (s *Scheduler) memoryStall(now time.Time) (float64, bool) {
 	return *stall, now.Sub(s.vmMemoryStallSince) >= memoryStallFor
 }
 
-// saveIdleVMs is admission's one pass when memory refused it: it saves
-// session VMs nobody is using, the longest idle first, until twice the
-// floor is free or none is left, and reports whether it saved any. It holds
+// saveIdleVMs is admission's one pass when memory refused it, with need
+// the bytes the admission must find above the floor. It saves session VMs
+// nobody is using, the longest idle first, until twice the floor and need
+// are free or none is left, and none when all of them together hold too
+// little to admit it. It reports whether it saved any. It holds
 // vmMemoryMu, so concurrent admissions and the guard each measure what the
 // others' saves freed.
-func (s *Scheduler) saveIdleVMs(ctx context.Context) bool {
+func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 	if _, ok := s.cfg.Runtime.(runtime.SaveRuntime); !ok {
 		return false
 	}
 	s.vmMemoryMu.Lock()
 	defer s.vmMemoryMu.Unlock()
+	candidates := s.memoryCandidates(ctx)
+	var idle uint64
+	for _, c := range candidates {
+		if c.idle {
+			idle += c.memory
+		}
+	}
+	if available, floor, err := s.hostMemory(); err != nil || available+idle < floor+need {
+		return false
+	}
 	saved := false
-	for _, c := range s.memoryCandidates(ctx) {
-		if available, floor, err := s.hostMemory(); err != nil || available >= 2*floor || !c.idle || ctx.Err() != nil {
+	for _, c := range candidates {
+		if available, floor, err := s.hostMemory(); err != nil || available >= 2*floor+need || !c.idle || ctx.Err() != nil {
 			break
 		}
 		if s.saveFits(c) && s.saveCandidate(ctx, c, false) {

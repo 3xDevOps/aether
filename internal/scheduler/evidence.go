@@ -145,11 +145,11 @@ func finishedAt(r *domain.Run) time.Time {
 
 // bootToCapture boots run's stopped VM without its main command, makes the
 // session's final commit and publishes its branch as a close does, captures
-// it, and stops the VM. One capture boot runs at a time on the server, so
-// each sees the memory the last one took, and one that waited for another
-// captures first, in case that boot made the commit. A host short of
-// memory defers the boot to the next try, as admission refuses a launch. A
-// boot that fails otherwise backs off; one a shutdown cut short does not.
+// it, and stops the VM. One capture boot runs at a time on the server, and
+// one that waited for another captures first, in case that boot made the
+// commit. A host short of memory, as reserveBoot measures it, defers the
+// boot to the next try. A boot that fails otherwise backs off; one a
+// shutdown cut short does not.
 func (s *Scheduler) bootToCapture(ctx context.Context, booter runtime.CaptureRuntime, r *domain.Run, cid runtime.ID, cause error, capture func(context.Context) (protocol.EvidencePacket, error)) (protocol.EvidencePacket, error) {
 	waited := false
 	select {
@@ -174,13 +174,11 @@ func (s *Scheduler) bootToCapture(ctx context.Context, booter runtime.CaptureRun
 			return packet, err
 		}
 	}
-	available, floor, err := s.hostMemory()
-	if err == nil && available < floor+startupMemoryBytes {
-		err = fmt.Errorf("%w: %d available bytes; reserve %d bytes plus %d bytes", ErrMemoryPressure, available, floor, startupMemoryBytes)
-	}
+	release, err := s.reserveBoot(ctx, cid)
 	if err != nil {
 		return protocol.EvidencePacket{}, fmt.Errorf("%w; Cloudfield boots the VM to commit it once the host has memory: %w", cause, err)
 	}
+	defer release()
 	msg := "wip: "
 	if r.Status == domain.RunCompleted || r.Status == domain.RunMerged {
 		msg = "aether: "

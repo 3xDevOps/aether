@@ -193,7 +193,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	if findErr == nil {
 		kept = cid
 	}
-	release, err := s.tryReserveCapacity(ctx)
+	release, err := s.tryReserveCapacity(ctx, &memoryClaim{bytes: startupMemoryBytes})
 	if err != nil {
 		return nil, err
 	}

@@ -233,6 +233,8 @@ type Scheduler struct {
 	idleCloseMu          sync.Mutex
 	pressureSkipLog      sync.Once
 	capacityReservations uint64
+	// memoryClaims is guarded by capacityGate.
+	memoryClaims []*memoryClaim
 
 	// vmDiskMu serializes the disk guard's checks. vmDiskBase is each VM's
 	// disk use when the filesystem first fell below the reserve, held while

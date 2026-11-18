@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
 const (
@@ -145,6 +149,41 @@ func syncSnapshot(dir string) error {
 		}
 	}
 	return nil
+}
+
+// savedMemory is the disk the saved state of a VM holds, once a save or
+// restore under way has finished. Cloud Hypervisor writes only the memory
+// the host held for the guest, and a restore loads all of it back. A saved
+// state that cannot be read counts as the unit's cap, as memoryUse counts
+// a cgroup it cannot read; one that is gone counts nothing, since the wake
+// then starts the VM from its disks.
+func (e *engine) savedMemory(key string) (uint64, error) {
+	unlock := e.lock(key)
+	defer unlock()
+	rec, err := e.load(key)
+	if errors.Is(err, runtime.ErrNotFound) {
+		return 0, nil
+	}
+	if err != nil || !rec.Saved {
+		return 0, err
+	}
+	entries, err := os.ReadDir(e.path(key, snapshotDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	var n int64
+	for _, entry := range entries {
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			err = infoErr
+			break
+		}
+		n += info.Sys().(*syscall.Stat_t).Blocks * 512
+	}
+	if err != nil {
+		return uint64(rec.MemoryMiB+unitOverheadMiB) << 20, fmt.Errorf("vm runtime: saved memory of VM %s: %w", key, err)
+	}
+	return uint64(n), nil
 }
 
 func (e *engine) resumeAfter(ctx context.Context, api chAPI, key string, cause error) error {

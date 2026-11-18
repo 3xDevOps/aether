@@ -275,9 +275,10 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 		s.mu.Unlock()
 		return woke{}, fmt.Errorf("%w: the session is ending", ErrNoLiveEnvironment)
 	}
+	cid := entry.containerID
 	s.mu.Unlock()
 
-	release, err := s.reserveCapacity(ctx)
+	release, err := s.reserveWake(ctx, cid)
 	if err != nil {
 		return woke{}, err
 	}
