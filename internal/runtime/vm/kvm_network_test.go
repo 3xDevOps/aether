@@ -182,9 +182,9 @@ func docker(t *testing.T, args ...string) string {
 }
 
 // TestKVMNetwork checks what docs/environments.md promises a session VM's
-// network: open VMs reach the host and whatever it routes to, however it
-// routes, but not each other, a Docker container, another bridge network or
-// the metadata service; a VM with egress control
+// network: open VMs reach the host and whatever it routes to by its own
+// links, however it routes, but not each other, a Docker container, a routed
+// veth, a bridge of veths or the metadata service; a VM with egress control
 // reaches only the proxy, which names its run; port forwards reach a dev
 // server in either; and a new engine rebuilds the firewall.
 func TestKVMNetwork(t *testing.T) {
@@ -303,20 +303,34 @@ func TestKVMNetwork(t *testing.T) {
 	expect("an open VM reaches the internet", probe(t, e, "run-vmnet-a", "dial example.com:80"), true)
 	expect("an open VM reaches the host", probe(t, e, "run-vmnet-a", "dial "+hostPort), true)
 	splitRoutes(t)
+	// Each ensureNetwork here is what the next VM boot does.
+	if err = e.ensureNetwork(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	for what, target := range map[string]string{"a server through split routes": "198.51.100.1:8080", "a server through a policy-routed split route": "198.51.100.129:8080"} {
 		expect("the host reaches "+what, dial(target), true)
 		expect("an open VM reaches "+what, probe(t, e, "run-vmnet-a", "dial "+target), true)
 		egressTargets[what] = target
 	}
+	targets["a routed veth"], egressTargets["a routed veth"] = "192.0.2.2:8080", "192.0.2.2:8080"
+	expect("the host reaches a routed veth", dial("192.0.2.2:8080"), true)
 	expect("the host reaches a bridge of veths", dial("192.0.2.10:8080"), true)
 	expect("an open VM reaches a bridge of veths", probe(t, e, "run-vmnet-a", "dial 192.0.2.10:8080"), false)
-	if out, linkErr := exec.Command("sh", "-c", "ip link add vmtestnic type dummy && ip link set vmtestnic master vmtestbr up").CombinedOutput(); linkErr != nil {
-		t.Fatalf("bridge a NIC: %v: %s", linkErr, out)
+	for _, port := range []struct {
+		what, cmd string
+		reached   bool
+	}{
+		{"a dummy port", "ip link add vmtestdum type dummy && ip link set vmtestdum master vmtestbr up", false},
+		{"a VLAN port", "ip link add vmtestdum2 type dummy && ip link add link vmtestdum2 name vmtestnic type vlan id 8 && ip link set vmtestdum2 up && ip link set vmtestnic master vmtestbr up", true},
+	} {
+		if out, linkErr := exec.Command("sh", "-c", port.cmd).CombinedOutput(); linkErr != nil {
+			t.Fatalf("%s: %v: %s", port.cmd, linkErr, out)
+		}
+		if err = e.ensureNetwork(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		expect("an open VM reaches a bridge with "+port.what, probe(t, e, "run-vmnet-a", "dial 192.0.2.10:8080"), port.reached)
 	}
-	if err = e.ensureNetwork(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	expect("an open VM reaches a bridge with a NIC once a VM boots", probe(t, e, "run-vmnet-a", "dial 192.0.2.10:8080"), true)
 	for what, target := range targets {
 		expect("an open VM reaches "+what, probe(t, e, "run-vmnet-a", "dial "+target), false)
 	}
@@ -449,17 +463,18 @@ func TestKVMNetwork(t *testing.T) {
 	}
 }
 
-// splitRoutes gives a host that already runs VMs what a VPN and Docker give
-// it: a network namespace serving on :8080 behind a veth that holds no
-// default route, reached through split prefixes, one in the main table and
-// one through a policy rule as wg-quick and Tailscale route; and a bridge
-// whose only port is a veth into it. The bridge gets a NIC as vmtestnic.
+// splitRoutes gives a host that already runs VMs what a VPN, Kubernetes and
+// Docker give it: a network namespace serving on :8080 behind a veth that
+// holds no default route, as a Calico pod's does; a VLAN over it, standing in
+// for a VPN link, that reaches the namespace through split prefixes, one in
+// the main table and one through a policy rule as wg-quick and Tailscale
+// route; and a bridge whose only port is a veth into it.
 func splitRoutes(t *testing.T) {
 	t.Helper()
 	const ns = "aether-vmtest"
 	t.Cleanup(func() {
 		_ = exec.Command("ip", "rule", "del", "to", "198.51.100.128/25", "lookup", "1000").Run()
-		for _, link := range []string{"vmtestbr", "vmtestnic"} {
+		for _, link := range []string{"vmtestbr", "vmtestdum", "vmtestdum2"} {
 			_ = exec.Command("ip", "link", "del", link).Run()
 		}
 		_ = exec.Command("ip", "netns", "del", ns).Run()
@@ -467,22 +482,28 @@ func splitRoutes(t *testing.T) {
 	for _, args := range [][]string{
 		{"netns", "add", ns},
 		{"link", "add", "vmtestwan", "type", "veth", "peer", "name", "wan", "netns", ns},
+		{"link", "add", "link", "vmtestwan", "name", "vmtestvpn", "type", "vlan", "id", "7"},
+		{"-n", ns, "link", "add", "link", "wan", "name", "vpn", "type", "vlan", "id", "7"},
 		{"link", "add", "vmtestlan", "type", "veth", "peer", "name", "lan", "netns", ns},
 		{"link", "add", "vmtestbr", "type", "bridge"},
 		{"link", "set", "vmtestlan", "master", "vmtestbr", "up"},
 		{"link", "set", "vmtestbr", "up"},
 		{"link", "set", "vmtestwan", "up"},
+		{"link", "set", "vmtestvpn", "up"},
 		{"addr", "add", "192.0.2.1/30", "dev", "vmtestwan"},
+		{"addr", "add", "192.0.2.5/30", "dev", "vmtestvpn"},
 		{"addr", "add", "192.0.2.9/29", "dev", "vmtestbr"},
 		{"-n", ns, "addr", "add", "192.0.2.2/30", "dev", "wan"},
+		{"-n", ns, "addr", "add", "192.0.2.6/30", "dev", "vpn"},
 		{"-n", ns, "addr", "add", "192.0.2.10/29", "dev", "lan"},
 		{"-n", ns, "addr", "add", "198.51.100.1/32", "dev", "lo"},
 		{"-n", ns, "addr", "add", "198.51.100.129/32", "dev", "lo"},
 		{"-n", ns, "link", "set", "lo", "up"},
 		{"-n", ns, "link", "set", "wan", "up"},
+		{"-n", ns, "link", "set", "vpn", "up"},
 		{"-n", ns, "link", "set", "lan", "up"},
-		{"route", "add", "198.51.100.0/25", "via", "192.0.2.2"},
-		{"route", "add", "198.51.100.128/25", "via", "192.0.2.2", "table", "1000"},
+		{"route", "add", "198.51.100.0/25", "via", "192.0.2.6"},
+		{"route", "add", "198.51.100.128/25", "via", "192.0.2.6", "table", "1000"},
 		{"rule", "add", "to", "198.51.100.128/25", "lookup", "1000"},
 	} {
 		if out, err := exec.Command("ip", args...).CombinedOutput(); err != nil {

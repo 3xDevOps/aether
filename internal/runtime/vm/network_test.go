@@ -169,11 +169,11 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 		`iifname "aethervm*" meta nfproto ipv6 drop`,
 		`iifname "aethervm*" fib saddr . iif oif missing drop`,
 		`meta l4proto { tcp, udp } th dport 53 accept`,
-		`iifname "aethervm*" ip daddr { 169.254.0.0/16, 100.100.100.200, 168.63.129.16 } drop`,
+		`iifname "aethervm*" ip daddr { 169.254.0.0/16, 100.100.100.200, 168.63.129.16, 100.100.100.100 } drop`,
 		`iifname "aethervme*" ct state established,related meta mark set meta mark | 0x1000000 accept`,
 		`iifname "aethervme*" ip daddr 10.200.0.1 tcp dport 3128 meta mark set meta mark | 0x1000000 accept`,
-		"iifname \"aethervme*\" reject with icmpx admin-prohibited\n\t\tiifname \"aethervm*\" tcp flags syn tcp option maxseg size set rt mtu\n\t\tiifname \"aethervm*\" oifname \"aethervm*\" reject with icmpx admin-prohibited\n\t\tiifname \"aethervm*\" meta oifkind \"bridge\"",
-		"reject with icmpx admin-prohibited\n\t\tiifname \"aethervm*\" meta mark set meta mark | 0x1000000 accept\n\t\toifname \"aethervm*\" ct state established,related",
+		"iifname \"aethervme*\" reject with icmpx admin-prohibited\n\t\tiifname \"aethervm*\" tcp flags syn tcp option maxseg size set rt mtu\n",
+		"iifname \"aethervm*\" reject with icmpx admin-prohibited\n\t\toifname \"aethervm*\" ct state established,related",
 		`oifname "aethervm*" ct state established,related meta mark set meta mark | 0x1000000 accept`,
 		`oifname "aethervm*" drop`,
 	} {
@@ -183,31 +183,55 @@ func TestEnsureNetworkAddsWhatIsMissingOnce(t *testing.T) {
 	}
 	// The DNS exception must come before the link-local drop; after it, a
 	// resolver inside the blocked ranges would be cut off.
-	if accept, drop := strings.Index(string(rules), "th dport 53 accept"), strings.Index(string(rules), "169.254.0.0/16, 100.100.100.200, 168.63.129.16 } drop"); accept < 0 || drop < 0 || accept > drop {
+	if accept, drop := strings.Index(string(rules), "th dport 53 accept"), strings.Index(string(rules), "169.254.0.0/16, 100.100.100.200, 168.63.129.16, 100.100.100.100 } drop"); accept < 0 || drop < 0 || accept > drop {
 		t.Errorf("the DNS exception must precede the link-local drop (accept=%d, drop=%d):\n%s", accept, drop, rules)
 	}
 }
 
-func TestNICBridgesHoldAPortOtherThanAVethOrTap(t *testing.T) {
+func TestUplinksAreTheHostsOwnLinks(t *testing.T) {
 	link := func(name string, index, master int) netlink.LinkAttrs {
 		return netlink.LinkAttrs{Name: name, Index: index, MasterIndex: master}
 	}
-	links := []netlink.Link{
-		&netlink.Bridge{LinkAttrs: link("br-ens3", 1, 0)},
-		&netlink.Device{LinkAttrs: link("ens3", 2, 1)},
-		&netlink.Device{LinkAttrs: link("ens4", 3, 1)},
-		&netlink.Bridge{LinkAttrs: link("docker0", 4, 0)},
-		&netlink.Veth{LinkAttrs: link("veth1", 5, 4)},
-		&netlink.Bridge{LinkAttrs: link("virbr0", 6, 0)},
-		&netlink.Tuntap{LinkAttrs: link("vnet0", 7, 6)},
-		&netlink.Bridge{LinkAttrs: link("br-empty", 8, 0)},
-		&netlink.Bridge{LinkAttrs: link("lxdbr0", 9, 0)},
-		&netlink.Veth{LinkAttrs: link("veth2", 10, 9)},
-		&netlink.Dummy{LinkAttrs: link("lxdnic", 11, 9)},
-		&netlink.Bond{LinkAttrs: link("bond0", 12, 0)},
-		&netlink.Device{LinkAttrs: link("eth1", 13, 12)},
+	tun := func(name string, index int, encap string) *netlink.Tuntap {
+		l := &netlink.Tuntap{LinkAttrs: link(name, index, 0)}
+		l.EncapType = encap
+		return l
 	}
-	if got := nicBridges(links); !slices.Equal(got, []string{"br-ens3", "lxdbr0"}) {
-		t.Errorf("bridges with a NIC = %v, want [br-ens3 lxdbr0]", got)
+	links := []netlink.Link{
+		&netlink.Device{LinkAttrs: link("lo", 1, 0)},
+		&netlink.Device{LinkAttrs: link("ens5", 2, 0)},
+		&netlink.Bridge{LinkAttrs: link("br-ens3", 3, 0)},
+		&netlink.Device{LinkAttrs: link("ens3", 4, 3)},
+		&netlink.Bridge{LinkAttrs: link("docker0", 5, 0)},
+		&netlink.Veth{LinkAttrs: link("veth1", 6, 5)},
+		&netlink.Bridge{LinkAttrs: link("virbr0", 7, 0)},
+		tun("vnet0", 8, "ether"),
+		&netlink.Bridge{LinkAttrs: link("lxdfan0", 9, 0)},
+		&netlink.Dummy{LinkAttrs: link("lxdfan0-mtu", 10, 9)},
+		&netlink.Vxlan{LinkAttrs: link("lxdfan0-fan", 11, 9)},
+		&netlink.Veth{LinkAttrs: link("cali1a2b3c", 12, 0)},
+		&netlink.GenericLink{LinkAttrs: link("ovn-k8s-mp0", 13, 0), LinkType: "openvswitch"},
+		&netlink.Netkit{LinkAttrs: link("lxc42", 14, 0)},
+		tun("fc-tap0", 15, "ether"),
+		tun("tailscale0", 16, "none"),
+		&netlink.Wireguard{LinkAttrs: link("wg0", 17, 0)},
+		&netlink.Bond{LinkAttrs: link("bond0", 18, 0)},
+		&netlink.Device{LinkAttrs: link("eth1", 19, 18)},
+		&netlink.Vlan{LinkAttrs: link("bond0.10", 20, 0)},
+		&netlink.GenericLink{LinkAttrs: link("team0", 21, 0), LinkType: "team"},
+		&netlink.Device{LinkAttrs: link("vboxnet0", 22, 0)},
+		&netlink.Dummy{LinkAttrs: link("aether-vmproxy", 23, 0)},
+		tun("aethervm1", 24, "ether"),
+		&netlink.Veth{LinkAttrs: link("eth0", 25, 0)},
+	}
+	physical := map[int]bool{2: true, 4: true, 19: true}
+	want := []string{"ens5", "ens3", "br-ens3", "tailscale0", "wg0", "bond0", "eth1", "bond0.10", "team0"}
+	if got := uplinks(links, physical, nil); !slices.Equal(got, want) {
+		t.Errorf("uplinks = %v, want %v", got, want)
+	}
+	// A server in a system container leaves by its veth.
+	want = append(want, "eth0")
+	if got := uplinks(links, physical, []int{25, 2}); !slices.Equal(got, want) {
+		t.Errorf("uplinks with the internet through eth0 = %v, want %v", got, want)
 	}
 }
