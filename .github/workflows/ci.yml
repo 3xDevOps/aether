@@ -160,7 +160,7 @@ jobs:
   lint:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -213,7 +213,7 @@ jobs:
   build-and-test:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -252,8 +252,8 @@ jobs:
           sudo env "PATH=$PATH" "$RUNNER_TEMP/vmimage.test" -test.run '^Test(Extract|Store)' -test.count=1 -test.v
       - name: Build binaries
         run: make build
-      # Own the Linux amd64 module and native compiler archives, plus bun.
-      # Other native Linux amd64 jobs restore only; cross-build jobs save
+      # Own the Blacksmith Linux amd64 module and native compiler archives,
+      # plus bun. Other such jobs restore only; cross-build jobs save
       # their own compiler variants without racing this module writer.
       # Saved on a red run too: a failed test does not invalidate compiled
       # objects or downloaded modules, and a flaky suite would otherwise leave
@@ -272,7 +272,7 @@ jobs:
   store-tests:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -291,7 +291,7 @@ jobs:
   dashboard:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

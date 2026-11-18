@@ -951,6 +951,16 @@ runners. In the Docker-heavy jobs, the runner's Docker daemon and
 the buildx builders pull Docker Hub images through `mirror.gcr.io` and fall
 back to Docker Hub, so a Docker Hub outage alone does not fail them.
 
+`lint`, `build-and-test`, `store-tests`, `dashboard`, both `integration` jobs,
+`arm64`, `dashboard-e2e` and `kvm` run on [Blacksmith](https://docs.blacksmith.sh/)
+runners (`blacksmith-4vcpu-ubuntu-2604`, and `blacksmith-4vcpu-ubuntu-2404-arm`
+for `arm64`), declared for actionlint in `.github/actionlint.yaml`. Every
+other job stays on a GitHub-hosted runner: the Windows smoke scripts refuse
+any other runner, and release, promote and nightly builds never read a cache a
+Blacksmith job wrote. Cache keys include `runner.environment`, so the two never
+share an archive; on GitHub-hosted runners `release-build` writes the Linux
+amd64 module, bun and release compiler caches the release workflow restores.
+
 | Job | Sessions | Locally |
 | --- | --- | --- |
 | `audit` | `scripts/public-audit.sh` | `make public-audit` |
@@ -964,7 +974,7 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 | `windows`, `windows-install` | [Windows](#windows); `windows` also scans `release-build`'s Windows binaries with Defender, and the `windows-install` install (zip) and update legs package and launch the Windows desktop zip on amd64 and arm64 | |
 | `release-build (binaries, desktop, android)` | `make release-binaries`, `cloudfield gui build` on Linux with and without Node on `PATH`, `make android` | `make release-binaries`, [Desktop shell](../CONTRIBUTING.md#desktop-shell), `make android` |
 | `edge-image` | [The edge image](#the-edge-image) and [qualification](#edge-upgrade-qualification) | |
-| `kvm` | [VM tests](#vm-tests) on a hosted runner, which has `/dev/kvm` (`.github/workflows/kvm.yml`) | `make kernel`, then `make test-kvm` as root |
+| `kvm` | [VM tests](#vm-tests) on a Blacksmith x86-64 runner, which has `/dev/kvm` (`.github/workflows/kvm.yml`) | `make kernel`, then `make test-kvm` as root |
 
 A pull request that changes only `docs/**` or root-level `*.md` files runs
 `audit` and nothing else. A Markdown file anywhere else counts as code.
