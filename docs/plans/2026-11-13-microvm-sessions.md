@@ -36,7 +36,7 @@ measurement (work item 1).
 | Kernel | An Aether-built guest kernel shipped with each server release | Per release |
 | Helper disk | A small read-only disk holding the in-VM helper, shipped with each server release | Per release; a saved VM keeps the one it booted with |
 | Base disk | The session's image (standard, a saved member environment) flattened to a read-only raw disk | Until the image is swept |
-| Root disk | A qcow2 copy-on-write layer over the base disk, so all sessions share one host cache of the base | Disposable; rebuilt on a cold start |
+| Root disk | A qcow2 copy-on-write layer over the base disk, so all sessions share one host cache of the base | Kept across cold starts, as a container's writable layer; deleted with the VM |
 | Data disk | `/workspace`, `/repos/<name>`, `/tmp`, `/var/lib/docker` | Until the session is deleted |
 | Home | The member's home folder on the server, reached through the helper's file service | The member's |
 | Saved state | The VM's memory and device state while it sleeps | Until the next wake |
@@ -69,7 +69,8 @@ through server restarts and updates. The server finds them again by run ID.
 | pause on close | Save the VM to disk; the monitor exits |
 | idle sleep (`docker stop`) | Save the VM to disk; the monitor exits |
 | wake | Restore the saved VM. If it cannot be restored (another monitor or kernel version, a deleted file), cold-start from the disks and resume the conversation, as today |
-| stop, destroy | Stop the VM; delete the root disk; the data disk follows the checkout retention |
+| stop | Stop the VM; its disks stay for the next start |
+| destroy | Delete the VM and its root disk; the data disk follows the checkout retention |
 | `docker commit` (Save environment) | Save the environment VM's root disk as a new base disk |
 
 After a restore the helper corrects the clock and the server reconnects its

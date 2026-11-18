@@ -381,9 +381,6 @@ What changes:
   its own. oh-my-pi's logins come from an auth broker the server runs per
   account; Copilot's and Antigravity's are copied in at each cold start
   ([harnesses.md](harnesses.md#agents-in-session-vms)).
-- Starting a stopped session builds a fresh root disk from its image and runs
-  the setup script again: packages installed outside the mounts are gone.
-  Docker images inside the session stay on its data disk.
 - Each VM has its own address in `10.200.0.0/16` and a tap device
   `aethervm<n>`. It reaches the server host, and the internet only through
   the host's default-route interfaces. It

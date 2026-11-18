@@ -41,9 +41,6 @@ func TestVMForRoutesEachKindToItsOwnVM(t *testing.T) {
 		if ok != (want != "") || name != want && ok {
 			t.Errorf("vmFor(%q) = %q, %v", key, name, ok)
 		}
-		if opts.KeepRoot != (key == "terminal:m1") {
-			t.Errorf("vmFor(%q) keeps its root disk: %v", key, opts.KeepRoot)
-		}
 		if (opts.Lifetime > 0) != strings.HasPrefix(key, "harness-update-") {
 			t.Errorf("vmFor(%q) has a lifetime of %s", key, opts.Lifetime)
 		}
