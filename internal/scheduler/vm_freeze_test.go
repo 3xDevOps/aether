@@ -316,21 +316,25 @@ func TestARestartTakesUpFrozenVMsWithoutLettingThemRun(t *testing.T) {
 	s2.mu.Unlock()
 
 	// A wake waits on admission holding the session's lock: its VM stays
-	// frozen until admission lets it go ahead.
+	// frozen until admission lets it go ahead. Anything else holding the
+	// lock, such as a close, has the VM thawed.
 	s2.mu.Lock()
-	waiting := s2.runs[runs[0]]
-	waiting.waking = make(chan struct{})
+	held := s2.runs[runs[0]]
+	held.admitting = true
 	s2.mu.Unlock()
-	waiting.lifecycleMu.Lock()
+	held.lifecycleMu.Lock()
 	time.Sleep(3 * vmMemoryBrake)
 	frozen := fr.Frozen()
-	waiting.lifecycleMu.Unlock()
 	s2.mu.Lock()
-	waiting.waking = nil
+	held.admitting = false
 	s2.mu.Unlock()
 	if len(frozen) != 2 {
+		held.lifecycleMu.Unlock()
 		t.Fatalf("with a wake waiting on admission %v are frozen; want both", frozen)
 	}
+	waitFor(t, "the VM of a session whose lock is held thawed", func() bool { return !slices.Contains(fr.Frozen(), a) })
+	held.lifecycleMu.Unlock()
+	waitFor(t, "the VM frozen again", func() bool { return slices.Contains(fr.Frozen(), a) })
 
 	s2.guardVMMemory(t.Context())
 	if fr.isSaved(a) == fr.isSaved(b) || !fr.foundFrozen(a) && !fr.foundFrozen(b) {

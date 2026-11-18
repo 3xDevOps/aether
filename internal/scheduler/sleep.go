@@ -276,14 +276,20 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 		return woke{}, fmt.Errorf("%w: the session is ending", ErrNoLiveEnvironment)
 	}
 	cid := entry.containerID
+	entry.admitting = true
 	s.mu.Unlock()
 
 	release, err := s.reserveWake(ctx, cid)
+	if err == nil {
+		defer release()
+		defer s.needGuest(cid)()
+	}
+	s.mu.Lock()
+	entry.admitting = false
+	s.mu.Unlock()
 	if err != nil {
 		return woke{}, err
 	}
-	defer release()
-	defer s.needGuest(cid)()
 	how, err := s.startAsleep(ctx, entry)
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotFound) {

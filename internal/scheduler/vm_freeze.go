@@ -110,14 +110,13 @@ func (s *Scheduler) settleFrozen(ctx context.Context, vms runtime.FreezeRuntime,
 		if s.vmMemoryBraked && !busy {
 			e.lifecycleMu.Unlock()
 		}
-		// A session asleep needs its guest only once admission lets its
-		// wake go ahead, which then takes needGuest.
-		asleep := !e.asleepSince.IsZero() && !e.sleeping
+		// A wake needs its guest only once admission lets it go ahead, and
+		// then takes needGuest.
 		switch {
 		case e.frozenSave:
 			saving = append(saving, cid)
 		case s.guestsNeeded[cid] > 0:
-		case !asleep && (busy || e.waking != nil || e.status == domain.RunProvisioning) || !e.retained && (e.status.Terminal() || e.killRequested || e.finalizing):
+		case busy && !e.admitting || e.status == domain.RunProvisioning || !e.retained && (e.status.Terminal() || e.killRequested || e.finalizing):
 			s.thawBraked(vms, cid)
 		default:
 			s.vmBrakeTargets = append(s.vmBrakeTargets, cid)

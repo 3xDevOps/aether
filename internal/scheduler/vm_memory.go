@@ -405,16 +405,17 @@ func (s *Scheduler) vmMemoryUse(ctx context.Context) map[runtime.ID]uint64 {
 
 // wakeSavedForMemory wakes the sleeping session VM the guard saved while it
 // worked that has slept longest of those whose memory fits in room; one
-// never saved holds its memory already. A wake that admission refuses, or
-// that a server shutdown cuts off, keeps its mark for the next check. Any
-// other failure drops it, so the guard never retries one forever, and says
-// so on the timeline: the next use wakes it as any sleeping session.
+// never saved, and not being saved, holds its memory already. A wake that
+// admission refuses, or that a server shutdown cuts off, keeps its mark for
+// the next check. Any other failure drops it, so the guard never retries
+// one forever, and says so on the timeline: the next use wakes it as any
+// sleeping session.
 func (s *Scheduler) wakeSavedForMemory(ctx context.Context, room uint64) {
 	s.mu.Lock()
 	var next *supervised
 	for _, e := range s.runs {
 		ending := e.retained || e.status.Terminal() || e.killRequested || e.finalizing || e.destroyPending
-		fits := !e.asleepSaved || e.memorySaved <= room
+		fits := !e.asleepSaved && !e.sleeping && !e.frozenSave || e.memorySaved <= room
 		if e.memorySaved > 0 && !e.asleepSince.IsZero() && !ending && fits && (next == nil || e.asleepSince.Before(next.asleepSince)) {
 			next = e
 		}

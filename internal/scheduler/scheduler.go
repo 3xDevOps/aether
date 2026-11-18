@@ -595,9 +595,11 @@ type supervised struct {
 	saveFailedAt time.Time
 	// frozenNotedAt is when the timeline last said the memory brake froze
 	// the session's VM. frozenSave is set while the memory guard saves the
-	// VM frozen, which keeps the brake from thawing it.
+	// VM frozen, and admitting while a wake holding the lifecycle lock
+	// waits on admission; both keep the brake from thawing it.
 	frozenNotedAt time.Time
 	frozenSave    bool
+	admitting     bool
 	// awake counts callers the container must not stop under: a delivery,
 	// an exec or a browser operation in flight.
 	awake int
