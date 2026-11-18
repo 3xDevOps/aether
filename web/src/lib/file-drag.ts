@@ -1,13 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
+import { desktopBridge } from '@/components/shell/window-bar'
 
 /** What a drop reads when more files are dragged than there is room for. */
 export function fitLabel(limit: number): string {
   return `At most ${limit} ${limit === 1 ? 'file fits' : 'files fit'}`
 }
 
-function hasFiles(transfer: DataTransfer | null): boolean {
-  return Boolean(transfer && Array.from(transfer.types).includes('Files'))
+function isLinuxDesktop(): boolean {
+  return desktopBridge()?.platform === 'linux'
+}
+
+function hasFiles(transfer: DataTransfer | null, linuxDesktop: boolean): boolean {
+  if (!transfer) return false
+  if (Array.from(transfer.types).includes('Files')) return true
+  return linuxDesktop && (
+    (transfer.files?.length ?? 0) > 0 ||
+    Array.from(transfer.items ?? []).some((item) => item.kind === 'file')
+  )
+}
+
+function droppedFiles(transfer: DataTransfer, linuxDesktop: boolean): File[] {
+  if (!linuxDesktop) return Array.from(transfer.files)
+  const files = Array.from(transfer.files ?? [])
+  return files.length ? files : Array.from(transfer.items ?? [])
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null)
 }
 
 /**
@@ -38,7 +57,7 @@ export function useFileDrop({ onFiles, limit }: { onFiles: (files: File[]) => vo
     }
   }, [dragging, end])
 
-  const ours = (event: React.DragEvent) => hasFiles(event.dataTransfer) && event.currentTarget.contains(event.target as Node)
+  const ours = (event: React.DragEvent) => hasFiles(event.dataTransfer, isLinuxDesktop()) && event.currentTarget.contains(event.target as Node)
   const handlers = {
     onDragEnter: (event: React.DragEvent) => {
       if (!ours(event)) return
@@ -46,7 +65,8 @@ export function useFileDrop({ onFiles, limit }: { onFiles: (files: File[]) => vo
       event.stopPropagation()
       depth.current += 1
       // A file dragged from a page also carries its URL and markup as string items.
-      setCount(Array.from(event.dataTransfer.items).filter((item) => item.kind === 'file').length || 1)
+      const items = Array.from(event.dataTransfer.items ?? []).filter((item) => item.kind === 'file').length
+      setCount(items || (isLinuxDesktop() ? event.dataTransfer.files?.length ?? 0 : 0) || 1)
     },
     onDragOver: (event: React.DragEvent) => {
       if (!ours(event)) return
@@ -65,7 +85,9 @@ export function useFileDrop({ onFiles, limit }: { onFiles: (files: File[]) => vo
       event.preventDefault()
       event.stopPropagation()
       end()
-      if (limit > 0) onFiles(Array.from(event.dataTransfer.files))
+      const linuxDesktop = isLinuxDesktop()
+      const files = droppedFiles(event.dataTransfer, linuxDesktop)
+      if (limit > 0 && (!linuxDesktop || files.length <= limit)) onFiles(files)
     },
   }
   return { count, refused: count !== null && count > limit, handlers }
@@ -75,9 +97,10 @@ export function useFileDrop({ onFiles, limit }: { onFiles: (files: File[]) => vo
 export function useRefuseStrayFileDrops() {
   useEffect(() => {
     const refuse = (event: DragEvent) => {
-      if (event.defaultPrevented || !event.dataTransfer?.types.includes('Files')) return
+      const transfer = event.dataTransfer
+      if (event.defaultPrevented || !transfer || !hasFiles(transfer, isLinuxDesktop())) return
       event.preventDefault()
-      event.dataTransfer.dropEffect = 'none'
+      transfer.dropEffect = 'none'
     }
     window.addEventListener('dragover', refuse)
     window.addEventListener('drop', refuse)
