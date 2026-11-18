@@ -956,10 +956,11 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 runners (`blacksmith-4vcpu-ubuntu-2604`, and `blacksmith-4vcpu-ubuntu-2404-arm`
 for `arm64`), declared for actionlint in `.github/actionlint.yaml`. Blacksmith's
 Ubuntu 26.04 image mounts `/tmp` as a tmpfs of half the runner's memory, too
-small for the server's disk-headroom check, so `.github/actions/free-disk`
-unmounts it. Every other job stays on a GitHub-hosted runner: the Windows smoke
-scripts refuse any other runner, Blacksmith's kernel rejects the `fib` rule of
-the session VM firewall `kvm` tests, and release, promote and nightly builds
+small for the server's disk-headroom check, so in the Docker suite jobs
+`.github/actions/free-disk` sets `TMPDIR=/var/tmp`, on the root disk. Every
+other job stays on a GitHub-hosted runner: the Windows smoke scripts refuse
+any other runner, Blacksmith's kernel rejects the `fib` rule in the session VM
+firewall that the `kvm` tests load, and release, promote and nightly builds
 never read a cache a Blacksmith job wrote. On Blacksmith, `actions/cache` uses
 Blacksmith's store, which GitHub-hosted jobs cannot read, so `release-build`
 writes the GitHub-hosted Linux amd64 module, bun and release compiler caches

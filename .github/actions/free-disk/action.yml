@@ -5,7 +5,9 @@ description: >
   uses its own pinned SDK container, not the runner's SDK. Blacksmith's
   Ubuntu 26.04 image mounts /tmp as a tmpfs of half the runner's memory,
   smaller than the server's disk-headroom check needs for concurrent
-  launches, so this puts /tmp back on the root disk.
+  launches, and the runner holds it so it cannot be unmounted. There,
+  later steps get TMPDIR=/var/tmp, on the root disk; sudo steps pass it
+  through explicitly.
 runs:
   using: composite
   steps:
@@ -14,7 +16,6 @@ runs:
         df -h / /tmp
         sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
         if findmnt -n -t tmpfs /tmp >/dev/null; then
-          sudo umount /tmp
-          sudo chmod 1777 /tmp
+          echo "TMPDIR=/var/tmp" >> "$GITHUB_ENV"
         fi
-        df -h / /tmp
+        df -h / /var/tmp

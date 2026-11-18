@@ -42,11 +42,13 @@ concurrency:
 # owns GitHub-hosted Linux amd64 Go modules and bun, windows owns Windows
 # amd64 native Go, arm64 owns Linux arm64 native Go, and the windows-install
 # arm64 update leg owns Windows arm64 Go. These Go owners also save modules
-# for their host. Each windows-install update leg owns its architecture's
-# Windows npm caches. On Blacksmith, actions/cache uses Blacksmith's store,
-# which GitHub-hosted jobs cannot read; buildx type=gha caches stay in
-# GitHub's. runner.environment stays in every key so a self-hosted archive
-# is never restored onto a hosted VM.
+# for their host. kvm, the one GitHub-hosted native Linux Go job, restores
+# release-build's modules and has no compiler-cache writer. Each
+# windows-install update leg owns its architecture's Windows npm caches.
+# On Blacksmith, actions/cache uses Blacksmith's store, which GitHub-hosted
+# jobs cannot read; buildx type=gha caches stay in GitHub's.
+# runner.environment stays in every key so a self-hosted archive is never
+# restored onto a hosted VM.
 
 jobs:
   # Lists changed files and decides whether the code jobs run. A merge-queue
