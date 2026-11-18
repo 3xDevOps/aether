@@ -580,7 +580,11 @@ and disk while they are contended; they cap nothing, so sessions use every
 core of an otherwise idle host. Image builds, pulls and other services on the
 host, such as a CI runner, stay in `system.slice` at twice the session group's
 weight. The slice sets no memory limit and never throttles, stops or kills a
-session. Its name has no dash because systemd nests `a-b.slice` inside
+session. A `MemoryHigh` on it would stop the memory guard: the host cannot
+swap VM memory, so a session VM held above the limit cannot be saved to
+disk. On a hosted test runner, with a VM 64 MiB over a 1.3 GiB limit, its
+save did not finish within the server's 2-minute timeout on Cloud
+Hypervisor's API and left it paused. Its name has no dash because systemd nests `a-b.slice` inside
 `a.slice`, whose default weight would decide instead. `install` rewrites the
 file, so change the weights in a drop-in: `sudo systemctl edit aether.slice`,
 under `[Slice]`.
@@ -639,6 +643,14 @@ a valid slice named as "xxx.slice"`, Docker's cgroup driver changed after the
 server started: `sudo systemctl restart aether-server`. To give the session
 group the default weight again, remove any `systemctl edit` drop-in and run
 `sudo systemctl set-property aether.slice CPUWeight=100 IOWeight=100`.
+
+The server also lowers its own OOM score to the unit's
+`OOMScoreAdjust=-500` when it starts, so an install whose unit file
+predates that line, which updates leave in place, is protected too. It
+never raises a score you set lower: `cat /proc/"$(pgrep -of
+'aether-server serve')"/oom_score_adj` prints `-500` or yours. A server
+that does not run as root cannot lower it; its journal then has `could not
+set the server's OOM score`.
 
 `MemoryLow=1G` makes the kernel reclaim the server's first gigabyte only after
 unprotected memory. Memory protection passes down the cgroup tree, so it

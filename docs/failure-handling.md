@@ -931,10 +931,11 @@ sudo systemctl restart aether-server
 
 The CPU, memory and process ceilings apply to containers created after the
 change. A host-wide out-of-memory kill takes agent processes before the server
-(`OOMScoreAdjust=-500` on the server, 500 in containers). Session VMs keep
-the default 0, since killing a VM's monitor ends the whole session, so
-container processes go first. Under CPU and disk contention the server gets
-a hundred shares to each container's one
+(`OOMScoreAdjust=-500` on the server, which it also lowers itself to when it
+starts, 500 in containers). Session VMs keep the default 0, since killing a
+VM's monitor ends the whole session, so container processes go first. Under
+CPU and disk contention the server gets a hundred shares to each container's
+one
 ([install.md](install.md#keep-the-server-reachable-under-load)).
 
 ### Picking a stall threshold
