@@ -27,6 +27,8 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
   const [scale, setScale] = useState<number>()
   const pending = useRef<number>(undefined)
   const [natural, setNatural] = useState<{ width: number; height: number }>()
+  const [showHint, setShowHint] = useState(false)
+  const hintTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 })
   const viewer = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
@@ -35,6 +37,15 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
   const anchor = useRef({ x: 0.5, y: 0.5, left: -1, top: -1 })
   const swipe = useRef<{ x: number; y: number }>(undefined)
   const pinch = useRef<{ distance: number; scale: number }>(undefined)
+
+  useEffect(() => () => clearTimeout(hintTimer.current), [])
+
+  const revealHint = () => {
+    if (!gallery) return
+    clearTimeout(hintTimer.current)
+    setShowHint(true)
+    hintTimer.current = setTimeout(() => setShowHint(false), 1000)
+  }
 
   const fitScale = () => {
     const el = frame.current
@@ -159,11 +170,15 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
         height: natural.height * (scale ?? fitScale()),
         borderRadius: `min(var(--radius-composer), ${Math.min(natural.width, natural.height) * (scale ?? fitScale()) / 4}px)`,
       } : undefined}
-      onLoad={(event) => setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+      onLoad={(event) => {
+        setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })
+        revealHint()
+      }}
     />
   )
 
   const onKey = (event: React.KeyboardEvent) => {
+    revealHint()
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return
     const { key, code } = event
     // A layout can put another character on these keys (AZERTY's 0 is à), so the key's place counts too; not the
@@ -209,6 +224,9 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
         const dx = touch.clientX - begin.x
         if (Math.abs(dx) > 48 && Math.abs(dx) > 2 * Math.abs(touch.clientY - begin.y)) onStep(dx < 0 ? 1 : -1)
       }}
+      onPointerMove={revealHint}
+      onPointerDown={revealHint}
+      onWheel={revealHint}
     >
       <div
         ref={frame}
@@ -236,7 +254,7 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
       >
         <div className={scale === undefined ? 'flex size-full items-center justify-center' : 'm-auto shrink-0'}>{image}</div>
       </div>
-      {gallery && <span aria-hidden className="absolute right-4 top-[calc(var(--safe-top)_+_1rem)] rounded-control coarse:hidden bg-chrome px-3 py-2 text-ui-sm text-muted">{name} · ← →</span>}
+      {gallery && <span aria-hidden className={cn('absolute right-4 top-[calc(var(--safe-top)_+_1rem)] rounded-control coarse:hidden bg-chrome px-3 py-2 text-ui-sm text-muted transition-opacity duration-300 motion-reduce:transition-none', showHint ? 'opacity-100' : 'opacity-0')}>{name}</span>}
       <DialogTitle className="sr-only">{name}</DialogTitle>
       <DialogDescription className="sr-only">
         {[

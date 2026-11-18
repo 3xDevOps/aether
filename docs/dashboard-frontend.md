@@ -3709,9 +3709,11 @@ fingers or pointer. `Mod+=`/`Mod+-` step by 1.25 about the frame's centre while
 or enlarged images to 125% of fit, preserving the clicked point. A multi-image
 gallery has no step buttons: `ArrowLeft` and `ArrowRight`, or a horizontal
 swipe, step through loaded images while the image is fitted, stopping at either
-end. With a fine pointer, a hint at the top right reads the image's name and
-"← →". Zoomed in, or with a modifier key held or the page pinch-zoomed, the
-keys and swipe do not switch. With the image fitted, clicking beside it closes the dialog; while
+end. With a fine pointer, the image name appears at the top right when each
+image loads and on a key press, pointer move or scroll over the image, then
+fades after one second without input.
+Zoomed in, or with a modifier key held or the page pinch-zoomed, the keys and
+swipe do not switch. With the image fitted, clicking beside it closes the dialog; while
 zoomed, the outer gutters close it and the frame remains scrollable. Losing an
 image's blob, as on reconnect, closes the dialog if it was showing that image.
 Closing returns focus to the thumbnail of the image last shown. Attachments sit

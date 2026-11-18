@@ -10,6 +10,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 /** jsdom lays nothing out and decodes no image, so give the picture and its frame a size and fire its load. */
@@ -34,6 +35,34 @@ test('names each image by its place in the row, so two messages never share a na
   expect(within(dialog).getByRole('img', { name: 'Image 2 of 2' }).getAttribute('src')).toMatch(/^blob:sent-/)
   fireEvent.keyDown(dialog, { key: 'Escape' })
   expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+test('the gallery hint returns on input and fades after a second without input', async () => {
+  const dialog = await open('Image 1 of 2')
+  vi.useFakeTimers()
+  load(dialog, [800, 600])
+  const hint = () => dialog.querySelector('[aria-hidden="true"]')!
+  expect(hint().className).toContain('opacity-100')
+
+  act(() => vi.advanceTimersByTime(1000))
+  expect(hint().className).toContain('opacity-0')
+
+  fireEvent.pointerMove(within(dialog).getByRole('img'))
+  expect(hint().className).toContain('opacity-100')
+  act(() => vi.advanceTimersByTime(600))
+  fireEvent.wheel(within(dialog).getByRole('img'))
+  act(() => vi.advanceTimersByTime(600))
+  expect(hint().className).toContain('opacity-100')
+  act(() => vi.advanceTimersByTime(400))
+  expect(hint().className).toContain('opacity-0')
+
+  fireEvent.keyDown(dialog, { key: 'Shift' })
+  expect(hint().className).toContain('opacity-100')
+
+  fireEvent.keyDown(dialog, { key: 'ArrowRight' })
+  const nextDialog = screen.getByRole('dialog', { name: 'Image 2 of 2' })
+  load(nextDialog, [800, 600])
+  expect(nextDialog.querySelector('[aria-hidden="true"]')?.className).toContain('opacity-100')
 })
 
 test('a lone image is the attached image', async () => {
