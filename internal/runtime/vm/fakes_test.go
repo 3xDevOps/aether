@@ -44,7 +44,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	h := &harness{t: t, images: &fakeImages{}, guests: map[string]*fakeHelper{}}
-	h.units = &fakeUnits{t: t, active: map[string]*fakeVMM{}}
+	h.units = &fakeUnits{t: t, active: map[string]*fakeVMM{}, cgroups: t.TempDir()}
 	h.engine = h.newEngine(dir)
 	t.Cleanup(h.units.stopAll)
 	return h
@@ -57,6 +57,7 @@ func (h *harness) newEngine(dir string) *engine {
 		return h.guest(filepath.Base(filepath.Dir(vsock))), nil
 	})
 	e.run = func(context.Context, string, ...string) error { return nil }
+	e.cgroupRoot = h.units.cgroups
 	e.listenDNS = func() (*dnsRelay, error) {
 		r, err := listenDNS(netip.MustParseAddr("127.0.0.1"), netip.MustParsePrefix("127.0.0.0/8"), func() []netip.AddrPort { return nil })
 		if err == nil {
@@ -228,6 +229,13 @@ type fakeUnits struct {
 	failNext   bool
 	stateErr   error
 	failResume bool
+	// cgroups is the cgroup root, which holds a memory.current and
+	// memory.stat for each running unit.
+	cgroups string
+}
+
+func (u *fakeUnits) cgroup(name string) string {
+	return filepath.Join(u.cgroups, runtime.SessionSlice, name)
 }
 
 type startCall struct {
@@ -244,6 +252,15 @@ func (u *fakeUnits) Start(_ context.Context, name string, argv, properties []str
 	}
 	var l launch
 	if err = json.Unmarshal(data, &l); err != nil {
+		return err
+	}
+	if err = os.MkdirAll(u.cgroup(name), 0o755); err != nil {
+		return err
+	}
+	if err = os.WriteFile(filepath.Join(u.cgroup(name), "memory.current"), []byte("1\n"), 0o644); err != nil {
+		return err
+	}
+	if err = os.WriteFile(filepath.Join(u.cgroup(name), "memory.stat"), []byte("anon 1\ninactive_file 0\n"), 0o644); err != nil {
 		return err
 	}
 	u.mu.Lock()
@@ -277,7 +294,7 @@ func (u *fakeUnits) Stop(_ context.Context, name string) error {
 		vmm.close()
 	}
 	delete(u.active, name)
-	return nil
+	return os.RemoveAll(u.cgroup(name))
 }
 
 func (u *fakeUnits) State(_ context.Context, name string) (unitState, error) {

@@ -349,7 +349,18 @@ itself stays outside.
 
 `Stats` counts the whole VM, which is the session: CPU time outside idle and
 I/O wait from `/proc/stat`, memory in use as `MemTotal - MemAvailable`, the
-kernel's OOM kill counter, and the session cgroup's task count.
+kernel's OOM kill counter, and the session cgroup's task count. Insights
+shows these.
+
+`MemoryUse` reports what each running VM holds of the host's memory, read
+from its unit's cgroup (`/sys/fs/cgroup/aether.slice/aether-vm-<key>.service`)
+with no call into systemd or the guest: `memory.current` less the
+`inactive_file` of `memory.stat`, the working set as the kubelet and
+`docker stats` count it. That leaves out disk cache the host
+can drop and counts what the guest's figure misses: guest page cache,
+which the guest counts as available but lives in the VM's RAM, and the
+memory of Cloud Hypervisor and the VM's file services. A VM whose cgroup
+cannot be read counts as its unit's cap, its memory plus 512 MiB.
 
 A restored VM's clock stopped while it was saved. The server calls
 `SetClock`, through `guest.Client.SyncClock`, after every restore. Before a

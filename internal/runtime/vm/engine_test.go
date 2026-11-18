@@ -649,6 +649,33 @@ func TestStatsAndMemoryEventsComeFromTheHelper(t *testing.T) {
 	}
 }
 
+// A VM's memory use is what its unit's cgroup holds less the cache the host
+// can drop; one whose cgroup cannot be read counts as its unit's cap, and a
+// stopped one not at all.
+func TestMemoryUseIsWhatTheUnitHolds(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	h.createStarted("run-b", sessionSpec("run-b"))
+	cgroup := func(key string) string { return h.units.cgroup(unitName(key)) }
+	if err := errors.Join(
+		os.WriteFile(filepath.Join(cgroup("run-a"), "memory.current"), []byte("381681664\n"), 0o644),
+		os.WriteFile(filepath.Join(cgroup("run-a"), "memory.stat"), []byte("anon 300\ninactive_file 67108864\nactive_file 1\n"), 0o644),
+		os.WriteFile(filepath.Join(cgroup("run-b"), "memory.current"), []byte("garbage"), 0o644),
+	); err != nil {
+		t.Fatal(err)
+	}
+	use, err := h.engine.memoryUse()
+	if use["vm-run-a"] != 300<<20 || use["vm-run-b"] != 2560<<20 || err == nil || !strings.Contains(err.Error(), "run-b") {
+		t.Errorf("memory use = %v, %v; want run-a's cgroup less its inactive file cache, and run-b's cap named in the error", use, err)
+	}
+	if err := h.engine.stop(t.Context(), "run-b", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if use, err := h.engine.memoryUse(); err != nil || len(use) != 1 {
+		t.Errorf("memory use with run-b stopped = %v, %v", use, err)
+	}
+}
+
 // createWithCheckoutDisk starts session VM key with its checkout on a disk
 // of its own.
 func (h *harness) createWithCheckoutDisk(key string) *record {

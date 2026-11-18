@@ -40,6 +40,7 @@ var (
 	_ runtime.CapacityRuntime     = (*Runtime)(nil)
 	_ runtime.InitPIDRuntime      = (*Runtime)(nil)
 	_ runtime.MemoryEventsRuntime = (*Runtime)(nil)
+	_ runtime.MemoryUseRuntime    = (*Runtime)(nil)
 	_ runtime.BrowserRuntime      = (*Runtime)(nil)
 	_ runtime.SaveRuntime         = (*Runtime)(nil)
 )
