@@ -508,10 +508,16 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised,
 	if identity == "" {
 		identity = evidenceCommitIdentity(run.LastCommit, "", -1)
 	}
-	if err := s.captureFinishEvidence(ctx, entry.runID, run.Status, identity); err != nil {
+	if err = s.captureFinishEvidence(ctx, entry.runID, run.Status, identity); err != nil {
 		logEvidenceFailure(entry.runID, err)
 		s.retainAfterEvidenceFailure(entry)
 		return err
+	}
+	// The capture may have noted on the reason what it could not keep, which
+	// the released reason below carries.
+	if run, err = s.cfg.Store.GetRun(ctx, entry.runID); err != nil {
+		s.recordCleanupError(entry, cleanupLookupError)
+		return fmt.Errorf("scheduler: load retained session: %w", err)
 	}
 
 	if err := s.destroyDevelopmentContainer(ctx, entry.runID, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {

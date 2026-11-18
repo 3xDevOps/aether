@@ -30,6 +30,7 @@ type schedulerEvidenceCapture struct {
 	beforeCalls     int
 	cleanupObserved bool
 	purgeCalls      int
+	gitErr          func(domain.RunID) error
 }
 
 func newSchedulerEvidenceCapture(workspace domain.WorkspaceID) *schedulerEvidenceCapture {
@@ -53,6 +54,11 @@ func (f *schedulerEvidenceCapture) Capture(_ context.Context, req evidence.Reque
 	}
 	if packet, ok := f.packets[req.IdempotencyKey]; ok {
 		return packet, nil
+	}
+	if f.gitErr != nil {
+		if err := f.gitErr(req.RunID); err != nil {
+			return protocol.EvidencePacket{}, err
+		}
 	}
 	origin := protocol.EvidenceOrigin{Kind: protocol.EvidenceOriginKind(req.Origin.Kind), ID: req.Origin.ID}
 	creator := ""

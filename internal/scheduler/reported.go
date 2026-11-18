@@ -33,10 +33,11 @@ const (
 	exitedFailedReasonPrefix      = "agent exited "
 	evidenceUnavailableReason     = "evidence unavailable: session checkout missing"
 	evidenceOverLimitReason       = "evidence unavailable: evidence storage limit exceeded"
+	workUncapturedReason          = "work could not be captured: the session VM stopped before its final commit and is gone; the checkout's changes since the branch's last published commit are lost"
 )
 
 // cleanupNotes are the notes checkout cleanup appends to a terminal reason.
-var cleanupNotes = []string{evidenceUnavailableReason, evidenceOverLimitReason}
+var cleanupNotes = []string{evidenceUnavailableReason, evidenceOverLimitReason, workUncapturedReason}
 
 // withoutCleanupNote strips the note checkout cleanup appended, returning it,
 // so the retention reasons below still match exactly.

@@ -823,6 +823,22 @@ retries a failed capture every `--poll-interval`. If the checkout is already
 gone, no retry can capture it: cleanup finishes without an evidence packet and
 the reason gains `evidence unavailable: session checkout missing`.
 
+A session VM's checkout is on the VM's disk, which only the VM reads. When
+the VM stopped before the session's final commit - it died, its saved state
+would not restore when a close or kill woke it, its close commit failed, or
+the session ended after the VM's 10-minute linger - Cloudfield boots the VM
+without the agent's command and setup script, commits the checkout as the
+session's final commit, publishes the session branch, captures evidence and
+stops the VM. A saved VM is restored instead, since its saved memory may
+hold writes its disks do not, and a VM the disk guard holds only has its
+vCPUs started. One such boot runs at a time on the server, and while
+available memory is below the floor plus 512 MiB it waits for the next try,
+as a launch would be refused. A boot that fails otherwise is retried 15
+minutes later, doubling up to 6 hours, and the checkout stays. Only once the VM is gone,
+so that no boot can make the commit, the reason gains `work could not be
+captured: ...` and cleanup goes ahead: the checkout's changes since the
+branch's last published commit are lost.
+
 A checkout over the evidence storage limit cannot be captured, so the session
 gets no evidence packet. Cloudfield commits the checkout's files as a `wip:`
 commit, publishes the session branch, adds `evidence unavailable: evidence

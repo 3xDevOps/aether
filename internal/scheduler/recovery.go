@@ -1337,14 +1337,11 @@ func (s *Scheduler) recoverUnstarted(ctx context.Context, r *domain.Run) {
 
 // interrupt re-reads the status under s.mu so a kill that raced recovery is
 // never overwritten.
-// interruptedReasonLocked adds a recorded missing-checkout note to the
-// reason an active run is interrupted with. The caller holds s.mu and
-// clears the note once that reason is written.
+// interruptedReasonLocked adds a recorded cleanup note to the reason an
+// active run is interrupted with. The caller holds s.mu and clears the note
+// once that reason is written.
 func (s *Scheduler) interruptedReasonLocked(run domain.RunID, reason string) string {
-	if _, ok := s.evidenceUnavailable[run]; !ok {
-		return reason
-	}
-	return withCleanupNote(reason, evidenceUnavailableReason)
+	return withCleanupNote(reason, s.evidenceUnavailable[run])
 }
 
 func (s *Scheduler) interrupt(ctx context.Context, r *domain.Run) {

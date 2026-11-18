@@ -95,6 +95,14 @@ type SaveRuntime interface {
 	Restore(context.Context, ID) error
 }
 
+// CaptureRuntime optionally starts a stopped session container with a main
+// process that does nothing in place of its command, and without its setup
+// script, so the server can make the session's final commit before the
+// container is removed. Stop ends it as any start.
+type CaptureRuntime interface {
+	BootForCapture(context.Context, ID) error
+}
+
 // Mount is one additional mount into a run container. Host paths are
 // validated against Aether-owned roots by the mount validator (see
 // mounts.go) before a spec reaches any runtime; the runtime itself only
