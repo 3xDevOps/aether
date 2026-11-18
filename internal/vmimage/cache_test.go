@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // writeAt writes p at the start of the file at path.
@@ -189,6 +190,40 @@ func TestCachePoolLayersCachesOverRawBases(t *testing.T) {
 	}
 	if flat, err = s.readNewest(filepath.Join(s.cachesDir(), "pool1")); err != nil {
 		t.Fatal(err)
+	}
+
+	idle := time.Now().Add(-cacheIdleAge - time.Hour)
+	started := filepath.Join(dir, "started.img")
+	if _, err = s.NewCacheDisk(t.Context(), "pool1", started); err != nil {
+		t.Fatal(err)
+	}
+	// The session outlives cacheIdleAge, and ends without promoting.
+	if err = os.Chtimes(flat.Path, idle, idle); err == nil {
+		err = s.Sweep()
+	}
+	if err == nil {
+		err = errors.Join(os.Remove(started), prunePins(started, ""))
+	}
+	if err == nil {
+		err = s.Sweep()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.readNewest(filepath.Join(s.cachesDir(), "pool1")); err != nil {
+		t.Errorf("the newest cache a session used until just now was swept: %v", err)
+	}
+	if err = os.Chtimes(flat.Path, idle, idle); err == nil {
+		err = s.Sweep()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(flat.Path); !os.IsNotExist(err) {
+		t.Errorf("a newest cache idle for %s outlived the sweep: %v", cacheIdleAge, err)
+	}
+	if _, err = s.readNewest(filepath.Join(s.cachesDir(), "pool1")); !os.IsNotExist(err) {
+		t.Errorf("the pool still names a newest cache: %v", err)
 	}
 
 	if _, err = s.SnapshotCache(Disk{Path: next.Path, Format: FormatQcow2}); err == nil {

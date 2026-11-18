@@ -22,6 +22,9 @@ const (
 	// currentCache names, in a pool's directory, the link to its newest
 	// cache.
 	currentCache = "current"
+	// cacheIdleAge is how long a pool's newest cache stays after a session
+	// last started from it or a sweep last found a disk reading through it.
+	cacheIdleAge = 7 * 24 * time.Hour
 )
 
 // NewCacheDisk creates a cache disk at path: a qcow2 disk over pool's newest
@@ -39,6 +42,10 @@ func (s *Store) NewCacheDisk(ctx context.Context, pool, path string) (Disk, erro
 	newest, err := s.readNewest(filepath.Join(s.cachesDir(), pool))
 	if err == nil {
 		err = s.pinLocked(newest.Path, rootPin(path, newest.ID))
+	}
+	if err == nil {
+		now := time.Now()
+		err = os.Chtimes(newest.Path, now, now)
 	}
 	s.mu.Unlock()
 	if err == nil {
@@ -195,8 +202,9 @@ func (s *Store) PromoteCache(pool, snapshot string) error {
 	return errors.Join(err, os.RemoveAll(snapshot), s.sweepCachesLocked(dir))
 }
 
-// sweepCachesLocked deletes a pool's caches that are not its newest and
-// that no disk links to.
+// sweepCachesLocked deletes a pool's caches that no disk links to, but its
+// newest only once it has been idle for cacheIdleAge. The newest's
+// modification time is when it was last in use.
 func (s *Store) sweepCachesLocked(dir string) error {
 	newest, _ := os.Readlink(filepath.Join(dir, currentCache))
 	entries, err := os.ReadDir(dir)
@@ -208,13 +216,24 @@ func (s *Store) sweepCachesLocked(dir string) error {
 	}
 	var errs []error
 	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".raw") || e.Name() == newest {
+		if !strings.HasSuffix(e.Name(), ".raw") {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
 		linked, err := linkedElsewhere(path)
-		if err == nil && !linked {
+		switch {
+		case err != nil:
+		case linked && e.Name() == newest:
+			now := time.Now()
+			err = os.Chtimes(path, now, now)
+		case linked:
+		case e.Name() != newest:
 			err = removeIfExists(path)
+		default:
+			var info os.FileInfo
+			if info, err = os.Stat(path); err == nil && time.Since(info.ModTime()) >= cacheIdleAge {
+				err = errors.Join(removeIfExists(filepath.Join(dir, currentCache)), removeIfExists(path))
+			}
 		}
 		errs = append(errs, err)
 	}
