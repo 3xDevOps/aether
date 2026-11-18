@@ -157,8 +157,8 @@ the swap file (step 6 of [Boot](#boot)) until it is full. In a VM without
 swap, such as the dictation engine's, anonymous pages are skipped, and tmpfs
 and shared memory pages are tried and stay.
 
-The helper writes these to `/sys/module/damon_reclaim/parameters`, `enabled`
-last:
+The helper writes these to `/sys/module/damon_reclaim/parameters`, in this
+order:
 
 | Parameter | Why |
 | --- | --- |
@@ -168,6 +168,7 @@ last:
 | `monitor_region_end=<bytes>` | The end of the last `System RAM` range in `/proc/iomem`. Cloud Hypervisor puts guest RAM past 3 GiB at 4 GiB, and DAMON_RECLAIM watches one range, by default only the larger piece; this spans both. The gap between them holds no RAM, but DAMON counts it toward the quota. |
 | `skip_anon=N`, or `Y` without swap | Cold program memory goes to swap; without swap an anonymous page has nowhere to go. |
 | `enabled=Y` | Starts it. |
+| `commit_inputs=Y` | Applies the inputs once more. Without it, a program's 64 MiB left idle stayed in memory for 5 minutes in 4 of 4 VMs; with it, all of it went to swap within 2.5 minutes. The cause is not known. |
 
 The default quotas cap it at 128 MiB of memory tried and 10 ms of CPU a
 second. The kernel config must leave `CONFIG_LRU_GEN` off: with MGLRU on,

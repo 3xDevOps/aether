@@ -75,7 +75,7 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 			t.Fatalf("%s after the program filled %d bytes and left them, %d bytes of them are in swap", time.Since(filled).Round(time.Second), coldAnon, n)
 		}
 		time.Sleep(5 * time.Second)
-		n = parseUint(t, guestFields(t, e, key, "for p in /proc/[0-9]*; do grep -qas 'HoldNo[w]' $p/cmdline && awk '/^VmSwap:/ {print $2}' $p/status; done", 1)[0]) << 10
+		n = parseUint(t, guestFields(t, e, key, "for p in /proc/[0-9]*; do grep -qas 'HoldNo[w]' $p/cmdline && awk '/^VmSwap:/ {print $2}' $p/status; done; true", 1)[0]) << 10
 	}
 	t.Logf("a quarter of the program's %d bytes went to swap %s after it filled them", coldAnon, time.Since(filled).Round(time.Second))
 
