@@ -63,6 +63,9 @@ func prepareVMHost(ctx context.Context, w io.Writer, baseURL, kernel string) err
 	if err := step(w, "checking "+kvmDevice, func() error { return serversetup.CheckKVM(kvmDevice) }); err != nil {
 		return err
 	}
+	if err := step(w, "checking /dev/userfaultfd", func() error { return serversetup.CheckUserfaultfd("/dev/userfaultfd") }); err != nil {
+		return err
+	}
 	if missing := serversetup.MissingVMTools(); len(missing) > 0 {
 		var packages []string
 		for _, tool := range missing {

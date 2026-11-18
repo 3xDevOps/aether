@@ -337,8 +337,9 @@ sudo systemctl restart aether-server
 
 The server must run as root: it starts each VM in a systemd unit and sets up
 its network, and it removes the files sessions leave behind itself rather than
-through a root container. The host needs `/dev/kvm` and systemd, besides
-Docker; `cloudfield-server vm install` checks for KVM and installs the rest: Cloud
+through a root container. The host needs `/dev/kvm`, `/dev/userfaultfd` and
+systemd, besides Docker; `cloudfield-server vm install` checks for both
+devices and installs the rest: Cloud
 Hypervisor, the tools VM disks and the VM firewall need, and the release's
 guest kernel at `/usr/local/lib/aether/vmlinux` (`--vm-kernel`, config key
 `vm-kernel`, names another path). [Hosts for VM

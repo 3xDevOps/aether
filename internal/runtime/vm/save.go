@@ -2,9 +2,11 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -64,7 +66,10 @@ func (e *engine) save(ctx context.Context, key string) error {
 	if err = os.Mkdir(dir, 0o700); err != nil {
 		return resumeAfter(err)
 	}
-	if err = api.snapshot(ctx, dir); err != nil {
+	if err = snapshotRestored(ctx, api, key, dir); err == nil {
+		err = syncSnapshot(dir)
+	}
+	if err != nil {
 		_ = os.RemoveAll(dir)
 		return resumeAfter(err)
 	}
@@ -97,6 +102,51 @@ func (e *engine) syncGuest(ctx context.Context, key string) bool {
 	return true
 }
 
+// snapshotRestored snapshots the paused VM once Cloud Hypervisor has loaded
+// all of the memory of the restore that woke it, which it refuses to
+// snapshot before; it keeps loading while the VM is paused.
+func snapshotRestored(ctx context.Context, api chAPI, key, dir string) error {
+	deadline := time.Now().Add(restoreTimeout)
+	for waited := false; ; waited = true {
+		err := api.snapshot(ctx, dir)
+		if err == nil || !strings.Contains(err.Error(), "memory restore is still in progress") || time.Now().After(deadline) {
+			return err
+		}
+		if !waited {
+			slog.Info("vm runtime: wait for the VM to load the memory it was restored with before saving it", "vm", key)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w: %w", err, ctx.Err())
+		case <-time.After(waitPoll):
+		}
+	}
+}
+
+// syncSnapshot makes the snapshot durable before the record says it is
+// saved: a restore reads the memory file only as the guest touches it, so
+// one a crash left short would fail the restored guest, not the restore.
+func syncSnapshot(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	paths := []string{dir}
+	for _, entry := range entries {
+		paths = append(paths, filepath.Join(dir, entry.Name()))
+	}
+	for _, path := range paths {
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			return openErr
+		}
+		if err = errors.Join(f.Sync(), f.Close()); err != nil {
+			return fmt.Errorf("vm runtime: sync %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
 func (e *engine) resumeAfter(ctx context.Context, api chAPI, key string, cause error) error {
 	if err := api.resume(context.WithoutCancel(ctx)); err != nil {
 		return fmt.Errorf("vm runtime: save VM %s: %w; and it stays paused: %w", key, cause, err)
@@ -123,9 +173,11 @@ func (e *engine) awaitStopped(ctx context.Context, key string) error {
 // restore starts the monitor on the saved state, resumes the guest and sets
 // its clock. Once the guest runs, its disks move past the snapshot, so the
 // snapshot is dropped durably before the guest resumes: a second restore of
-// it would pair old memory with newer disks. Cloud Hypervisor has read all
-// of it by then. With no snapshot left, the guest is never killed for a
-// later error or the caller's ctx ending.
+// it would pair old memory with newer disks. Cloud Hypervisor, loading the
+// memory on demand, holds the memory file open until it has read all of it.
+// With no snapshot left, the guest is never killed for a later error or the
+// caller's ctx ending. On-demand restore takes no vhost-user device, and a
+// VM with a virtio-fs share is never saved.
 func (e *engine) restore(ctx context.Context, key string) (err error) {
 	unlock := e.lock(key)
 	defer unlock()
@@ -154,7 +206,7 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 	dir := e.path(key, snapshotDir)
 	l := launch{Home: booted.Home, Reveal: booted.Reveal, Args: []string{
 		"--api-socket", "path=" + e.path(key, apiSocket), "--event-monitor", "path=" + e.path(key, eventsFile),
-		"--restore", "source_url=file://" + dir,
+		"--restore", "source_url=file://" + dir + ",memory_restore_mode=ondemand",
 	}}
 	if rec.Net != offline {
 		if err = e.ensureNetwork(ctx); err != nil {

@@ -69,7 +69,10 @@ limits what a flaw in them reaches:
   `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`,
   `ProtectControlGroups=yes` and `ProtectClock=yes`. It opens no device but
   `/dev/kvm`, `/dev/net/tun` and the standard pseudo devices
-  (`DevicePolicy=closed`), and has no netlink
+  (`DevicePolicy=closed`). Only the unit a wake starts may also open
+  `/dev/userfaultfd`, which loads the saved memory; it also lets a
+  compromised monitor stall the kernel's own faults on memory it registers,
+  a known aid to exploiting kernel races. The unit has no netlink
   (`RestrictAddressFamilies=AF_UNIX AF_INET`). It also gets `ProtectHome=yes`,
   which hides `/home`, `/root` and `/run/user`, unless the data directory or
   the guest kernel lives under one of those (a server run from a home

@@ -198,7 +198,7 @@ func TestKVMSaveRestoreKeepsProcesses(t *testing.T) {
 	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
 	spec := runtime.Spec{
 		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, Command: []string{"/bin/sh", "-c", "exec sleep infinity"},
-		Env: map[string]string{"AETHER_RUN_ID": key}, CPULimit: 2, MemoryLimitBytes: 1 << 30,
+		Env: map[string]string{"AETHER_RUN_ID": key}, CPULimit: 2, MemoryLimitBytes: 2 << 30,
 	}
 	if _, err := e.create(t.Context(), spec.CreationKey, spec, options{}); err != nil {
 		t.Fatal(err)
@@ -206,20 +206,38 @@ func TestKVMSaveRestoreKeepsProcesses(t *testing.T) {
 	if err := e.start(t.Context(), key); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := vmRun(t, e, key, "setsid sleep 4000 </dev/null >/dev/null 2>&1 & sleep 0.5; pgrep -x sleep | sort | tr '\\n' ' '; cat /proc/sys/kernel/random/boot_id")
-	start := time.Now()
-	if err := e.save(t.Context(), key); err != nil {
-		t.Fatal(err)
+	// The file in the tmpfs makes the saved memory over 1.5 GiB.
+	before, _ := vmRun(t, e, key, "mount -o remount,size=1700M /dev/shm; head -c 1536M /dev/urandom >/dev/shm/fill; setsid sleep 4000 </dev/null >/dev/null 2>&1 & sleep 0.5; pgrep -x sleep | sort | tr '\\n' ' '; cat /proc/sys/kernel/random/boot_id")
+	// The second save comes right after a wake, while Cloud Hypervisor still
+	// loads the saved memory.
+	for round := range 2 {
+		start := time.Now()
+		if err := e.save(t.Context(), key); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("save %d took %s", round, time.Since(start))
+		if up, _ := e.running(t.Context(), key); up {
+			t.Fatal("the VM still runs after save")
+		}
+		// A VM asleep for minutes on a busy host has its saved memory on
+		// disk, not in the page cache.
+		unix.Sync()
+		if err := os.WriteFile("/proc/sys/vm/drop_caches", []byte("3"), 0); err != nil {
+			t.Fatal(err)
+		}
+		start = time.Now()
+		if err := e.restore(t.Context(), key); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("restore %d took %s", round, time.Since(start))
+		if round == 0 {
+			continue
+		}
+		vmRun(t, e, key, "true")
+		t.Logf("first exec %s after the restore began", time.Since(start))
+		vmRun(t, e, key, "cat /dev/shm/fill >/dev/null")
+		t.Logf("the guest read all its memory %s after the restore began", time.Since(start))
 	}
-	t.Logf("save took %s", time.Since(start))
-	if up, _ := e.running(t.Context(), key); up {
-		t.Fatal("the VM still runs after save")
-	}
-	start = time.Now()
-	if err := e.restore(t.Context(), key); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("restore took %s", time.Since(start))
 	after, _ := vmRun(t, e, key, "pgrep -x sleep | sort | tr '\\n' ' '; cat /proc/sys/kernel/random/boot_id")
 	if before != after {
 		t.Errorf("processes or boot changed across save and restore:\n%s\nvs\n%s", before, after)

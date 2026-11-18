@@ -545,6 +545,10 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	if !restored.restored || !slices.Contains(restored.called(), "vm.resume") || h.guest("run-a").clock.IsZero() {
 		t.Errorf("restore: vmm %+v calls %v", restored, restored.called())
 	}
+	if unit := h.units.last(); !slices.Contains(unit.launch.Args, "source_url=file://"+h.engine.path("run-a", snapshotDir)+",memory_restore_mode=ondemand") ||
+		!slices.Contains(unit.properties, "DeviceAllow=/dev/userfaultfd rw") {
+		t.Errorf("a restore launches %v with properties %v, want an on-demand restore that may open /dev/userfaultfd", unit.launch.Args, unit.properties)
+	}
 	if _, err := os.Stat(h.engine.path("run-a", snapshotDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("snapshot kept after restore: %v", err)
 	}
@@ -599,6 +603,24 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	}
 	if _, err := os.Stat(h.engine.path("run-c", snapshotDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("stop kept a saved VM's state: %v", err)
+	}
+
+	h.createStarted("run-d", sessionSpec("run-d"))
+	if err := h.engine.save(t.Context(), "run-d"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.restore(t.Context(), "run-d"); err != nil {
+		t.Fatal(err)
+	}
+	loading := h.units.vmm("run-d")
+	loading.mu.Lock()
+	loading.restoring = 2
+	loading.mu.Unlock()
+	if err := h.engine.save(t.Context(), "run-d"); err != nil {
+		t.Fatalf("save while the restore still loads memory = %v", err)
+	}
+	if n := slices.Index(loading.called(), "vmm.shutdown") - slices.Index(loading.called(), "vm.snapshot"); n != 3 {
+		t.Errorf("save after a restore calls %v, want three snapshots", loading.called())
 	}
 }
 

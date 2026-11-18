@@ -326,6 +326,9 @@ type fakeVMM struct {
 	restored   bool
 	srv        *http.Server
 	listener   net.Listener
+	// restoring counts the snapshots refused while an on-demand restore
+	// still loads memory.
+	restoring int
 }
 
 func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
@@ -358,6 +361,11 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 				http.Error(w, "reply lost", http.StatusGatewayTimeout)
 			}
 		case "vm.snapshot":
+			if v.restoring > 0 {
+				v.restoring--
+				http.Error(w, `["Error from API","VM on-demand memory restore is still in progress"]`, http.StatusConflict)
+				return
+			}
 			var req struct {
 				Destination string `json:"destination_url"`
 			}

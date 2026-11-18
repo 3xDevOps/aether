@@ -54,6 +54,9 @@ func TestVMUnitsWriteOnlyTheirOwnPathsAndKeepFewCapabilities(t *testing.T) {
 				t.Errorf("unit properties %v lack %s", props, want)
 			}
 		}
+		if slices.Contains(props, "DeviceAllow=/dev/userfaultfd rw") {
+			t.Errorf("a booted VM's unit may open /dev/userfaultfd: %v", props)
+		}
 	}
 	// Writable binds reveal the VM's directory, its state disk and its
 	// writable shares; the read-only login is revealed read-only; the data
