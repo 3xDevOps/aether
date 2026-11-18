@@ -128,10 +128,9 @@ func (e *Engine) retainSnapshot(ctx context.Context, store, tree string) error {
 	return err
 }
 
-// detachSnapshotStore copies only recorded trees and their dependency closure,
-// never the ancestry behind scratch branch-publication refs. Existing local
-// objects are left intact. The caller stops the watcher and holds
-// repoMaintenanceMu before snapshotLock, matching evidence capture's lock order.
+// detachSnapshotStore moves the store off the checkout's objects before the
+// checkout goes. The caller stops the watcher and holds repoMaintenanceMu
+// before snapshotLock, matching evidence capture's lock order.
 func (e *Engine) detachSnapshotStore(ctx context.Context, run domain.RunID, checkout string) error {
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
@@ -157,15 +156,221 @@ func (e *Engine) detachSnapshotStore(ctx context.Context, run domain.RunID, chec
 	if retainErr := e.retainRecordedSnapshotTrees(ctx, meta.Workspace, run, store); retainErr != nil {
 		return retainErr
 	}
+	repo, err := e.repoPath(meta.Workspace)
+	if err != nil {
+		return err
+	}
+	return e.shareHistory(ctx, run, store, repo)
+}
+
+// historyPinRoot holds, in a workspace repository, one ref per snapshot store
+// that borrows its objects, naming the fork-point tree the store relies on.
+// git gc keeps what refs reach, so the tree outlives every branch that held it.
+const historyPinRoot = "refs/aether/sessions/"
+
+// shareHistory repacks the store of key to exactly what its refs/aether refs
+// reach beyond the fork-point tree, which it then borrows from repo under a
+// pin. With repo empty, or a repo that lacks the tree, the store keeps all of
+// it and borrows nothing. Older packs, and loose objects a pack holds, go.
+// The caller holds repoMaintenanceMu, so no evidence prune that started
+// before the pin can drop the tree, and then the snapshot lock of key.
+func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo string) error {
+	base, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", "refs/aether/base")
+	if err != nil {
+		return err
+	}
+	base = strings.TrimSpace(base)
+	if repo != "" && !e.hasObject(ctx, repo, base) {
+		repo = ""
+	}
 	roots, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", "refs/aether/")
 	if err != nil {
 		return err
 	}
-	if _, packErr := e.gitInput(ctx, store, e.gitEnv(), []byte(roots), "pack-objects", "--revs", "--non-empty", filepath.Join(store, "objects", "pack", "pack")); packErr != nil {
-		return packErr
+	if repo != "" {
+		if _, err = e.git(ctx, repo, "update-ref", historyPinRoot+string(key), base); err != nil {
+			return err
+		}
+		roots += "^" + base + "\n"
 	}
-	if removeErr := os.Remove(filepath.Join(store, "objects", "info", "alternates")); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-		return removeErr
+	packs := filepath.Join(store, "objects", "pack")
+	old, err := os.ReadDir(packs)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	name, err := e.gitInput(ctx, store, e.gitEnv(), []byte(roots), "pack-objects", "--revs", "--non-empty", filepath.Join(packs, "pack"))
+	if err != nil {
+		return err
+	}
+	if repo != "" {
+		_, err = borrowObjects(store, filepath.Join(repo, "objects"), key)
+	} else if err = os.Remove(filepath.Join(store, "objects", "info", "alternates")); errors.Is(err, fs.ErrNotExist) {
+		err = nil
+	}
+	if err != nil {
+		return err
+	}
+	// The new pack is in place before the old ones go, as in git repack -d.
+	for _, entry := range old {
+		if name == "" || !strings.HasPrefix(entry.Name(), "pack-"+name+".") {
+			if err = os.Remove(filepath.Join(packs, entry.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	_, _, err = e.gitBareBounded(ctx, store, 0, "prune-packed")
+	return err
+}
+
+// unpinHistory drops the pin of key in the workspace repository its store
+// borrows from, if it borrows from one.
+func (e *Engine) unpinHistory(ctx context.Context, key domain.RunID, store string) error {
+	data, err := os.ReadFile(filepath.Join(store, "objects", "info", "alternates"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	repo := filepath.Dir(strings.TrimSpace(string(data)))
+	if filepath.Dir(repo) != filepath.Clean(e.cfg.ReposDir) {
+		return nil
+	}
+	if _, err = os.Stat(repo); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	_, err = e.git(ctx, repo, "update-ref", "-d", historyPinRoot+string(key))
+	return err
+}
+
+// unshareHistory gives every store pinned in repo its own copy of what it
+// borrows, before repo is removed.
+func (e *Engine) unshareHistory(ctx context.Context, repo string) error {
+	if _, err := os.Stat(repo); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	keys, err := e.git(ctx, repo, "for-each-ref", "--format=%(refname:lstrip=3)", historyPinRoot)
+	if err != nil {
+		return err
+	}
+	for name := range strings.FieldsSeq(keys) {
+		if err = e.unshareStore(ctx, domain.RunID(name)); err != nil {
+			return fmt.Errorf("gitengine: copy the fork point into the history of session %s: %w", name, err)
+		}
 	}
 	return nil
+}
+
+func (e *Engine) unshareStore(ctx context.Context, key domain.RunID) error {
+	store, err := e.snapshotStorePath(key)
+	if err != nil {
+		return err
+	}
+	lock := e.snapshotLock(key)
+	lock.Lock()
+	defer lock.Unlock()
+	// A pin outlives its store when a share failed before the store
+	// borrowed anything and the session was deleted since.
+	if _, err = os.Stat(filepath.Join(store, "HEAD")); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return e.shareHistory(ctx, key, store, "")
+}
+
+// ShareDetachedHistory shares the fork point of each removed checkout's store
+// that still holds its own copy, as servers before shareHistory left them,
+// with a workspace repository that holds it. It works one store at a time and
+// skips a store whose repack could take the disk below the receive floor.
+func (e *Engine) ShareDetachedHistory(ctx context.Context) error {
+	stores, err := os.ReadDir(e.cfg.CheckoutsDir)
+	if err != nil {
+		return fmt.Errorf("gitengine: list diff history: %w", err)
+	}
+	entries, err := os.ReadDir(e.cfg.ReposDir)
+	if err != nil {
+		return fmt.Errorf("gitengine: list workspace repositories: %w", err)
+	}
+	var repos []string
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasSuffix(entry.Name(), ".git") {
+			repos = append(repos, filepath.Join(e.cfg.ReposDir, entry.Name()))
+		}
+	}
+	var errs []error
+	for _, entry := range stores {
+		key, ok := strings.CutSuffix(entry.Name(), snapshotStoreSuffix)
+		if !ok || !entry.IsDir() {
+			continue
+		}
+		if shareErr := e.shareDetachedStore(ctx, domain.RunID(key), repos); shareErr != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			errs = append(errs, fmt.Errorf("gitengine: share the history of session %s: %w", key, shareErr))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (e *Engine) shareDetachedStore(ctx context.Context, key domain.RunID, repos []string) error {
+	store, err := e.snapshotStorePath(key)
+	if err != nil {
+		return err
+	}
+	checkout, err := e.checkoutPath(key)
+	if err != nil {
+		return err
+	}
+	e.repoMaintenanceMu.Lock()
+	defer e.repoMaintenanceMu.Unlock()
+	lock := e.snapshotLock(key)
+	lock.Lock()
+	defer lock.Unlock()
+	// A checkout still there detaches its own store; a store that borrows
+	// already shares.
+	for _, path := range []string{checkout, filepath.Join(store, "objects", "info", "alternates")} {
+		if _, statErr := os.Stat(path); statErr == nil {
+			return nil
+		} else if !errors.Is(statErr, fs.ErrNotExist) {
+			return statErr
+		}
+	}
+	if _, err = os.Stat(filepath.Join(store, "HEAD")); err != nil {
+		return err
+	}
+	base, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", "refs/aether/base")
+	if err != nil {
+		return err
+	}
+	repo := ""
+	for _, candidate := range repos {
+		if e.hasObject(ctx, candidate, strings.TrimSpace(base)) {
+			repo = candidate
+			break
+		}
+	}
+	if repo == "" {
+		return nil
+	}
+	packs, err := os.ReadDir(filepath.Join(store, "objects", "pack"))
+	if err != nil {
+		return err
+	}
+	var size int64
+	for _, pack := range packs {
+		info, infoErr := pack.Info()
+		if infoErr != nil {
+			return infoErr
+		}
+		size += info.Size()
+	}
+	grant, err := e.reserveVMReceive(store, size)
+	if err != nil {
+		return err
+	}
+	defer e.releaseVMReceive(grant)
+	if grant < size {
+		return fmt.Errorf("%w: the server has too little free disk", ErrSnapshotStorageLimit)
+	}
+	return e.shareHistory(ctx, key, store, repo)
 }

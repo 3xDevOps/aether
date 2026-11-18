@@ -846,9 +846,20 @@ storage limit exceeded` to the session's reason (shown by `cloudfield sessions
 <session-id>` and the dashboard), and only then removes the checkout. If the
 commit, the publish or that reason write fails, the checkout stays.
 
-Removing a checkout first copies the session's diff history out of it into
+Removing a checkout first moves the session's diff history out of it into
 `checkouts/<run-id>.diffsnap/`, which stays; this reads the session's diff
-events from the event log. If any step fails, the checkout stays and the
+events from the event log. That store holds only what the session's
+snapshots added and reads the fork point from the workspace repository in
+`repos/`, where the ref `refs/aether/sessions/<run-id>` keeps it from
+`git gc` until the session is deleted. Deleting a workspace first copies the
+fork point into the history of any other workspace's session that still
+reads it, as one with an extra repository does. Stores that older servers
+wrote with their own copy of the fork point shrink the same way, one at a
+time, after the server starts. A store waits for the next start when the
+disk has 256 MiB or less free, or no room for a copy of the store with
+128 MiB to spare; the server then logs `server: share diff history with
+workspace repositories` with the error. If any step fails, the checkout
+stays and the
 server logs `scheduler: checkout gc: capture before cleanup` with the session,
 the attempt, the next retry time and the error. Retries wait 15 minutes,
 doubling to at most 6 hours, and continue until cleanup succeeds; nothing is

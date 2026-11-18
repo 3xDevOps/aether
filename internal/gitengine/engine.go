@@ -238,7 +238,9 @@ func (e *Engine) InitWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) (
 }
 
 // RemoveWorkspaceRepo removes all branches and private refs after the server
-// has fenced workspace admission and purged its run artifacts.
+// has fenced workspace admission and purged its run artifacts. Diff history
+// of other workspaces' sessions that borrows from it, an extra repository's,
+// gets its own copy first.
 func (e *Engine) RemoveWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) error {
 	repo, err := e.repoPath(ws)
 	if err != nil {
@@ -249,6 +251,9 @@ func (e *Engine) RemoveWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID)
 	e.repoMaintenanceMu.Lock()
 	defer e.repoMaintenanceMu.Unlock()
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := e.unshareHistory(ctx, repo); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(repo); err != nil {

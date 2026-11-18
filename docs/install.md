@@ -1112,7 +1112,9 @@ The server keeps all its state in `/var/lib/aether`, or the `data-dir` you set.
 
 The other directories hold internal server state. To recover a server, back
 up `aether.db`, `repos/`, `checkouts/*.diffsnap/`, `transcripts/`, `homes/`,
-`signing-keys/`, `profiles/`, `mirrors/` and `workspace-secrets/`. With
+`signing-keys/`, `profiles/`, `mirrors/` and `workspace-secrets/`. Each
+`<run-id>.diffsnap/` reads its fork point from `repos/` by absolute path, in
+its `objects/info/alternates`, so restore both into the same `data-dir`. With
 `session-runtime vm`, also back up `vm/images/tags.json` and
 `vm/images/bases/local-*/`, the environments members saved; they are sparse
 disks, so copy them with `tar --sparse` or `cp --sparse=always`. Like

@@ -169,9 +169,8 @@ func (e *Engine) publishVM(ctx context.Context, run domain.RunID, meta runMeta) 
 }
 
 // removeVMCheckout deletes the checkout's disk and identity. Its snapshot
-// store keeps the history, detached first: what the recorded trees need
-// from the workspace repository it borrowed from is copied into it, so the
-// history outlives a workspace that drops the fork point.
+// store keeps the history, detached first: it keeps borrowing the fork
+// point from the workspace repository, pinned there, and holds the rest.
 func (e *Engine) removeVMCheckout(ctx context.Context, run domain.RunID, checkout, metaPath string) error {
 	e.repoMaintenanceMu.Lock()
 	defer e.repoMaintenanceMu.Unlock()
@@ -238,22 +237,20 @@ func (e *Engine) detachVMStore(ctx context.Context, run domain.RunID) error {
 	if err != nil {
 		return err
 	}
-	alternates := filepath.Join(store, "objects", "info", "alternates")
-	if _, statErr := os.Stat(alternates); errors.Is(statErr, fs.ErrNotExist) {
+	if _, statErr := os.Stat(filepath.Join(store, "HEAD")); errors.Is(statErr, fs.ErrNotExist) {
 		return nil
 	} else if statErr != nil {
 		return statErr
 	}
-	roots, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", "refs/aether/")
+	meta, err := e.readRunMeta(run)
 	if err != nil {
 		return err
 	}
-	if roots != "" {
-		if _, err = e.gitInput(ctx, store, e.gitEnv(), []byte(roots), "pack-objects", "--revs", "--non-empty", filepath.Join(store, "objects", "pack", "pack")); err != nil {
-			return fmt.Errorf("gitengine: detach the history of session %s: %w", run, err)
-		}
+	repo, err := e.repoPath(meta.Workspace)
+	if err != nil {
+		return err
 	}
-	if err = os.Remove(alternates); err != nil {
+	if err = e.shareHistory(ctx, run, store, repo); err != nil {
 		return fmt.Errorf("gitengine: detach the history of session %s: %w", run, err)
 	}
 	return nil

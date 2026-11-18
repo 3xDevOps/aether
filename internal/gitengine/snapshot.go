@@ -572,6 +572,9 @@ func (e *Engine) removeRunHistory(ctx context.Context, run domain.RunID) error {
 	if removeErr := os.Remove(meta); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 		return fmt.Errorf("gitengine: remove session metadata for %s: %w", run, removeErr)
 	}
+	if unpinErr := e.unpinHistory(ctx, run, store); unpinErr != nil {
+		return fmt.Errorf("gitengine: release the fork point of session %s: %w", run, unpinErr)
+	}
 	if removeErr := os.RemoveAll(store); removeErr != nil {
 		return fmt.Errorf("gitengine: remove snapshot store for session %s: %w", run, removeErr)
 	}

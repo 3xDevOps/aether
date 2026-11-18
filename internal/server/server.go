@@ -802,6 +802,13 @@ func (s *Server) Run(ctx context.Context) error {
 			s.serveWeb(runCtx)
 		}()
 	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.git.ShareDetachedHistory(runCtx); err != nil && runCtx.Err() == nil {
+			slog.Warn("server: share diff history with workspace repositories", "error", err)
+		}
+	}()
 	go func() {
 		defer wg.Done()
 		if err := s.sched.Start(runCtx); err != nil {
