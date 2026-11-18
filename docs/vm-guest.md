@@ -163,6 +163,12 @@ mounted. It is package `internal/guest/home`, API
   An agent that reads a login another session just refreshed reads the
   new login whole, unless another process in the VM still has the old one
   open. An `O_APPEND` write appends at the host's end of the file.
+- The helper raises the mount's read-ahead
+  (`/sys/class/bdi/<device>/read_ahead_kb`) from the kernel's 128 KiB to
+  512 KiB, so a program started from the home, such as an agent's binary,
+  loads in a quarter of the round trips. From 1 MiB on, a session that
+  fills its memory can thrash for minutes, refaulting its own program,
+  instead of being killed.
 - `flock` and `fcntl` locks hold only within one VM, and memory maps are not
   shared across VMs. A SQLite database or a lock file in the home is not
   protected against the member's other sessions, as it is under Docker;

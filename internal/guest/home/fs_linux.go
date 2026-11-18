@@ -3,9 +3,11 @@ package home
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
@@ -33,6 +36,11 @@ const (
 	callTimeout = 2 * time.Minute
 	// retries covers a connection cut under a call, as a save does.
 	retries = 3
+	// readAheadKiB replaces the kernel's 128 KiB in sysfs, as the mount's
+	// MaxReadAhead can only lower it. From 1 MiB on, a session that fills
+	// its memory can thrash for minutes on refaults of its own program
+	// instead of being killed (TestKVMSessionThatFillsTheVMIsKilled).
+	readAheadKiB = 512
 )
 
 // Mount mounts the service at dir and serves it from this process until the
@@ -68,8 +76,17 @@ func Mount(dir string, dial func(context.Context) (net.Conn, error)) error {
 	})
 	if err != nil {
 		_ = conn.Close()
+		return err
 	}
-	return err
+	var st unix.Stat_t
+	if err = unix.Stat(dir, &st); err != nil {
+		return fmt.Errorf("stat the home: %w", err)
+	}
+	bdi := fmt.Sprintf("/sys/class/bdi/%d:%d/read_ahead_kb", unix.Major(st.Dev), unix.Minor(st.Dev))
+	if err = os.WriteFile(bdi, []byte(strconv.Itoa(readAheadKiB)), 0); err != nil {
+		return fmt.Errorf("set the home's read-ahead: %w", err)
+	}
+	return nil
 }
 
 type filesystem struct {
