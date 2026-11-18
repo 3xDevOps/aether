@@ -952,16 +952,19 @@ the buildx builders pull Docker Hub images through `mirror.gcr.io` and fall
 back to Docker Hub, so a Docker Hub outage alone does not fail them.
 
 `lint`, `build-and-test`, `store-tests`, `dashboard`, both `integration` jobs,
-`arm64`, `dashboard-e2e` and `kvm` run on [Blacksmith](https://docs.blacksmith.sh/)
+`arm64` and `dashboard-e2e` run on [Blacksmith](https://docs.blacksmith.sh/)
 runners (`blacksmith-4vcpu-ubuntu-2604`, and `blacksmith-4vcpu-ubuntu-2404-arm`
-for `arm64`), declared for actionlint in `.github/actionlint.yaml`. Every
-other job stays on a GitHub-hosted runner: the Windows smoke scripts refuse
-any other runner, and release, promote and nightly builds never read a cache a
-Blacksmith job wrote. On Blacksmith, `actions/cache` uses Blacksmith's store,
-which GitHub-hosted jobs cannot read, so `release-build` writes the
-GitHub-hosted Linux amd64 module, bun and release compiler caches the release
-workflow restores. Buildx `type=gha` caches stay in GitHub's store, so the
-release workflow builds the browser and standard images without one.
+for `arm64`), declared for actionlint in `.github/actionlint.yaml`. Blacksmith's
+Ubuntu 26.04 image mounts `/tmp` as a tmpfs of half the runner's memory, too
+small for the server's disk-headroom check, so `.github/actions/free-disk`
+unmounts it. Every other job stays on a GitHub-hosted runner: the Windows smoke
+scripts refuse any other runner, Blacksmith's kernel rejects the `fib` rule of
+the session VM firewall `kvm` tests, and release, promote and nightly builds
+never read a cache a Blacksmith job wrote. On Blacksmith, `actions/cache` uses
+Blacksmith's store, which GitHub-hosted jobs cannot read, so `release-build`
+writes the GitHub-hosted Linux amd64 module, bun and release compiler caches
+the release workflow restores. Buildx `type=gha` caches stay in GitHub's store,
+so the release workflow builds the browser and standard images without one.
 
 | Job | Sessions | Locally |
 | --- | --- | --- |
@@ -976,7 +979,7 @@ release workflow builds the browser and standard images without one.
 | `windows`, `windows-install` | [Windows](#windows); `windows` also scans `release-build`'s Windows binaries with Defender, and the `windows-install` install (zip) and update legs package and launch the Windows desktop zip on amd64 and arm64 | |
 | `release-build (binaries, desktop, android)` | `make release-binaries`, `cloudfield gui build` on Linux with and without Node on `PATH`, `make android` | `make release-binaries`, [Desktop shell](../CONTRIBUTING.md#desktop-shell), `make android` |
 | `edge-image` | [The edge image](#the-edge-image) and [qualification](#edge-upgrade-qualification) | |
-| `kvm` | [VM tests](#vm-tests) on a Blacksmith x86-64 runner, which has `/dev/kvm` (`.github/workflows/kvm.yml`) | `make kernel`, then `make test-kvm` as root |
+| `kvm` | [VM tests](#vm-tests) on a hosted runner, which has `/dev/kvm` (`.github/workflows/kvm.yml`) | `make kernel`, then `make test-kvm` as root |
 
 A pull request that changes only `docs/**` or root-level `*.md` files runs
 `audit` and nothing else. A Markdown file anywhere else counts as code.

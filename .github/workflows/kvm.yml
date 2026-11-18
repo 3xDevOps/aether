@@ -1,12 +1,13 @@
 name: VM tests
 
-# make test-kvm on a Blacksmith x86-64 runner, which exposes /dev/kvm
-# through nested virtualization. ci-suite.yml calls it in the merge queue for a
+# make test-kvm on a hosted x86-64 runner, which exposes /dev/kvm through
+# nested virtualization. ci-suite.yml calls it in the merge queue for a
 # change that can affect the VM tests and in every nightly run;
 # `gh workflow run kvm.yml --ref <branch>` runs it for any branch. The guest
 # kernel takes up to six minutes to build, so it builds only when its
 # inputs change: the cache is keyed by their hash and written on main. It
-# saves no compiler cache for its static builds.
+# saves no compiler cache for its static builds: the repository's Actions
+# cache is already over its size limit.
 on:
   workflow_call:
   workflow_dispatch:
@@ -17,7 +18,7 @@ permissions:
 jobs:
   kvm:
     name: make test-kvm
-    runs-on: blacksmith-4vcpu-ubuntu-2604
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

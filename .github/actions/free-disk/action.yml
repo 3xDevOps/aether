@@ -1,13 +1,20 @@
 name: Free runner disk
 description: >
   Delete preinstalled toolchains no Aether job uses, so the Docker image
-  builds and Go caches of a job fit a hosted runner's disk. The Android
-  build uses its own pinned SDK container, not the runner's SDK.
+  builds and Go caches of a job fit the runner's disk. The Android build
+  uses its own pinned SDK container, not the runner's SDK. Blacksmith's
+  Ubuntu 26.04 image mounts /tmp as a tmpfs of half the runner's memory,
+  smaller than the server's disk-headroom check needs for concurrent
+  launches, so this puts /tmp back on the root disk.
 runs:
   using: composite
   steps:
     - shell: bash
       run: |
-        df -h /
+        df -h / /tmp
         sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
-        df -h /
+        if findmnt -n -t tmpfs /tmp >/dev/null; then
+          sudo umount /tmp
+          sudo chmod 1777 /tmp
+        fi
+        df -h / /tmp
