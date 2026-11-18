@@ -52,7 +52,12 @@ const (
 	stateDiskBytes = 1 << 30
 	minMemoryMiB   = 256
 	bootTimeout    = 90 * time.Second
-	agentOOMScore  = 500
+	// guestOverheadMiB is what the guest keeps out of the session's limit
+	// beyond a 32nd of it (guestMiB): 288 MiB for what the kernel and the
+	// helper hold (at most 265 MiB, at a 3 GiB limit, once sessions of 1 to
+	// 8 GiB had started), the helper's 48 MiB reserve and the git service's
+	// 96 MiB.
+	guestOverheadMiB = 288 + 48 + 96
 	// unitOverheadMiB is what a VM's unit may hold beyond the guest's
 	// memory: Cloud Hypervisor, virtiofsd, and the monitor with the file
 	// service, whose requests a guest can fill.
@@ -188,6 +193,9 @@ func (e *engine) flag(m map[string]bool, key string) bool {
 type options struct {
 	// Offline gives the VM no network device.
 	Offline bool
+	// NoSwap gives the VM no swap, as the dictation engine's container has
+	// none.
+	NoSwap bool
 	// Lifetime has systemd end the VM after it, even when no server is
 	// left to: the VM of a check that a crash interrupted.
 	Lifetime time.Duration
@@ -265,7 +273,7 @@ func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts
 		WorkingDir: cmp.Or(spec.WorkingDir, base.Config.WorkingDir, "/"), Command: spec.Command, TTY: spec.TTY,
 		SetupScript: spec.SetupScript, SecretEnv: spec.SecretEnv, NestedDocker: spec.NestedDocker, Sudo: spec.Sudo,
 		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: shared, CheckoutDisks: disks, Mounts: spec.Mounts, Net: index, Egress: spec.Egress,
-		Lifetime: opts.Lifetime, OwnedDirs: opts.OwnedDirs, Serves: opts.Serves,
+		NoSwap: opts.NoSwap, Lifetime: opts.Lifetime, OwnedDirs: opts.OwnedDirs, Serves: opts.Serves,
 	}
 	if opts.Browser {
 		if err = e.attachBrowser(ctx, rec); err != nil {
@@ -286,6 +294,19 @@ func vcpus(limit float64) (int, float64) {
 		return host, 0
 	}
 	return min(host, max(1, int(math.Ceil(limit)))), limit
+}
+
+// guestMiB is the RAM of a VM whose session's limit is limitMiB: the limit,
+// which the session gets whole, and what the guest holds outside it. A
+// 64th of RAM goes to the kernel's page structures, and up to as much
+// again to its watermarks.
+func guestMiB(limitMiB int64) int64 {
+	return limitMiB + limitMiB/32 + guestOverheadMiB
+}
+
+// unitMemoryMiB is the MemoryMax of rec's unit.
+func unitMemoryMiB(rec *record) int64 {
+	return guestMiB(rec.MemoryMiB) + unitOverheadMiB
 }
 
 func memoryMiB(limit int64) (int64, error) {
@@ -444,7 +465,14 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	if err != nil {
 		return launch{}, err
 	}
-	cfg := guest.Config{Hostname: rec.Key, Mounts: p.mounts, Checkouts: checkouts, Sockets: p.sockets, Serves: rec.Serves, Loopbacks: p.loopbacks}
+	cfg := guest.Config{
+		Hostname: rec.Key, Mounts: p.mounts, Checkouts: checkouts, Sockets: p.sockets, Serves: rec.Serves, Loopbacks: p.loopbacks,
+		MemoryLimit: uint64(rec.MemoryMiB) << 20,
+	}
+	if !rec.NoSwap {
+		// A quarter of the limit, as Docker gives a container.
+		cfg.Swap = cfg.MemoryLimit / 4
+	}
 	if rec.Browser.Path != "" {
 		cfg.Serves = append(cfg.Serves, guest.Socket{Port: guest.BrowserPort, Path: guest.BrowserSocket})
 	}
@@ -478,7 +506,7 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		// (Cloud Hypervisor v54.1 on a host that is itself a VM). Sessions
 		// run no VMs of their own.
 		"--cpus", fmt.Sprintf("boot=%d,nested=off", rec.CPUs),
-		"--memory", fmt.Sprintf("size=%dM,shared=on", rec.MemoryMiB),
+		"--memory", fmt.Sprintf("size=%dM,shared=on", guestMiB(rec.MemoryMiB)),
 		"--balloon", "size=0,free_page_reporting=on",
 	)
 	if rec.Net != offline {
@@ -560,7 +588,11 @@ func (e *engine) launch(ctx context.Context, rec *record, l launch) error {
 	logPath := e.path(rec.Key, monitorLog)
 	properties := []string{
 		"Type=exec", "PrivateMounts=yes", "KillMode=control-group", "TimeoutStopSec=15",
-		fmt.Sprintf("OOMScoreAdjust=%d", agentOOMScore), fmt.Sprintf("MemoryMax=%dM", rec.MemoryMiB+unitOverheadMiB),
+		// The guest swaps its own memory: host swap would page it out
+		// behind the guest's back. No OOMScoreAdjust, unlike a container's
+		// 500: a host OOM kill of the monitor ends the whole session, not
+		// one process in it.
+		fmt.Sprintf("MemoryMax=%dM", unitMemoryMiB(rec)), "MemorySwapMax=0",
 		"StandardOutput=append:" + logPath, "StandardError=append:" + logPath,
 	}
 	if rec.CPULimit > 0 {

@@ -80,6 +80,10 @@ type Config struct {
 	Sockets   []Socket
 	Serves    []Socket
 	Loopbacks []Loopback
+	// MemoryLimit caps the session's memory, in bytes; Swap sizes the swap
+	// file the helper makes on the data disk. 0 leaves either out.
+	MemoryLimit uint64
+	Swap        uint64
 }
 
 // Network configures the VM's one network interface.
@@ -181,6 +185,9 @@ func (c Config) KernelArgs(base string) (string, error) {
 	}
 	for _, l := range c.Loopbacks {
 		args = append(args, "aether.loopback="+strconv.FormatUint(uint64(l.Port), 10)+","+escapePath(l.Path))
+	}
+	if c.MemoryLimit > 0 || c.Swap > 0 {
+		args = append(args, "aether.memory="+strconv.FormatUint(c.MemoryLimit, 10)+","+strconv.FormatUint(c.Swap, 10))
 	}
 	line := strings.TrimSpace(strings.Join(append(args, "--", "guest"), " "))
 	if len(line) > maxCmdline {
@@ -319,6 +326,19 @@ func (c *Config) parseArg(key, value string) error {
 			return err
 		}
 		c.Loopbacks = append(c.Loopbacks, Loopback{Port: uint16(port), Path: p})
+	case "aether.memory":
+		if len(fields) != 2 {
+			return errors.New("want <limit>,<swap>")
+		}
+		limit, err := strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			return err
+		}
+		swap, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			return err
+		}
+		c.MemoryLimit, c.Swap = limit, swap
 	default:
 		return errors.New("unknown argument")
 	}

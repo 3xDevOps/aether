@@ -919,6 +919,9 @@ func TestKVMDictationVM(t *testing.T) {
 	if links, _ := vmRun(t, e, dictationVM("i9test"), "ls /sys/class/net"); strings.TrimSpace(links) != "lo" {
 		t.Errorf("the engine's VM has network links %q, want only lo", links)
 	}
+	if got, _ := vmRun(t, e, dictationVM("i9test"), "cat /sys/fs/cgroup/session/memory.max; wc -l </proc/swaps"); got != "1073741824\n1\n" {
+		t.Errorf("the engine's memory.max and /proc/swaps line count are %q, want its 1 GiB cap and no swap, as its container has", got)
+	}
 	if err = r.RemoveDictation(t.Context(), "i9test"); err != nil {
 		t.Fatal(err)
 	}

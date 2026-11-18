@@ -22,9 +22,6 @@ const dictationPort = 2000
 const (
 	// dictationPids matches the Docker engine container's process limit.
 	dictationPids = 256
-	// dictationGuest is what the guest kernel and helper take, on top of
-	// the engine's own memory cap.
-	dictationGuest = 256 << 20
 	// dictationStart bounds pulling the engine's image, building its disk
 	// and booting its VM.
 	dictationStart = 10 * time.Minute
@@ -62,10 +59,10 @@ func (r *Runtime) StartDictation(ctx context.Context, spec runtime.DictationSpec
 	key := dictationVM(spec.Owner)
 	vmSpec := runtime.Spec{
 		Image: spec.Image, Command: spec.Entrypoint, User: spec.User, Mounts: mounts,
-		CPULimit: spec.CPUs, MemoryLimitBytes: spec.MemoryBytes + dictationGuest, PidsLimit: dictationPids,
+		CPULimit: spec.CPUs, MemoryLimitBytes: spec.MemoryBytes, PidsLimit: dictationPids,
 	}
 	opts := options{
-		Offline: true, OwnedDirs: []string{guestDir},
+		Offline: true, NoSwap: true, OwnedDirs: []string{guestDir},
 		Serves: []guest.Socket{{Port: dictationPort, Path: path.Join(guestDir, spec.Socket)}},
 	}
 	id, err := r.vms.create(ctx, key, vmSpec, opts)

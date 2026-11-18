@@ -292,6 +292,33 @@ func CgroupMemoryPressure(dir string) (*float64, error) {
 	return readPressure(filepath.Join(dir, "memory.pressure"), "some", "avg60")
 }
 
+// CgroupWorkingSet is the cgroup v2 directory dir's memory.current less its
+// inactive_file, as the kubelet and docker stats count a container's.
+func CgroupWorkingSet(dir string) (uint64, error) {
+	current, err := os.ReadFile(filepath.Join(dir, "memory.current"))
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.ParseUint(strings.TrimSpace(string(current)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse memory.current: %w", err)
+	}
+	stat, err := os.ReadFile(filepath.Join(dir, "memory.stat"))
+	if err != nil {
+		return 0, err
+	}
+	for line := range strings.SplitSeq(string(stat), "\n") {
+		if v, ok := strings.CutPrefix(line, "inactive_file "); ok {
+			inactive, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse memory.stat: %w", err)
+			}
+			return n - min(inactive, n), nil
+		}
+	}
+	return 0, errors.New("memory.stat has no inactive_file")
+}
+
 // HostMemoryStall is the percentage of the last 10 seconds in which every
 // non-idle task on the host stalled on memory at once (procRoot's
 // pressure/memory, "full avg10"), the figure systemd-oomd acts on. It is nil
