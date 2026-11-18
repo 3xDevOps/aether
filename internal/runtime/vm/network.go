@@ -165,8 +165,9 @@ func (e *engine) egressKey(ip netip.Addr) (string, error) {
 // as it does the hosts on any uplink's network. Otherwise it never reaches
 // a tailnet peer anyway, and dropping the range would only cut off the host's
 // own tailnet address, which it may reach. Guests resolve through the DNS
-// relay at the proxy address; the host's upstream resolvers stay reachable on
-// port 53 too, since a host may run one at a link-local address.
+// relay at the proxy address. Port 53 to the host's upstream resolvers goes
+// to the relay too, even at a link-local address: a VM booted before the
+// relay still names them, and a guest often cannot reach them.
 var firewall = template.Must(template.New("firewall").Parse(`table inet {{.Table}}
 delete table inet {{.Table}}
 table inet {{.Table}} {
@@ -181,8 +182,8 @@ table inet {{.Table}} {
 	}
 	chain dns {
 		type nat hook prerouting priority dstnat - 1; policy accept;
-		iifname "{{.Taps}}*" ip daddr {{.Proxy}} udp dport 53 dnat ip to {{.Proxy}}:{{.DNSUDP}}
-		iifname "{{.Taps}}*" ip daddr {{.Proxy}} tcp dport 53 dnat ip to {{.Proxy}}:{{.DNSTCP}}
+		iifname "{{.Taps}}*" ip daddr { {{.Proxy}}{{range .DNS}}, {{.}}{{end}} } udp dport 53 dnat ip to {{.Proxy}}:{{.DNSUDP}}
+		iifname "{{.Taps}}*" ip daddr { {{.Proxy}}{{range .DNS}}, {{.}}{{end}} } tcp dport 53 dnat ip to {{.Proxy}}:{{.DNSTCP}}
 	}
 	chain input {
 		type filter hook input priority filter - 1; policy accept;
@@ -201,9 +202,6 @@ table inet {{.Table}} {
 {{- if .Uplinks}}
 		iifname "{{.Taps}}*" oifname { {{range $i, $u := .Uplinks}}{{if $i}}, {{end}}"{{$u}}"{{end}} } meta mark set meta mark | {{.Mark}} accept
 {{- end}}
-{{- if .DNS}}
-		iifname "{{.Taps}}*" ip daddr { {{range $i, $a := .DNS}}{{if $i}}, {{end}}{{$a}}{{end}} } meta l4proto { tcp, udp } th dport 53 meta mark set meta mark | {{.Mark}} accept
-{{- end}}
 		iifname "{{.Taps}}*" reject with icmpx admin-prohibited
 		oifname "{{.Taps}}*" ct state established,related meta mark set meta mark | {{.Mark}} accept
 		oifname "{{.Taps}}*" drop
@@ -217,10 +215,9 @@ table inet {{.Table}} {
 
 // ensureNetwork sets up the host side of every VM's network. VMs leave the
 // host only through its default-route interfaces, so they miss every bridge
-// of Docker's, whatever it is named, and the host's upstream DNS servers
-// stay reachable wherever they route, as a VPN's resolver does. It runs at
-// every start: the firewall is replaced in one transaction, so a changed
-// default route or resolver applies to the next VM that boots.
+// of Docker's, whatever it is named. It runs at every start: the firewall is
+// replaced in one transaction, so a changed default route or resolver list
+// applies to every VM at the next server start, VM boot or restore.
 func (e *engine) ensureNetwork(ctx context.Context) error {
 	e.netMu.Lock()
 	defer e.netMu.Unlock()
@@ -340,9 +337,9 @@ func routeUplinks(routes, internet []netlink.Route, names map[int]string) []stri
 	return out
 }
 
-// hostDNS are the host's upstream IPv4 servers, which a guest may also query
-// itself. It prefers systemd-resolved's list, since its stub at 127.0.0.53 is
-// the host's own.
+// hostDNS are the host's upstream IPv4 servers, the ones VMs booted before
+// the DNS relay name. It prefers systemd-resolved's list, since its stub at
+// 127.0.0.53 is the host's own.
 func hostDNS() []netip.Addr {
 	for _, path := range []string{"/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"} {
 		f, err := os.Open(path)

@@ -397,9 +397,14 @@ What changes:
   host's search domains. A VM so resolves what the host resolves, short
   names included, through a loopback stub such as systemd-resolved's
   `127.0.0.53`, Tailscale's MagicDNS or a VPN's resolver. Lookups fail
-  while the server restarts. The host's upstream DNS servers also stay
-  reachable on port 53, even at a link-local address: a VM started before
-  v0.9.0-beta.2 keeps querying them until it next starts cold.
+  while the server restarts. A VM's port 53 traffic to one of the host's
+  upstream DNS servers (the IPv4, non-loopback ones in
+  `/run/systemd/resolve/resolv.conf`, else `/etc/resolv.conf`, else
+  `8.8.8.8` and `8.8.4.4`) is answered by the relay too, so
+  `dig @<that server>` in a VM gets the host resolver's answer. A VM
+  started before v0.9.0-beta.2 still names those servers until it next
+  starts cold; if the host's list has changed since it booted, it still
+  queries its old servers directly.
 - A session with [egress control](#egress-control) gets the tap
   `aethervme<n>`, no DNS servers, and reaches only the egress proxy at
   `10.200.0.1:3128`. That address is on the dummy link `aether-vmproxy`; the
