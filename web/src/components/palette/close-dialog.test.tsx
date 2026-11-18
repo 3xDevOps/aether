@@ -83,7 +83,7 @@ describe('close dialog', () => {
     const merged = await screen.findByRole('button', { name: 'Close as merged' })
     const abandoned = screen.getByRole('button', { name: 'Close as abandoned' })
     expect(abandoned.className).toContain('bg-state-failed')
-    expect(merged.className).not.toContain('bg-accent')
+    expect(merged.className).not.toContain('bg-action')
     const cancel = screen.getByRole('button', { name: 'Cancel' })
     expect(document.activeElement).toBe(cancel)
     expect(cancel.className).toContain('focus:outline-accent')
@@ -105,7 +105,7 @@ describe('close dialog', () => {
   it('keeps merging the calm primary without warnings, and stacks the buttons in reading order', async () => {
     render(<CloseDialog />)
     const merged = await screen.findByRole('button', { name: 'Close as merged' })
-    expect(merged.className).toContain('bg-accent')
+    expect(merged.className).toContain('bg-action')
     const footer = merged.parentElement!
     expect([...footer.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Cancel', 'Close as abandoned', 'Close as merged'])
     expect(footer.className).toMatch(/(^| )flex-col( |$)/)

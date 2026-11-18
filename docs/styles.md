@@ -2,10 +2,15 @@
 
 ## Workbench language
 
-The dashboard is a dense developer workbench on graphite surfaces with one
-teal accent. Adjoining panes are flat and quiet. Elevation is restrained:
-cards and secondary buttons carry a light shadow, floating surfaces a deeper
-one, panes none. Do not add saturated colours, gradients or backdrop blur.
+The dashboard is a dense developer workbench on neutral surfaces. The dark
+theme, the default, follows the Cloudfield website: blue-black surfaces at
+the logo blue's hue, Cream `#f7f0e4` text, the logo's teal `#54e0d0` as the
+accent, and one warm colour, gold `#f5c542`, for the primary button and for
+what needs a person. The light theme is white and grey with a teal accent.
+Adjoining panes are flat and quiet. Elevation is restrained: cards and
+secondary buttons carry a light shadow, floating surfaces a deeper one, panes
+none. Do not add saturated colours beyond the tokens, gradients or backdrop
+blur.
 The desktop launch splash is the exception: it plays the website's opening;
 see [Session state and motion](#session-state-and-motion).
 
@@ -101,28 +106,31 @@ the system theme over the native error and update panels.
 
 | Token | Utility | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
-| `--canvas` | `bg-canvas` | `#ffffff` | `#141516` | Main view, fields |
-| `--chrome` | `bg-chrome` | `#f7f7f7` | `#1b1c1d` | Sidebar, app header, toolbars, code, browser chrome |
-| `--hover` | `bg-hover` | `#f3f3f3` | `#1d1e1f` | Hovered rows and cards on canvas |
-| `--hover-chrome` | `bg-hover-chrome` | `#ececec` | `#262728` | Hover on chrome and raised surfaces: sidebar and list rows, menu items, ghost and secondary buttons |
-| `--raised` | `bg-raised` | `#ffffff` | `#222324` | Floating surfaces, secondary buttons |
-| `--seam` | `border-seam` | black 8% | white 8% | Every border; the default border colour |
-| `--control-border` | `border-control` | `#8a8a8a` | `#767676` | Fields, checkboxes, radios |
+| `--canvas` | `bg-canvas` | `#ffffff` | `#070b11` | Main view, fields |
+| `--chrome` | `bg-chrome` | `#f7f7f7` | `#0c141f` | Sidebar, app header, toolbars, code, browser chrome |
+| `--hover` | `bg-hover` | `#f3f3f3` | `#121924` | Hovered rows and cards on canvas |
+| `--hover-chrome` | `bg-hover-chrome` | `#ececec` | `#1c2531` | Hover on chrome and raised surfaces: sidebar and list rows, menu items, ghost and secondary buttons |
+| `--raised` | `bg-raised` | `#ffffff` | `#151d2a` | Floating surfaces, secondary buttons |
+| `--seam` | `border-seam` | black 8% | Cream 9% | Every border; the default border colour |
+| `--control-border` | `border-control` | `#8a8a8a` | `#717c8d` | Fields, checkboxes, radios |
 | `--scrim` | `bg-scrim` | black 56% | black 56% | Dialogs and sheets |
 | `--scrim-strong` | `bg-scrim-strong` | black 85% | black 85% | ACP image viewer |
-| `--text` | `text-text` | `#1f1f1f` | `#e8e8e8` | Text |
-| `--text-muted` | `text-muted` | `#6b6b6b` | `#9a9a9a` | Placeholders, timestamps, meta |
-| `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons, scrollbar thumbs, tree connectors |
-| `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, control outline |
-| `--focus-ring` | `outline-focus` | `#367f77` | `#5fb3a8` | Keyboard focus ring; 3:1 on every surface and on the selected row in both themes |
-| `--accent-text` | `text-accent` | `#306f69` | `#5fb3a8` | Links, accent text |
-| `--on-accent` | `text-on-accent` | `#ffffff` | `#ffffff` | Text on `bg-accent` |
-| `--selection` | `bg-selection` | `#dfebe9` | `#17413d` | Selected rows |
+| `--text` | `text-text` | `#1f1f1f` | `#f7f0e4` | Text |
+| `--text-muted` | `text-muted` | `#6b6b6b` | `#97a3b5` | Placeholders, timestamps, meta |
+| `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#798699` | Disabled text, decorative icons, scrollbar thumbs, tree connectors |
+| `--accent-fill` | `bg-action` | `#367f77` | `#f5c542` | The one primary button |
+| `--accent-mark` | `bg-accent`, `border-accent`, `outline-accent` | `#367f77` | `#54e0d0` | What is selected or active: checked controls, the current tab, progress, control outlines |
+| `--focus-ring` | `outline-focus` | `#367f77` | `#54e0d0` | Keyboard focus ring; 3:1 on every surface and on the selected row in both themes |
+| `--accent-text` | `text-accent` | `#306f69` | `#54e0d0` | Links, accent text |
+| `--on-accent` | `text-on-accent` | `#ffffff` | `#070b11` | Text on `bg-action` and `bg-accent` |
+| `--selection` | `bg-selection` | `#dfebe9` | `#0c3b36` | Selected rows |
 
 `accent` is a fill for backgrounds and borders but the link colour for text;
-`bg-accent-hover` darkens the fill for a hovered primary button. The accent
-marks selection, focus, the one primary button per view, links and the
-Finished: review state, nothing else. Inside a selected row, secondary text uses `text-text`. A floating
+`bg-action` is the primary button's own fill and `bg-action-hover` darkens it
+under the pointer. In the light theme both are the same teal. In the dark
+theme the primary button is gold and the accent is teal: the accent marks
+selection, focus, links and the Finished: review state, nothing else, and
+gold is on the one primary button per view and on Needs you. Inside a selected row, secondary text uses `text-text`. A floating
 surface is `bg-raised`, a 1px seam and `shadow-overlay`; dialogs, the
 palette and sheets take `shadow-dialog` and sit over `bg-scrim`.
 [Geometry](#geometry-and-responsive-behavior) lists every shadow.
@@ -131,17 +139,21 @@ The session states (see
 [dashboard-frontend.md](dashboard-frontend.md#session-state)), used on dots,
 state lines, badges, callouts and request cards. Finished: review, a reported
 success awaiting its owner, takes the accent and a filled check circle; it
-asks nothing, so it is never amber. A subsession's success, which is for
-its parent agent only, draws the done check in `icon-faint` (the `held` tone):
+asks nothing, so it never takes the needs-you colour. That colour, also the
+dashboard's warning colour, is amber in the light theme and gold in the dark
+one, where it is also the primary button's fill; a warning is an outlined
+chip, a ring or text with an icon, never a filled button. A subsession's
+success, which is for its
+parent agent only, draws the done check in `icon-faint` (the `held` tone):
 
 | State | Utility | Light | Dark |
 | --- | --- | --- | --- |
-| Needs you | `state-needs-you` | `#8a5d00` | `#e0a52a` |
+| Needs you | `state-needs-you` | `#8a5d00` | `#f5c542` |
 | Working | `state-working` | `#1b65c2` | `#4a9eff` |
-| Paused | `state-paused` | `#6e6e6e` | `#8a8a8a` |
+| Paused | `state-paused` | `#6e6e6e` | `#798699` |
 | Done | `state-done` | `#1a7a36` | `#45c26a` |
 | Failed | `state-failed` | `#c8321f` | `#f05c4a` |
-| Finished: review | `text-accent`, `bg-accent-soft` (`review` tone) | `#306f69` | `#5fb3a8` |
+| Finished: review | `text-accent`, `bg-accent-soft` (`review` tone) | `#306f69` | `#54e0d0` |
 
 Each state has a `-soft` fill (`bg-state-failed-soft`) at 8% light, 12% dark;
 `bg-accent-soft` likewise. `text-on-failed` is the text on a `bg-state-failed`
@@ -180,7 +192,7 @@ than restyling it.
 
 | Variant | Look | Use |
 | --- | --- | --- |
-| `primary` (default) | `bg-accent`, `text-on-accent` | The one primary action in a view |
+| `primary` (default) | `bg-action`, `text-on-accent` | The one primary action in a view |
 | `secondary` | Seam border on `bg-raised`, `shadow-button` | Other actions |
 | `ghost` | Muted text, `bg-hover-chrome` on hover | Toolbar and icon buttons |
 | `danger` | `bg-state-failed`, `text-on-failed` | Confirming a destructive action |
@@ -279,8 +291,8 @@ The other primitives with motion or a fixed size:
   `TextSwap` and shows its answer digit as a `Kbd` on a fine pointer.
   Answers split a narrow card in halves and sit at their own width on the
   right of a wide one. `RequestTimeBar` drains 2px of needs-you toward a
-  deadline. Amber appears only in the dot and that bar; accent only on the
-  primary answer.
+  deadline. The needs-you colour appears only in the dot and that bar; the
+  primary fill only on the primary answer.
 - `Spinner` draws a ring: a track at `--opacity-track` under a quarter arc
   turning every 900ms.
 - `Skeleton` sweeps a `bg-hover-chrome` band across `bg-chrome`. A page that
@@ -326,7 +338,7 @@ own bar is its state history in the `-soft` state fills. A running bar
 carries `trace-live`, the live shimmer's band in working blue; history that
 is not loaded is hatched (`trace-unknown`). A duration that would run past
 the track sits inside the bar's end, on the bar's own fill. The **Slowest**
-pill is neutral, `bg-hover-chrome` and muted, because amber means Needs you.
+pill is neutral, `bg-hover-chrome` and muted: it is not a warning.
 
 ## Lanes
 
@@ -425,7 +437,7 @@ when a listed file already complies, so the lists only shrink.
 
 The same file checks contrast in both themes: `text` and `text-muted` on
 every surface, `text` on `selection`, accent text on canvas and chrome,
-`on-accent` on the accent fill, `on-failed` and `on-done` on their fills, and the
+`on-accent` on the primary fill and on the accent mark, `on-failed` and `on-done` on their fills, and the
 states and diff colours on canvas at 4.5:1; control borders, `icon-faint`
 and the agent colours on canvas at 3:1. It also checks that every `text-*`
 and `bg-*` class in `components/ui/` names a token defined in `index.css`.
@@ -579,8 +591,8 @@ medium and **Search**. A `bg-chrome` tab bar along the bottom holds Needs you,
 Sessions, New, Assistant and More: 56px tall, a 20px icon in the same 28 ×
 44px box over a 12px label, muted at rest and accent when current, with a 2px
 accent bar along the top edge. Counts over 99 read 99+. The Needs you count is
-an amber chip with `text-canvas` figures, the one place amber fills a count,
-because it is the needs-you signal. **New** is an accent pill unless the page
+a needs-you chip with `text-canvas` figures, the one place that colour fills a count,
+because it is the needs-you signal. **New** is a primary pill unless the page
 has its own primary action, so the screen keeps one filled button. More opens
 as a bottom sheet. Content views draw `PaneHeader`: the title in `text-title`,
 one optional muted line under it, and actions on the right. A connection
@@ -747,7 +759,7 @@ shimmer leaves plain muted text, the spinner shows a still arc and a
 skeleton a flat fill. Holds and timers do not change. `useReducedMotion()` and `prefersReducedMotion()` in
 `web/src/lib/hooks.ts` answer the query in scripts.
 
-The desktop launch splash plays the website's opening on `#0b0911` in every
+The desktop launch splash plays the website's opening on `#070b11` in every
 theme. Its keyframes are scoped to `launch-splash` in `web/src/index.css`.
 `web/src/components/launch-splash-opening.tsx` inlines
 `web/public/cloudfield-logo-small.svg` at build time and splits it into the
@@ -791,16 +803,17 @@ Enhanced Multiplayer strip, or the agent terminal's toolbar in a Standard
 session. Its background is a grid of 2px round dots on a 6px pitch, behind the
 bar's text and controls. The dots are neutral, `--text` at 24%, until this
 tab has live, acknowledged writable control; then they turn
-`--control-light`, the accent teal in light theme and a brighter teal in
-dark. A lost takeover and an occupied hold turn them `--state-failed`.
+`--control-light`, the primary button's colour in both themes. A lost
+takeover and an occupied hold turn them `--state-failed`.
 Colored dots sit at `--control-dots` opacity (100% light, 70% dark), scaled
 by a strength of 70% while they move or turn red. Once acquisition settles
 the strength dims to half over 1.2s, then breathes between 42% and 60% on
 an 8-second cycle. The dots fade out around each group of text and
 buttons on the bar, to 10% under them over about 20px, and the bar's text
 uses `--text`, not `--text-muted`. `src/design-system.test.ts` checks text
-over the faded teal and red dots at full strength. **Release**, shown while you
-control, has the accent fill; **Take control** is a secondary button. The matrix is pointer-transparent and does not change
+over the faded `--control-light` and red dots at full strength. **Release**,
+shown while you control, is a primary button; **Take control** is a secondary
+button. The matrix is pointer-transparent and does not change
 layout. Terminal replay and history reading return it to neutral; reading
 earlier Enhanced items does not disable the composer or clear its color.
 The right end, under **Take control** and **Release**, is the color's
@@ -809,8 +822,8 @@ drains it back to the right, each over 720ms and decelerating toward the
 endpoint. A control-lost takeover turns the dots red over 540ms and drains
 them to the right over 1440ms. An occupied three-second hold fills **Take
 control** and the holder's **Release** diagonally in red and spreads red
-dots leftward from the right end of the holder's bar, blending into the
-teal over 4rem; text on either side of the fill edge keeps its own contrast.
+dots leftward from the right end of the holder's bar, blending into
+`--control-light` over 4rem; text on either side of the fill edge keeps its own contrast.
 The fill decelerates (logarithmic) while the countdown stays linear. A
 seven-second holder decision follows. Under
 `prefers-reduced-motion: reduce`, ownership changes are instant, settled
