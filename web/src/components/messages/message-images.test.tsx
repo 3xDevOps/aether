@@ -56,6 +56,9 @@ test('the gallery hint returns on input and fades after a second without input',
   act(() => vi.advanceTimersByTime(400))
   expect(hint().className).toContain('opacity-0')
 
+  fireEvent.keyDown(dialog, { key: 'Shift' })
+  expect(hint().className).toContain('opacity-100')
+
   fireEvent.keyDown(dialog, { key: 'ArrowRight' })
   const nextDialog = screen.getByRole('dialog', { name: 'Image 2 of 2' })
   load(nextDialog, [800, 600])
