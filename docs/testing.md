@@ -958,15 +958,20 @@ for `arm64`), declared for actionlint in `.github/actionlint.yaml`. Blacksmith's
 Ubuntu 26.04 image mounts `/tmp` as a tmpfs of half the runner's memory, too
 small for the server's disk-headroom check, so in the Docker suite jobs
 `.github/actions/free-disk` sets `TMPDIR=/t`, on the root disk and short enough
-for test socket paths; a `sudo env` step there must pass `"TMPDIR=$TMPDIR"`. Every
-other job stays on a GitHub-hosted runner: the Windows smoke scripts refuse
-any other runner, Blacksmith's kernel rejects the `fib` rule in the session VM
-firewall that the `kvm` tests load, and release, promote and nightly builds
-never read a cache a Blacksmith job wrote. On Blacksmith, `actions/cache` uses
-Blacksmith's store, which GitHub-hosted jobs cannot read, so `release-build`
-writes the GitHub-hosted Linux amd64 module, bun and release compiler caches
-the release workflow restores. Buildx `type=gha` caches stay in GitHub's store,
-so the release workflow builds the browser and standard images without one.
+for test socket paths; a `sudo env` step there must pass `"TMPDIR=$TMPDIR"`.
+Blacksmith's images also set `GOCACHEPROG` to `blacksmithd gocacheprog`, a Go
+build cache of Blacksmith's own that this repository does not configure.
+
+Every other job runs on a GitHub-hosted runner: `changes`, `audit`, `CI gate`,
+`edge-image`, `release-build`, `kvm`, the Windows jobs, and the release, promote
+and nightly workflows. The Windows smoke scripts refuse any other runner, and
+Blacksmith's kernel rejects the `fib` rule in the session VM firewall that the
+`kvm` tests load. Release builds never read a cache a Blacksmith job wrote: on
+Blacksmith, `actions/cache` uses Blacksmith's store, which GitHub-hosted jobs
+cannot read, so `release-build` writes the GitHub-hosted Linux amd64 module, bun
+and release compiler caches the release workflow restores. Buildx `type=gha`
+caches stay in GitHub's store, so the release workflow builds the browser and
+standard images without one.
 
 | Job | Sessions | Locally |
 | --- | --- | --- |

@@ -3,8 +3,9 @@ description: >
   Delete preinstalled toolchains no Aether job uses, so the Docker image
   builds and Go caches of a job fit the runner's disk. The Android build
   uses its own pinned SDK container, not the runner's SDK. Later steps get
-  TMPDIR=/t on the root disk, shorter than /tmp so test socket paths stay
-  under the unix limit; sudo steps must pass it through.
+  TMPDIR=/t on the root disk: Blacksmith's tmpfs /tmp fails the server's
+  disk-headroom check, and /t keeps test socket paths under the unix
+  limit. sudo steps must pass it through.
 runs:
   using: composite
   steps:
@@ -14,4 +15,4 @@ runs:
         sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
         sudo install -d -m 1777 /t
         echo "TMPDIR=/t" >> "$GITHUB_ENV"
-        df -h / /t
+        df -h /
