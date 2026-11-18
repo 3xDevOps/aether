@@ -267,7 +267,7 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	if _, _, _, err = h.e.exec(ctx, key, []string{"true"}, "/"); err == nil {
 		t.Fatal("exec into a paused session was not refused")
 	}
-	if patch, err = h.git.RunPatch(ctx, run, gitengine.PatchRequest{}); err != nil || patch.Recorded || !strings.Contains(patch.Text, "+++ b/tick") {
+	if patch, err = h.git.RunPatch(ctx, run, gitengine.PatchRequest{}); err != nil || patch.Recorded || !strings.Contains(patch.Text, "+++ b/tick\n") {
 		t.Fatalf("patch of a paused session = %+v, %v", patch, err)
 	}
 	member := domain.GitIdentity{Name: "Member", Email: "member@localhost"}
