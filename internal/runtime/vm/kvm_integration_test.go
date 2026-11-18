@@ -162,6 +162,21 @@ func TestKVMSessionLifecycle(t *testing.T) {
 	if out, code := vmRun(t, e, key, "echo from-guest > /workspace/written"); code != 0 {
 		t.Fatalf("write to the checkout: %d %s", code, out)
 	}
+	// Page cache counts as available in the guest, but the host holds it.
+	if out, code := vmRun(t, e, key, "head -c 134217728 /dev/zero > /tmp/cached && sync"); code != 0 {
+		t.Fatalf("fill the guest's page cache: %d %s", code, out)
+	}
+	h, err := e.helper(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := h.Stats(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if use, err := e.memoryUse(); err != nil || use[runtime.ID(idPrefix+key)] < g.MemoryBytes+96<<20 {
+		t.Errorf("memory use = %v, %v; guest count %d; want the unit's host memory, with the guest's page cache", use, err, g.MemoryBytes)
+	}
 	if data, _ := os.ReadFile(filepath.Join(src, "checkout", "written")); string(data) != "from-guest\n" {
 		t.Errorf("host sees %q", data)
 	}

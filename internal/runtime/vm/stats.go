@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -143,4 +146,63 @@ func (e *engine) filesystem() (runtime.FilesystemCapacity, error) {
 		return runtime.FilesystemCapacity{}, err
 	}
 	return runtime.FilesystemCapacity{Name: "Session VM disks", TotalBytes: usage.TotalBytes, FreeBytes: usage.FreeBytes}, nil
+}
+
+func (r *Runtime) MemoryUse(context.Context) (map[runtime.ID]uint64, error) {
+	return r.vms.memoryUse()
+}
+
+// memoryUse reads each VM unit's cgroup, which exists while the unit runs,
+// with no call into systemd or the guest. A VM whose cgroup cannot be read
+// counts as its unit's cap.
+func (e *engine) memoryUse() (map[runtime.ID]uint64, error) {
+	keys, err := e.keys()
+	if err != nil {
+		return nil, err
+	}
+	use := make(map[runtime.ID]uint64, len(keys))
+	var errs []error
+	for _, key := range keys {
+		n, err := workingSet(filepath.Join(e.cgroupRoot, runtime.SessionSlice, unitName(key)))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("vm runtime: memory of VM %s: %w", key, err))
+			rec, loadErr := e.load(key)
+			if loadErr != nil {
+				continue
+			}
+			n = uint64(rec.MemoryMiB+unitOverheadMiB) << 20
+		}
+		use[runtime.ID(idPrefix+key)] = n
+	}
+	return use, errors.Join(errs...)
+}
+
+// workingSet is a cgroup's memory.current less its inactive_file, as the
+// kubelet counts a container's.
+func workingSet(dir string) (uint64, error) {
+	current, err := os.ReadFile(filepath.Join(dir, "memory.current"))
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.ParseUint(strings.TrimSpace(string(current)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse memory.current: %w", err)
+	}
+	stat, err := os.ReadFile(filepath.Join(dir, "memory.stat"))
+	if err != nil {
+		return 0, err
+	}
+	for line := range strings.SplitSeq(string(stat), "\n") {
+		if v, ok := strings.CutPrefix(line, "inactive_file "); ok {
+			inactive, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("parse memory.stat: %w", err)
+			}
+			return n - min(inactive, n), nil
+		}
+	}
+	return 0, errors.New("memory.stat has no inactive_file")
 }

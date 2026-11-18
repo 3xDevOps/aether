@@ -76,6 +76,14 @@ type MemoryEvents struct {
 	LimitBytes uint64
 }
 
+// MemoryUseRuntime optionally reports what each running container holds of
+// the host's memory, where the container's own count misses some of it, as
+// a VM's guest counts its page cache as available while the host holds it.
+// With an error it still reports every container it could measure.
+type MemoryUseRuntime interface {
+	MemoryUse(context.Context) (map[ID]uint64, error)
+}
+
 // SaveRuntime optionally writes a running container's memory and device
 // state to disk and ends it, then later restores it with every process
 // where it was. A container that was saved and not restored is stopped:

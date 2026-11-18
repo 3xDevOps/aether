@@ -71,6 +71,8 @@ type engine struct {
 	dial  func(vsockPath string) (helper, error)
 	run   func(ctx context.Context, name string, args ...string) error
 
+	cgroupRoot string
+
 	mu      sync.Mutex
 	locks   map[string]*sync.Mutex
 	helpers map[string]helper
@@ -93,7 +95,8 @@ func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
 		cfg: cfg, root: filepath.Join(cfg.DataDir, "vm"), units: u, dial: dial, run: runCommand,
 		locks: map[string]*sync.Mutex{}, helpers: map[string]helper{}, gits: map[string]*guest.Git{}, booting: map[string]bool{},
 		fresh: map[string]bool{}, events: map[string]runtime.MemoryEvents{}, relays: map[string]*relay{}, reserved: map[int]bool{},
-		listenDNS: func() (*dnsRelay, error) { return listenDNS(proxyAddr, vmSubnet, hostResolvers) },
+		listenDNS:  func() (*dnsRelay, error) { return listenDNS(proxyAddr, vmSubnet, hostResolvers) },
+		cgroupRoot: "/sys/fs/cgroup",
 	}
 }
 
