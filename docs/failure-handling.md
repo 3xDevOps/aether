@@ -392,9 +392,9 @@ and answers nothing, so its terminals, messages and file views wait. Its
 timeline says `Paused: the server was running out of memory. It carries on
 by itself once memory is free again. If it has to be saved to disk for
 that, it wakes with every process where it was.`, at most once in 5
-minutes. The brake leaves out a VM the server is starting, stopping, saving
-or restoring until that is done, and thaws the VM of a session that is
-being killed or is finishing, whose end frees its memory. Once
+minutes. A session the server is working on needs its guest to answer, so
+the brake leaves it running until that is done: one it is launching,
+waking, closing, killing, finishing, or saving because it is idle. Once
 `MemAvailable` is back at the floor it thaws one VM each check, the longest
 frozen first; if that takes the host below the floor again, every VM
 freezes again. Every frozen VM so ends either thawed or saved to disk and
@@ -408,8 +408,9 @@ peak, and ran the host out in about 10 seconds, before the first save had
 finished. That host's floor is 2.9 GiB, which such a burst takes 1.9
 seconds to use, so the freeze lands with at least 2.1 GiB left. If nothing
 can be saved, because no saved memory fits on the disk or every save
-fails, and nothing else frees memory, the VMs stay frozen: kill sessions,
-which thaws theirs, or free memory or disk.
+fails, and nothing else frees memory, the VMs stay frozen, as does a VM
+the guard never saves, such as a Background session's: kill or close
+sessions, which thaws theirs, or free memory or disk.
 
 The memory guard reads `/proc/meminfo` and
 `/proc/pressure/memory` every 5 seconds. It starts when available memory
@@ -432,8 +433,9 @@ whose agent works: such a stall may come from outside the VMs. A VM it
 saves while memory is short is frozen first and saved as it stands, without
 the sync and the wait for dropped page cache an idle sleep makes
 ([vm-guest.md](vm-guest.md#limits-stats-and-the-clock)), which would let its guest run and
-take memory. A frozen guest cannot say whether it is busy, so a session
-saved frozen always wakes on its own. It skips a
+take memory. A guest the brake froze cannot say whether it is busy, so a
+session saved after the brake froze it always wakes on its own, also when a
+launch or wake saved it to make room. It skips a
 VM whose memory is unknown or would not leave the data filesystem its
 reserve plus 4 GiB, the level below which disk cleanup deletes the saved
 memory of other sleeping sessions

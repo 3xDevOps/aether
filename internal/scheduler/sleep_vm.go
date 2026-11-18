@@ -111,11 +111,8 @@ func (s *Scheduler) saveMarked(ctx context.Context, entry *supervised, saver run
 		return errors.Join(detachErr, recordErr)
 	}
 	saveErr = errors.Join(fmt.Errorf("save the idle session: %w", saveErr), detachErr)
-	if vms, ok := s.cfg.Runtime.(runtime.FreezeRuntime); ok && frozen {
-		// A save refused before it thawed the VM; the brake freezes it
-		// again while the host is short of memory.
-		saveErr = errors.Join(saveErr, vms.Thaw(cid))
-	}
+	// The reattach below needs the guest to answer.
+	s.endFrozenSave(entry, cid)
 	s.mu.Lock()
 	entry.saveFailedAt = time.Now().UTC()
 	s.mu.Unlock()

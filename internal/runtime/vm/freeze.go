@@ -116,12 +116,12 @@ func (e *engine) frozenVMs() []runtime.ID {
 // thaw lets key's VM run on; one that is not frozen, or no longer runs, is
 // left as it is.
 func (e *engine) thaw(key string) error {
-	e.mu.Lock()
-	delete(e.frozenAt, key)
-	e.mu.Unlock()
 	if err := e.writeFreezer(key, "0"); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("vm runtime: thaw VM %s: %w", key, err)
 	}
+	e.mu.Lock()
+	delete(e.frozenAt, key)
+	e.mu.Unlock()
 	return nil
 }
 

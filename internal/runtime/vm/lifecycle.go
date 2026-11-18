@@ -222,6 +222,7 @@ func (e *engine) lingering(ctx context.Context) {
 func (e *engine) powerOff(ctx context.Context, rec *record) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), powerOffTimeout)
 	defer cancel()
+	_ = e.thaw(rec.Key)
 	h, err := e.helper(rec.Key)
 	if err == nil {
 		offCtx, offCancel := context.WithTimeout(ctx, helperCallTimeout)
@@ -245,8 +246,8 @@ func (e *engine) powerOff(ctx context.Context, rec *record) (bool, error) {
 	}
 }
 
-// kill thaws first, as stop and destroy do: a frozen unit handles no
-// SIGTERM, and would hold the stop for its whole TimeoutStopSec.
+// kill thaws first, as stop, powerOff and destroy do: a frozen unit handles
+// no SIGTERM, and would hold the stop for its whole TimeoutStopSec.
 func (e *engine) kill(ctx context.Context, key string) {
 	e.forgetHelper(key)
 	_ = e.thaw(key)
@@ -408,6 +409,7 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 		return err
 	}
 	rec, loadErr := e.load(key)
+	_ = e.thaw(key)
 	// The session's database disk outlives this VM, as when an account move
 	// replaces it: the guest's unwritten data goes to it first. A paused VM
 	// cannot sync, and is destroyed only with its session, and the disk; a
@@ -420,7 +422,6 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 		cancel()
 	}
 	e.forgetHelper(key)
-	_ = e.thaw(key)
 	if err = e.units.Stop(ctx, unitName(key)); err != nil {
 		return err
 	}

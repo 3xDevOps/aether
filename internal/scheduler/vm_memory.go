@@ -306,16 +306,21 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 	c.e.sleeping = true
 	c.e.sleepDone = make(chan struct{})
 	s.mu.Unlock()
-	// A frozen guest cannot say whether it is busy, so it wakes again.
-	frozen := s.vmFrozen(cid)
-	wake := !c.idle || frozen
-	if !wake {
+	defer s.endFrozenSave(c.e, cid)
+	frozen := s.vmFrozen(cid) && s.freezeToSave(c.e, cid)
+	wake := !c.idle
+	if c.idle && !frozen {
 		busy, err := s.guestBusy(ctx, cid)
 		wake = busy || err != nil
 	}
 	if wake && !working {
 		s.endSleep(c.e, false)
 		return false
+	}
+	// A guest the brake froze cannot say whether it is busy: it is saved
+	// as it stands, and wakes again as one that was.
+	if frozen {
+		wake, working = true, true
 	}
 	if err := s.markAsleep(c.e); err != nil {
 		s.endSleep(c.e, false)
@@ -325,10 +330,8 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 	if !working {
 		return s.savedForMemory(ctx, c.e, s.saveLive(ctx, c.e, saver), memorySavedIdleNote)
 	}
-	// Frozen, the VM takes no more memory while it is saved, and the save
-	// does not wait for its guest.
-	if vms, ok := s.cfg.Runtime.(runtime.FreezeRuntime); ok && !frozen {
-		frozen = vms.Freeze(cid) == nil
+	if !frozen {
+		frozen = s.freezeToSave(c.e, cid)
 	}
 	// A turn the agent started since the candidates were listed carries on
 	// after the wake.

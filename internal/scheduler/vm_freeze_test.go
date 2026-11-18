@@ -15,7 +15,8 @@ import (
 
 // freezeRuntime gives memoryRuntime the cgroup freezer: frozen holds the
 // frozen VMs in the order they froze, and savedFrozen the VMs a save found
-// frozen, which it thaws as the VM runtime does.
+// frozen, which it thaws as the VM runtime does. A frozen VM's guest
+// answers nothing.
 type freezeRuntime struct {
 	*memoryRuntime
 	freezeMu    sync.Mutex
@@ -68,6 +69,22 @@ func (r *freezeRuntime) Save(ctx context.Context, id runtime.ID) error {
 		return err
 	}
 	return r.Thaw(id)
+}
+
+var errFrozenGuest = errors.New("the frozen guest does not answer")
+
+func (r *freezeRuntime) Exec(ctx context.Context, id runtime.ID, argv []string, workDir string) (int, string, string, error) {
+	if slices.Contains(r.Frozen(), id) {
+		return 0, "", "", errFrozenGuest
+	}
+	return r.memoryRuntime.Exec(ctx, id, argv, workDir)
+}
+
+func (r *freezeRuntime) Attach(ctx context.Context, id runtime.ID) (runtime.Attachment, error) {
+	if slices.Contains(r.Frozen(), id) {
+		return nil, errFrozenGuest
+	}
+	return r.memoryRuntime.Attach(ctx, id)
 }
 
 func (r *freezeRuntime) foundFrozen(id runtime.ID) bool {
@@ -139,41 +156,68 @@ func TestTheMemoryBrakeFreezesEveryVMAndEachEndsThawedOrSavedThenWoken(t *testin
 	}
 }
 
-func TestTheMemoryBrakeNotesAFreezeOnceAndLeavesAnEndingSessionRunning(t *testing.T) {
+// A session the server is working on needs its guest to answer: the brake
+// thaws it at once, and freezes it with the rest when that is done.
+func TestTheMemoryBrakeLeavesASessionTheServerWorksOnRunning(t *testing.T) {
 	t.Parallel()
 	e, fr := newFreezeEnv(t)
 	kept := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
-	ending := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
-	endingRun := e.runOf(t, ending)
+	killed := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
+	closing := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
+	keptRun, killedRun, closingRun := e.runOf(t, kept), e.runOf(t, killed), e.runOf(t, closing)
 	e.sched.mu.Lock()
-	e.sched.runs[endingRun].killRequested = true
+	keptEntry, closingEntry := e.sched.runs[keptRun], e.sched.runs[closingRun]
+	e.sched.runs[killedRun].killRequested = true
 	e.sched.mu.Unlock()
 	sub := e.subscribe(t)
 	fr.setAvailable(3 << 30)
 
+	closingEntry.lifecycleMu.Lock()
 	e.sched.brakeVMMemory(t.Context(), fr)
+	closingEntry.lifecycleMu.Unlock()
 	if frozen := fr.Frozen(); !slices.Equal(frozen, []runtime.ID{kept}) {
-		t.Fatalf("frozen = %v, want only the session that is not ending", frozen)
+		t.Fatalf("frozen = %v, want only the session nothing is being done to", frozen)
 	}
-	waitTimelineEvent(t, sub, e.runOf(t, kept), events.TimelineNote)
+	waitTimelineEvent(t, sub, keptEntry.runID, events.TimelineNote)
+	e.sched.brakeVMMemory(t.Context(), fr)
+	if frozen := fr.Frozen(); !slices.Equal(frozen, []runtime.ID{kept, closing}) {
+		t.Fatalf("frozen = %v, want the session whose close is over frozen too", frozen)
+	}
+
 	// Thawed and frozen again as memory comes and goes: no second note.
+	e.sched.mu.Lock()
+	noted := keptEntry.frozenNotedAt
+	e.sched.mu.Unlock()
 	if err := fr.Thaw(kept); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.brakeVMMemory(t.Context(), fr)
-	if !slices.Contains(fr.Frozen(), kept) {
-		t.Fatal("the brake did not freeze the VM again")
+	e.sched.mu.Lock()
+	again := keptEntry.frozenNotedAt
+	e.sched.mu.Unlock()
+	if !slices.Contains(fr.Frozen(), kept) || !again.Equal(noted) {
+		t.Fatalf("a second freeze: frozen %v, noted again %v", fr.Frozen(), !again.Equal(noted))
 	}
-	for {
-		select {
-		case ev := <-sub.Events():
-			if p, ok := ev.Payload.(events.TimelinePayload); ok && p.Message == memoryFrozenNote {
-				t.Fatalf("a second freeze noted again: %+v", ev)
-			}
-			continue
-		default:
-		}
-		break
+}
+
+// Admission saves an idle VM the brake froze, marked to wake, and never a
+// working one.
+func TestAMemoryRefusalSavesAFrozenIdleVM(t *testing.T) {
+	t.Parallel()
+	e, fr := newFreezeEnv(t)
+	idle := e.launchVM(t, fr.memoryRuntime, "say pong", 4<<30)
+	working := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 4<<30)
+	fr.setAvailable(3 << 30)
+	e.sched.brakeVMMemory(t.Context(), fr)
+
+	release, err := e.sched.reserveCapacity(t.Context())
+	if err != nil {
+		t.Fatalf("admission with a frozen idle VM to save: %v", err)
+	}
+	release()
+	if !fr.isSaved(idle) || !fr.foundFrozen(idle) || e.memorySaved(e.runOf(t, idle)) != 4<<30 || fr.isSaved(working) {
+		t.Fatalf("admission saved idle %v frozen %v marked %d, working %v; want only the idle VM, frozen and marked to wake",
+			fr.isSaved(idle), fr.foundFrozen(idle), e.memorySaved(e.runOf(t, idle)), fr.isSaved(working))
 	}
 }
 

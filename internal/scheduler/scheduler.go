@@ -589,8 +589,10 @@ type supervised struct {
 	asleepSaved  bool
 	saveFailedAt time.Time
 	// frozenNotedAt is when the timeline last said the memory brake froze
-	// the session's VM.
+	// the session's VM. frozenSave is set while the memory guard saves the
+	// VM frozen, which keeps the brake from thawing it.
 	frozenNotedAt time.Time
+	frozenSave    bool
 	// awake counts callers the container must not stop under: a delivery,
 	// an exec or a browser operation in flight.
 	awake int
@@ -807,6 +809,11 @@ func (s *Scheduler) RecoveryReady() <-chan struct{} {
 func (s *Scheduler) Start(ctx context.Context) error {
 	s.recovering.Store(true)
 	defer s.recovering.Store(false)
+	// A server that crashed left the VMs its memory brake froze frozen, and
+	// recovery reattaches only to a guest that answers.
+	if vms, ok := s.cfg.Runtime.(runtime.FreezeRuntime); ok {
+		s.thawVMs(vms)
+	}
 	// Subscribed before recovery, so a usage limit published meanwhile
 	// waits for the run recovery brings back.
 	var (
