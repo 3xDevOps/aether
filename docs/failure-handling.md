@@ -413,10 +413,11 @@ says
 `Saved to disk early: the server was running out of memory.` The server log
 has `scheduler: memory guard:` lines. `--run-sleep-after 0` does not turn
 the guard off. Memory that grows faster than the guard saves VMs can still
-run the host out: a VM's memory never goes to host swap, so the host's OOM
-killer then ends container processes first, and after them the session VM
-holding the most memory (`journalctl -k | grep -i 'out of memory'` names
-its `cloud-hypervisor`).
+run the host out, sooner than containers would, since a VM's memory never
+goes to host swap. The host's OOM killer then ends container processes
+first (`OOMScoreAdjust=500`), then the session VM holding the most memory:
+`journalctl -k | grep -i 'out of memory'` names it `cloud-hyperviso`, the
+kernel's 15-character cut of `cloud-hypervisor`.
 
 To recover, close or kill sessions. A closed session's paused container still
 holds its memory; **Free sandbox…** releases it. An idle Enhanced Claude

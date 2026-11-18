@@ -22,8 +22,8 @@ import (
 // memory, within twice min_age and 3 minutes, while a file Main reads every
 // 2 seconds stays cached and kdamond stays under 2% of a vCPU. The rest
 // follows more slowly, as DAMON splits it from memory in use. A program's
-// untouched memory goes to the guest's swap. At a 2 GiB limit the session
-// holds enough of the guest's memory to leave under 20% free.
+// untouched memory goes to the guest's swap first. At a 2 GiB limit the
+// session holds enough of the guest's memory to leave under 20% free.
 func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-cold-memory"
@@ -67,6 +67,17 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	}
 	defer func() { _ = att.Close() }()
 	readUntil(t, att, "held")
+	// Nothing else presses on the guest's memory yet, so only DAMON_RECLAIM
+	// can move the program's memory to swap.
+	filled := time.Now()
+	for n := uint64(0); n < coldAnon/4; {
+		if time.Since(filled) > 2*minAge+3*time.Minute {
+			t.Fatalf("%s after the program filled %d bytes and left them, %d bytes of them are in swap", time.Since(filled).Round(time.Second), coldAnon, n)
+		}
+		time.Sleep(5 * time.Second)
+		n = parseUint(t, guestFields(t, e, key, "for p in /proc/[0-9]*; do grep -qas 'HoldNo[w]' $p/cmdline && awk '/^VmSwap:/ {print $2}' $p/status; done", 1)[0]) << 10
+	}
+	t.Logf("a quarter of the program's %d bytes went to swap %s after it filled them", coldAnon, time.Since(filled).Round(time.Second))
 
 	const hotMiB = 64
 	coldMiB := memTotalKiB * 9 / 10 >> 10
@@ -105,17 +116,6 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	}
 	t.Logf("reading %d MiB left %d of %d KiB free; the host's share of the guest went %d -> %d -> %d bytes, a third back %s after the read (min_age %s)",
 		coldMiB, free, memTotalKiB, before, held, guestRAMOnHost(t, key), time.Since(read).Round(time.Second), minAge)
-	swapped := func() uint64 {
-		kib := guestFields(t, e, key, "awk '/^Swap(Total|Free):/ {print $2}' /proc/meminfo", 2)
-		return (parseUint(t, kib[0]) - parseUint(t, kib[1])) << 10
-	}
-	for n := swapped(); n < coldAnon/4; n = swapped() {
-		if time.Now().After(deadline) {
-			t.Fatalf("%s after the program filled %d bytes and left them, %d bytes are in swap", time.Since(read).Round(time.Second), coldAnon, n)
-		}
-		time.Sleep(5 * time.Second)
-	}
-	t.Logf("%d bytes in swap %s after the read", swapped(), time.Since(read).Round(time.Second))
 
 	if n := reclaimed() - reclaimedBefore; n < coldMiB<<20/3 {
 		t.Errorf("DAMON_RECLAIM paged out %d bytes after the read, under a third of the %d MiB file that left", n, coldMiB)

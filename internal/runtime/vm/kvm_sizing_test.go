@@ -61,10 +61,12 @@ func TestKVMGuestFullOfMemoryKeepsItsVM(t *testing.T) {
 	if err != nil || code != 128+int(unix.SIGKILL) {
 		t.Fatalf("the program that filled the session ended with %d, %v: %s", code, err, errOut)
 	}
-	out, _ = vmRun(t, e, key, "grep -E '^(oom|oom_kill) ' /sys/fs/cgroup/session/memory.events; cat /sys/fs/cgroup/session/memory.peak /sys/fs/cgroup/session/memory.swap.peak 2>&1")
-	t.Logf("session after the kill: %q", out)
-	if !strings.Contains(out, "oom_kill ") || strings.Contains(out, "oom_kill 0\n") {
-		t.Errorf("the session's own OOM killer did not kill the program: %q", out)
+	session := guestFields(t, e, key, "grep -E '^(oom|oom_kill) ' /sys/fs/cgroup/session/memory.events; cat /sys/fs/cgroup/session/memory.peak /sys/fs/cgroup/session/memory.swap.peak", 6)
+	t.Logf("session after the kill: %v", session)
+	// oom counts the session reaching its own memory.max; oom_kill counts
+	// its processes killed by any OOM killer, the guest's too.
+	if session[1] == "0" || session[3] == "0" || parseUint(t, session[4]) < limit*99/100 {
+		t.Errorf("the session's own cap did not kill the program at its whole limit %d: %v", limit, session)
 	}
 
 	unit := filepath.Join("/sys/fs/cgroup", runtime.SessionSlice, unitName(key))

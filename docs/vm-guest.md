@@ -39,7 +39,7 @@ In order, as PID 1:
    the size `aether.memory` gives, writes its swap header and turns it on
    with discard, so freed swap goes back to the host. Any failure, such as
    a kernel built without swap or a full data disk, is logged on the
-   console and the VM runs without swap.
+   console, not reported as `boot_error`, and the VM runs without swap.
 7. Creates the session cgroup `/sys/fs/cgroup/session` (below).
 8. Listens on every forwarded socket.
 9. Turns on DAMON_RECLAIM ([Memory the guest returns](#memory-the-guest-returns)).
@@ -401,14 +401,15 @@ Every process the helper starts begins in its leaf `/sys/fs/cgroup/session/procs
 and dockerd puts nested containers beside it, so they count too. The helper
 itself stays outside.
 
-`Stats` reports CPU time outside idle and I/O wait from `/proc/stat`, the
-kernel's OOM kill counter, and from the session cgroup its task count, its
-memory in use and its `memory.max`, the limit a process of the session is
-killed at. Memory in use is `memory.current` less the `inactive_file` of
+`Stats` reports CPU time outside idle and I/O wait from `/proc/stat`, and
+from the session cgroup its OOM kills less the development browser's, its
+task count, its memory in use and its `memory.max`, the limit a process of
+the session is killed at. Memory in use is `memory.current` less the `inactive_file` of
 `memory.stat`, as `docker stats` counts a container's, so the kernel, the
 helper and the git service, which are outside the session, are left out.
-Without the session cgroup, memory is the whole guest's, `MemTotal -
-MemAvailable` of `MemTotal`. Insights shows these.
+Without the session cgroup, OOM kills and memory are the whole guest's: the
+kernel's OOM kill counter, and `MemTotal - MemAvailable` of `MemTotal`.
+Insights shows these.
 
 `MemoryUse` reports what each running VM holds of the host's memory, read
 from its unit's cgroup (`/sys/fs/cgroup/aether.slice/aether-vm-<key>.service`)
