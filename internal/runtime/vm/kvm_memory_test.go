@@ -211,7 +211,8 @@ func guestRAMOnHost(t *testing.T, key string) uint64 {
 // TestKVMSaveWritesOnlyWhatTheSessionUses saves a VM whose page cache fills
 // most of it: the save waits for free page reporting to hand the dropped
 // cache to the host, so the memory file holds little more than the session
-// uses. Saved at once, it held 1228 to 1315 MiB of the 1400 MiB cached.
+// uses. Saved 3 s after the drop, it held 1228 to 1315 MiB of the 1400 MiB
+// cached.
 func TestKVMSaveWritesOnlyWhatTheSessionUses(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-save-small"
@@ -226,7 +227,7 @@ func TestKVMSaveWritesOnlyWhatTheSessionUses(t *testing.T) {
 	if err := e.start(t.Context(), key); err != nil {
 		t.Fatal(err)
 	}
-	guestFields(t, e, key, "head -c 1400M /dev/urandom >/var/tmp/f && sync && cat /var/tmp/f >/dev/null", 0)
+	sum := guestFields(t, e, key, "head -c 1400M /dev/urandom >/var/tmp/f && sync && cksum </var/tmp/f", 2)
 	held := guestRAMOnHost(t, key)
 	start := time.Now()
 	if err := e.save(t.Context(), key); err != nil {
@@ -240,12 +241,12 @@ func TestKVMSaveWritesOnlyWhatTheSessionUses(t *testing.T) {
 	saved := uint64(st.Blocks) * 512
 	t.Logf("the save took %s and wrote %d MiB of memory; the host held %d MiB of the guest before it", took.Round(time.Millisecond), saved>>20, held>>20)
 	if saved > 400<<20 {
-		t.Errorf("the save wrote %d MiB of memory, most of the %d MiB the guest's page cache held", saved>>20, held>>20)
+		t.Errorf("the save wrote %d MiB of memory, most of the %d MiB the host held of the guest, its page cache included", saved>>20, held>>20)
 	}
 	if err := e.restore(t.Context(), key); err != nil {
 		t.Fatal(err)
 	}
-	if got := guestFields(t, e, key, "wc -c </var/tmp/f", 1)[0]; got != "1468006400" {
-		t.Errorf("the restored guest reads %s bytes of its file, want 1468006400", got)
+	if got := guestFields(t, e, key, "cksum </var/tmp/f", 2); got[0] != sum[0] || got[1] != sum[1] {
+		t.Errorf("the restored guest reads its file back as %v, want %v", got, sum)
 	}
 }

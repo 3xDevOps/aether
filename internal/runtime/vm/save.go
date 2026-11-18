@@ -21,9 +21,9 @@ const (
 	destroySyncTimeout = 5 * time.Second
 	// Free page reporting hands the guest's free memory to the host in
 	// passes 2 s apart, each about a sixteenth of it, so a check every
-	// reportPoll spans a pass; one that freed under reportSettled ends the
-	// wait. The kernel's own estimate for all of it is about 30 s.
-	reportPoll    = 4 * time.Second
+	// engine.reportPoll, 4 s, spans a pass; one that freed under
+	// reportSettled ends the wait. The kernel's own estimate for all of it
+	// is about 30 s.
 	reportSettled = 16 << 20
 	reportTimeout = 40 * time.Second
 )
@@ -127,7 +127,7 @@ func (e *engine) awaitReported(ctx context.Context, key string) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(reportPoll):
+		case <-time.After(e.reportPoll):
 		}
 		var now uint64
 		if now, err = workingSet(dir); err == nil && held < now+reportSettled {
