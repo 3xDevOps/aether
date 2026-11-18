@@ -129,7 +129,6 @@ func newMemoryEnv(t *testing.T) (*testEnv, *memoryRuntime) {
 		sr := &saveRuntime{acpRuntime: cfg.Runtime.(*acpRuntime), saved: map[runtime.ID]string{}}
 		mr = &memoryRuntime{saveRuntime: sr, available: 24 << 30, vm: map[runtime.ID]uint64{}, loading: map[runtime.ID]bool{}}
 		cfg.Runtime = mr
-		cfg.filesystemCapacity = healthyAdmissionData
 		cfg.hostMemory = mr.hostMemory
 		cfg.sleepAnyAgent = true
 	})
