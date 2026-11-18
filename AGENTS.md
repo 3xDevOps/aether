@@ -168,15 +168,18 @@ Many sessions share the same CI runners.
   [docs/testing.md](docs/testing.md).
 - Mark the pull request ready (`gh pr ready <n>`) only when it is done;
   then the merge gate applies.
-- The merge gate: an adversarial review of the current head by an Opus
-  reviewer with a fresh context that did not write the change (a subagent
-  is enough; give it the pull request, not the author's reasoning); real
-  findings fixed and the rest answered with a reason in the pull request;
-  after fixes that change code, another fresh reviewer checks the new head;
-  `CI gate` green on the current head. There is no review bot: do not wait
-  for one. Then
-  `gh pr merge <n> --squash` puts it in the merge queue, which runs the
-  full suite once per batch before `main` moves. Never pass `--admin`.
+- The merge gate, with no review bot to wait for:
+  - An adversarial review by an Opus reviewer with a fresh context that
+    did not write the change (a subagent is enough; give it the pull
+    request, not the author's reasoning). Fix each real finding and answer
+    the rest with a reason in the pull request description.
+  - When those fixes change behavior, another such reviewer checks them;
+    repeat until no finding blocks. A rebase or a wording-only fix needs
+    no new review.
+  - `CI gate` green on the current head.
+
+  Then `gh pr merge <n> --squash` puts it in the merge queue, which runs
+  the full suite once per batch before `main` moves. Never pass `--admin`.
 - A UI change also gets a design review loop: a fresh-context Opus
   reviewer (a subagent is enough) reviews dark-mode screenshots at the
   affected widths as a senior product designer would. Apply or rebut each
