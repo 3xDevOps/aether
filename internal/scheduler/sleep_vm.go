@@ -117,16 +117,14 @@ func (s *Scheduler) saveMarked(ctx context.Context, entry *supervised, saver run
 	saveErr = errors.Join(fmt.Errorf("save the idle session: %w", saveErr), detachErr)
 	s.mu.Lock()
 	entry.saveFailedAt = time.Now().UTC()
+	entry.paused = false
 	s.mu.Unlock()
+	if info, err := s.cfg.Runtime.Inspect(context.WithoutCancel(ctx), cid); errors.Is(err, runtime.ErrNotFound) || err == nil && info.Exited {
+		return errors.Join(saveErr, s.unmarkAsleep(entry))
+	}
 	if ctx.Err() != nil {
 		s.endSleep(entry, true)
 		return saveErr
-	}
-	s.mu.Lock()
-	entry.paused = false
-	s.mu.Unlock()
-	if info, err := s.cfg.Runtime.Inspect(ctx, cid); errors.Is(err, runtime.ErrNotFound) || err == nil && info.Exited {
-		return errors.Join(saveErr, s.unmarkAsleep(entry))
 	}
 	if err := s.reattach(ctx, entry, true); err != nil {
 		s.endSleep(entry, true)
@@ -198,11 +196,12 @@ func (s *Scheduler) reattach(ctx context.Context, entry *supervised, restored bo
 // restoreAsleep restores entry's saved VM under a fresh wait. A saved state
 // that cannot be restored falls back to a cold start from the VM's disks
 // when the agent restores its conversation there; otherwise the wake fails
-// with the restore's error and the VM keeps its disks. Caller holds
-// entry.lifecycleMu and has reserved capacity.
+// with the restore's error and the VM keeps its disks, and an open session
+// whose VM stopped before it was saved, which can never wake, ends as any
+// whose VM died. Caller holds entry.lifecycleMu and has reserved capacity.
 func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) (woke, error) {
 	s.mu.Lock()
-	cid, closed := entry.containerID, entry.retained
+	cid, closed, saved := entry.containerID, entry.retained, entry.asleepSaved
 	s.mu.Unlock()
 	restoreErr := saver.Restore(ctx, cid)
 	if restoreErr == nil {
@@ -222,12 +221,17 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	// restored, left the VM up with every process: it is taken up as it is.
 	// One the restore left paused runs again; resuming a running one fails,
 	// which is harmless, and the reattach that follows proves it runs.
-	if info, err := s.cfg.Runtime.Inspect(ctx, cid); err == nil && !info.Exited {
+	info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
+	if inspectErr == nil && !info.Exited {
 		_ = s.cfg.Runtime.Resume(ctx, cid)
 		s.superviseWoken(entry)
 		return woke{restored: true}, nil
 	}
 	if reason := s.coldStartRefusal(ctx, entry); reason != "" {
+		if inspectErr == nil && !closed && !saved {
+			s.finalizeAsleep(entry, info.ExitCode)
+			return woke{}, fmt.Errorf("the session's VM stopped before it was saved, so the session ends; its checkout and branch are kept: %w", restoreErr)
+		}
 		return woke{}, fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason)
 	}
 	slog.Warn("scheduler: restore a sleeping session; starting it from its disk", "run", entry.runID, "error", restoreErr)
@@ -348,17 +352,38 @@ func (s *Scheduler) saveClosed(ctx context.Context, entry *supervised, saver run
 	return recordErr
 }
 
-// saveRecoveredAsleep finishes the save of a VM a server restart caught
-// falling asleep. One that cannot be saved stays running, for the next wake
-// to take up. Caller holds entry.lifecycleMu.
+// saveRecoveredAsleep finishes the save of the VM of a run recorded asleep
+// that still runs, which this server holds nothing in: one a server restart
+// caught falling asleep or left frozen, or whose save failed. One that
+// cannot be saved stays running, for the next wake to take up. Caller holds
+// entry.lifecycleMu.
 func (s *Scheduler) saveRecoveredAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
 	s.mu.Lock()
 	cid := entry.containerID
 	s.mu.Unlock()
 	if err := saver.Save(ctx, cid); err != nil {
-		return fmt.Errorf("save the session the restart caught falling asleep: %w", err)
+		s.mu.Lock()
+		entry.saveFailedAt = time.Now().UTC()
+		s.mu.Unlock()
+		return fmt.Errorf("save the sleeping session: %w", err)
 	}
 	return s.recordSaved(entry, true)
+}
+
+// saveAsleepRunning is saveRecoveredAsleep for the memory guard: the VM is
+// frozen first and saved as it stands. Caller holds entry.lifecycleMu.
+func (s *Scheduler) saveAsleepRunning(ctx context.Context, entry *supervised) error {
+	s.mu.Lock()
+	cid := entry.containerID
+	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero() && !entry.asleepSaved && !entry.killRequested && !entry.finalizing && s.guestsNeeded[cid] == 0
+	s.mu.Unlock()
+	saver, ok := s.saver(cid)
+	if !asleep || !ok {
+		return nil
+	}
+	defer s.endFrozenSave(entry, cid)
+	s.freezeToSave(entry, cid)
+	return s.saveRecoveredAsleep(ctx, entry, saver)
 }
 
 // wakeBeforeEnd wakes a sleeping session VM before a kill or close takes its

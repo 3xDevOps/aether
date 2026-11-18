@@ -704,8 +704,7 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 			}
 			slog.Info("scheduler: recovery: session started", "run", r.ID)
 			start := time.Now()
-			// A VM a restart caught falling asleep is saved as it stands.
-			if sc, err := s.readSidecar(r.ID); err == nil && sc.AsleepSince == nil {
+			if sc, err := s.readSidecar(r.ID); err == nil && sc.AsleepSince == nil && !s.sleepFrozen(ctx, r, sc) {
 				defer s.needGuest(runtime.ID(sc.ContainerID))()
 			}
 			switch r.Status {

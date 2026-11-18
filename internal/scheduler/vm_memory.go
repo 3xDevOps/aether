@@ -172,13 +172,15 @@ func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 	return saved
 }
 
-// memoryCandidate is an awake session VM a save under memory pressure may
-// take. idle is false while its agent works, since is its last activity and
-// memory is what it holds of the host's.
+// memoryCandidate is a running session VM a save under memory pressure may
+// take. asleep is one of a run recorded asleep, which this server holds
+// nothing in. idle is false while its agent works, since is its last
+// activity and memory is what it holds of the host's.
 type memoryCandidate struct {
 	e      *supervised
 	cid    runtime.ID
 	closed bool
+	asleep bool
 	idle   bool
 	since  time.Time
 	memory uint64
@@ -186,7 +188,7 @@ type memoryCandidate struct {
 
 func (c memoryCandidate) rank() int {
 	switch {
-	case c.closed:
+	case c.closed || c.asleep:
 		return 0
 	case c.idle:
 		return 1
@@ -194,11 +196,12 @@ func (c memoryCandidate) rank() int {
 	return 2
 }
 
-// memoryCandidates lists the awake session VMs in the order a save takes
-// them: closed ones, then open ones whose agent is idle, the longest idle
-// first, then the rest, the one holding the most memory first. A run that
-// must stay awake whatever the host is short of, a Background one, and one
-// whose save failed within memorySaveRetry are left out.
+// memoryCandidates lists the running session VMs in the order a save takes
+// them: closed ones and those of runs recorded asleep, then open ones whose
+// agent is idle, the longest idle first, then the rest, the one holding the
+// most memory first. A run that must stay awake whatever the host is short
+// of, a Background one, and one whose save failed within memorySaveRetry
+// are left out.
 func (s *Scheduler) memoryCandidates(ctx context.Context) []memoryCandidate {
 	type open struct {
 		e        *supervised
@@ -214,10 +217,14 @@ func (s *Scheduler) memoryCandidates(ctx context.Context) []memoryCandidate {
 	for _, e := range s.runs {
 		enhanced := e.acp && e.launchMode == domain.LaunchACP
 		_, saving := s.saver(e.containerID)
-		if !saving || e.sleeping || !e.asleepSince.IsZero() || !enhanced && e.launchMode != domain.LaunchTUI || now.Sub(e.saveFailedAt) < memorySaveRetry {
+		if !saving || e.sleeping || !enhanced && e.launchMode != domain.LaunchTUI || now.Sub(e.saveFailedAt) < memorySaveRetry {
 			continue
 		}
 		switch {
+		case !e.asleepSince.IsZero():
+			if !e.asleepSaved && memory[e.containerID] > 0 {
+				out = append(out, memoryCandidate{e: e, cid: e.containerID, asleep: true, idle: true, memory: memory[e.containerID]})
+			}
 		case e.retained && e.paused && !e.destroyPending && !e.evidencePending && e.retainedUntil != nil:
 			out = append(out, memoryCandidate{e: e, cid: e.containerID, closed: true, idle: true, memory: memory[e.containerID]})
 		case heldAwakeLocked(e) == "":
@@ -297,10 +304,19 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 	if c.closed {
 		return s.savedForMemory(ctx, c.e, s.sleepClosedLocked(ctx, c.e), "")
 	}
+	if c.asleep {
+		s.mu.Lock()
+		note := memorySavedIdleNote
+		if c.e.memorySaved > 0 {
+			note = memorySavedFrozenNote
+		}
+		s.mu.Unlock()
+		return s.savedForMemory(ctx, c.e, s.saveAsleepRunning(ctx, c.e), note)
+	}
 	s.mu.Lock()
 	cid := c.e.containerID
 	saver, saving := s.saver(cid)
-	if !saving || s.runs[c.e.runID] != c.e || c.e.sleeping || !c.e.asleepSince.IsZero() || heldAwakeLocked(c.e) != "" {
+	if !saving || s.runs[c.e.runID] != c.e || c.e.sleeping || !c.e.asleepSince.IsZero() || heldAwakeLocked(c.e) != "" || s.guestsNeeded[cid] > 0 {
 		s.mu.Unlock()
 		return false
 	}

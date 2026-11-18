@@ -395,18 +395,24 @@ that, it wakes with every process where it was.`, at most once in 5
 minutes. A session the server is working on needs its guest to answer, so
 the brake leaves it running until that is done: one it is launching,
 waking, closing, killing, finishing, saving because it is idle, or taking
-up after a restart. Once
+up after a restart, an Enhanced session whose agent it restarts, and a
+Background session whose turn it ends. Once
 `MemAvailable` is back at the floor it thaws one VM each check, the longest
 frozen first; if that takes the host below the floor again, every VM
-freezes again. Every frozen VM so ends either thawed or saved to disk and
-woken later.
+freezes again. A woken VM still loading its saved memory keeps that memory
+set aside for as long as it stays frozen. Every frozen VM so ends either
+thawed or saved to disk and woken later.
 
-A server that stops while the host is still below the floor leaves the VMs
-frozen: thawed, they would run with nothing watching them. The server that
-starts, after a stop or a crash, keeps them frozen while it takes each
-session up, thaws them as memory allows, and finishes a save the stop
-interrupted. Above the floor a stopping server thaws them all. To thaw them
-yourself on a host whose server stays down:
+A server that stops with less than twice the floor free leaves the VMs
+frozen: thawed at once, they would run with nothing watching them. The
+server that starts, after a stop or a crash, never lets a frozen VM run to
+take its session up. It takes the session up asleep, marked to wake, and
+thaws nothing until it has taken every session up. Then the memory guard
+saves those VMs to disk as they stand while the host is short, the brake
+thaws them one a check once it is not, and the guard wakes each on its own
+once its memory fits above twice the floor, as a session it saved. A VM
+whose save the stop interrupted is saved, or woken, the same way. To thaw
+them yourself on a host whose server stays down:
 
 ```sh
 echo 0 | sudo tee /sys/fs/cgroup/aether.slice/aether-vm-*.service/cgroup.freeze
@@ -434,7 +440,8 @@ killing. The guard never kills a session. It saves awake session VMs to
 disk, with every process in them, as an idle sleep does
 ([Sessions in VMs](#sessions-in-vms)), in this order:
 
-1. a closed session's VM still paused in memory;
+1. a closed session's VM still paused in memory, and the still running VM
+   of a session recorded asleep, such as one a restart took up frozen;
 2. an open session whose agent is idle, the longest idle first;
 3. when none is idle, the session holding the most host memory, even while
    its agent works. A VM's host memory is what its unit holds, guest page
@@ -454,10 +461,13 @@ VM whose memory is unknown or would not leave the data filesystem its
 reserve plus 4 GiB, the level below which disk cleanup deletes the saved
 memory of other sleeping sessions
 ([Recover from disk pressure](#recover-from-disk-pressure)), and for 5
-minutes one whose save failed. A save that fails leaves the VM running; a
-VM that died instead, or that the server stopped because its monitor no
-longer answered or resumed it, ends its session as any VM that died:
-`failed`, with its work committed from its disks. It stops once
+minutes one whose save failed. A save waits for Cloud Hypervisor to finish
+writing the snapshot, however long that takes, and one that fails leaves
+the VM running; a VM that died instead ends its session as any VM that
+died, also when the server is shutting down: `failed`, with its work
+committed from its disks. So does, at its next wake, a session recorded
+asleep whose VM stopped before it was saved, unless it can start again
+from its disk ([Sessions in VMs](#sessions-in-vms)). It stops once
 twice the floor is free and `full avg10` is below 60%. Then a session it
 saved while its agent worked, or while its guest still used the CPU, wakes
 on its own, one each check, the first saved first among those whose memory
@@ -881,8 +891,10 @@ from its disk: processes that were running end, the conversation is
 restored, and the Chat view gives the restore's error. Any other session,
 a Standard one among them, stays asleep: the wake fails with the restore's
 error, and the VM keeps its disk and saved state. Launch a new session on
-its branch, or wake it again. A VM a failed save left running is taken up
-as it is on the next wake.
+its branch, or wake it again. One whose VM stopped before it was ever
+saved has nothing to wake from: the wake ends it, `failed`, with its work
+committed from its disk. A VM a failed save left running is taken up as it
+is on the next wake.
 
 A saved VM takes about as much disk as the memory its processes use, after
 the guest drops its page cache: 137 MiB for an idle test VM of 2 GiB whose

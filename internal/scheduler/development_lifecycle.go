@@ -373,7 +373,9 @@ func (s *Scheduler) recoverDevelopment(ctx context.Context) error {
 		wg.Go(func() {
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			if ctx.Err() != nil {
+			// A VM the brake froze is not let run for this: its terminals
+			// are read again on their next use or its wake.
+			if ctx.Err() != nil || s.vmFrozen(entry.containerID) {
 				return
 			}
 			defer s.needGuest(entry.containerID)()

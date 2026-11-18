@@ -23,10 +23,10 @@ const (
 
 const memoryFrozenNote = "Paused: the server was running out of memory. It carries on by itself once memory is free again. If it has to be saved to disk for that, it wakes with every process where it was."
 
-// watchVMBrake runs from before recovery, so the VMs a server left frozen
-// stay so while this one takes them up. A server that stops with the host
-// still short of memory leaves them frozen for the next: thawed, they would
-// run with nothing watching them.
+// watchVMBrake runs from before recovery, which takes up a VM a server left
+// frozen without letting it run. A server that stops with less than the
+// guard's calm line, twice the floor, free leaves the VMs frozen for the
+// next: thawed at once, they would run with nothing watching them.
 func (s *Scheduler) watchVMBrake(ctx context.Context) {
 	vms, ok := s.cfg.Runtime.(runtime.FreezeRuntime)
 	if !ok {
@@ -34,7 +34,7 @@ func (s *Scheduler) watchVMBrake(ctx context.Context) {
 	}
 	s.vmMemoryBraked = len(vms.Frozen()) > 0
 	defer func() {
-		if available, floor, err := s.hostMemory(); err == nil && available < floor {
+		if available, floor, err := s.hostMemory(); err == nil && available < 2*floor {
 			return
 		}
 		for _, id := range vms.Frozen() {
@@ -86,21 +86,20 @@ func (s *Scheduler) brakeVMMemory(ctx context.Context, vms runtime.FreezeRuntime
 
 // settleFrozen lists the VMs the next check freezes: those of the sessions
 // the server is doing nothing to. The VM of a session it launches, wakes,
-// closes, kills, finishes, saves the ordinary way or takes up after a
-// restart needs its guest to answer, so it is thawed and left out until
-// that is done. A VM the guard saves frozen stays so. It tells each open
-// session in froze why it paused, and with thaw it thaws the VM frozen
-// longest. Every thaw is made under s.mu, which the guard takes to claim a
-// VM for a frozen save, so none lands on a VM it has claimed.
+// closes, kills, finishes, saves the ordinary way, takes up after a restart
+// or restarts the agent of needs its guest to answer, so it is thawed and
+// left out until that is done. A VM the guard saves frozen stays so. It
+// tells each open session in froze why it paused, and with thaw it thaws
+// the VM frozen longest, except during recovery, which would take that VM
+// up at once and out of the brake's reach. Every thaw is made under s.mu,
+// which the guard takes to claim a VM for a frozen save, so none lands on a
+// VM it has claimed.
 func (s *Scheduler) settleFrozen(ctx context.Context, vms runtime.FreezeRuntime, froze []runtime.ID, thaw bool) {
 	now := time.Now()
 	var saving []runtime.ID
 	var noted []*supervised
 	s.mu.Lock()
 	s.vmBrakeTargets = s.vmBrakeTargets[:0]
-	for cid := range s.guestsNeeded {
-		s.thawBraked(vms, cid)
-	}
 	for _, e := range s.runs {
 		cid := e.containerID
 		if _, vm := s.saver(cid); !vm {
@@ -125,7 +124,12 @@ func (s *Scheduler) settleFrozen(ctx context.Context, vms runtime.FreezeRuntime,
 			}
 		}
 	}
-	if thaw && s.vmMemoryBraked {
+	for cid := range s.guestsNeeded {
+		if !slices.Contains(saving, cid) {
+			s.thawBraked(vms, cid)
+		}
+	}
+	if thaw && s.vmMemoryBraked && !s.recovering.Load() {
 		frozen := slices.DeleteFunc(vms.Frozen(), func(id runtime.ID) bool { return slices.Contains(saving, id) })
 		if len(frozen) == 0 && len(saving) == 0 {
 			s.vmMemoryBraked = false
@@ -165,20 +169,15 @@ func (s *Scheduler) thawBraked(vms runtime.FreezeRuntime, cid runtime.ID) {
 	}
 }
 
-// needGuest keeps the brake off cid's VM until the returned function is
-// called, and thaws it: recovery takes up only a guest that answers.
+// needGuest keeps the brake off cid's VM, and the guard from saving it,
+// until the returned function is called; the brake's next check thaws it.
 func (s *Scheduler) needGuest(cid runtime.ID) func() {
-	vms, ok := s.cfg.Runtime.(runtime.FreezeRuntime)
-	if !ok || cid == "" {
+	if _, ok := s.cfg.Runtime.(runtime.FreezeRuntime); !ok || cid == "" {
 		return func() {}
 	}
 	s.mu.Lock()
 	s.guestsNeeded[cid]++
-	err := vms.Thaw(cid)
 	s.mu.Unlock()
-	if err != nil {
-		slog.Warn("scheduler: memory guard: thaw the VM of a session to take it up", "vm", cid, "error", err)
-	}
 	return func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -192,6 +191,26 @@ func (s *Scheduler) needGuest(cid runtime.ID) func() {
 func (s *Scheduler) vmFrozen(cid runtime.ID) bool {
 	vms, ok := s.cfg.Runtime.(runtime.FreezeRuntime)
 	return ok && slices.Contains(vms.Frozen(), cid)
+}
+
+// sleepFrozen records as asleep, marked to wake, an open run whose VM a
+// server left frozen, so recovery takes it up without letting it run: the
+// memory guard saves it as it stands, or wakes it once memory is free. A
+// run being killed or destroyed is taken up as any, to end. It reports
+// whether it recorded the sleep.
+func (s *Scheduler) sleepFrozen(ctx context.Context, r *domain.Run, sc sidecar) bool {
+	cid := runtime.ID(sc.ContainerID)
+	open := r.Status == domain.RunRunning || r.Status == domain.RunNeedsAttention
+	if !open || sc.KillRequested || sc.DestroyPending || !s.vmFrozen(cid) {
+		return false
+	}
+	now := time.Now().UTC()
+	sc.AsleepSince, sc.AsleepSaved, sc.MemorySaved = &now, false, s.vmMemoryUse(ctx)[cid]
+	if err := s.writeSidecar(sc); err != nil {
+		slog.Warn("scheduler: recovery: record a frozen session VM asleep; taking it up running", "run", r.ID, "error", err)
+		return false
+	}
+	return true
 }
 
 // freezeToSave freezes the VM of a run the guard is about to save, so it

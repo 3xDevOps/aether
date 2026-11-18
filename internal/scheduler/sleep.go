@@ -840,9 +840,12 @@ func (s *Scheduler) recoverAsleep(ctx context.Context, r *domain.Run, sc sidecar
 		s.syncRunUserReservationsLocked()
 	}
 	s.mu.Unlock()
-	if entry != nil && err == nil && !info.Exited {
-		// Started by hand while the server was down, or a VM whose save the
-		// restart interrupted: this process holds none of its streams.
+	// Started by hand while the server was down, or a VM whose save the
+	// restart interrupted: this process holds none of its streams. A VM the
+	// memory guard marked to wake, one it was saving or the brake left
+	// frozen, is the guard's to save frozen or wake: a save here would let
+	// it run first.
+	if entry != nil && err == nil && !info.Exited && sc.MemorySaved == 0 {
 		s.stopRecoveredAsleep(ctx, entry)
 	}
 	return true

@@ -245,30 +245,147 @@ func TestAGuardSaveFreezesItsVMAndThawsOneItCouldNotSave(t *testing.T) {
 }
 
 // A VM the kernel killed while the guard was saving it has no saved state to
-// wake from: its run ends as that of any VM that died.
+// wake from: its run ends as that of any VM that died, also when the server
+// shuts down meanwhile.
 func TestAVMThatDiesWhileTheGuardSavesItEndsItsRun(t *testing.T) {
 	t.Parallel()
-	e, fr := newFreezeEnv(t)
-	working := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 3<<30)
-	run := e.runOf(t, working)
-	sub := e.subscribe(t)
-	fr.saveMu.Lock()
-	fr.saving, fr.release = make(chan struct{}), make(chan struct{})
-	fr.saveErr = errors.New("vm runtime: save VM: it is not running")
-	fr.saveMu.Unlock()
-	fr.setAvailable(3 << 30)
+	for _, shutdown := range []bool{false, true} {
+		e, fr := newFreezeEnv(t)
+		working := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 3<<30)
+		run := e.runOf(t, working)
+		sub := e.subscribe(t)
+		fr.saveMu.Lock()
+		fr.saving, fr.release = make(chan struct{}), make(chan struct{})
+		fr.saveErr = errors.New("vm runtime: save VM: it is not running")
+		fr.saveMu.Unlock()
+		fr.setAvailable(3 << 30)
 
-	guarded := make(chan struct{})
-	go func() {
-		defer close(guarded)
-		e.sched.guardVMMemory(context.WithoutCancel(t.Context()))
-	}()
-	<-fr.saving
-	e.container(t, run).endProcess(137)
-	close(fr.release)
-	<-guarded
-	waitStatusEvent(t, sub, run, domain.RunFailed)
-	if e.sched.Sleep(run).AsleepSince != nil {
-		t.Fatal("a run whose VM died during its save is still asleep")
+		ctx, cancel := context.WithCancel(t.Context())
+		guarded := make(chan struct{})
+		go func() {
+			defer close(guarded)
+			e.sched.guardVMMemory(ctx)
+		}()
+		<-fr.saving
+		e.container(t, run).endProcess(137)
+		if shutdown {
+			cancel()
+		}
+		close(fr.release)
+		<-guarded
+		cancel()
+		if sc, err := e.sched.readSidecar(run); err != nil || sc.AsleepSince != nil {
+			t.Fatalf("shutdown %v: a run whose VM died during its save is recorded %+v, %v; want it awake", shutdown, sc, err)
+		}
+		waitStatusEvent(t, sub, run, domain.RunFailed)
+	}
+}
+
+// A server that stops leaves the VMs frozen unless twice the floor is free:
+// the next is not watching them yet. The next takes each session up asleep
+// without letting its VM run, and the guard saves or wakes it.
+func TestARestartTakesUpFrozenVMsWithoutLettingThemRun(t *testing.T) {
+	t.Parallel()
+	e, fr := newFreezeEnv(t)
+	a := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
+	b := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
+	runs := []domain.RunID{e.runOf(t, a), e.runOf(t, b)}
+	e.brake(fr, 4<<30)
+	e.brake(fr, 3<<30)
+	stopped, stop := context.WithCancel(t.Context())
+	stop()
+	fr.setAvailable(6 << 30)
+	e.sched.watchVMBrake(stopped)
+	if frozen := fr.Frozen(); len(frozen) != 2 {
+		t.Fatalf("a server stopping with 6 GiB free, under twice the 3.2 GiB floor, left %v frozen; want both", frozen)
+	}
+
+	fr.setAvailable(3 << 30)
+	s2 := e.restartACP(t)
+	if frozen := fr.Frozen(); len(frozen) != 2 {
+		t.Fatalf("after the restart %v are frozen; want both VMs still frozen", frozen)
+	}
+	s2.mu.Lock()
+	for _, run := range runs {
+		if entry := s2.runs[run]; entry == nil || entry.asleepSince.IsZero() || entry.asleepSaved || entry.memorySaved != 1<<30 {
+			s2.mu.Unlock()
+			t.Fatalf("the restart took up %s as %+v; want it asleep, unsaved and marked to wake", run, entry)
+		}
+	}
+	s2.mu.Unlock()
+
+	s2.guardVMMemory(t.Context())
+	if fr.isSaved(a) == fr.isSaved(b) || !fr.foundFrozen(a) && !fr.foundFrozen(b) {
+		t.Fatalf("the guard saved a %v, b %v; want one, saved frozen", fr.isSaved(a), fr.isSaved(b))
+	}
+
+	fr.setAvailable(16 << 30)
+	waitFor(t, "the brake thawing the VM left", func() bool { return len(fr.Frozen()) == 0 })
+	waitFor(t, "both sessions awake with their turns running", func() bool {
+		s2.guardVMMemory(t.Context())
+		for _, run := range runs {
+			sess := s2.acp.session(run)
+			if s2.Sleep(run).AsleepSince != nil || sess == nil || !sess.State().TurnInFlight {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// The server needs the guest of a VM whose agent it restarts, or whose
+// Background turn it ends: the brake thaws that VM and leaves it out, and
+// the guard saves another.
+func TestAVMWhoseGuestTheServerNeedsIsThawedAndNotSaved(t *testing.T) {
+	t.Parallel()
+	e, fr := newFreezeEnv(t)
+	needed := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 3<<30)
+	other := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
+	e.brake(fr, 4<<30)
+	e.brake(fr, 3<<30)
+	release := e.sched.needGuest(needed)
+	e.brake(fr, 3<<30)
+	if frozen := fr.Frozen(); !slices.Equal(frozen, []runtime.ID{other}) {
+		t.Fatalf("frozen = %v, want only the VM nothing needs", frozen)
+	}
+	e.sched.guardVMMemory(t.Context())
+	if fr.isSaved(needed) || !fr.isSaved(other) {
+		t.Fatalf("the guard saved the needed VM %v, the other %v; want only the other", fr.isSaved(needed), fr.isSaved(other))
+	}
+	release()
+	e.brake(fr, 3<<30)
+	e.brake(fr, 3<<30)
+	if !slices.Contains(fr.Frozen(), needed) {
+		t.Fatal("the brake left a VM out after the server was done with it")
+	}
+}
+
+// frozenUseRuntime is useRuntime with frozen frozen.
+type frozenUseRuntime struct {
+	useRuntime
+	frozen []runtime.ID
+}
+
+func (r *frozenUseRuntime) Freeze(runtime.ID) (bool, error) { return false, nil }
+func (r *frozenUseRuntime) Frozen() []runtime.ID            { return r.frozen }
+func (r *frozenUseRuntime) Thaw(runtime.ID) error           { return nil }
+
+// A woken VM the brake froze loads nothing: its claim stands however long
+// it stays frozen.
+func TestAFrozenWokenVMKeepsItsClaim(t *testing.T) {
+	t.Parallel()
+	rt := &frozenUseRuntime{useRuntime: useRuntime{use: map[runtime.ID]uint64{"vm": 1 << 30}}, frozen: []runtime.ID{"vm"}}
+	s := &Scheduler{cfg: Config{Runtime: rt}}
+	claim := &memoryClaim{bytes: 8 << 30, vm: "vm", held: 1 << 30}
+	s.memoryClaims = []*memoryClaim{claim}
+	s.releaseClaim(claim)
+	claim.grew = claim.grew.Add(-2 * memoryLoadTime)
+	if got := s.claimedMemory(t.Context()); got != 7<<30 {
+		t.Fatalf("a frozen VM that loaded 1 of its 8 GiB claims %d, want the rest", got)
+	}
+	rt.frozen = nil
+	claim.grew = claim.grew.Add(-2 * memoryLoadTime)
+	if got := s.claimedMemory(t.Context()); got != 0 {
+		t.Fatalf("thawed, and loading nothing for %s, it still claims %d", memoryLoadTime, got)
 	}
 }
