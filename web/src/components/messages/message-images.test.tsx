@@ -49,7 +49,11 @@ test('the gallery hint returns on input and fades after a second without input',
 
   fireEvent.pointerMove(within(dialog).getByRole('img'))
   expect(hint().className).toContain('opacity-100')
-  act(() => vi.advanceTimersByTime(1000))
+  act(() => vi.advanceTimersByTime(600))
+  fireEvent.wheel(within(dialog).getByRole('img'))
+  act(() => vi.advanceTimersByTime(600))
+  expect(hint().className).toContain('opacity-100')
+  act(() => vi.advanceTimersByTime(400))
   expect(hint().className).toContain('opacity-0')
 
   fireEvent.keyDown(dialog, { key: 'ArrowRight' })

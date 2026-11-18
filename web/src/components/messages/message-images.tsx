@@ -202,7 +202,6 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
       ref={viewer}
       className="contents"
       onTouchStart={(event) => {
-        revealHint()
         const [a, b] = [event.touches[0], event.touches[1]]
         pinch.current = event.touches.length === 2 && a && b
           ? { distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), scale: scale ?? fitScale() }
@@ -210,7 +209,6 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
         swipe.current = event.touches.length === 1 && a ? { x: a.clientX, y: a.clientY } : undefined
       }}
       onTouchMove={(event) => {
-        revealHint()
         const [a, b] = [event.touches[0], event.touches[1]]
         const start = pinch.current
         if (!start || event.touches.length !== 2 || !a || !b) return
@@ -218,7 +216,6 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
         zoomTo(start.scale * ratio, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2)
       }}
       onTouchEnd={(event) => {
-        revealHint()
         if (event.touches.length < 2) pinch.current = undefined
         const begin = swipe.current
         const touch = event.changedTouches[0]
@@ -230,6 +227,7 @@ function ImageViewer({ url, name, gallery, zoomed, keys, refocus, onStep, onClos
       }}
       onPointerMove={revealHint}
       onPointerDown={revealHint}
+      onWheel={revealHint}
     >
       <div
         ref={frame}
