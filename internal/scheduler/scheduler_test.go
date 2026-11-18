@@ -180,6 +180,8 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		StateDir:      filepath.Join(dir, "scheduler"),
 		Homes:         homes,
 		StandardImage: "busybox:1.36",
+		// Admission must not depend on the free space of the host's temp dir.
+		filesystemCapacity: healthyAdmissionData,
 		// The fake runtime never needs the default two-second window, and a short
 		// probe keeps reboot scenarios from being the slowest tests.
 		ExitProbeTimeout: 20 * time.Millisecond,
