@@ -15,7 +15,9 @@ import (
 
 // Every launch walks the member's whole home and caches, so a file's cost
 // must not grow with how deep it sits: files spread down a chain of
-// directories and the same files side by side walk in about the same time.
+// directories and the same files side by side take the same syscalls.
+// The count measures cost only while every call the walk makes is relative
+// to a held directory and names one component, as each is now.
 func TestChownTreeCostDoesNotGrowWithDepth(t *testing.T) {
 	t.Parallel()
 	const dirs, files = maxHeldDirs, 40
@@ -36,21 +38,21 @@ func TestChownTreeCostDoesNotGrowWithDepth(t *testing.T) {
 		populate(filepath.Join(deep, strings.Repeat("d/", i+1)))
 		populate(filepath.Join(flat, strconv.Itoa(i)))
 	}
-	walk := func(dir string) time.Duration {
+	walk := func(dir string) int {
 		t.Helper()
-		best := time.Duration(1 << 62)
-		for range 5 {
-			start := time.Now()
-			if err := chownTree(dir, os.Getuid(), os.Getgid(), nil); err != nil {
-				t.Fatal(err)
-			}
-			best = min(best, time.Since(start))
+		f, err := os.Open(dir)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return best
+		w := ownershipWalk{uid: os.Getuid(), gid: os.Getgid()}
+		if err := w.walk(f, ".", 0, -1, nil); err != nil {
+			t.Fatal(err)
+		}
+		return w.syscalls
 	}
-	deepTime, flatTime := walk(deep), walk(flat)
-	if deepTime > 4*flatTime+5*time.Millisecond {
-		t.Fatalf("walking %d files down %d directories took %s, side by side %s", dirs*files, dirs, deepTime, flatTime)
+	deepCalls, flatCalls := walk(deep), walk(flat)
+	if flatCalls < dirs*files || deepCalls > flatCalls {
+		t.Fatalf("walking %d files down %d directories made %d syscalls, side by side %d", dirs*files, dirs, deepCalls, flatCalls)
 	}
 }
 
