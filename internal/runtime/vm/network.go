@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -19,7 +18,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 )
 
 // vmSubnet holds one /30 per VM: .1 is the host end of its tap, .2 the
@@ -148,10 +146,14 @@ func (e *engine) egressKey(ip netip.Addr) (string, error) {
 // on to them. Its input and forward chains run just before iptables', whose
 // INPUT and FORWARD take only what they marked.
 //
-// Forward clamps the MSS of a VM's SYNs to the route's MTU, as the host's own
-// TCP sizes its segments: the guest sees only its tap's 1500 bytes, so through
-// a smaller uplink such as tailscale0 or wg0 a server's full-size replies
-// would reach it only where path MTU discovery works end to end.
+// Forward lets an open VM out by any interface, whatever the host's routes,
+// but a VM tap or a bridge of containers: a bridge whose ports are all veths
+// and taps, as Docker's, libvirt's and LXD's are. Matching the kind keeps a
+// bridge made after the table out too. It clamps the MSS of a VM's SYNs to
+// the route's MTU, as the host's own TCP sizes its segments: the guest sees
+// only its tap's 1500 bytes, so through a smaller link such as tailscale0 or
+// wg0 a server's full-size replies would reach it only where path MTU
+// discovery works end to end.
 //
 // Prerouting drops the whole link-local range 169.254.0.0/16 from open taps,
 // not just the two metadata IPs: it carries cloud metadata, credential and
@@ -160,11 +162,8 @@ func (e *engine) egressKey(ip netip.Addr) (string, error) {
 // (the gateway and proxy are in 10.200.0.0/16). Alibaba's 100.100.100.200 and
 // Azure's WireServer 168.63.129.16, which serve the same role outside that
 // range, are dropped too. The shared-address range 100.64.0.0/10 is not
-// dropped whole, because it is also Tailscale's. tailscale0 is an uplink only
-// while the host uses an exit node, and then an open VM reaches tailnet peers
-// as it does the hosts on any uplink's network. Otherwise it never reaches
-// a tailnet peer anyway, and dropping the range would only cut off the host's
-// own tailnet address, which it may reach. Guests resolve through the DNS
+// dropped, because it is also Tailscale's: an open VM reaches tailnet peers,
+// as a Docker container on the host does. Guests resolve through the DNS
 // relay at the proxy address. Port 53 to the host's upstream resolvers goes
 // to the relay too, even at a link-local address: a VM booted before the
 // relay still names them, and a guest often cannot reach them.
@@ -199,10 +198,9 @@ table inet {{.Table}} {
 		type filter hook forward priority filter - 1; policy accept;
 		iifname "{{.EgressTaps}}*" reject with icmpx admin-prohibited
 		iifname "{{.Taps}}*" tcp flags syn tcp option maxseg size set rt mtu
-{{- if .Uplinks}}
-		iifname "{{.Taps}}*" oifname { {{range $i, $u := .Uplinks}}{{if $i}}, {{end}}"{{$u}}"{{end}} } meta mark set meta mark | {{.Mark}} accept
-{{- end}}
-		iifname "{{.Taps}}*" reject with icmpx admin-prohibited
+		iifname "{{.Taps}}*" oifname "{{.Taps}}*" reject with icmpx admin-prohibited
+		iifname "{{.Taps}}*" meta oifkind "bridge"{{if .Bridges}} oifname != { {{range $i, $b := .Bridges}}{{if $i}}, {{end}}"{{$b}}"{{end}} }{{end}} reject with icmpx admin-prohibited
+		iifname "{{.Taps}}*" meta mark set meta mark | {{.Mark}} accept
 		oifname "{{.Taps}}*" ct state established,related meta mark set meta mark | {{.Mark}} accept
 		oifname "{{.Taps}}*" drop
 	}
@@ -213,11 +211,10 @@ table inet {{.Table}} {
 }
 `))
 
-// ensureNetwork sets up the host side of every VM's network. VMs leave the
-// host only through its default-route interfaces, so they miss every bridge
-// of Docker's, whatever it is named. It runs at every start: the firewall is
-// replaced in one transaction, so a changed default route or resolver list
-// applies to every VM at the next server start, VM boot or restore.
+// ensureNetwork sets up the host side of every VM's network. It runs at
+// every start: the firewall is replaced in one transaction, so a bridge that
+// gained a NIC or a changed resolver list applies to every VM at the next
+// server start, VM boot or restore.
 func (e *engine) ensureNetwork(ctx context.Context) error {
 	e.netMu.Lock()
 	defer e.netMu.Unlock()
@@ -237,9 +234,9 @@ func (e *engine) ensureNetwork(ctx context.Context) error {
 			return err
 		}
 	}
-	uplinks, err := defaultRoutes()
+	links, err := netlink.LinkList()
 	if err != nil {
-		return err
+		return fmt.Errorf("vm runtime: read the host's interfaces: %w", err)
 	}
 	if e.dns == nil {
 		if e.dns, err = e.listenDNS(); err != nil {
@@ -251,7 +248,7 @@ func (e *engine) ensureNetwork(ctx context.Context) error {
 	if err = firewall.Execute(&rules, map[string]any{
 		"Table": firewallTable, "Taps": tapPrefix, "EgressTaps": egressTapPrefix,
 		"Proxy": proxyAddr, "ProxyPort": egress.Port, "Subnet": vmSubnet, "DNSUDP": dnsUDP, "DNSTCP": dnsTCP,
-		"Uplinks": uplinks, "DNS": hostDNS(), "Mark": fmt.Sprintf("%#x", allowedMark),
+		"Bridges": nicBridges(links), "DNS": hostDNS(), "Mark": fmt.Sprintf("%#x", allowedMark),
 	}); err != nil {
 		return fmt.Errorf("vm runtime: write the VM firewall: %w", err)
 	}
@@ -279,60 +276,21 @@ func (e *engine) ensureNetwork(ctx context.Context) error {
 	return nil
 }
 
-// defaultRoutes reads the interfaces of the host's IPv4 default routes and of
-// the routes its policy rules pick for the internet.
-func defaultRoutes() ([]string, error) {
-	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Table: unix.RT_TABLE_UNSPEC}, netlink.RT_FILTER_TABLE)
-	if err != nil {
-		return nil, fmt.Errorf("vm runtime: read the host's routes: %w", err)
-	}
-	var internet []netlink.Route
-	for _, probe := range []string{"1.1.1.1", "128.0.0.1"} {
-		// No route to a probe means no uplink toward it, not a failure.
-		if got, getErr := netlink.RouteGet(net.ParseIP(probe)); getErr == nil {
-			internet = append(internet, got...)
+// nicBridges names the bridges with a port other than a veth or a tap, such
+// as br-ens3 over the NIC ens3.
+func nicBridges(links []netlink.Link) []string {
+	bridges := map[int]string{}
+	for _, l := range links {
+		if l.Type() == "bridge" {
+			bridges[l.Attrs().Index] = l.Attrs().Name
 		}
-	}
-	links, err := net.Interfaces()
-	if err != nil {
-		return nil, fmt.Errorf("vm runtime: read the host's interfaces: %w", err)
-	}
-	names := make(map[int]string, len(links))
-	for _, link := range links {
-		names[link.Index] = link.Name
-	}
-	return routeUplinks(routes, internet, names), nil
-}
-
-// routeUplinks ignores default routes outside the main table: a per-NIC
-// source-routing table holds one too, and that NIC's network is no uplink.
-func routeUplinks(routes, internet []netlink.Route, names map[int]string) []string {
-	var links []int
-	for _, r := range routes {
-		if r.Table != unix.RT_TABLE_MAIN {
-			continue
-		}
-		if r.Dst != nil {
-			if ones, _ := r.Dst.Mask.Size(); ones > 0 {
-				continue
-			}
-		}
-		links = append(links, r.LinkIndex)
-		for _, hop := range r.MultiPath {
-			links = append(links, hop.LinkIndex)
-		}
-	}
-	for _, r := range internet {
-		links = append(links, r.LinkIndex)
 	}
 	var out []string
-	for _, index := range links {
-		name := names[index]
-		switch {
-		case name == "", name == "lo", name == proxyLink, strings.HasPrefix(name, tapPrefix), slices.Contains(out, name):
-			continue
+	for _, l := range links {
+		name, ok := bridges[l.Attrs().MasterIndex]
+		if ok && l.Type() != "veth" && l.Type() != "tuntap" && !slices.Contains(out, name) {
+			out = append(out, name)
 		}
-		out = append(out, name)
 	}
 	return out
 }

@@ -385,8 +385,9 @@ What changes:
   account; Copilot's and Antigravity's are copied in at each cold start
   ([harnesses.md](harnesses.md#agents-in-session-vms)).
 - Each VM has its own address in `10.200.0.0/16` and a tap device
-  `aethervm<n>`. It reaches the server host, and the internet only through
-  the host's default-route interfaces. It
+  `aethervm<n>`. Like a Docker container, it reaches the server host and
+  whatever the host routes to, however it routes: the internet, your
+  network, a VPN's split routes, tailnet peers. It
   reaches no other VM, no Docker container, nothing in the link-local range
   `169.254.0.0/16` (which holds the cloud metadata, credential and resolver
   endpoints), not the `100.100.100.200` or `168.63.129.16` metadata
@@ -419,17 +420,14 @@ What changes:
   `FORWARD` or ufw's on `INPUT`, so egress-controlled VMs reach the proxy
   behind ufw. While the table is gone, the `FORWARD` policy drops all
   traffic VMs send through the host, and what they send to the host itself
-  is unfiltered. A default-route interface is the interface of an IPv4
-  default route in the main routing table, or the one `ip route get 1.1.1.1`
-  or `ip route get 128.0.0.1` names, which follows the host's routing
-  rules: `tailscale0` with a Tailscale exit node, `wg0` with a `wg-quick`
-  full tunnel, `tun0` with OpenVPN's `redirect-gateway def1`. A default
-  route in another table, such as a second NIC's source-routing table,
-  does not count, and VM taps, `aether-vmproxy` and `lo` never do. With an
-  exit node, VMs also reach tailnet peers, Tailscale's `100.100.100.100` on
-  every port (its web client on 80, Taildrive on 8080) and any subnet
-  routes the host accepts. A change of default route applies when the next
-  VM boots. The MSS of a VM's outgoing TCP connections is clamped to the
+  is unfiltered. A VM's traffic leaves by any interface except a VM tap and
+  a Linux bridge whose ports are all veths or taps, which is where Docker,
+  libvirt and LXD keep their containers and VMs. A bridge with another
+  port, such as `br-ens3` over the NIC `ens3`, counts from the next VM
+  boot after it gains that port. On a Tailscale host VMs so reach
+  Tailscale's `100.100.100.100` on every port (its web client on 80,
+  Taildrive on 8080) and any subnet routes the host accepts. The MSS of a
+  VM's outgoing TCP connections is clamped to the
   MTU of the interface they leave by: 1240 bytes through `tailscale0`'s
   1280.
 - The environment terminal runs in `aether-vm-terminal-<member id>.service`
