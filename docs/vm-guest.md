@@ -139,9 +139,10 @@ makes single pages count), which hands over what is free within about 30
 seconds. A guest frees its page cache only under memory pressure, and then
 only down to a few percent free, so the helper turns on the kernel's
 DAMON_RECLAIM at boot: it pages out memory left untouched for `min_age`, 60
-seconds. It evicts a page the second time it finds it idle, so a file read
-once leaves the guest, and the host, about 2 minutes later, while pages in
-use stay. Clean file pages are dropped. A dirty one leaves on a later pass,
+seconds. The first time it finds a cold page it only marks it idle, and it
+evicts the page on its next pass if nothing touched it, so a file read once
+leaves the guest, and the host, about 2 minutes later, while pages in use
+stay. Clean file pages are dropped. A dirty one leaves on a later pass,
 once the kernel's flusher has written it. Anonymous ones go to swap, and
 are skipped while the guest has none.
 
@@ -152,12 +153,13 @@ last:
 | --- | --- |
 | `min_age=60000000` | 60 seconds untouched is cold. |
 | `wmarks_high=1000`, `wmarks_mid=1000`, `wmarks_low=0` | Run at any level of free memory. The defaults stop it above 50% free, and below 20%, where a guest full of cold page cache would keep it. |
-| `sample_interval=50000`, `aggr_interval=1000000` | Check accesses every 50 ms instead of 5, so an idle VM rarely wakes. |
-| `monitor_region_end=<bytes>` | The end of the last `System RAM` range in `/proc/iomem`. Cloud Hypervisor puts guest RAM past 3 GiB at 4 GiB, and DAMON_RECLAIM watches one range, by default only the larger piece; this spans both. |
+| `sample_interval=50000`, `aggr_interval=1000000` | Check accesses every 50 ms instead of 5, so its thread wakes 20 times a second instead of 200. |
+| `monitor_region_end=<bytes>` | The end of the last `System RAM` range in `/proc/iomem`. Cloud Hypervisor puts guest RAM past 3 GiB at 4 GiB, and DAMON_RECLAIM watches one range, by default only the larger piece; this spans both. The gap between them holds no RAM, but DAMON counts it toward the quota. |
 | `skip_anon=Y` | Only while `/proc/swaps` lists no swap, where an anonymous page has nowhere to go. |
 | `enabled=Y` | Starts it. |
 
-The default quotas cap it at 128 MiB paged out and 10 ms of CPU a second.
+The default quotas cap it at 128 MiB of memory tried and 10 ms of CPU a
+second.
 A kernel without DAMON_RECLAIM has no such directory and the step is
 skipped; any other failure is reported as a `boot_error`. The kernel config
 must leave `CONFIG_LRU_GEN` off: with it, reading a file no longer clears the

@@ -67,6 +67,10 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	if held < before+coldMiB<<20/2 {
 		t.Fatalf("reading %d MiB took the host's share of the guest from %d to only %d bytes", coldMiB, before, held)
 	}
+	pgpgin := func() uint64 { return parseUint(t, guestFields(t, e, key, "grep '^pgpgin ' /proc/vmstat", 2)[1]) }
+	// Main reloads within 2 seconds whatever of its file the read pushed out.
+	time.Sleep(5 * time.Second)
+	readIn := pgpgin()
 	deadline := read.Add(2*minAge + 3*time.Minute)
 	for now := guestRAMOnHost(t, key); now > before+coldMiB<<20/5; now = guestRAMOnHost(t, key) {
 		if time.Now().After(deadline) {
@@ -77,9 +81,8 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	t.Logf("reading %d MiB left %d KiB of %d free; the host's share of the guest went %d -> %d -> %d bytes, back %s after the read (min_age %s)",
 		coldMiB, free, memTotalKiB, before, held, guestRAMOnHost(t, key), time.Since(read).Round(time.Second), minAge)
 
-	reads := guestFields(t, e, key, "grep '^pgpgin ' /proc/vmstat; cat /var/tmp/hot >/dev/null; grep '^pgpgin ' /proc/vmstat", 4)
-	if kib := parseUint(t, reads[3]) - parseUint(t, reads[1]); kib > hotMiB<<10/8 {
-		t.Errorf("reading the file Main keeps reading took %d KiB from disk: DAMON_RECLAIM evicted it", kib)
+	if kib := pgpgin() - readIn; kib > hotMiB<<10/8 {
+		t.Errorf("while the cold file left, the guest read %d KiB from disk: DAMON_RECLAIM evicted the file Main keeps reading", kib)
 	}
 	cpu := guestFields(t, e, key, "cut -d' ' -f14,15 /proc/"+kdamond+"/stat; cut -d' ' -f1 /proc/uptime", 3)
 	ticks := parseUint(t, cpu[0]) + parseUint(t, cpu[1])

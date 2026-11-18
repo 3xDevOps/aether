@@ -14,8 +14,8 @@ const damonReclaimParams = "/sys/module/damon_reclaim/parameters"
 // startDAMONReclaim turns on the kernel's DAMON_RECLAIM, which pages out
 // memory left untouched for a minute so free page reporting returns it to
 // the host; docs/vm-guest.md#memory-the-guest-returns says why each value.
-// It runs after swap is on, since it skips anonymous pages without swap. A
-// kernel built without it is skipped.
+// It reads /proc/swaps to skip anonymous pages in a guest without swap, so
+// it runs after swap is turned on. A kernel built without it is skipped.
 func startDAMONReclaim() error {
 	if _, err := os.Stat(damonReclaimParams); errors.Is(err, os.ErrNotExist) {
 		return nil

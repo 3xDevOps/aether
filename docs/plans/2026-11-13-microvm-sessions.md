@@ -104,7 +104,7 @@ then moves the checkout onto the data disk:
 
 - vCPUs and memory come from the session's limits. Guest memory returns to
   the host through free page reporting and DAMON_RECLAIM inside the guest,
-  which pages out memory left untouched for a minute.
+  which pages out memory left untouched for about 2 minutes.
 - The launch capacity check counts VM memory.
 - Hosts need `/dev/kvm`: bare metal, or a cloud instance with nested
   virtualization (on AWS, the Intel 7th and 8th generation families listed
