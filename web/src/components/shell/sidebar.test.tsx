@@ -279,6 +279,14 @@ describe('run rows', () => {
     expect(runList().queryByText('reported check')).toBeNull()
     expect(runList().getByRole('button', { name: '2 finished' })).toBeDefined()
 
+    const parent = runList().getByRole('button', { name: /coordinate/ })
+    const disclosure = parent.closest('[data-slot="list-row"]')!.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+    expect(disclosure.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(disclosure)
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+    expect(runList().getByRole('button', { name: '2 finished' })).toBeDefined()
+
+    act(() => useStore.getState().navigate('run', { runId: 'run_parent' }))
     fireEvent.click(runList().getByRole('button', { name: 'Collapse 1 subsession' }))
     expect(runList().queryByRole('button', { name: '2 finished' })).toBeNull()
     expect(runList().queryByText('failed check')).toBeNull()
@@ -287,7 +295,9 @@ describe('run rows', () => {
   it('opens and turns the subsession arrow when the first child arrives', async () => {
     useStore.setState((s) => ({ runs: { ...s.runs, run_parent: toRecord(run({ id: 'run_parent', task: 'coordinate' })) } }))
     render(<AppShell />)
-    expect(runList().queryByRole('button', { name: /subsession/ })).toBeNull()
+    const parent = runList().getByRole('button', { name: /coordinate/ })
+    let disclosure = parent.closest('[data-slot="list-row"]')!.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+    expect(disclosure.getAttribute('aria-expanded')).toBe('false')
 
     act(() => useStore.setState((s) => ({
       runs: {
@@ -296,10 +306,51 @@ describe('run rows', () => {
       },
     })))
 
-    const disclosure = await runList().findByRole('button', { name: 'Collapse 1 subsession' })
+    await runList().findByRole('button', { name: 'Collapse 1 subsession' })
+    disclosure = parent.closest('[data-slot="list-row"]')!.querySelector<HTMLButtonElement>('button[aria-expanded]')!
     expect(disclosure.getAttribute('aria-expanded')).toBe('true')
     expect(disclosure.querySelector('svg')?.getAttribute('class')).toContain('rotate-90')
     expect(runList().getByText('new check')).toBeDefined()
+  })
+
+  it('opens an empty subsession list when its arrow is clicked', () => {
+    useStore.setState((s) => ({ runs: { ...s.runs, run_parent: toRecord(run({ id: 'run_parent', task: 'coordinate' })) } }))
+    render(<AppShell />)
+
+    const parent = runList().getByRole('button', { name: /coordinate/ })
+    const disclosure = parent.closest('[data-slot="list-row"]')!.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+    fireEvent.click(disclosure)
+
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+    expect(disclosure.querySelector('svg')?.getAttribute('class')).toContain('rotate-90')
+    expect(runList().queryByText('new check')).toBeNull()
+  })
+
+  it('keeps a parent expanded and explains why while one of its subsessions is open', async () => {
+    useStore.setState((s) => ({
+      runs: {
+        ...s.runs,
+        run_parent: toRecord(run({ id: 'run_parent', task: 'coordinate' })),
+        run_child: toRecord(run({ id: 'run_child', task: 'running check', parent_run_id: 'run_parent' })),
+      },
+    }))
+    render(<AppShell />)
+
+    const parent = runList().getByRole('button', { name: /coordinate/ })
+    const disclosure = parent.closest('[data-slot="list-row"]')!.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+    act(() => useStore.getState().navigate('run', { runId: 'run_child' }))
+    expect(disclosure.getAttribute('aria-disabled')).toBe('true')
+    expect(disclosure.getAttribute('aria-label')).toBe('Cannot collapse while a subsession is open')
+    fireEvent.click(disclosure)
+
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+    expect(disclosure.querySelector('svg')?.getAttribute('class')).toContain('rotate-90')
+    expect(runList().getByText('running check')).toBeDefined()
+
+    disclosure.focus()
+    await userEvent.setup().keyboard('{Enter}')
+    expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+    expect(runList().getByText('running check')).toBeDefined()
   })
 
   describe('people', () => {
@@ -317,11 +368,11 @@ describe('run rows', () => {
     const faces = () => [...row().querySelectorAll('[data-slot=run-people] [data-slot=avatar]')].map((face) => face.getAttribute('aria-label'))
     const details = () => document.querySelector<HTMLElement>('[data-slot=run-details]')
 
-    it("fills the owner mark with the owner's colour, whoever backs or controls the run", () => {
+    it("colors the subsession arrow with the owner's colour, whoever backs or controls the run", () => {
       seed({ member_id: bob.id, account_member_id: alice.id, controller_member_id: vera.id })
       render(<AppShell />)
 
-      expect(row().querySelector<HTMLElement>('[data-slot=owner-mark]')?.style.backgroundColor).toBe('rgb(60, 180, 75)')
+      expect(row().closest('[data-slot="list-row"]')?.querySelector<HTMLButtonElement>('button[aria-expanded]')?.style.color).toBe('rgb(60, 180, 75)')
       expect(row().getAttribute('aria-label')).toContain(" · Bob's session · Vera controls")
     })
 

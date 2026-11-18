@@ -231,6 +231,13 @@ function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) 
   const [settledShown, setSettledShown] = useState(false)
   const touched = useRef(false)
   const hadChildren = useRef(below > 0)
+  const openSubsession = useStore((s) =>
+    (tree.childRuns?.members ?? []).some((row) => isRunRoute(s.route, row.run.id)) ||
+    settled.some((row) => isRunRoute(s.route, row.run.id)))
+
+  useEffect(() => {
+    if (openSubsession) setExpanded(true)
+  }, [openSubsession])
 
   useEffect(() => {
     const hasChildren = below > 0
@@ -239,20 +246,22 @@ function RunFamily({ tree, group }: { tree: RunTree; group: RunTree['group'] }) 
   }, [below])
 
   const shown = expanded ? tree.children : tree.children.filter((child) => child.needsYou)
-  const finished = expanded || foldable === 0 ? settled : []
+  const finished = expanded ? settled : []
   const openID = useStore((s) => settled.find((row) => isRunRoute(s.route, row.run.id))?.run.id)
   return (
     <>
       <RunRowItem
         tree={tree}
-        subsessions={foldable > 0 ? {
+        subsessions={{
           count: foldable,
           expanded,
+          locked: openSubsession,
           onToggle: () => {
+            if (openSubsession) return
             touched.current = true
             setExpanded((open) => !open)
           },
-        } : undefined}
+        }}
       />
       {shown.length + finished.length > 0 && (
         <ul aria-label={`Sessions in ${runLabel(tree.run)}`}>
@@ -323,7 +332,7 @@ function MineToggle() {
   )
 }
 
-function RunRowItem({ tree, subsessions }: { tree: RunTree; subsessions?: { count: number; expanded: boolean; onToggle: () => void } }) {
+function RunRowItem({ tree, subsessions }: { tree: RunTree; subsessions?: { count: number; expanded: boolean; locked?: boolean; onToggle: () => void } }) {
   return (
     <RunRow
       runID={tree.run.id}
@@ -352,7 +361,7 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   since: string
   workspaceName?: string
   childRuns?: TreeSummary
-  subsessions?: { count: number; expanded: boolean; onToggle: () => void }
+  subsessions?: { count: number; expanded: boolean; locked?: boolean; onToggle: () => void }
 }) {
   const run = useRun(runID)
   return run ? <RunRowButton run={run} {...shown} /> : null
@@ -371,8 +380,14 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
   since: string
   workspaceName?: string
   childRuns?: TreeSummary
-  subsessions?: { count: number; expanded: boolean; onToggle: () => void }
+  subsessions?: { count: number; expanded: boolean; locked?: boolean; onToggle: () => void }
 }) {
+  const [emptyExpanded, setEmptyExpanded] = useState(false)
+  const disclosure = subsessions ?? {
+    count: 0,
+    expanded: emptyExpanded,
+    onToggle: () => setEmptyExpanded((open) => !open),
+  }
   const navigate = useStore((s) => s.navigate)
   const self = useStore((s) => s.info?.member.id)
   const selected = useStore((s) => isRunRoute(s.route, run.id))
@@ -427,38 +442,26 @@ function RunRowButton({ run, state, waiting, reason, next, cause, wait, since, w
         aria-current={selected ? 'page' : undefined}
         selected={selected}
         onClick={() => navigate('run', { runId: run.id })}
-        leading={subsessions ? undefined : (
-          <>
-            <StatusDot tone={toneOf({ state, wait })} />
-            <span
-              data-slot="owner-mark"
-              aria-hidden
-              style={{ backgroundColor: resolveMember({ members, mergedInto }, run.member_id).member?.color }}
-              className="-mx-1 h-1.75 w-1.5 shrink-0 bg-icon-faint [clip-path:polygon(0_0,100%_50%,0_100%)]"
-            />
-          </>
-        )}
-        leadingAction={subsessions && (
+        leadingAction={(
           <span className="flex shrink-0 items-center gap-2 pl-2">
             <StatusDot tone={toneOf({ state, wait })} />
-            <span
-              data-slot="owner-mark"
-              aria-hidden
-              style={{ backgroundColor: resolveMember({ members, mergedInto }, run.member_id).member?.color }}
-              className="-mx-1 h-1.75 w-1.5 shrink-0 bg-icon-faint [clip-path:polygon(0_0,100%_50%,0_100%)]"
-            />
             <Button
               variant="ghost"
               size="icon-sm"
-              label={`${subsessions.expanded ? 'Collapse' : 'Expand'} ${subsessions.count} subsession${subsessions.count === 1 ? '' : 's'}`}
-              aria-expanded={subsessions.expanded}
+              label={disclosure.locked ? 'Cannot collapse while a subsession is open' : disclosure.count > 0
+                ? `${disclosure.expanded ? 'Collapse' : 'Expand'} ${disclosure.count} subsession${disclosure.count === 1 ? '' : 's'}`
+                : `${disclosure.expanded ? 'Collapse' : 'Expand'} subsessions`}
+              hint={disclosure.locked ? 'Leave the open subsession to collapse its parent' : undefined}
+              aria-expanded={disclosure.expanded}
+              aria-disabled={disclosure.locked || undefined}
+              style={{ color: resolveMember({ members, mergedInto }, run.member_id).member?.color }}
               onClick={(event) => {
                 event.stopPropagation()
-                subsessions.onToggle()
+                disclosure.onToggle()
               }}
-              className="-mr-2"
+              className="-mr-2 aria-disabled:opacity-100"
             >
-              <ChevronRight className={cn(chevronTurn, subsessions.expanded && 'rotate-90')} />
+              <ChevronRight className={cn('size-4 text-current', chevronTurn, disclosure.expanded && 'rotate-90')} strokeWidth={2.75} />
             </Button>
           </span>
         )}

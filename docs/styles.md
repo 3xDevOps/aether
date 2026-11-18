@@ -565,12 +565,12 @@ keep Board outside the overflow menu. The header and sidebar use
 `bg-chrome` with seams against the content; navigation rows have muted icons
 and the open page in `bg-selection`. **New session** at the sidebar's top is the
 only filled button in the shell.
-Session rows carry a shaped `StatusDot`, a 6×7px owner mark (a right-pointing
-triangle in the owner's colour, 4px from the dot and from the title), the
-agent's title, a compact age ("15m") in `text-ui-sm` muted tabular figures
-and a monochrome `AgentGlyph`. The people on a session follow as 16px avatars
-overlapping by 6px, the first one whole at the right edge, each ringed in
-the row's own background so the one in front cuts into the one behind.
+Session rows carry a shaped `StatusDot`, an owner-coloured disclosure chevron
+with a 2.75px stroke, the agent's title, a compact age ("15m") in `text-ui-sm`
+muted tabular figures and a monochrome `AgentGlyph`. The people on a session
+follow as 16px avatars overlapping by 6px, the first one whole at the right
+edge, each ringed in the row's own background so the one in front cuts into
+the one behind.
 Subsessions are
 indented 26px under their parent and joined to it by 1px `icon-faint` tree
 connectors: a trunk under the centre of the root's status dot, and for each
