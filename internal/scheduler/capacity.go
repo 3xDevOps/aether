@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -26,15 +27,18 @@ var (
 	ErrMemoryPressure     = errors.New("scheduler: insufficient host memory headroom")
 	ErrBrowserCPUCapacity = errors.New("scheduler: insufficient browser CPU capacity")
 	ErrCapacityUnknown    = errors.New("scheduler: host capacity unavailable")
-	// errServerStalled is a memory refusal no save can lift in time: the
-	// server's own minute of memory pressure.
-	errServerStalled = errors.New("the server stalled on memory")
 )
 
 const (
 	capacityProbeTimeout        = 5 * time.Second
 	startupDiskBytes     uint64 = 1 << 30
-	startupMemoryBytes   uint64 = 512 << 20
+	// startupMemoryBytes covers what a session VM holds of the host once it
+	// has booted, which TestKVMWakeLoadsBackWhatWasSaved measures.
+	startupMemoryBytes uint64 = 512 << 20
+	// memoryLoadTime is how long what a woken VM holds stays flat before its
+	// claim ends: Cloud Hypervisor loads the rest of the saved memory in the
+	// background, as fast as the disk reads it.
+	memoryLoadTime = time.Minute
 	// maxMemoryPressure is the "some avg60" percentage of the server's own
 	// cgroup memory.pressure at which new launches are refused.
 	maxMemoryPressure = 10.0
@@ -102,23 +106,162 @@ func memoryFloor(total uint64) uint64 {
 	return max(uint64(2<<30), total/10)
 }
 
-// reserveCapacity serializes the bounded probe and accounting independently of
-// Scheduler.mu. Every admission sees outstanding provisioning allowances, not
-// the sum of container memory ceilings. A completed reservation is released
-// under the same gate so the next probe cannot reuse a pre-completion snapshot.
+// memoryClaim is host memory an admission set aside that the host does not
+// show as used yet.
+type memoryClaim struct {
+	bytes uint64
+	// vm is the saved VM a wake restores, which goes on loading its memory
+	// once the wake returns. held is the most of bytes it has held, grew is
+	// when that last rose, and released is set once the wake returned.
+	vm       runtime.ID
+	held     uint64
+	grew     time.Time
+	released bool
+}
+
+// memoryShortage is a memory refusal that saving idle VMs can lift: the
+// host has available bytes, short of the floor, this start's need and what
+// admitted starts have yet to take.
+type memoryShortage struct{ available, floor, need, claimed uint64 }
+
+func (e *memoryShortage) Error() string {
+	return fmt.Sprintf("%v: %d available bytes; reserve %d bytes plus %d bytes for this start and %d bytes for starts in flight",
+		ErrMemoryPressure, e.available, e.floor, e.need, e.claimed)
+}
+
+func (e *memoryShortage) Unwrap() error { return ErrMemoryPressure }
+
+// reserveCapacity admits a start that brings up a new container or VM.
 func (s *Scheduler) reserveCapacity(ctx context.Context) (func(), error) {
-	release, err := s.tryReserveCapacity(ctx)
+	return s.reserve(ctx, &memoryClaim{bytes: startupMemoryBytes})
+}
+
+// reserveWake admits the wake of a sleeping container: a saved VM must fit
+// the memory its restore loads back.
+func (s *Scheduler) reserveWake(ctx context.Context, cid runtime.ID) (func(), error) {
+	return s.reserve(ctx, s.wakeClaim(cid))
+}
+
+// reserveBoot admits the boot of a stopped VM to commit its work on memory
+// alone, as a wake: disk reclaim runs that boot to free checkouts, so it
+// neither waits on disk nor saves idle VMs.
+func (s *Scheduler) reserveBoot(ctx context.Context, cid runtime.ID) (func(), error) {
+	claim := s.wakeClaim(cid)
+	probeCtx, cancel := context.WithTimeout(ctx, capacityProbeTimeout)
+	defer cancel()
+	select {
+	case s.capacityGate <- struct{}{}:
+	case <-probeCtx.Done():
+		return nil, fmt.Errorf("%w: waiting for capacity probe: %w", ErrCapacityUnknown, probeCtx.Err())
+	}
+	defer func() { <-s.capacityGate }()
+	available, floor, err := s.hostMemory()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrCapacityUnknown, err)
+	}
+	if err = s.fitMemory(probeCtx, available, floor, claim); err != nil {
+		return nil, err
+	}
+	s.memoryClaims = append(s.memoryClaims, claim)
+	return func() {
+		s.capacityGate <- struct{}{}
+		s.releaseClaim(claim)
+		<-s.capacityGate
+	}, nil
+}
+
+// wakeClaim is the memory waking cid takes: what its saved state holds on
+// disk, or the most it may when that cannot be read, and no less than a
+// start.
+func (s *Scheduler) wakeClaim(cid runtime.ID) *memoryClaim {
+	claim := &memoryClaim{bytes: startupMemoryBytes}
+	saver, ok := s.saver(cid)
+	if !ok {
+		return claim
+	}
+	saved, err := saver.SavedMemory(cid)
+	if err != nil {
+		slog.Warn("scheduler: measure the saved memory of a session VM; counting the most it may load", "container", cid, "bytes", saved, "error", err)
+	}
+	if saved > claim.bytes {
+		claim.bytes, claim.vm = saved, cid
+	}
+	return claim
+}
+
+// reserve serializes the bounded probe and accounting independently of
+// Scheduler.mu. Every admission sees the memory outstanding admissions have
+// yet to take, not the sum of container memory ceilings. A completed
+// reservation is released under the same gate so the next probe cannot reuse
+// a pre-completion snapshot.
+func (s *Scheduler) reserve(ctx context.Context, claim *memoryClaim) (func(), error) {
+	release, err := s.tryReserveCapacity(ctx, claim)
 	// One reclaim or save pass, then fresh measurements. Never loop or
 	// reinterpret unavailable capacity.
+	var short *memoryShortage
 	switch {
 	case ctx.Err() != nil:
 	case errors.Is(err, ErrDiskFull):
 		s.reclaimDisk(ctx, "")
-		return s.tryReserveCapacity(ctx)
-	case errors.Is(err, ErrMemoryPressure) && !errors.Is(err, errServerStalled) && s.saveIdleVMs(ctx):
-		return s.tryReserveCapacity(ctx)
+		return s.tryReserveCapacity(ctx, claim)
+	case errors.As(err, &short) && s.saveIdleVMs(ctx, short.need+short.claimed):
+		return s.tryReserveCapacity(ctx, claim)
 	}
 	return release, err
+}
+
+// fitMemory refuses claim unless available memory covers the floor, claim
+// and what admitted claims have yet to take. Caller holds capacityGate.
+func (s *Scheduler) fitMemory(ctx context.Context, available, floor uint64, claim *memoryClaim) error {
+	if claimed := s.claimedMemory(ctx); available < floor+claim.bytes+claimed {
+		return &memoryShortage{available: available, floor: floor, need: claim.bytes, claimed: claimed}
+	}
+	return nil
+}
+
+// claimedMemory is what admitted claims have yet to take from the host: all
+// of a launch or wake still running, and after the wake of a saved VM what
+// it has not loaded back. That claim ends once a measurement shows the VM
+// stopped or holding all of it, or memoryLoadTime after what it held last
+// grew. A failed measurement changes nothing else. The memory guard calls
+// it every check, so growth is seen however rarely admission runs. Caller
+// holds capacityGate.
+func (s *Scheduler) claimedMemory(ctx context.Context) uint64 {
+	var use map[runtime.ID]uint64
+	measured := false
+	source, ok := s.cfg.Runtime.(runtime.MemoryUseRuntime)
+	if ok && slices.ContainsFunc(s.memoryClaims, func(c *memoryClaim) bool { return c.vm != "" }) {
+		var err error
+		use, err = source.MemoryUse(ctx)
+		if err != nil {
+			slog.Warn("scheduler: measure the memory of woken session VMs; their claims stand", "error", err)
+		}
+		measured = err == nil
+	}
+	now := time.Now()
+	var total uint64
+	s.memoryClaims = slices.DeleteFunc(s.memoryClaims, func(c *memoryClaim) bool {
+		held, running := use[c.vm]
+		if measured && held > c.held {
+			c.held, c.grew = held, now
+		}
+		if c.released && (measured && (!running || c.held >= c.bytes) || now.Sub(c.grew) >= memoryLoadTime) {
+			return true
+		}
+		total += c.bytes - min(c.bytes, c.held)
+		return false
+	})
+	return total
+}
+
+// releaseClaim ends claim's admission: a launch's claim goes, a wake's
+// stays while its VM loads. Caller holds capacityGate.
+func (s *Scheduler) releaseClaim(claim *memoryClaim) {
+	if claim.vm == "" {
+		s.memoryClaims = slices.DeleteFunc(s.memoryClaims, func(c *memoryClaim) bool { return c == claim })
+		return
+	}
+	claim.released, claim.grew = true, time.Now()
 }
 
 // measureCapacity returns the Aether data filesystem (unless the free-disk
@@ -158,7 +301,7 @@ func (s *Scheduler) dataFilesystem() (disk.Usage, error) {
 	return measure(path)
 }
 
-func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
+func (s *Scheduler) tryReserveCapacity(ctx context.Context, claim *memoryClaim) (func(), error) {
 	probeCtx, cancel := context.WithTimeout(ctx, capacityProbeTimeout)
 	defer cancel()
 	select {
@@ -197,10 +340,8 @@ func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 		if capacity.MemoryTotalBytes == 0 || capacity.MemoryAvailableBytes > capacity.MemoryTotalBytes {
 			return nil, fmt.Errorf("%w: host memory measurement is invalid", ErrCapacityUnknown)
 		}
-		floor := memoryFloor(capacity.MemoryTotalBytes)
-		if !hasProvisioningHeadroom(capacity.MemoryAvailableBytes, floor, startupMemoryBytes, s.capacityReservations) {
-			return nil, fmt.Errorf("%w: %d available bytes; reserve %d bytes plus %d bytes per provisioning (%d already in flight)",
-				ErrMemoryPressure, capacity.MemoryAvailableBytes, floor, startupMemoryBytes, s.capacityReservations)
+		if err := s.fitMemory(probeCtx, capacity.MemoryAvailableBytes, memoryFloor(capacity.MemoryTotalBytes), claim); err != nil {
+			return nil, err
 		}
 		// MemAvailable does not show a server that is stalling on memory. Only
 		// the server's own cgroup counts: a session stalled inside its own
@@ -220,19 +361,21 @@ func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 				slog.Info("scheduler: skipping the memory pressure check; the server has no cgroup of its own with memory.pressure", "cgroup_root", cgroupRoot)
 			})
 		} else if *pressure >= maxMemoryPressure {
-			return nil, fmt.Errorf("%w: %w for %.1f%% of the last 60s (its cgroup's memory.pressure, some avg60); launches are refused at %.0f%%",
-				ErrMemoryPressure, errServerStalled, *pressure, maxMemoryPressure)
+			return nil, fmt.Errorf("%w: the server stalled on memory for %.1f%% of the last 60s (its cgroup's memory.pressure, some avg60); launches are refused at %.0f%%",
+				ErrMemoryPressure, *pressure, maxMemoryPressure)
 		}
 	}
 	if err := probeCtx.Err(); err != nil {
 		return nil, fmt.Errorf("%w: capacity probe: %w", ErrCapacityUnknown, err)
 	}
 	s.capacityReservations++
+	s.memoryClaims = append(s.memoryClaims, claim)
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			s.capacityGate <- struct{}{}
 			s.capacityReservations--
+			s.releaseClaim(claim)
 			<-s.capacityGate
 		})
 	}, nil

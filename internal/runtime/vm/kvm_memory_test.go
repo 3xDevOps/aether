@@ -108,6 +108,66 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	t.Logf("kdamond used %.2f%% of a vCPU over %.0f s", share*100, uptime)
 }
 
+// TestKVMWakeLoadsBackWhatWasSaved measures the two amounts the scheduler's
+// admission counts: what a session VM holds of the host once it has booted,
+// under the 512 MiB a start is allowed (startupMemoryBytes), and what a wake
+// loads back, which savedMemory reads off the disk before the restore: the
+// memory the session held, not the VM's 2 GiB.
+func TestKVMWakeLoadsBackWhatWasSaved(t *testing.T) {
+	e := kvmEngine(t)
+	key := "run-wake-memory"
+	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, Command: []string{"/bin/sh", "-c", "exec sleep infinity"},
+		Env: map[string]string{"AETHER_RUN_ID": key}, CPULimit: 2, MemoryLimitBytes: 2 << 30,
+	}
+	if _, err := e.create(t.Context(), key, spec, options{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.start(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	held := func() uint64 {
+		use, err := e.memoryUse()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return use[runtime.ID(idPrefix+key)]
+	}
+	const start, fill = 512 << 20, 768 << 20
+	booted := held()
+	if booted == 0 || booted > start {
+		t.Errorf("a booted VM holds %d bytes of the host, want some and at most the %d a start is allowed", booted, start)
+	}
+	if saved, err := e.savedMemory(key); err != nil || saved != 0 {
+		t.Errorf("a running VM has %d bytes of saved memory, %v", saved, err)
+	}
+
+	guestFields(t, e, key, "head -c 768M /dev/urandom >/dev/shm/fill", 0)
+	before := held()
+	if err := e.save(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := e.savedMemory(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved < fill || saved > fill+start {
+		t.Errorf("the saved state holds %d bytes, want the %d the session filled and at most a start's %d more", saved, uint64(fill), uint64(start))
+	}
+	if err = e.restore(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	guestFields(t, e, key, "cat /dev/shm/fill >/dev/null", 0)
+	// Cloud Hypervisor loads what the guest did not touch in the background.
+	time.Sleep(10 * time.Second)
+	after := held()
+	if after < fill || after > saved+start {
+		t.Errorf("the woken VM holds %d bytes, want the %d it filled and at most the %d saved plus a start", after, uint64(fill), saved)
+	}
+	t.Logf("booted with %d bytes; held %d before the save, %d saved on disk, %d after the wake", booted, before, saved, after)
+}
+
 func guestFields(t *testing.T, e *engine, key, script string, n int) []string {
 	t.Helper()
 	out, code := vmRun(t, e, key, script)

@@ -320,10 +320,27 @@ through.
 
 ## Recover from memory pressure
 
-Every launch checks two things. Free memory must stay above the larger of 2 GiB
-and a tenth of the host's memory, plus 512 MiB for each launch already starting;
-otherwise the error ends `<n> available bytes; reserve <n> bytes plus ...`. The
-server's own cgroup must also not be stalling on memory: its `memory.pressure`
+Every launch and wake checks two things. Available memory (`MemAvailable`)
+must cover the floor, the larger of 2 GiB and a tenth of the host's memory,
+plus what the start takes and what starts already admitted have yet to take;
+otherwise the error ends `<n> available bytes; reserve <n> bytes plus ...`.
+Memory ceilings (`--run-memory`) are never counted, only what sessions hold
+now.
+
+- A launch takes 512 MiB while it runs. On a hosted test runner a 2 GiB
+  session VM held 159 MiB of the host once booted; what it grows to later is
+  memory the next check sees as used.
+- The wake of a saved session VM takes the size of its saved memory on
+  disk, which the restore loads back: 918 MiB on disk for a VM that held
+  934 MiB, and 938 MiB held again after the wake. After the wake it keeps
+  counting what the VM has not loaded yet, until the VM holds all of it,
+  stops, or has held no more for a minute, which the server measures every
+  5 seconds. While that measurement fails, nothing changes but the minute.
+  A reopen while a closed session's save is still being written waits for
+  the save, then measures it. A saved size that cannot be read counts as
+  the VM's cap, its memory plus 512 MiB.
+
+The server's own cgroup must also not be stalling on memory: its `memory.pressure`
 `some avg60` must stay below 10%, which means tasks in the server's cgroup were
 blocked on memory for under 6 s of the last minute. Otherwise:
 
@@ -354,10 +371,12 @@ its cgroup, the stall check is skipped and the server logs that once. A file it 
 parse refuses launches with `scheduler: host capacity unavailable`, like the
 other probes.
 
-A launch or wake that memory refuses first saves idle session VMs
-to disk, the longest idle first, until twice the floor is free, then
-checks once more. It never saves a VM whose agent is working, and saves
-none when only the server's own memory pressure refused it.
+A launch or wake that memory refuses first saves idle session VMs to disk,
+the longest idle first, until twice the floor plus what the start and the
+starts in flight take is free, then checks once more. It never saves a VM
+whose agent is working. It saves none when all idle VMs together hold too
+little to admit the start, or when only the server's own memory pressure
+refused it.
 
 With `--session-runtime vm`, a memory guard reads `/proc/meminfo` and
 `/proc/pressure/memory` every 5 seconds. It starts when available memory
@@ -382,8 +401,9 @@ the disk reserve, and for 5 minutes one whose save failed. It stops once
 twice the floor is free and `full avg10` is below 60%. Then a session it
 saved while its agent worked, or while its guest still used the CPU, wakes
 on its own, one each check, the first saved first among those whose memory
-fits above twice the floor. A wake that admission refuses is tried again at
-the next check; one that fails otherwise is not, and its timeline says
+fits above twice the floor. That wake passes the same check as any wake, so
+the guard never wakes one into memory another is still loading. A wake that
+admission refuses is tried again at the next check; one that fails otherwise is not, and its timeline says
 `Could not wake on its own once memory was free again: <error>`. Its turn
 carries on where it was, as across a server restart; a model call the save
 cut off fails as on a network outage, and the agent retries it. Every other
@@ -662,7 +682,8 @@ that ran detached, such as one started with `nohup`, stopped with the sleep:
 the connection is refused until you start it again. The request that woke it waits while the
 container starts and the agent restores its conversation, then goes through.
 Two wakes at once start the container once. Waking counts against the same
-memory and disk checks as a launch. A refused or failed wake returns its
+memory and disk checks as a launch, and a saved VM must fit its saved memory
+([Recover from memory pressure](#recover-from-memory-pressure)). A refused or failed wake returns its
 error to the request that caused it, keeps the session asleep and shows the
 error under **Asleep since**. A wake never starts a new conversation: when
 the agent cannot restore its own, every wake fails with the agent's error;
@@ -831,9 +852,11 @@ without the agent's command and setup script, commits the checkout as the
 session's final commit, publishes the session branch, captures evidence and
 stops the VM. A saved VM is restored instead, since its saved memory may
 hold writes its disks do not, and a VM the disk guard holds only has its
-vCPUs started. One such boot runs at a time on the server, and while
-available memory is below the floor plus 512 MiB it waits for the next try,
-as a launch would be refused. A boot that fails otherwise is retried 15
+vCPUs started. One such boot runs at a time on the server. It passes the
+memory check of a wake, and counts against later ones while it runs, but
+saves no idle VM and skips the disk check: disk reclaim runs these boots
+to free checkouts. While it does not fit, it waits for the next try. A
+boot that fails otherwise is retried 15
 minutes later, doubling up to 6 hours, and the checkout stays. Only once the VM is gone,
 so that no boot can make the commit, the reason gains `work could not be
 captured: ...` and cleanup goes ahead: the checkout's changes since the

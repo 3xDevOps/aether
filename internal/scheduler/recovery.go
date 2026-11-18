@@ -110,15 +110,26 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			ErrInvalidTransition, run)
 	}
 	// Outside lifecycleMu: the disk reclaim a reservation may run can pick
-	// this closed run and take its lock. A sleep that finishes before the
-	// lock is taken makes the run reserve and take it again.
+	// this closed run and take its lock. A save under way finishes first, so
+	// the wake is measured on the memory it wrote. A sleep that finishes
+	// before the lock is taken makes the run reserve and take it again.
 	reserved := false
 	for {
 		s.mu.Lock()
-		asleep := entry.sleeping || !entry.asleepSince.IsZero()
+		sleeping, done := entry.sleeping, entry.sleepDone
+		asleep := !entry.asleepSince.IsZero()
+		cid := entry.containerID
 		s.mu.Unlock()
+		if sleeping {
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return nil, fmt.Errorf("wait for the session to finish falling asleep: %w", ctx.Err())
+			}
+		}
 		if asleep && !reserved {
-			release, capErr := s.reserveCapacity(ctx)
+			release, capErr := s.reserveWake(ctx, cid)
 			if capErr != nil {
 				return nil, capErr
 			}

@@ -161,7 +161,7 @@ func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.M
 	case len(running) > 0:
 		return "", fmt.Errorf("scheduler: a sign-in for the assistant is running (%s); finish it first", running[0])
 	}
-	release, err := s.tryReserveCapacity(ctx)
+	release, err := s.tryReserveCapacity(ctx, &memoryClaim{bytes: startupMemoryBytes})
 	if err != nil {
 		return "", err
 	}

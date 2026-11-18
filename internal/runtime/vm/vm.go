@@ -395,6 +395,14 @@ func (r *Runtime) Save(ctx context.Context, id runtime.ID) error {
 	return r.vms.save(ctx, key)
 }
 
+func (r *Runtime) SavedMemory(id runtime.ID) (uint64, error) {
+	key, ok := vmKey(id)
+	if !ok {
+		return 0, nil
+	}
+	return r.vms.savedMemory(key)
+}
+
 func (r *Runtime) Restore(ctx context.Context, id runtime.ID) error {
 	key, ok := vmKey(id)
 	if !ok {
