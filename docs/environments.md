@@ -385,8 +385,9 @@ What changes:
   it is stopped, or deleted while stopped or saved. The server writes the
   member's new caches in the background, and a VM that starts again before
   that is done first copies its own cache disk. An idle sleep does not
-  promote them. Caches over 20 GiB are dropped, and the next session starts
-  empty. An Isolated session's caches never go back.
+  promote them. Caches over 20 GiB are dropped, and so are a member's
+  newest caches once no VM has used them for 7 days; the next session then
+  starts empty. An Isolated session's caches never go back.
 - No ownership pass runs over the home: every file in it shows as the
   session user's.
 - Agents' SQLite databases cannot be shared between VMs, so each session gets
