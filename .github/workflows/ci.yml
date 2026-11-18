@@ -33,15 +33,20 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# GitHub-hosted runners are ephemeral, so untrusted pull request code does
-# not need an admin gate before checkout. Caches save only on runs on main:
-# a merge-queue run's caches are scoped to its own queue branch. Go module
-# archives are separate from compiler archives, whose keys also include their native or cross-build lane. Each lane has one writer;
-# build-and-test owns Linux amd64 native Go and bun, windows owns Windows
+# GitHub-hosted and Blacksmith runners are ephemeral, so untrusted pull
+# request code does not need an admin gate before checkout. Caches save only
+# on runs on main: a merge-queue run's caches are scoped to its own queue
+# branch. Go module archives are separate from compiler archives, whose keys
+# also include their native or cross-build lane. Each lane has one writer;
+# build-and-test owns Blacksmith Linux amd64 native Go and bun, release-build
+# owns GitHub-hosted Linux amd64 Go modules and bun, windows owns Windows
 # amd64 native Go, arm64 owns Linux arm64 native Go, and the windows-install
-# arm64 update leg owns Windows arm64 Go. These four Go owners also save
-# modules for their host. Each windows-install update leg owns its
-# architecture's Windows npm caches.
+# arm64 update leg owns Windows arm64 Go. These Go owners also save modules
+# for their host. kvm, the one GitHub-hosted native Linux Go job, restores
+# release-build's modules and has no compiler-cache writer. Each
+# windows-install update leg owns its architecture's Windows npm caches.
+# On Blacksmith, actions/cache uses Blacksmith's store, which GitHub-hosted
+# jobs cannot read; buildx type=gha caches stay in GitHub's.
 # runner.environment stays in every key so a self-hosted archive is never
 # restored onto a hosted VM.
 
@@ -160,7 +165,7 @@ jobs:
   lint:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -213,7 +218,7 @@ jobs:
   build-and-test:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -252,8 +257,8 @@ jobs:
           sudo env "PATH=$PATH" "$RUNNER_TEMP/vmimage.test" -test.run '^Test(Extract|Store)' -test.count=1 -test.v
       - name: Build binaries
         run: make build
-      # Own the Linux amd64 module and native compiler archives, plus bun.
-      # Other native Linux amd64 jobs restore only; cross-build jobs save
+      # Own the Blacksmith Linux amd64 module and native compiler archives,
+      # plus bun. Other such jobs restore only; cross-build jobs save
       # their own compiler variants without racing this module writer.
       # Saved on a red run too: a failed test does not invalidate compiled
       # objects or downloaded modules, and a flaky suite would otherwise leave
@@ -272,7 +277,7 @@ jobs:
   store-tests:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -291,7 +296,7 @@ jobs:
   dashboard:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

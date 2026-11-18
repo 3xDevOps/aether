@@ -27,7 +27,7 @@ jobs:
   # it.
   integration-server-rest:
     name: integration (server-rest, browser)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -67,14 +67,14 @@ jobs:
           AETHER_BROWSER_TEST_IMAGE: aether/browser:test
           AETHER_BROWSER_IMAGE: aether/browser:test
         run: |
-          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
+          sudo env "PATH=$PATH" "HOME=$HOME" "TMPDIR=$TMPDIR" "GOFLAGS=$GOFLAGS" \
             "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
             "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
             make test-integration INTEGRATION_PKGS=./internal/server \
               INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|EndToEnd|MultiMember|ServerUpdate)'
       - name: Exercise the real browser runtime
         if: ${{ !cancelled() }}
-        run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "TMPDIR=$TMPDIR" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
 
   # Everything that runs on the standard image: the server's long flows, the
   # scheduler and every other integration package, the agent CLIs at today's
@@ -86,7 +86,7 @@ jobs:
   # here.
   integration:
     name: integration (server-flows, scheduler, rest, agents, smoke)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -120,7 +120,7 @@ jobs:
           GOFLAGS: -v
         run: |
           for run in '^TestIntegration(Chaos|Coordination)' '^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'; do
-            sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
+            sudo env "PATH=$PATH" "HOME=$HOME" "TMPDIR=$TMPDIR" "GOFLAGS=$GOFLAGS" \
               make test-integration INTEGRATION_PKGS=./internal/server INTEGRATION_RUN="$run" || status=1
           done
           exit "${status:-0}"
@@ -131,13 +131,13 @@ jobs:
         env:
           GOFLAGS: -v
         run: |
-          sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" \
+          sudo env "PATH=$PATH" "HOME=$HOME" "TMPDIR=$TMPDIR" "GOFLAGS=$GOFLAGS" \
             make test-integration INTEGRATION_SKIP="./internal/harness ./internal/server" \
               INTEGRATION_SKIP_PATTERN='^TestDockerBrowser'
       - name: Assistant sign-in endpoints in the pinned CLIs (real Docker, npm)
         if: ${{ !cancelled() }}
         run: |
-          sudo env "PATH=$PATH" "HOME=$HOME" AETHER_ACP_IMAGE=aether-standard:ci \
+          sudo env "PATH=$PATH" "HOME=$HOME" "TMPDIR=$TMPDIR" AETHER_ACP_IMAGE=aether-standard:ci \
             make test-integration INTEGRATION_PKGS=./internal/scheduler \
               INTEGRATION_RUN='^TestIntegrationAssistantIssuerMatchesTheBundledCLIs$'
       - name: Prove standard environment tools and native Git
@@ -168,14 +168,14 @@ jobs:
         run: make agents-image AGENTS_BASE=aether-standard:ci
       - name: Real agents against a mock model (real Docker, real git)
         if: ${{ !cancelled() }}
-        run: sudo env "PATH=$PATH" "HOME=$HOME" make test-agents
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "TMPDIR=$TMPDIR" make test-agents
 
   # Native arm64 builds and runs of the standard and browser images. Only
   # the full suite pays for it: nothing here depends on the architecture
   # except the images' own base layers and downloads. This
   # job owns the Linux arm64 Go cache.
   arm64:
-    runs-on: ubuntu-24.04-arm
+    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -234,7 +234,7 @@ jobs:
       - name: Prove headless Chromium sandbox and companion behavior
         run: make browser-smoke
       - name: Exercise the real browser runtime
-        run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "TMPDIR=$TMPDIR" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
@@ -262,7 +262,7 @@ jobs:
   # gate and this one starts containers.
   dashboard-e2e:
     name: dashboard-e2e (${{ matrix.shard }}/2)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -351,7 +351,7 @@ jobs:
         # The server spawned by Playwright needs the installed service's
         # ownership authority; Chromium itself remains sandboxed in Docker.
         run: |
-          sudo env "PATH=$PATH" "HOME=$HOME" "CI=$CI" \
+          sudo env "PATH=$PATH" "HOME=$HOME" "TMPDIR=$TMPDIR" "CI=$CI" \
             "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
             "AETHER_BROWSER_TEST_IMAGE=$AETHER_BROWSER_TEST_IMAGE" \
             "AETHER_BROWSER_IMAGE=$AETHER_BROWSER_IMAGE" \
@@ -482,11 +482,18 @@ jobs:
           mode: restore
       - name: Cross-compile release binaries
         run: make release-binaries
+      # The only GitHub-hosted Linux amd64 job that saves Go modules and bun,
+      # which release-build.yml restores.
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
           variant: release
+          save-modules: 'true'
+      - uses: ./.github/actions/bun-cache
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        with:
+          mode: save
       - id: windows-binaries
         uses: actions/upload-artifact@v4
         with:
