@@ -604,6 +604,9 @@ func (e *engine) launch(ctx context.Context, rec *record, l launch) error {
 	}
 	properties = append(properties, sandbox(filepath.Dir(e.root), e.cfg.Monitor[0], rec, l)...)
 	argv := append(append([]string{}, e.cfg.Monitor...), e.dir(rec.Key))
+	if err := os.Rename(logPath, logPath+".1"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("vm runtime: keep the last monitor log of VM %s: %w", rec.Key, err)
+	}
 	if err := e.units.Start(ctx, unitName(rec.Key), argv, properties); err != nil {
 		return err
 	}

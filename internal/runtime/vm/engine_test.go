@@ -183,14 +183,17 @@ func TestStartFailsWithTheLogWhenTheVMDiesWhileBooting(t *testing.T) {
 	if _, err := h.engine.create(t.Context(), "run-a", sessionSpec("run-a"), options{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(h.engine.path("run-a", monitorLog), []byte("cloud-hypervisor: Error booting VM: KvmNotAvailable\n"), 0o600); err != nil {
+	if err := os.WriteFile(h.engine.path("run-a", monitorLog), []byte("an earlier launch\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	h.units.failNext = true
 	h.guest("run-a").pingErr = errors.New("connection refused")
 	err := h.engine.start(t.Context(), "run-a")
-	if err == nil || !strings.Contains(err.Error(), "stopped while booting") || !strings.Contains(err.Error(), "KvmNotAvailable") {
+	if err == nil || !strings.Contains(err.Error(), "stopped while booting") || !strings.Contains(err.Error(), "KvmNotAvailable") || strings.Contains(err.Error(), "earlier launch") {
 		t.Fatalf("start = %v", err)
+	}
+	if old, _ := os.ReadFile(h.engine.path("run-a", monitorLog+".1")); string(old) != "an earlier launch\n" {
+		t.Errorf("monitor.log.1 = %q, want the earlier launch's output", old)
 	}
 }
 
