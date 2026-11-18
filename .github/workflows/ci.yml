@@ -34,7 +34,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # GitHub-hosted and Blacksmith runners are ephemeral, so untrusted pull
-# request code does not need an admin gate before checkout. Caches save only
+# request code does not need an admin gate before checkout. A pull request
+# from a fork runs on GitHub-hosted runners, so outside code never reaches
+# Blacksmith or its caches; kvm and the GitHub-hosted lanes below also
+# serve those runs, compiling cold where no lane writes. Caches save only
 # on runs on main: a merge-queue run's caches are scoped to its own queue
 # branch. Go module archives are separate from compiler archives, whose keys
 # also include their native or cross-build lane. Each lane has one writer;
@@ -165,7 +168,7 @@ jobs:
   lint:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2604
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2604' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -218,7 +221,7 @@ jobs:
   build-and-test:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2604
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2604' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -277,7 +280,7 @@ jobs:
   store-tests:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2604
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2604' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -296,7 +299,7 @@ jobs:
   dashboard:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2604
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2604' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
