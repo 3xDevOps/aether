@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
@@ -56,18 +55,17 @@ func cachePool(m runtime.Mount) string {
 // promoteCache makes the cache of a VM that stopped for good, by a clean
 // stop or a deletion while stopped or saved, its pool's newest, so the
 // member's next session starts from it. A save alone never promotes, and a
-// disk that may lack the guest's last writes never does. It holds the key's
-// lock only for a copy, a clone where the filesystem can, and publishes the
-// copy in the background. An Isolated session's cache, an overlay in a container,
-// never goes back.
-func (e *engine) promoteCache(ctx context.Context, rec *record) {
+// disk that may lack the guest's last writes never does. It links the disk
+// under the key's lock and copies and publishes it in the background. An
+// Isolated session's cache, an overlay in a container, never goes back.
+func (e *engine) promoteCache(rec *record) {
 	m, ok := cacheMount(rec.Mounts)
 	if !ok || !rec.CacheRan || !rec.CacheSynced || m.Overlay != "" {
 		return
 	}
-	snapshot, err := e.cfg.Images.SnapshotCache(ctx, rec.Cache)
+	snapshot, err := e.cfg.Images.SnapshotCache(rec.Cache)
 	if err != nil {
-		slog.Warn("vm runtime: copy the cache of a stopped VM", "vm", rec.Key, "error", err)
+		slog.Warn("vm runtime: link the cache of a stopped VM", "vm", rec.Key, "error", err)
 		return
 	}
 	rec.CacheRan = false

@@ -372,10 +372,13 @@ What changes:
   ([vm-guest.md](vm-guest.md#the-file-service)): a file another session
   wrote reads as written from the next open, shows in listings and `stat`
   within a second, and read-only mounts stay read-only.
-- `/tmp` is on the session's data disk. `/aether-cache` is the session's own
-  copy of the member's newest caches, made when the session is created. A
-  session's caches become the member's newest when its VM stops for good:
-  it is stopped, or deleted while stopped or saved. An idle sleep does not
+- `/tmp` is on the session's data disk. `/aether-cache` is a copy-on-write
+  layer over the member's newest caches, made when the session is created,
+  so sessions share those caches' blocks and each holds only what it wrote.
+  A session's caches become the member's newest when its VM stops for good:
+  it is stopped, or deleted while stopped or saved. The server writes the
+  member's new caches in the background, and a VM that starts again before
+  that is done first copies its own cache disk. An idle sleep does not
   promote them. Caches over 20 GiB are dropped, and the next session starts
   empty. An Isolated session's caches never go back.
 - No ownership pass runs over the home: every file in it shows as the
@@ -461,13 +464,14 @@ What changes:
   each from a fresh root disk. The server stops their containers still
   running in Docker when it starts with `vm`, as it does the terminal's.
 - **Save environment** freezes the terminal's root filesystem while it
-  copies the root disk, well under a second on a host whose filesystem can
-  share blocks (XFS, Btrfs), then builds a new base disk from the copy while
-  the terminal goes on. A session started from a saved image gets a raw copy
-  of it, made the same way. Writes to `/` wait meanwhile; the home and
-  `/tmp` stay writable. A copy that takes longer than 5 minutes fails the
-  save, and the terminal thaws by itself then even if the server died. The
-  check boots the new image in a VM with no network, which systemd stops
+  copies the root disk, which holds only the changes since the image (well
+  under a second on a host whose filesystem can share blocks, such as XFS or
+  Btrfs), then builds a new base disk from the copy over the image while
+  the terminal goes on. A session started from a saved image gets a
+  copy-on-write layer over it, as over any image. Writes to `/` wait
+  meanwhile; the home and `/tmp` stay writable. A copy that takes longer
+  than 5 minutes fails the save, and the terminal thaws by itself then even
+  if the server died. The check boots the new image in a VM with no network, which systemd stops
   after 10 minutes at most, and runs a shell in it as your terminal's user;
   an image it cannot boot fails the save with `would not start` and the boot
   error. Saved images live in `<data dir>/vm/images`, not in Docker; one

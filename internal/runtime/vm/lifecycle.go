@@ -89,7 +89,7 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 		if err = e.store(rec); err != nil {
 			return err
 		}
-		e.promoteCache(ctx, rec)
+		e.promoteCache(rec)
 		return nil
 	}
 	api := newCHAPI(e.path(key, apiSocket))
@@ -178,7 +178,7 @@ func (e *engine) shutDown(ctx context.Context, rec *record) error {
 	if err = e.store(rec); err != nil {
 		return err
 	}
-	e.promoteCache(ctx, rec)
+	e.promoteCache(rec)
 	return nil
 }
 
@@ -419,7 +419,7 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 		return err
 	}
 	if loadErr == nil && !up {
-		e.promoteCache(ctx, rec)
+		e.promoteCache(rec)
 	}
 	if err = os.RemoveAll(e.dir(key)); err != nil {
 		return fmt.Errorf("vm runtime: remove VM %s: %w", key, err)

@@ -98,7 +98,7 @@ func TestEveryDiskStatesItsFormatAndOnlyServerOverlaysBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	overlays := []string{"root", "repo0", "browser"}
+	overlays := []string{"root", "cache", "repo0", "browser"}
 	launches := map[string][]string{"run-b": full.Args}
 	restores := 0
 	for i, s := range h.units.started {

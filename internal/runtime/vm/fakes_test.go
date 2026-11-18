@@ -194,12 +194,14 @@ func (f *fakeImages) NewDataDisk(_ context.Context, path string, _ int64) (vmima
 }
 
 func (f *fakeImages) NewCacheDisk(_ context.Context, _, path string) (vmimage.Disk, error) {
-	return vmimage.Disk{Path: path, Format: "raw"}, os.WriteFile(path, nil, 0o600)
+	return vmimage.Disk{Path: path, Format: "qcow2", Backing: path + ".base"}, os.WriteFile(path, nil, 0o600)
 }
 
-func (f *fakeImages) SnapshotCache(_ context.Context, disk vmimage.Disk) (string, error) {
+func (f *fakeImages) SnapshotCache(disk vmimage.Disk) (string, error) {
 	return disk.Path + ".snapshot", nil
 }
+
+func (f *fakeImages) UnshareCache(context.Context, vmimage.Disk) error { return nil }
 
 func (f *fakeImages) PromoteCache(pool, snapshot string) error {
 	f.mu.Lock()

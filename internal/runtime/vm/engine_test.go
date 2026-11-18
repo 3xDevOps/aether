@@ -212,7 +212,7 @@ func TestACacheIsPromotedOnlyWhenItsVMStopsForGood(t *testing.T) {
 	}
 
 	session("run-a", cache)
-	if args := strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "cache.img,image_type=raw,backing_files=off,id=cache,serial=cache") {
+	if args := strings.Join(h.units.last().launch.Args, " "); !strings.Contains(args, "cache.img,image_type=qcow2,backing_files=on,id=cache,serial=cache") {
 		t.Errorf("launch args lack the cache disk:\n%s", args)
 	}
 	if err := h.engine.save(t.Context(), "run-a"); err != nil {

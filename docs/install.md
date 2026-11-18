@@ -140,7 +140,8 @@ On AWS:
   sudo mount /dev/nvme1n1 /var/lib/aether
   ```
 
-  XFS clones package-cache disks without copying them. VM disks,
+  XFS clones the root disk for Save environment and the part of a
+  package cache a stopping session wrote, where ext4 copies them. VM disks,
   checkouts and the image store must share one filesystem, because they
   hard-link each other. Instance storage is lost when the instance stops or
   fails, so keep the [backups](#what-lives-in-the-data-directory) current, or

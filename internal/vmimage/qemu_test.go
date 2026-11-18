@@ -66,11 +66,38 @@ func TestQemuImgNamesFormatsAndNeverOpensAHeadersBackingFile(t *testing.T) {
 		t.Errorf("the saved base is not the copy over the recorded base: starts %x", got[:16])
 	}
 
+	// A cache promoted from a qcow2 disk whose header names a link that is
+	// gone by then.
+	empty, err := s.NewCacheDisk(ctx, "pool", filepath.Join(dir, "empty-cache.img"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := s.SnapshotCache(empty)
+	if err == nil {
+		err = s.PromoteCache("pool", snapshot)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := s.NewCacheDisk(ctx, "pool", filepath.Join(dir, "cache.img"))
+	if err != nil || cache.Format != FormatQcow2 {
+		t.Fatalf("cache disk %+v, %v", cache, err)
+	}
+	if snapshot, err = s.SnapshotCache(cache); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Remove(cache.Backing); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.PromoteCache("pool", snapshot); err != nil {
+		t.Fatal(err)
+	}
+
 	recorded, err := os.ReadFile(calls)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := map[string]bool{}
+	seen, converts := map[string]bool{}, 0
 	for line := range strings.Lines(string(recorded)) {
 		args := strings.Split(strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\x1f"), "\x1f")
 		seen[args[0]] = true
@@ -86,17 +113,18 @@ func TestQemuImgNamesFormatsAndNeverOpensAHeadersBackingFile(t *testing.T) {
 				continue
 			}
 			opts := args[len(args)-2]
-			for _, want := range []string{"driver=qcow2,", ",backing.driver=raw,", ",backing.file.filename=" + base.Path} {
-				if !strings.Contains(opts, want) {
-					t.Errorf("qemu-img %v: the input %q lacks %q", args, opts, want)
-				}
+			_, backing, _ := strings.Cut(opts, ",backing.file.filename=")
+			recordedBase := backing == base.Path || strings.HasPrefix(backing, s.tmpDir()) && strings.HasSuffix(backing, "/base.raw")
+			if !strings.HasPrefix(opts, "driver=qcow2,") || !strings.Contains(opts, ",backing.driver=raw,") || !recordedBase {
+				t.Errorf("qemu-img %v: the input %q must be qcow2 over a raw base the store recorded", args, opts)
 			}
+			converts++
 		default:
 			t.Errorf("qemu-img %v: a call this test does not check", args)
 		}
 	}
-	if !seen["create"] || !seen["convert"] {
-		t.Errorf("recorded calls %q, want a create and a convert", recorded)
+	if !seen["create"] || converts != 2 {
+		t.Errorf("recorded calls %q, want creates and a convert for the save and for the cache", recorded)
 	}
 
 	// Every qemu-img call in the module's code is one the store made above.

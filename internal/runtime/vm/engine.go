@@ -39,7 +39,8 @@ type Images interface {
 	Untag(ref string) error
 	Tags(repo string) ([]string, error)
 	NewCacheDisk(ctx context.Context, pool, path string) (vmimage.Disk, error)
-	SnapshotCache(ctx context.Context, disk vmimage.Disk) (string, error)
+	SnapshotCache(disk vmimage.Disk) (string, error)
+	UnshareCache(ctx context.Context, disk vmimage.Disk) error
 	PromoteCache(pool, snapshot string) error
 	Sweep() error
 }
@@ -356,6 +357,11 @@ func (e *engine) startLocked(ctx context.Context, key string) (err error) {
 	if rec.Booted && rec.SetupScript != "" && !rec.SetupDone {
 		if rec.Root, err = e.cfg.Images.NewRootDisk(ctx, rec.Base, e.path(key, rootDisk)); err != nil {
 			return fmt.Errorf("vm runtime: root disk: %w", err)
+		}
+	}
+	if rec.Cache.Path != "" {
+		if err = e.cfg.Images.UnshareCache(ctx, rec.Cache); err != nil {
+			return fmt.Errorf("vm runtime: cache disk: %w", err)
 		}
 	}
 	// A cold start ends any companion and takes the current browser image's
