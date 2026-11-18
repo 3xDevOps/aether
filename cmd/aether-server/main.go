@@ -14,6 +14,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -350,6 +352,7 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 func serve(args []string) error {
 	host := serverupdate.HostProcess()
 	if host.UnderSystemd() {
+		lowerOOMScore()
 		linkSecondNames(host)
 	}
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
@@ -572,6 +575,23 @@ func linkSecondNames(host serverupdate.Host) {
 					" yet; it does after: sudo systemctl daemon-reload")
 			}
 		}()
+	}
+}
+
+// lowerOOMScore lowers the server's OOM score to the unit's -500, which a
+// unit from before that line, left in place by updates, does not set. A
+// lower score an operator set stays.
+func lowerOOMScore() {
+	score, err := os.ReadFile("/proc/self/oom_score_adj")
+	current := 0
+	if err == nil {
+		current, err = strconv.Atoi(strings.TrimSpace(string(score)))
+	}
+	if err == nil && current > -500 {
+		err = os.WriteFile("/proc/self/oom_score_adj", []byte("-500"), 0)
+	}
+	if err != nil {
+		slog.Warn("could not set the server's OOM score; a host out of memory may kill it", "error", err)
 	}
 }
 
