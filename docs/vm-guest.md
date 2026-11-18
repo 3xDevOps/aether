@@ -436,9 +436,16 @@ A restored VM's clock stopped while it was saved. The server calls
 `SetClock`, through `guest.Client.SyncClock`, after every restore. Before a
 save it calls `Sync`, which writes every filesystem's dirty data to its
 disk, so the cache disk of a saved VM that is deleted without a restore
-holds what the session wrote. `Sync` then drops the guest's page cache and
-waits 3 seconds, while free page reporting hands the freed memory to the
-host, so the saved state holds only what the session uses.
+holds what the session wrote. `Sync` then drops the guest's page cache.
+Free page reporting hands the freed memory to the host in passes 2 seconds
+apart, each about a sixteenth of the guest's free memory, so the server
+waits until a 4-second check sees under 16 MiB more come back, at most 40
+seconds, then calls `Sync` again for what the session wrote meanwhile, and
+saves. The saved state then holds about what the session uses: a 2 GiB VM
+whose page cache held 1400 MiB wrote 137 MiB of memory in a 21-second
+save, against 1228 to 1315 MiB in 7 seconds before the wait
+(`TestKVMSaveWritesOnlyWhatTheSessionUses`). The host has the memory back
+as each pass reports it, before the save ends.
 
 ## Freezing the root disk
 

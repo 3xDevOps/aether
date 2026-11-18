@@ -57,7 +57,7 @@ func (h *harness) newEngine(dir string) *engine {
 		return h.guest(filepath.Base(filepath.Dir(vsock))), nil
 	})
 	e.run = func(context.Context, string, ...string) error { return nil }
-	e.cgroupRoot = h.units.cgroups
+	e.cgroupRoot, e.reportPoll = h.units.cgroups, time.Millisecond
 	e.listenDNS = func() (*dnsRelay, error) {
 		r, err := listenDNS(netip.MustParseAddr("127.0.0.1"), netip.MustParsePrefix("127.0.0.0/8"), func() []netip.AddrPort { return nil })
 		if err == nil {

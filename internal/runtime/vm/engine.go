@@ -78,6 +78,7 @@ type engine struct {
 	run   func(ctx context.Context, name string, args ...string) error
 
 	cgroupRoot string
+	reportPoll time.Duration
 
 	mu      sync.Mutex
 	locks   map[string]*sync.Mutex
@@ -103,7 +104,7 @@ func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
 		locks: map[string]*sync.Mutex{}, helpers: map[string]helper{}, gits: map[string]*guest.Git{}, booting: map[string]bool{},
 		fresh: map[string]bool{}, capture: map[string]bool{}, events: map[string]runtime.MemoryEvents{}, relays: map[string]*relay{}, reserved: map[int]bool{},
 		listenDNS:  func() (*dnsRelay, error) { return listenDNS(proxyAddr, vmSubnet, hostResolvers) },
-		cgroupRoot: "/sys/fs/cgroup",
+		cgroupRoot: "/sys/fs/cgroup", reportPoll: 4 * time.Second,
 	}
 }
 
