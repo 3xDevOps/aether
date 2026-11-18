@@ -822,7 +822,7 @@ runs every package that has them:
 | --- | --- | --- |
 | `internal/vmimage` | `TestKVMStandardImageRunsDocker` | The standard image from store disks, with Docker inside ([The guest kernel](#the-guest-kernel)) |
 | `internal/guest/helper` | `TestKVMHelper` | The helper as PID 1, driven through its client ([The VM helper](#the-vm-helper)) |
-| `internal/runtime/vm` | `TestKVM...` in each `kvm_*_test.go` | Sessions through the engine, with real systemd units and the server binary as monitor and helper: lifecycle, save and restore, a guest reboot, the home, the checkout, the network, Save environment |
+| `internal/runtime/vm` | `TestKVM...` in each `kvm_*_test.go` | Sessions through the engine, with real systemd units and the server binary as monitor and helper: lifecycle, save and restore, a guest reboot, the home, the checkout, the network, Save environment, cold memory returning to the host |
 
 It needs root on a Linux x86-64 host with `/dev/kvm`, `cloud-hypervisor`,
 `qemu-img`, `mkfs.ext4`, `virtiofsd` at `/usr/libexec/virtiofsd`, systemd,
@@ -851,7 +851,7 @@ The target builds the test binaries and `aether-server` with
 libraries. It builds them, and keeps the disks, in a new private directory
 under `$TMPDIR` (default `/tmp`) that it removes at the end: root runs that
 server, so no other user may be able to replace it. A test's VM gets at most 2 GiB; on a CI runner the tests take
-about three minutes.
+about 13 minutes.
 
 On a KVM host without Go, build on your machine, copy the directory over,
 and run each test binary there with the variables `make test-kvm` sets:

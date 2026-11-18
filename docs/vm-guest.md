@@ -37,7 +37,8 @@ In order, as PID 1:
    `/etc/resolv.conf`.
 6. Creates the session cgroup `/sys/fs/cgroup/session` (below).
 7. Listens on every forwarded socket.
-8. Serves the API on vsock port 1024. It accepts connections from the host
+8. Turns on DAMON_RECLAIM ([Memory the guest returns](#memory-the-guest-returns)).
+9. Serves the API on vsock port 1024. It accepts connections from the host
    only (vsock CID 2): a process in the VM that reached it through vsock
    loopback could start processes as root.
 
@@ -128,6 +129,48 @@ leaves it, and a target is created as a directory or an empty file to match
 the source. `overlay`, on a `home` mount, mounts the source read-only below
 a writable layer at `overlay/<source>` on the data disk, whose root takes the
 source's owner and mode: the guest's writes stay in the VM.
+
+## Memory the guest returns
+
+Guest memory is shared memory the host fills as the guest touches it
+(`--memory shared=on`). A page the guest frees goes back through free page
+reporting (`--balloon free_page_reporting=on`; `page_reporting_order=0`
+makes single pages count), which hands over what is free within about 30
+seconds. A guest frees its page cache only under memory pressure, and then
+only down to a few percent free, so the helper turns on the kernel's
+DAMON_RECLAIM at boot: it pages out memory left untouched for `min_age`, 60
+seconds, while pages in use stay. It samples memory by region, so a cold
+page that shares a region with pages in use leaves only once DAMON splits
+them apart. A file read once starts leaving the guest, and the host, a
+minute or two later; a third of one that filled the guest is back within
+about 3 minutes, and the rest follows more slowly
+(`TestKVMColdMemoryReturnsToTheHost`). Clean file pages are dropped. A dirty
+one leaves on a later pass, once the kernel's flusher has written it.
+Anonymous pages are skipped, since the guest has no swap. Cold tmpfs and
+shared memory pages, such as `/dev/shm`, are tried, find no swap either, and
+stay.
+
+The helper writes these to `/sys/module/damon_reclaim/parameters`, `enabled`
+last:
+
+| Parameter | Why |
+| --- | --- |
+| `min_age=60000000` | 60 seconds untouched is cold. |
+| `wmarks_high=1000`, `wmarks_mid=1000`, `wmarks_low=0` | Run at any level of free memory. The defaults stop it above 50% free, and below 20%, where a guest full of cold page cache would keep it. |
+| `sample_interval=50000`, `aggr_interval=1000000` | Check accesses every 50 ms instead of 5, so its thread wakes 20 times a second instead of 200. |
+| `monitor_region_end=<bytes>` | The end of the last `System RAM` range in `/proc/iomem`. Cloud Hypervisor puts guest RAM past 3 GiB at 4 GiB, and DAMON_RECLAIM watches one range, by default only the larger piece; this spans both. The gap between them holds no RAM, but DAMON counts it toward the quota. |
+| `skip_anon=Y` | Without swap an anonymous page has nowhere to go. |
+| `enabled=Y` | Starts it. |
+
+The default quotas cap it at 128 MiB of memory tried and 10 ms of CPU a
+second. The kernel config must leave `CONFIG_LRU_GEN` off: with MGLRU on,
+reading a file no longer clears the idle flag DAMON checks, and files in use
+would be paged out. The helper skips the step on a kernel, such as one set
+with `vm-kernel`, that lacks any of these parameters or runs MGLRU
+(`/sys/kernel/mm/lru_gen/enabled` is not `0x0000`); any other failure is
+reported as a `boot_error`. A server gets the kernel with its release
+([Update the server](install.md#update-the-server)); a running or saved VM
+boots it on its next cold start.
 
 ## The file service
 
