@@ -957,7 +957,8 @@ runners (`blacksmith-4vcpu-ubuntu-2604`, and `blacksmith-4vcpu-ubuntu-2404-arm`
 for `arm64`), declared for actionlint in `.github/actionlint.yaml`. Blacksmith's
 Ubuntu 26.04 image mounts `/tmp` as a tmpfs of half the runner's memory, too
 small for the server's disk-headroom check, so in the Docker suite jobs
-`.github/actions/free-disk` sets `TMPDIR=/var/tmp`, on the root disk. Every
+`.github/actions/free-disk` sets `TMPDIR=/t`, on the root disk and short enough
+for test socket paths; a `sudo env` step there must pass `"TMPDIR=$TMPDIR"`. Every
 other job stays on a GitHub-hosted runner: the Windows smoke scripts refuse
 any other runner, Blacksmith's kernel rejects the `fib` rule in the session VM
 firewall that the `kvm` tests load, and release, promote and nightly builds
