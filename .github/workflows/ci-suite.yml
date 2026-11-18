@@ -482,8 +482,8 @@ jobs:
           mode: restore
       - name: Cross-compile release binaries
         run: make release-binaries
-      # The only GitHub-hosted Linux amd64 Go and bun job on main, so it
-      # writes the module and bun archives release-build.yml restores.
+      # The only GitHub-hosted Linux amd64 job that saves Go modules and bun,
+      # which release-build.yml restores.
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:

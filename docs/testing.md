@@ -957,9 +957,11 @@ runners (`blacksmith-4vcpu-ubuntu-2604`, and `blacksmith-4vcpu-ubuntu-2404-arm`
 for `arm64`), declared for actionlint in `.github/actionlint.yaml`. Every
 other job stays on a GitHub-hosted runner: the Windows smoke scripts refuse
 any other runner, and release, promote and nightly builds never read a cache a
-Blacksmith job wrote. Cache keys include `runner.environment`, so the two never
-share an archive; on GitHub-hosted runners `release-build` writes the Linux
-amd64 module, bun and release compiler caches the release workflow restores.
+Blacksmith job wrote. On Blacksmith, `actions/cache` uses Blacksmith's store,
+which GitHub-hosted jobs cannot read, so `release-build` writes the
+GitHub-hosted Linux amd64 module, bun and release compiler caches the release
+workflow restores. Buildx `type=gha` caches stay in GitHub's store, so the
+release workflow builds the browser and standard images without one.
 
 | Job | Sessions | Locally |
 | --- | --- | --- |

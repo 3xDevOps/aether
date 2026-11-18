@@ -196,6 +196,8 @@ jobs:
           ref: ${{ inputs.commit }}
           persist-credentials: false
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      # No build cache: CI writes this image's caches on Blacksmith runners,
+      # and a cache written by other workflows must not reach a published image.
       - name: Build the versioned browser companion
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
@@ -207,7 +209,6 @@ jobs:
           provenance: false
           sbom: false
           tags: ghcr.io/3xdevops/aether-browser:${{ inputs.tag }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=browser-${{ matrix.arch }}-main
       - name: Prove sandbox, local app, actions, captures and streams
         env:
           BROWSER_IMAGE: ghcr.io/3xdevops/aether-browser:${{ inputs.tag }}-${{ matrix.arch }}
@@ -822,6 +823,8 @@ jobs:
           labels: org.opencontainers.image.version=${{ inputs.tag }}
       # Native builds retain Ubuntu's normal update behavior without QEMU's
       # arm64 apt cost. Smoke and push use this same loaded image.
+      # No build cache: CI writes this image's caches on Blacksmith runners,
+      # and a cache written by other workflows must not reach a published image.
       - name: Build the standard environment image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
@@ -834,7 +837,6 @@ jobs:
           sbom: false
           tags: ${{ steps.standard-meta.outputs.tags }}
           labels: ${{ steps.standard-meta.outputs.labels }}
-          cache-from: type=gha,scope=standard-${{ matrix.arch }}-main
       - name: Prove the standard toolchain and native Git
         env:
           STANDARD_IMAGE: ghcr.io/3xdevops/aether-standard:${{ inputs.tag }}-${{ matrix.arch }}
