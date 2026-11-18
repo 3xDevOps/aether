@@ -412,7 +412,12 @@ says
 `Saved to disk while it worked: the server was running out of memory.` or
 `Saved to disk early: the server was running out of memory.` The server log
 has `scheduler: memory guard:` lines. `--run-sleep-after 0` does not turn
-the guard off.
+the guard off. Memory that grows faster than the guard saves VMs can still
+run the host out, sooner than containers would, since a VM's memory never
+goes to host swap. The host's OOM killer then ends container processes
+first (`OOMScoreAdjust=500`), then the session VM holding the most memory:
+`journalctl -k | grep -i 'out of memory'` names it `cloud-hyperviso`, the
+kernel's 15-character cut of `cloud-hypervisor`.
 
 To recover, close or kill sessions. A closed session's paused container still
 holds its memory; **Free sandbox…** releases it. An idle Enhanced Claude
@@ -920,14 +925,16 @@ sudo systemctl restart aether-server
 | `--run-sleep-after` | `30m`; `5m` for session VMs | How long an idle Enhanced session of an agent that can restore its conversation, open or closed, keeps its container running, and how long any idle session VM runs before it is saved ([Idle sleep](#idle-sleep)). `0` keeps every session awake. | Lower on a host short of memory; `0` when processes in idle sessions must keep running. |
 | `--min-free-disk` | automatic | The free-space reserve per filesystem, in bytes. Negative turns the disk check off; the memory check stays. | See below. |
 | `--run-cpus` | 8, or the host's CPU count if lower | CPU ceiling per session and environment. | Lower to share a small host. |
-| `--run-memory` | 8 GiB | Memory ceiling per session and environment, in bytes. Swap adds a quarter of it. | Raise when sessions hit out-of-memory kills. |
+| `--run-memory` | 8 GiB | Memory ceiling per session and environment, in bytes. Swap adds a quarter of it, in a container from the host's swap and in a VM from a swap file on its data disk. | Raise when sessions hit out-of-memory kills. |
 | `--run-pids` | `4096` | Process and thread ceiling per container. | Raise for builds that start many processes. |
 | `--agent-update` | `true` | Update a shipped agent in the member's home, in the background, when a session launches. | Turn off on a host without internet access, or to hold a version. |
 
 The CPU, memory and process ceilings apply to containers created after the
 change. A host-wide out-of-memory kill takes agent processes before the server
-(`OOMScoreAdjust=-500` on the server, 500 in containers). Under CPU and disk
-contention the server gets a hundred shares to each container's one
+(`OOMScoreAdjust=-500` on the server, 500 in containers). Session VMs keep
+the default 0, since killing a VM's monitor ends the whole session, so
+container processes go first. Under CPU and disk contention the server gets
+a hundred shares to each container's one
 ([install.md](install.md#keep-the-server-reachable-under-load)).
 
 ### Picking a stall threshold

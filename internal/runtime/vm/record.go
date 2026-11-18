@@ -84,6 +84,7 @@ type record struct {
 	// Net is the VM's network index, or offline.
 	Net       int            `json:"net"`
 	Egress    bool           `json:"egress,omitempty"`
+	NoSwap    bool           `json:"no_swap,omitempty"`
 	Lifetime  time.Duration  `json:"lifetime,omitempty"`
 	OwnedDirs []string       `json:"owned_dirs,omitempty"`
 	Serves    []guest.Socket `json:"serves,omitempty"`

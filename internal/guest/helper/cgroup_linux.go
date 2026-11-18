@@ -16,15 +16,17 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/guest/guestpb"
+	"github.com/3xDevOps/Aether/internal/sysstats"
 )
 
 // sessionCgroup is the cgroup whose pids.max is the session's process
 // limit. Processes start in its procs child: cgroup v2 lets only a leaf hold
 // processes once dockerd puts its containers beside it.
 type sessionCgroup struct {
-	dir   string
-	procs *os.File
-	limit atomic.Int64
+	dir       string
+	procs     *os.File
+	limit     atomic.Int64
+	memoryMax uint64
 }
 
 // sessionCgroupParent is the cgroup dockerd puts nested containers under.
@@ -42,9 +44,10 @@ const sessionReserve = 48 << 20
 // for it.
 const gitReserve = 96 << 20
 
-// newSessionCgroup keeps the helper's reserve, and with git the git
-// service's, beyond what was in use or held free out of the session.
-func newSessionCgroup(root string, git bool) (*sessionCgroup, error) {
+// newSessionCgroup gives the session the memory limit the server sized the
+// VM for, but never the helper's reserve, nor with git the git service's,
+// beyond what was in use or held free; 0 means all the rest.
+func newSessionCgroup(root string, git bool, limit uint64) (*sessionCgroup, error) {
 	if err := os.WriteFile(filepath.Join(root, "cgroup.subtree_control"), []byte("+pids +memory"), 0); err != nil {
 		return nil, fmt.Errorf("enable the pids and memory controllers: %w", err)
 	}
@@ -65,15 +68,18 @@ func newSessionCgroup(root string, git bool) (*sessionCgroup, error) {
 	if available <= reserve {
 		return nil, fmt.Errorf("cap the session's memory: %d MiB is available and %d MiB stays outside the session", available>>20, reserve>>20)
 	}
-	limit := strconv.FormatUint(available-reserve, 10)
-	if err = os.WriteFile(filepath.Join(dir, "memory.max"), []byte(limit), 0); err != nil {
+	memoryMax := available - reserve
+	if limit > 0 {
+		memoryMax = min(memoryMax, limit)
+	}
+	if err = os.WriteFile(filepath.Join(dir, "memory.max"), []byte(strconv.FormatUint(memoryMax, 10)), 0); err != nil {
 		return nil, fmt.Errorf("cap the session's memory: %w", err)
 	}
 	f, err := os.Open(procs)
 	if err != nil {
 		return nil, err
 	}
-	return &sessionCgroup{dir: dir, procs: f}, nil
+	return &sessionCgroup{dir: dir, procs: f, memoryMax: memoryMax}, nil
 }
 
 // gitCgroupDir holds the git service and every git it runs: beside the
@@ -140,8 +146,9 @@ func (c *sessionCgroup) freeze(ctx context.Context, frozen bool) error {
 	}
 }
 
-// readStats counts the whole VM, which is the session: memory in use is
-// what the kernel could not hand back without reclaim.
+// readStats counts CPU for the whole VM, and memory for the session
+// cgroup, whose limit the session's OOM kills happen at; without it, for
+// the whole VM, as what the kernel could not hand back without reclaim.
 func readStats(cgroup *sessionCgroup) (*guestpb.StatsReply, error) {
 	meminfo, err := readCounters("/proc/meminfo", 1024)
 	if err != nil {
@@ -180,6 +187,10 @@ func readStats(cgroup *sessionCgroup) (*guestpb.StatsReply, error) {
 		if stats.Pids, err = strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64); err != nil {
 			return nil, fmt.Errorf("pids.current: %w", err)
 		}
+		if stats.MemoryBytes, err = sysstats.CgroupWorkingSet(cgroup.dir); err != nil {
+			return nil, err
+		}
+		stats.MemoryLimitBytes = cgroup.memoryMax
 		stats.PidsLimit = uint64(cgroup.limit.Load())
 	}
 	stats.OomKills = kills - min(browser["oom_kill"], kills)

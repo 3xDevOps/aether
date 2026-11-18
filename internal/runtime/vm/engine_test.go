@@ -92,14 +92,17 @@ func TestStartBootsTheVMInItsUnit(t *testing.T) {
 	if call.name != "aether-vm-run-a.service" || call.argv[1] != MonitorCommand || call.argv[2] != h.engine.dir("run-a") {
 		t.Fatalf("unit start = %+v", call)
 	}
-	for _, want := range []string{"PrivateMounts=yes", "CPUQuota=150%", "OOMScoreAdjust=500", "MemoryMax=2560M"} {
+	for _, want := range []string{"PrivateMounts=yes", "CPUQuota=150%", "MemoryMax=3056M", "MemorySwapMax=0"} {
 		if !slices.Contains(call.properties, want) {
 			t.Errorf("properties %v lack %s", call.properties, want)
 		}
 	}
+	if len(property(call.properties, "OOMScoreAdjust")) != 0 {
+		t.Errorf("properties %v make the host OOM killer prefer the VM", call.properties)
+	}
 	args := strings.Join(call.launch.Args, " ")
 	for _, want := range []string{
-		"--cpus boot=2,nested=off", "--memory size=2048M,shared=on", "--balloon size=0,free_page_reporting=on",
+		"--cpus boot=2,nested=off", "--memory size=2544M,shared=on", "--balloon size=0,free_page_reporting=on", "aether.memory=2147483648,536870912",
 		"--kernel /k/vmlinux", "page_reporting.page_reporting_order=0", "aether.mount=home,0,/root",
 		"helper.img,image_type=raw,backing_files=off,id=helper,serial=helper,readonly=on", "root.img,image_type=qcow2,backing_files=on,id=root,serial=root",
 		"--net id=net0,tap=aethervm1,ip=10.200.0.5,mask=255.255.255.252",
@@ -682,7 +685,7 @@ func TestMemoryUseIsWhatTheUnitHolds(t *testing.T) {
 		t.Fatal(err)
 	}
 	use, err := h.engine.memoryUse()
-	if use["vm-run-a"] != 300<<20 || use["vm-run-b"] != 2560<<20 || err == nil || !strings.Contains(err.Error(), "run-b") {
+	if use["vm-run-a"] != 300<<20 || use["vm-run-b"] != 3056<<20 || err == nil || !strings.Contains(err.Error(), "run-b") {
 		t.Errorf("memory use = %v, %v; want run-a's cgroup less its inactive file cache, and run-b's cap named in the error", use, err)
 	}
 	if err := h.engine.stop(t.Context(), "run-b", time.Second); err != nil {

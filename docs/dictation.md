@@ -111,7 +111,7 @@ With `session-runtime vm` ([Sessions in virtual
 machines](environments.md#sessions-in-virtual-machines)), the engine runs in
 a VM with no network device instead, in the systemd unit
 `aether-vm-dictation-<owner>.service`, with the same user, mounts and process
-limit, and the memory cap plus 256 MiB for the guest kernel and helper. Its socket stays inside the VM, on a directory its user
+limit, the memory cap, and no swap. Its socket stays inside the VM, on a directory its user
 owns; the server listens on `<data-dir>/dictation/sock/engine.sock` itself
 once the engine accepts, and relays each connection through the VM's helper.
 `cloudfield-server dictation install` then pulls nothing into Docker: the first

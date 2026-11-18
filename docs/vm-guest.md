@@ -35,12 +35,17 @@ In order, as PID 1:
 5. Brings up `lo` and the VM's network device, sets the hostname, and writes
    `/etc/hostname`, `/etc/hosts` and, when DNS servers are given,
    `/etc/resolv.conf`.
-6. Creates the session cgroup `/sys/fs/cgroup/session` (below).
-7. Listens on every forwarded socket.
-8. Turns on DAMON_RECLAIM ([Memory the guest returns](#memory-the-guest-returns)).
-9. Serves the API on vsock port 1024. It accepts connections from the host
-   only (vsock CID 2): a process in the VM that reached it through vsock
-   loopback could start processes as root.
+6. Makes the swap file `/run/aether-guest/data/swap` on the data disk, at
+   the size `aether.memory` gives, writes its swap header and turns it on
+   with discard, so freed swap goes back to the host. Any failure, such as
+   a kernel built without swap or a full data disk, is logged on the
+   console, not reported as `boot_error`, and the VM runs without swap.
+7. Creates the session cgroup `/sys/fs/cgroup/session` (below).
+8. Listens on every forwarded socket.
+9. Turns on DAMON_RECLAIM ([Memory the guest returns](#memory-the-guest-returns)).
+10. Serves the API on vsock port 1024. It accepts connections from the host
+    only (vsock CID 2): a process in the VM that reached it through vsock
+    loopback could start processes as root.
 
 A step that fails is logged on the serial console and reported by the API's
 `Info` as `boot_error`; the helper still serves, so the server can show the
@@ -108,6 +113,7 @@ x86 kernels cap the whole line at 2047 bytes, and `KernelArgs` fails past it.
 | `aether.sock=<port>,<path>` | Listen on `<path>` and relay each connection to vsock port `<port>` on the host. |
 | `aether.serve=<port>,<path>` | Listen on vsock port `<port>` for the host and relay each connection to `<path>` (below). |
 | `aether.loopback=<port>,<path>` | Listen on `127.0.0.1:<port>` and relay each connection to the socket at `<path>` in the VM, for a program that reaches a server only by an HTTP address, such as omp's auth broker. |
+| `aether.memory=<limit>,<swap>` | The session cgroup's memory limit and the swap file's size, in bytes. |
 | `aether.seed=<target>,<file>` | Follows the state mount at `<target>`: at every boot, before binding it, copy `<target>/<file>` as the home shows it into the mount's directory, or remove the copy when the home has none. |
 
 Paths are escaped per segment as in a URL, so a space or a comma in a path
@@ -146,9 +152,16 @@ minute or two later; a third of one that filled the guest is back within
 about 3 minutes, and the rest follows more slowly
 (`TestKVMColdMemoryReturnsToTheHost`). Clean file pages are dropped. A dirty
 one leaves on a later pass, once the kernel's flusher has written it.
-Anonymous pages are skipped, since the guest has no swap. Cold tmpfs and
-shared memory pages, such as `/dev/shm`, are tried, find no swap either, and
-stay.
+With swap, cold anonymous, tmpfs and shared memory pages, such as
+`/dev/shm`, are tried too and go to the swap file (step 6 of
+[Boot](#boot)). DAMON rarely reaches idle program memory in a guest that is
+mostly free, though: a program's 64 MiB, left idle in an otherwise idle
+2 GiB VM, stayed in memory for 5 minutes in 5 of 5 VMs, with under 300 KiB
+of it swapped. In 2 more VMs, where the inputs were committed again
+(`commit_inputs=Y`) after the session started, all of it went to swap
+within 2.5 minutes; committing them at boot did not help, and the cause is
+not known. In a VM without swap, such as the dictation engine's, anonymous
+pages are skipped, and tmpfs and shared memory pages are tried and stay.
 
 The helper writes these to `/sys/module/damon_reclaim/parameters`, `enabled`
 last:
@@ -159,7 +172,7 @@ last:
 | `wmarks_high=1000`, `wmarks_mid=1000`, `wmarks_low=0` | Run at any level of free memory. The defaults stop it above 50% free, and below 20%, where a guest full of cold page cache would keep it. |
 | `sample_interval=50000`, `aggr_interval=1000000` | Check accesses every 50 ms instead of 5, so its thread wakes 20 times a second instead of 200. |
 | `monitor_region_end=<bytes>` | The end of the last `System RAM` range in `/proc/iomem`. Cloud Hypervisor puts guest RAM past 3 GiB at 4 GiB, and DAMON_RECLAIM watches one range, by default only the larger piece; this spans both. The gap between them holds no RAM, but DAMON counts it toward the quota. |
-| `skip_anon=Y` | Without swap an anonymous page has nowhere to go. |
+| `skip_anon=N`, or `Y` without swap | Cold program memory goes to swap; without swap an anonymous page has nowhere to go. |
 | `enabled=Y` | Starts it. |
 
 The default quotas cap it at 128 MiB of memory tried and 10 ms of CPU a
@@ -373,14 +386,16 @@ reports how many bytes the process took; it never closes the input.
 ## Limits, stats and the clock
 
 The session cgroup's `pids.max` is the session's process limit from `Boot`.
-Its `memory.max` is the guest's `MemAvailable` when the helper starts, less
-48 MiB: what the kernel and the helper already hold, the free memory the
-kernel keeps back, and 48 MiB for the helper to grow stay outside the
-session. A VM with checkouts keeps up to 96 MiB more out of it, a
-sixteenth of its memory at most, for the [git service](#the-git-service)'s
-anonymous memory, which its 256 MiB cap does not keep from the helper: a
-256 MiB VM's session gets 16 MiB less, a 1 GiB VM's 64 MiB less, and from
-1.5 GiB on 96 MiB less, about 1% of the default 8 GiB.
+Its `memory.max` is the session's memory limit from `aether.memory`, as a
+container's: the server boots the guest with that limit plus a 32nd of it
+plus 432 MiB, so what the kernel and the helper hold, the free memory the
+kernel keeps back, 48 MiB for the helper to grow and, in a VM with
+checkouts, up to 96 MiB (a sixteenth of the VM's memory at most) for the
+[git service](#the-git-service)'s anonymous memory, which its 256 MiB cap
+does not keep from the helper, all stay outside the session. If the guest's
+`MemAvailable` when the helper starts, less those reserves, is below the
+limit, the session gets that instead. The swap file, a quarter of the
+limit, is the guest's own: the host never swaps a VM's memory.
 A session that filled the VM would leave the helper no memory to
 serve the file service, and pages the session faults back in from it would
 never arrive, so the kernel would thrash instead of killing a process. The
@@ -392,10 +407,15 @@ Every process the helper starts begins in its leaf `/sys/fs/cgroup/session/procs
 and dockerd puts nested containers beside it, so they count too. The helper
 itself stays outside.
 
-`Stats` counts the whole VM, which is the session: CPU time outside idle and
-I/O wait from `/proc/stat`, memory in use as `MemTotal - MemAvailable`, the
-kernel's OOM kill counter, and the session cgroup's task count. Insights
-shows these.
+`Stats` reports CPU time outside idle and I/O wait from `/proc/stat`, and
+from the session cgroup its OOM kills less the development browser's, its
+task count, its memory in use and its `memory.max`, the limit a process of
+the session is killed at. Memory in use is `memory.current` less the `inactive_file` of
+`memory.stat`, as `docker stats` counts a container's, so the kernel, the
+helper and the git service, which are outside the session, are left out.
+Without the session cgroup, OOM kills and memory are the whole guest's: the
+kernel's OOM kill counter, and `MemTotal - MemAvailable` of `MemTotal`.
+Insights shows these.
 
 `MemoryUse` reports what each running VM holds of the host's memory, read
 from its unit's cgroup (`/sys/fs/cgroup/aether.slice/aether-vm-<key>.service`)
@@ -405,7 +425,7 @@ with no call into systemd or the guest: `memory.current` less the
 can drop and counts what the guest's figure misses: guest page cache,
 which the guest counts as available but lives in the VM's RAM, and the
 memory of Cloud Hypervisor and the VM's file services. A VM whose cgroup
-cannot be read counts as its unit's cap, its memory plus 512 MiB.
+cannot be read counts as its unit's cap, its guest's RAM plus 512 MiB.
 `SavedMemory` reports the disk a saved VM's state takes, which a restore
 loads back, after waiting for a save or restore of that VM under way. A
 saved state that cannot be read counts as the unit's cap, one that is gone

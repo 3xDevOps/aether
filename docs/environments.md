@@ -359,11 +359,17 @@ What changes:
   VM monitor's output and `console.log` the guest's serial console, at most
   1 MiB, with the 1 MiB before it in `console.log.1`.
 - The VM gets the CPU limit rounded up to whole vCPUs, held to the exact
-  limit by the unit's `CPUQuota`, and the memory limit as its memory; the
+  limit by the unit's `CPUQuota`. The session gets the whole memory limit
+  and swap of a quarter of it on its data disk, as a container does; the
+  guest boots with the limit plus a 32nd of it plus 432 MiB for its kernel,
+  the helper and what the helper keeps out of the session
+  ([vm-guest.md](vm-guest.md#limits-stats-and-the-clock)). The
   unit's `MemoryMax` allows 512 MiB more for the VM monitor and the file
-  service. The process limit applies inside the guest. Processes start at
-  an open-file limit of 1024 soft and 524288 hard, and any user may listen
-  on ports below 1024 and use `ping` ([vm-guest.md](vm-guest.md#boot)).
+  service, and its `MemorySwapMax=0` keeps the host from swapping the VM's
+  memory: the guest swaps on its own disk instead. The process limit
+  applies inside the guest. Processes start at an open-file limit of 1024
+  soft and 524288 hard, and any user may listen on ports below 1024 and use
+  `ping` ([vm-guest.md](vm-guest.md#boot)).
 - The checkout and each extra repository live on disks of their own, made
   in constant time from a prepared disk per workspace and base commit, and
   git work on them runs inside the VM ([vm-guest.md](vm-guest.md#checkouts)).

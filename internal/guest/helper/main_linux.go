@@ -206,7 +206,13 @@ func serve() error {
 	record("mount volumes", mountVolumes(cfg.Mounts))
 	record("mount checkouts", mountCheckouts(cfg.Checkouts))
 	record("configure the network", configureNetwork(cfg))
-	cgroup, err := newSessionCgroup("/sys/fs/cgroup", len(cfg.Checkouts) > 0)
+	// A session runs without swap, as a container on a host without it,
+	// rather than not at all.
+	swapErr := enableSwap(cfg.Swap)
+	if swapErr != nil {
+		slog.Warn("guest: turn on swap", "error", swapErr)
+	}
+	cgroup, err := newSessionCgroup("/sys/fs/cgroup", len(cfg.Checkouts) > 0, cfg.MemoryLimit)
 	record("create the session cgroup", err)
 	var procsDir *os.File
 	if cgroup != nil {
@@ -229,7 +235,7 @@ func serve() error {
 	record("forward sockets", forwardSockets(cfg.Sockets))
 	record("serve sockets", serveSockets(cfg.Serves))
 	record("listen on loopback ports", listenLoopbacks(cfg.Loopbacks))
-	record("start DAMON_RECLAIM", startDAMONReclaim())
+	record("start DAMON_RECLAIM", startDAMONReclaim(cfg.Swap > 0 && swapErr == nil))
 
 	bootError := ""
 	if len(failures) > 0 {

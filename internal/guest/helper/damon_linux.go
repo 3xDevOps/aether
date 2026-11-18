@@ -14,9 +14,10 @@ const damonReclaimParams = "/sys/module/damon_reclaim/parameters"
 // startDAMONReclaim turns on the kernel's DAMON_RECLAIM, which pages out
 // memory left untouched for a minute so free page reporting returns it to
 // the host; docs/vm-guest.md#memory-the-guest-returns says why each value.
-// It skips a kernel that lacks any of the parameters, and one running
-// MGLRU, under which a read no longer marks a page used for DAMON.
-func startDAMONReclaim() error {
+// With swap it pages out anonymous memory too. It skips a kernel that lacks
+// any of the parameters, and one running MGLRU, under which a read no
+// longer marks a page used for DAMON.
+func startDAMONReclaim(swap bool) error {
 	if mglru, err := os.ReadFile("/sys/kernel/mm/lru_gen/enabled"); err == nil && strings.TrimSpace(string(mglru)) != "0x0000" {
 		return nil
 	}
@@ -28,12 +29,16 @@ func startDAMONReclaim() error {
 	if err != nil {
 		return err
 	}
+	skipAnon := "Y"
+	if swap {
+		skipAnon = "N"
+	}
 	params := []struct{ name, value string }{
 		{"min_age", "60000000"},
 		{"wmarks_high", "1000"}, {"wmarks_mid", "1000"}, {"wmarks_low", "0"},
 		{"sample_interval", "50000"}, {"aggr_interval", "1000000"},
 		{"monitor_region_end", strconv.FormatUint(end, 10)},
-		{"skip_anon", "Y"},
+		{"skip_anon", skipAnon},
 		{"enabled", "Y"},
 	}
 	for _, p := range params {

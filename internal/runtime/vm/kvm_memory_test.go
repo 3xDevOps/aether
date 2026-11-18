@@ -20,7 +20,9 @@ import (
 // stop it: a third of a file read once leaves the guest, and the host's
 // memory, within twice min_age and 3 minutes, while a file Main reads every
 // 2 seconds stays cached and kdamond stays under 2% of a vCPU. The rest
-// follows more slowly, as DAMON splits it from memory in use.
+// follows more slowly, as DAMON splits it from memory in use. At a 2 GiB
+// limit the session holds enough of the guest's memory to leave under 20%
+// free.
 func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-cold-memory"
@@ -28,7 +30,7 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	spec := runtime.Spec{
 		Image: "docker.io/library/ubuntu:24.04", CreationKey: key,
 		Command: []string{"/bin/sh", "-c", "while :; do cat /var/tmp/hot >/dev/null 2>&1; sleep 2; done"},
-		Env:     map[string]string{"AETHER_RUN_ID": key}, CPULimit: 1, MemoryLimitBytes: 1 << 30,
+		Env:     map[string]string{"AETHER_RUN_ID": key}, CPULimit: 1, MemoryLimitBytes: 2 << 30,
 	}
 	if _, err := e.create(t.Context(), key, spec, options{Offline: true}); err != nil {
 		t.Fatal(err)
@@ -46,8 +48,8 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	if last, err := strconv.ParseUint(ramLast, 16, 64); err != nil || last+1 != parseUint(t, params[2]) {
 		t.Errorf("DAMON_RECLAIM watches up to %s, the guest's RAM ends at %s+1", params[2], ramLast)
 	}
-	if params[3] != "Y" {
-		t.Errorf("DAMON_RECLAIM has skip_anon=%s in a guest without swap", params[3])
+	if params[3] != "N" {
+		t.Errorf("DAMON_RECLAIM has skip_anon=%s in a guest with swap", params[3])
 	}
 	kdamond, memTotalKiB := params[4], parseUint(t, params[6])
 

@@ -181,7 +181,7 @@ func (e *engine) savedMemory(key string) (uint64, error) {
 		n += info.Sys().(*syscall.Stat_t).Blocks * 512
 	}
 	if err != nil {
-		return uint64(rec.MemoryMiB+unitOverheadMiB) << 20, fmt.Errorf("vm runtime: saved memory of VM %s: %w", key, err)
+		return uint64(unitMemoryMiB(rec)) << 20, fmt.Errorf("vm runtime: saved memory of VM %s: %w", key, err)
 	}
 	return uint64(n), nil
 }
