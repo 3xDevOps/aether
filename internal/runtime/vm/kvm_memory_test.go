@@ -37,19 +37,19 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	params := guestFields(t, e, key, "cd /sys/module/damon_reclaim/parameters && cat enabled min_age monitor_region_end skip_anon kdamond_pid; "+
-		"grep -c . /proc/swaps; grep 'System RAM' /proc/iomem | tail -1 | cut -d' ' -f1; awk '/^MemTotal:/ {print $2}' /proc/meminfo", 8)
+		"grep 'System RAM' /proc/iomem | tail -1 | cut -d' ' -f1; awk '/^MemTotal:/ {print $2}' /proc/meminfo", 7)
 	if params[0] != "Y" {
 		t.Fatalf("DAMON_RECLAIM is not running: enabled=%s", params[0])
 	}
 	minAge := time.Duration(parseUint(t, params[1])) * time.Microsecond
-	_, ramLast, _ := strings.Cut(params[6], "-")
+	_, ramLast, _ := strings.Cut(params[5], "-")
 	if last, err := strconv.ParseUint(ramLast, 16, 64); err != nil || last+1 != parseUint(t, params[2]) {
 		t.Errorf("DAMON_RECLAIM watches up to %s, the guest's RAM ends at %s+1", params[2], ramLast)
 	}
-	if noSwap := params[5] == "1"; (params[3] == "Y") != noSwap {
-		t.Errorf("DAMON_RECLAIM has skip_anon=%s with %s lines in /proc/swaps", params[3], params[5])
+	if params[3] != "Y" {
+		t.Errorf("DAMON_RECLAIM has skip_anon=%s in a guest without swap", params[3])
 	}
-	kdamond, memTotalKiB := params[4], parseUint(t, params[7])
+	kdamond, memTotalKiB := params[4], parseUint(t, params[6])
 
 	const hotMiB = 64
 	coldMiB := memTotalKiB * 9 / 10 >> 10
@@ -81,6 +81,10 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	t.Logf("reading %d MiB left %d of %d KiB free; the host's share of the guest went %d -> %d -> %d bytes, a third back %s after the read (min_age %s)",
 		coldMiB, free, memTotalKiB, before, held, guestRAMOnHost(t, key), time.Since(read).Round(time.Second), minAge)
 
+	reclaimed := parseUint(t, guestFields(t, e, key, "cat /sys/module/damon_reclaim/parameters/bytes_reclaimed_regions", 1)[0])
+	if reclaimed < coldMiB<<20/3 {
+		t.Errorf("DAMON_RECLAIM paged out %d bytes, under a third of the %d MiB file that left", reclaimed, coldMiB)
+	}
 	if kib := pgpgin() - readIn; kib > hotMiB<<10/8 {
 		t.Errorf("while the cold file left, the guest read %d KiB from disk: DAMON_RECLAIM evicted the file Main keeps reading", kib)
 	}

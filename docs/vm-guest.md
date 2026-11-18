@@ -146,7 +146,9 @@ minute or two later; a third of one that filled the guest is back within
 about 3 minutes, and the rest follows more slowly
 (`TestKVMColdMemoryReturnsToTheHost`). Clean file pages are dropped. A dirty
 one leaves on a later pass, once the kernel's flusher has written it.
-Anonymous ones go to swap, and are skipped while the guest has none.
+Anonymous pages are skipped, since the guest has no swap. Cold tmpfs and
+shared memory pages, such as `/dev/shm`, are tried, find no swap either, and
+stay.
 
 The helper writes these to `/sys/module/damon_reclaim/parameters`, `enabled`
 last:
@@ -157,7 +159,7 @@ last:
 | `wmarks_high=1000`, `wmarks_mid=1000`, `wmarks_low=0` | Run at any level of free memory. The defaults stop it above 50% free, and below 20%, where a guest full of cold page cache would keep it. |
 | `sample_interval=50000`, `aggr_interval=1000000` | Check accesses every 50 ms instead of 5, so its thread wakes 20 times a second instead of 200. |
 | `monitor_region_end=<bytes>` | The end of the last `System RAM` range in `/proc/iomem`. Cloud Hypervisor puts guest RAM past 3 GiB at 4 GiB, and DAMON_RECLAIM watches one range, by default only the larger piece; this spans both. The gap between them holds no RAM, but DAMON counts it toward the quota. |
-| `skip_anon=Y` | Only while `/proc/swaps` lists no swap, where an anonymous page has nowhere to go. |
+| `skip_anon=Y` | Without swap an anonymous page has nowhere to go. |
 | `enabled=Y` | Starts it. |
 
 The default quotas cap it at 128 MiB of memory tried and 10 ms of CPU a
