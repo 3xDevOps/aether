@@ -17,9 +17,10 @@ import (
 
 // TestKVMColdMemoryReturnsToTheHost checks DAMON_RECLAIM in a guest whose
 // page cache fills it, below the 20% free at which its default watermarks
-// stop it: half of a file read once leaves the guest, and the host's
-// memory, within twice min_age and 2 minutes, while a file Main reads every
-// 2 seconds stays cached and kdamond stays under 2% of a vCPU.
+// stop it: a third of a file read once leaves the guest, and the host's
+// memory, within twice min_age and 3 minutes, while a file Main reads every
+// 2 seconds stays cached and kdamond stays under 2% of a vCPU. The rest
+// follows more slowly, as DAMON splits it from memory in use.
 func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-cold-memory"
@@ -69,15 +70,15 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	// Main reloads within 2 seconds whatever of its file the read pushed out.
 	time.Sleep(5 * time.Second)
 	readIn := pgpgin()
-	deadline := read.Add(2*minAge + 2*time.Minute)
-	for now := guestRAMOnHost(t, key); now > held-coldMiB<<20/2; now = guestRAMOnHost(t, key) {
+	deadline := read.Add(2*minAge + 3*time.Minute)
+	for now := guestRAMOnHost(t, key); now > held-coldMiB<<20/3; now = guestRAMOnHost(t, key) {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s after reading %d MiB the host holds %d bytes of the guest, %d right after the read and %d before it (min_age %s)",
 				time.Since(read).Round(time.Second), coldMiB, now, held, before, minAge)
 		}
 		time.Sleep(5 * time.Second)
 	}
-	t.Logf("reading %d MiB left %d of %d KiB free; the host's share of the guest went %d -> %d -> %d bytes, half back %s after the read (min_age %s)",
+	t.Logf("reading %d MiB left %d of %d KiB free; the host's share of the guest went %d -> %d -> %d bytes, a third back %s after the read (min_age %s)",
 		coldMiB, free, memTotalKiB, before, held, guestRAMOnHost(t, key), time.Since(read).Round(time.Second), minAge)
 
 	if kib := pgpgin() - readIn; kib > hotMiB<<10/8 {

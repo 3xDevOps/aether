@@ -139,12 +139,14 @@ makes single pages count), which hands over what is free within about 30
 seconds. A guest frees its page cache only under memory pressure, and then
 only down to a few percent free, so the helper turns on the kernel's
 DAMON_RECLAIM at boot: it pages out memory left untouched for `min_age`, 60
-seconds. The first time it finds a cold page it only marks it idle, and it
-evicts the page on its next pass if nothing touched it, so a file read once
-leaves the guest, and the host, about 2 minutes later, while pages in use
-stay. Clean file pages are dropped. A dirty one leaves on a later pass,
-once the kernel's flusher has written it. Anonymous ones go to swap, and
-are skipped while the guest has none.
+seconds, while pages in use stay. It samples memory by region, so a cold
+page that shares a region with pages in use leaves only once DAMON splits
+them apart. A file read once starts leaving the guest, and the host, a
+minute or two later; a third of one that filled the guest is back within
+about 3 minutes, and the rest follows more slowly
+(`TestKVMColdMemoryReturnsToTheHost`). Clean file pages are dropped. A dirty
+one leaves on a later pass, once the kernel's flusher has written it.
+Anonymous ones go to swap, and are skipped while the guest has none.
 
 The helper writes these to `/sys/module/damon_reclaim/parameters`, `enabled`
 last:
@@ -159,12 +161,11 @@ last:
 | `enabled=Y` | Starts it. |
 
 The default quotas cap it at 128 MiB of memory tried and 10 ms of CPU a
-second.
-A kernel without DAMON_RECLAIM has no such directory and the step is
+second. A kernel without DAMON_RECLAIM has no such directory and the step is
 skipped; any other failure is reported as a `boot_error`. The kernel config
-must leave `CONFIG_LRU_GEN` off: with it, reading a file no longer clears the
-idle flag DAMON checks, and files in use would be paged out. A server gets
-the kernel with its release
+must leave `CONFIG_LRU_GEN` off: with it, reading a file no longer clears
+the idle flag DAMON checks, and files in use would be paged out. A server
+gets the kernel with its release
 ([Update the server](install.md#update-the-server)); a running or saved VM
 boots it on its next cold start.
 
