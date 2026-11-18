@@ -442,8 +442,10 @@ apart, each about a sixteenth of the guest's free memory, so the server
 waits until a 4-second check sees under 16 MiB more come back, at most 40
 seconds, then calls `Sync` again for what the session wrote meanwhile, and
 saves. The saved state then holds about what the session uses: a 2 GiB VM
-whose page cache held 1400 MiB saved 135 MiB of memory, against 1228 to
-1315 MiB saved at once (`TestKVMSaveWritesOnlyWhatTheSessionUses`).
+whose page cache held 1400 MiB wrote 137 MiB of memory in a 21-second
+save, against 1228 to 1315 MiB in 7 seconds before the wait
+(`TestKVMSaveWritesOnlyWhatTheSessionUses`). The host has the memory back
+as each pass reports it, before the save ends.
 
 ## Freezing the root disk
 
