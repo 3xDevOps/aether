@@ -244,14 +244,14 @@ func TestExecResolvesNamedUsersInTheGuest(t *testing.T) {
 	if _, err := h.engine.execAttached(t.Context(), "run-a", runtime.AttachedExec{Argv: []string{"psql"}, User: "postgres", Stdout: io.Discard, Stderr: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
-	var user string
+	var ran guest.ProcessSpec
 	for _, p := range g.spawned() {
 		if p.Argv[len(p.Argv)-1] == "psql" {
-			user = p.User
+			ran = p
 		}
 	}
-	if user != "70:71" {
-		t.Errorf("a sudo -u postgres command ran as %q", user)
+	if ran.User != "70:71" || !slices.Contains(ran.Env, runtime.RootPath) {
+		t.Errorf("a sudo -u postgres command ran as %q with %v", ran.User, ran.Env)
 	}
 	g.output["/bin/sh"] = ""
 	if _, err := h.engine.execAttached(t.Context(), "run-a", runtime.AttachedExec{Argv: []string{"psql"}, User: "nobody-here", Stdout: io.Discard, Stderr: io.Discard}); err == nil || !strings.Contains(err.Error(), "unknown in the VM") {

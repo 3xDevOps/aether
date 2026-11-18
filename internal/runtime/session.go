@@ -15,8 +15,11 @@ const ExecOutputLimit = 1 << 20
 // end, where the failure is.
 const setupOutputLimit = 16 << 10
 
-// RootPath is sudo's secure_path. A root exec never searches the
-// container's PATH, which puts the agent-writable ~/.local/bin first.
+// RootPath is sudo's secure_path, the PATH of sudo's commands and of the
+// runtime's own root setup steps. Every other process, root or not, keeps
+// the session's PATH, which puts the agent-writable ~/.local/bin first, so
+// a process started as root names its program by absolute path; only the
+// agent or shell, run as the session's user, is looked up by name.
 const RootPath = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 // RootUser reports whether an exec user string names uid 0 as "root" or a plain

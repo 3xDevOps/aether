@@ -28,15 +28,6 @@ func processID(kind string) string {
 	return kind + "-" + hex.EncodeToString(b[:])
 }
 
-// A root exec gets sudo's secure_path instead of the VM's PATH, as with
-// Docker.
-func execEnv(rec *record, user string, extra []string) []string {
-	if runtime.RootUser(user) {
-		extra = append(append([]string{}, extra...), runtime.RootPath)
-	}
-	return overrideEnv(rec.Env, extra)
-}
-
 func overrideEnv(base, extra []string) []string {
 	merged := make(map[string]string, len(base)+len(extra))
 	for _, list := range [][]string{base, extra} {
@@ -91,7 +82,7 @@ func (e *engine) spawn(ctx context.Context, key string, spec guest.ProcessSpec) 
 	// Docker's no-new-privileges covers every process of a session without
 	// sudo, so the image's own setuid sudo cannot skip the approval shim.
 	spec.NoNewPrivileges = !rec.Sudo
-	spec.Env = execEnv(rec, spec.User, spec.Env)
+	spec.Env = overrideEnv(rec.Env, spec.Env)
 	if spec.Dir == "" {
 		spec.Dir = rec.WorkingDir
 	}
@@ -198,9 +189,10 @@ func (e *engine) execTTY(ctx context.Context, key string, argv []string, workDir
 
 // execAttached keeps the staged helper's input open while it runs: closing
 // it, when ctx ends or the output cannot be delivered, kills the command.
+// As with Docker, it gets sudo's secure_path whatever its user.
 func (e *engine) execAttached(ctx context.Context, key string, spec runtime.AttachedExec) (int, error) {
 	argv := append([]string{coordtransport.CLIPath, devexec.Command, devexec.Attached, strconv.Itoa(len(spec.Stdin))}, spec.Argv...)
-	p, att, err := e.spawn(ctx, key, guest.ProcessSpec{ID: processID("attached"), Argv: argv, User: spec.User, Dir: spec.WorkingDir, Lossless: true})
+	p, att, err := e.spawn(ctx, key, guest.ProcessSpec{ID: processID("attached"), Argv: argv, Env: []string{runtime.RootPath}, User: spec.User, Dir: spec.WorkingDir, Lossless: true})
 	if err != nil {
 		return 0, fmt.Errorf("vm runtime: exec: %w", err)
 	}
