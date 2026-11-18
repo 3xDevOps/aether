@@ -245,7 +245,9 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	// Pause freezes the session, not the VM: a writer in it stops, exec is
 	// refused, and git still serves the checkout, so a close can commit a
 	// paused session as it commits a paused container.
-	h.sh(t, key, "(while [ ! -e stop ]; do date +%s%N > tick; sleep 0.05; done) >/dev/null 2>&1 &")
+	// The writer renames each tick into place, so a pause never lands on an
+	// empty file.
+	h.sh(t, key, "date +%s%N > tick; (while [ ! -e stop ]; do date +%s%N > tick.new && mv tick.new tick; sleep 0.05; done) >/dev/null 2>&1 &")
 	tick := func() string {
 		t.Helper()
 		got, readErr := h.git.FilesRead(ctx, ws, run, "", "tick", 0)
@@ -285,7 +287,7 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	if now := tick(); now == frozen {
 		t.Fatal("a resumed session does not write")
 	}
-	h.sh(t, key, "touch stop && sleep 0.3 && rm -f stop tick")
+	h.sh(t, key, "touch stop && sleep 0.3 && rm -f stop tick tick.new")
 
 	// Finalize's order: the main process exits, then the last snapshot, the
 	// commit, publication and evidence, then the VM goes.
