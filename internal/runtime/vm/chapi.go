@@ -49,14 +49,12 @@ func (c chAPI) resume(ctx context.Context) error {
 	return c.call(ctx, http.MethodPut, "vm.resume", nil, nil)
 }
 
-// snapshot waits as long as the monitor takes to write the guest's memory,
-// minutes for a large guest on a slow disk, and is not cut short by ctx: a
-// monitor cut off goes on writing, and answers no resume until it is done,
-// so the VM would stay paused.
+// snapshot is bounded by ctx alone: writing a large guest's memory to a slow
+// disk takes minutes.
 func (c chAPI) snapshot(ctx context.Context, dir string) error {
 	untimed := *c.client
 	untimed.Timeout = 0
-	return chAPI{client: &untimed}.call(context.WithoutCancel(ctx), http.MethodPut, "vm.snapshot", map[string]string{"destination_url": "file://" + dir}, nil)
+	return chAPI{client: &untimed}.call(ctx, http.MethodPut, "vm.snapshot", map[string]string{"destination_url": "file://" + dir}, nil)
 }
 
 // shutdownVMM ends the monitor process; the guest gets no warning.

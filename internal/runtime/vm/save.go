@@ -27,6 +27,10 @@ const (
 	// is about 30 s.
 	reportSettled = 16 << 20
 	reportTimeout = 40 * time.Second
+	// snapshotRate is the slowest write a snapshot gets time for: a 24 GiB
+	// guest gets over 20 minutes. A monitor still busy after that is taken
+	// to hang; the VM it holds paused is resumed by the next wake.
+	snapshotRate = 20 << 20
 )
 
 // save pauses the VM, writes its memory and device state to the snapshot
@@ -91,7 +95,12 @@ func (e *engine) save(ctx context.Context, key string) error {
 	if err = os.Mkdir(dir, 0o700); err != nil {
 		return resumeAfter(err)
 	}
-	if err = snapshotRestored(ctx, api, key, dir); err == nil {
+	// Not cut short with ctx: a monitor cut off goes on writing, and answers
+	// no resume until it is done.
+	snapCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chAPITimeout+time.Duration(unitMemoryMiB(rec)<<20/snapshotRate)*time.Second)
+	err = snapshotRestored(snapCtx, api, key, dir)
+	cancel()
+	if err == nil {
 		err = syncSnapshot(dir)
 	}
 	if err != nil {
