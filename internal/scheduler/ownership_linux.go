@@ -361,6 +361,9 @@ const maxHeldDirs = 64
 type ownershipWalk struct {
 	uid, gid  int
 	protected map[inodeKey]struct{}
+	// syscalls counts the directory reads, stats, chowns and opens the walk
+	// makes, so a test can compare walks by work rather than by time.
+	syscalls int
 }
 
 type subdir struct {
@@ -372,7 +375,7 @@ type subdir struct {
 // stat however deep it sits, and closes dir. The first maxHeldDirs levels stay
 // open while their subdirectories are walked; a deeper directory is reopened
 // from anchor, the deepest one still open, along fromAnchor.
-func (w ownershipWalk) walk(dir *os.File, rel string, depth, anchor int, fromAnchor []string) error {
+func (w *ownershipWalk) walk(dir *os.File, rel string, depth, anchor int, fromAnchor []string) error {
 	subdirs, err := w.entries(dir, rel)
 	if err != nil || depth >= maxHeldDirs {
 		_ = dir.Close()
@@ -385,7 +388,7 @@ func (w ownershipWalk) walk(dir *os.File, rel string, depth, anchor int, fromAnc
 	}
 	for _, sub := range subdirs {
 		components := append(slices.Clip(fromAnchor), sub.name)
-		child, err := openBeneath(anchor, components, sub)
+		child, err := w.openBeneath(anchor, components, sub)
 		if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) || errors.Is(err, errDirChanged) {
 			continue
 		}
@@ -400,8 +403,9 @@ func (w ownershipWalk) walk(dir *os.File, rel string, depth, anchor int, fromAnc
 }
 
 // entries chowns dir's entries and returns its subdirectories.
-func (w ownershipWalk) entries(dir *os.File, rel string) ([]subdir, error) {
+func (w *ownershipWalk) entries(dir *os.File, rel string) ([]subdir, error) {
 	fd := int(dir.Fd())
+	w.syscalls++
 	names, err := dir.Readdirnames(-1)
 	if errors.Is(err, unix.ENOENT) && rel != "." {
 		return nil, nil
@@ -412,6 +416,7 @@ func (w ownershipWalk) entries(dir *os.File, rel string) ([]subdir, error) {
 	var subdirs []subdir
 	for _, name := range names {
 		var st unix.Stat_t
+		w.syscalls++
 		if err := unix.Fstatat(fd, name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 			if errors.Is(err, unix.ENOENT) {
 				continue
@@ -423,6 +428,7 @@ func (w ownershipWalk) entries(dir *os.File, rel string) ([]subdir, error) {
 		_, protectedLink := w.protected[inodeKey{st.Dev, st.Ino}]
 		shared := st.Mode&unix.S_IFMT == unix.S_IFREG && (protectedLink || st.Nlink > 1)
 		if (int(st.Uid) != w.uid || int(st.Gid) != w.gid) && !shared {
+			w.syscalls++
 			if err := unix.Fchownat(fd, name, w.uid, w.gid, unix.AT_SYMLINK_NOFOLLOW); err != nil && !errors.Is(err, unix.ENOENT) {
 				return nil, fmt.Errorf("chown %s: %w", path.Join(rel, name), err)
 			}
@@ -438,9 +444,10 @@ var errDirChanged = errors.New("directory changed during the walk")
 
 // openBeneath opens the directory components lead to from anchor without
 // following a symlink at any step, and refuses one that is no longer want.
-func openBeneath(anchor int, components []string, want subdir) (*os.File, error) {
+func (w *ownershipWalk) openBeneath(anchor int, components []string, want subdir) (*os.File, error) {
 	fd := anchor
 	for _, name := range components {
+		w.syscalls++
 		next, err := unix.Openat(fd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if fd != anchor {
 			_ = unix.Close(fd)
@@ -451,6 +458,7 @@ func openBeneath(anchor int, components []string, want subdir) (*os.File, error)
 		fd = next
 	}
 	var st unix.Stat_t
+	w.syscalls++
 	if err := unix.Fstat(fd, &st); err != nil {
 		_ = unix.Close(fd)
 		return nil, err
