@@ -202,8 +202,18 @@ func TestKVMSessionLifecycle(t *testing.T) {
 	if info, _ := after.inspect(t.Context(), key); !info.Exited {
 		t.Errorf("stopped VM inspects as %+v", info)
 	}
+	monitor := after.path(key, monitorLog)
+	if err := os.WriteFile(monitor, []byte("the first launch\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := after.start(t.Context(), key); err != nil {
 		t.Fatal(err)
+	}
+	if cur, err := os.ReadFile(monitor); err != nil || strings.Contains(string(cur), "the first launch") {
+		t.Errorf("after a cold start monitor.log holds %q, %v; want only the new launch's output", cur, err)
+	}
+	if old, _ := os.ReadFile(monitor + ".1"); string(old) != "the first launch\n" {
+		t.Errorf("monitor.log.1 holds %q, want the first launch's output", old)
 	}
 	if out, _ := vmRun(t, after, key, "cat /usr/local/bin/kept; wc -l < /var/tmp/setup-log"); out != "installed\n1\n" {
 		t.Errorf("after a cold start the root disk holds %q, want the file written before it and one setup run", out)
