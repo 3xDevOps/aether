@@ -354,25 +354,22 @@ func (e *Engine) borrowedRepo(dir string) (string, error) {
 }
 
 // reserveShare reserves, against the receive floor, a bound on what
-// shareHistory writes: the objects the store's refs reach beyond the tree
-// borrowed. With borrowed "" that is the store's whole history, as it takes
-// the disk now. Otherwise objects stored as deltas against the borrowed tree
-// are written whole, so their full size counts.
+// shareHistory writes: the full size of the objects the store's refs reach
+// beyond the tree borrowed, the whole history with borrowed "". An object
+// stored as a delta against one the pack leaves out is written whole.
 func (e *Engine) reserveShare(ctx context.Context, store, borrowed string) (func(), error) {
 	roots, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", "refs/aether/")
 	if err != nil {
 		return nil, err
 	}
-	format := "%(objectsize:disk)"
 	if borrowed != "" {
 		roots += "^" + borrowed + "\n"
-		format = "%(objectsize)"
 	}
 	objects, err := e.gitInput(ctx, store, e.gitEnv(), []byte(roots), "rev-list", "--objects", "--no-object-names", "--stdin")
 	if err != nil {
 		return nil, err
 	}
-	sizes, err := e.gitInput(ctx, store, e.gitEnv(), []byte(objects), "cat-file", "--batch-check="+format)
+	sizes, err := e.gitInput(ctx, store, e.gitEnv(), []byte(objects), "cat-file", "--batch-check=%(objectsize)")
 	if err != nil {
 		return nil, err
 	}

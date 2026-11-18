@@ -273,6 +273,18 @@ func TestShareDetachedHistoryShrinksStoresThatCopiedTheForkPoint(t *testing.T) {
 	if pins, _ := e.git(ctx, partial, "for-each-ref", historyPinRoot); pins != "" || objectBytes(t, store) != whole {
 		t.Fatalf("a repository missing the fork point's files took the history: pins %q, store %d bytes of %d", pins, objectBytes(t, store), whole)
 	}
+	repo, err := e.existingRepoPath("ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A share that fails once it pinned the fork point leaves no pin and the
+	// store as it was.
+	if err = e.shareHistory(ctx, "run1", store, repo, strings.Repeat("1", len(base))); err == nil {
+		t.Fatal("a share that packs a missing object succeeded")
+	}
+	if pins, _ := e.git(ctx, repo, "for-each-ref", historyPinRoot); pins != "" || objectBytes(t, store) != whole {
+		t.Fatalf("a failed share left pins %q and a store of %d bytes, of %d", pins, objectBytes(t, store), whole)
+	}
 	workspaceOf := func(_ context.Context, key domain.RunID) (domain.WorkspaceID, error) {
 		if key != "run1" {
 			t.Errorf("workspace of %s asked", key)
@@ -286,10 +298,6 @@ func TestShareDetachedHistoryShrinksStoresThatCopiedTheForkPoint(t *testing.T) {
 	t.Logf("history store of a two-file session: %d bytes before the share, %d after", whole, shared)
 	if shared*20 > whole {
 		t.Fatalf("the store shrank from %d bytes to only %d", whole, shared)
-	}
-	repo, err := e.existingRepoPath("ws1")
-	if err != nil {
-		t.Fatal(err)
 	}
 	for ws, want := range map[domain.WorkspaceID]string{"ws0": "", "ws1": historyPinRoot + "run1"} {
 		pinned, pathErr := e.existingRepoPath(ws)
