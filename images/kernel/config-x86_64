@@ -71,6 +71,14 @@ CONFIG_BLK_DEV=y
 CONFIG_VIRTIO_BLK=y
 CONFIG_VIRTIO_BALLOON=y
 CONFIG_PAGE_REPORTING=y
+# DAMON_RECLAIM pages out memory the guest has left untouched, which free
+# page reporting then returns to the host; the helper turns it on, and cold
+# anonymous pages go to swap (docs/vm-guest.md). LRU_GEN must stay off: with
+# it a read no longer clears the idle flag DAMON checks.
+CONFIG_DAMON=y
+CONFIG_DAMON_PADDR=y
+CONFIG_DAMON_RECLAIM=y
+CONFIG_SWAP=y
 CONFIG_MEMORY_HOTPLUG=y
 CONFIG_MEMORY_HOTREMOVE=y
 CONFIG_VIRTIO_MEM=y

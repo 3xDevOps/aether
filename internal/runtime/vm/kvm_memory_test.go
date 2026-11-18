@@ -1,0 +1,131 @@
+//go:build kvm
+
+package vm
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/3xDevOps/Aether/internal/runtime"
+)
+
+// TestKVMColdMemoryReturnsToTheHost checks DAMON_RECLAIM in a guest whose
+// page cache fills it, below the 20% free at which its default watermarks
+// stop it: a file read once leaves the guest, and the host's memory, after
+// twice min_age (pageout skips a page the first time it finds it not yet
+// marked idle) and the time its quota and free page reporting take; a file
+// Main reads every 2 seconds stays cached, and kdamond stays under 2% of a
+// vCPU.
+func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
+	e := kvmEngine(t)
+	key := "run-cold-memory"
+	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: key,
+		Command: []string{"/bin/sh", "-c", "while :; do cat /var/tmp/hot >/dev/null 2>&1; sleep 2; done"},
+		Env:     map[string]string{"AETHER_RUN_ID": key}, CPULimit: 1, MemoryLimitBytes: 2 << 30,
+	}
+	if _, err := e.create(t.Context(), key, spec, options{Offline: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.start(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	params := guestFields(t, e, key, "cd /sys/module/damon_reclaim/parameters && cat enabled min_age monitor_region_end skip_anon kdamond_pid; "+
+		"grep -c . /proc/swaps; grep 'System RAM' /proc/iomem | tail -1 | cut -d' ' -f1; awk '/^MemTotal:/ {print $2}' /proc/meminfo", 8)
+	if params[0] != "Y" {
+		t.Fatalf("DAMON_RECLAIM is not running: enabled=%s", params[0])
+	}
+	minAge := time.Duration(parseUint(t, params[1])) * time.Microsecond
+	_, ramLast, _ := strings.Cut(params[6], "-")
+	if last, err := strconv.ParseUint(ramLast, 16, 64); err != nil || last+1 != parseUint(t, params[2]) {
+		t.Errorf("DAMON_RECLAIM watches up to %s, the guest's RAM ends at %s+1", params[2], ramLast)
+	}
+	if noSwap := params[5] == "1"; (params[3] == "Y") != noSwap {
+		t.Errorf("DAMON_RECLAIM has skip_anon=%s with %s lines in /proc/swaps", params[3], params[5])
+	}
+	kdamond, memTotalKiB := params[4], parseUint(t, params[7])
+
+	const hotMiB = 64
+	coldMiB := memTotalKiB * 9 / 10 >> 10
+	guestFields(t, e, key, fmt.Sprintf("dd if=/dev/urandom of=/var/tmp/cold bs=1M count=%d iflag=fullblock oflag=direct status=none && "+
+		"dd if=/dev/urandom of=/var/tmp/hot bs=1M count=%d iflag=fullblock oflag=direct status=none", coldMiB, hotMiB), 0)
+	time.Sleep(5 * time.Second)
+	before := guestRAMOnHost(t, key)
+	free := parseUint(t, guestFields(t, e, key, "cat /var/tmp/cold >/dev/null && awk '/^MemFree:/ {print $2}' /proc/meminfo", 1)[0])
+	read := time.Now()
+	if free*5 > memTotalKiB {
+		t.Fatalf("reading %d MiB left %d of %d KiB free, not under 20%%", coldMiB, free, memTotalKiB)
+	}
+	held := guestRAMOnHost(t, key)
+	if held < before+coldMiB<<20/2 {
+		t.Fatalf("reading %d MiB took the host's share of the guest from %d to only %d bytes", coldMiB, before, held)
+	}
+	deadline := read.Add(2*minAge + 3*time.Minute)
+	for now := guestRAMOnHost(t, key); now > before+coldMiB<<20/5; now = guestRAMOnHost(t, key) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s after the read the host still holds %d bytes of the guest, %d before it (min_age %s)", time.Since(read).Round(time.Second), now, before, minAge)
+		}
+		time.Sleep(5 * time.Second)
+	}
+	t.Logf("reading %d MiB left %d KiB of %d free; the host's share of the guest went %d -> %d -> %d bytes, back %s after the read (min_age %s)",
+		coldMiB, free, memTotalKiB, before, held, guestRAMOnHost(t, key), time.Since(read).Round(time.Second), minAge)
+
+	reads := guestFields(t, e, key, "grep '^pgpgin ' /proc/vmstat; cat /var/tmp/hot >/dev/null; grep '^pgpgin ' /proc/vmstat", 4)
+	if kib := parseUint(t, reads[3]) - parseUint(t, reads[1]); kib > hotMiB<<10/8 {
+		t.Errorf("reading the file Main keeps reading took %d KiB from disk: DAMON_RECLAIM evicted it", kib)
+	}
+	cpu := guestFields(t, e, key, "cut -d' ' -f14,15 /proc/"+kdamond+"/stat; cut -d' ' -f1 /proc/uptime", 3)
+	ticks := parseUint(t, cpu[0]) + parseUint(t, cpu[1])
+	uptime, err := strconv.ParseFloat(cpu[2], 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	share := float64(ticks) / 100 / uptime
+	if share > 0.02 {
+		t.Errorf("kdamond used %.2f%% of a vCPU", share*100)
+	}
+	t.Logf("kdamond used %.2f%% of a vCPU over %.0f s", share*100, uptime)
+}
+
+func guestFields(t *testing.T, e *engine, key, script string, n int) []string {
+	t.Helper()
+	out, code := vmRun(t, e, key, script)
+	fields := strings.Fields(out)
+	if code != 0 || len(fields) != n {
+		t.Fatalf("%q exited %d with %q, want %d fields", script, code, out, n)
+	}
+	return fields
+}
+
+func parseUint(t *testing.T, s string) uint64 {
+	t.Helper()
+	v, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// guestRAMOnHost is the guest memory the host holds for the VM: Cloud
+// Hypervisor's shared memory, charged to the VM's unit.
+func guestRAMOnHost(t *testing.T, key string) uint64 {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("/sys/fs/cgroup", runtime.SessionSlice, unitName(key), "memory.stat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if v, ok := strings.CutPrefix(line, "shmem "); ok {
+			return parseUint(t, v)
+		}
+	}
+	t.Fatalf("memory.stat of %s has no shmem", key)
+	return 0
+}
