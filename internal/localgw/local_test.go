@@ -376,7 +376,7 @@ func TestExternalLinkRefreshesBackend(t *testing.T) {
 	}
 }
 
-func TestLocalSnapshotRefreshesNamedOverlayAfterMtimeChange(t *testing.T) {
+func TestLocalSnapshotRefreshesNamedOverlayAfterASave(t *testing.T) {
 	useTempConfigDir(t)
 	initial := cli.Config{
 		Addr:  "default:2222",
@@ -650,6 +650,18 @@ func TestLocalLinkReset(t *testing.T) {
 	rec = do(g, http.MethodPost, "/local/v1/link.status", `{}`, true)
 	if !strings.Contains(rec.Body.String(), `"server_configured":false`) {
 		t.Fatalf("status after reset: %s", rec.Body)
+	}
+
+	// The same `aether link` again in a terminal writes the same bytes.
+	if err := cli.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	rec = do(g, http.MethodPost, "/local/v1/link.status", `{}`, true)
+	if !strings.Contains(rec.Body.String(), `"server_configured":true`) {
+		t.Fatalf("status after relinking the same server: %s", rec.Body)
+	}
+	if len(backend.relinked) != 2 || backend.relinked[1].Addr != saved.Addr {
+		t.Fatalf("relinked = %+v, want the gateway back on %s", backend.relinked, saved.Addr)
 	}
 }
 

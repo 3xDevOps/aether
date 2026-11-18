@@ -93,8 +93,9 @@ type localState struct {
 	// neither starts on the server being switched away from.
 	switching sync.RWMutex
 	cfg       cli.Config
-	// raw is the config file the cache was read from. Comparing bytes, not
-	// the mtime, catches two saves within one filesystem timestamp tick.
+	// raw is the config file reload last cached cfg from, nil once the
+	// gateway changed cfg itself. Comparing bytes, not the mtime, catches
+	// two saves within one filesystem timestamp tick.
 	raw     []byte
 	backend Backend
 	sync    *localops.SyncManager
@@ -113,19 +114,11 @@ func newLocalState(cfg Config) *localState {
 	return state
 }
 
-// cacheConfig updates the in-memory link and the file bytes together.
-// Callers hold s.mu while changing the cache.
+// cacheConfig sets the in-memory link after the gateway changed it, so the
+// next reload compares the file afresh. Callers hold s.mu.
 func (s *localState) cacheConfig(cfg cli.Config) {
-	path, err := cli.Path()
-	if err != nil {
-		return
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
 	s.cfg = cfg
-	s.raw = raw
+	s.raw = nil
 }
 
 // snapshot returns the current link config under the lock, with any change
@@ -151,7 +144,7 @@ func (s *localState) reload() (cli.Config, bool) {
 	if err != nil || bytes.Equal(raw, s.raw) {
 		return cli.Config{}, false
 	}
-	cfg, err := cli.Load()
+	cfg, err := cli.Parse(path, raw)
 	if err != nil {
 		return cli.Config{}, false
 	}
@@ -169,7 +162,8 @@ func (s *localState) reload() (cli.Config, bool) {
 		s.cfg.EdgeURL != cfg.EdgeURL || s.cfg.ServerID != cfg.ServerID {
 		return cfg, true
 	}
-	s.cacheConfig(cfg)
+	s.cfg = cfg
+	s.raw = raw
 	return cfg, false
 }
 
