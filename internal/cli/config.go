@@ -268,7 +268,7 @@ func Load() (Config, error) {
 	return Parse(path, body)
 }
 
-// Parse decodes the config file at path that Load would read as body.
+// Parse decodes body, the contents of the config file at path, as Load does.
 func Parse(path string, body []byte) (Config, error) {
 	var cfg Config
 	if err := json.Unmarshal(body, &cfg); err != nil {

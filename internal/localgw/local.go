@@ -93,9 +93,8 @@ type localState struct {
 	// neither starts on the server being switched away from.
 	switching sync.RWMutex
 	cfg       cli.Config
-	// raw is the config file reload last cached cfg from, nil once the
-	// gateway changed cfg itself. Comparing bytes, not the mtime, catches
-	// two saves within one filesystem timestamp tick.
+	// raw is the config file cfg was last read from, nil after the gateway
+	// changed cfg itself, so the next reload compares the file afresh.
 	raw     []byte
 	backend Backend
 	sync    *localops.SyncManager
