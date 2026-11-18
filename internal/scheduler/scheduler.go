@@ -250,6 +250,9 @@ type Scheduler struct {
 	vmMemoryMu         sync.Mutex
 	vmMemoryLow        bool
 	vmMemoryStallSince time.Time
+	// vmMemoryBraked holds from the brake's first freeze until every VM
+	// runs again; only the brake's own goroutine touches it.
+	vmMemoryBraked bool
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
@@ -585,6 +588,9 @@ type supervised struct {
 	// save, which the sleep sweep waits a full sleep delay after.
 	asleepSaved  bool
 	saveFailedAt time.Time
+	// frozenNotedAt is when the timeline last said the memory brake froze
+	// the session's VM.
+	frozenNotedAt time.Time
 	// awake counts callers the container must not stop under: a delivery,
 	// an exec or a browser operation in flight.
 	awake int
@@ -850,11 +856,17 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		defer close(memoryWatched)
 		s.watchVMMemory(watchCtx)
 	}()
+	brakeWatched := make(chan struct{})
+	go func() {
+		defer close(brakeWatched)
+		s.watchVMBrake(watchCtx)
+	}()
 	defer func() {
 		stopWatch()
 		<-watched
 		<-disksWatched
 		<-memoryWatched
+		<-brakeWatched
 	}()
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {

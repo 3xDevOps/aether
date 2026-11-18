@@ -61,7 +61,7 @@ func (s *Scheduler) saveLive(ctx context.Context, entry *supervised, saver runti
 	if s.agentWorking(entry) {
 		return errors.Join(errStayAwake, s.unmarkAsleep(entry))
 	}
-	return s.saveMarked(ctx, entry, saver)
+	return s.saveMarked(ctx, entry, saver, false)
 }
 
 // agentWorking reports whether entry's agent works, as a save of its VM
@@ -75,8 +75,12 @@ func (s *Scheduler) agentWorking(entry *supervised) bool {
 }
 
 // saveMarked is saveLive for a run whatever its agent is doing. A turn in
-// flight carries on after the restore, as across a server restart.
-func (s *Scheduler) saveMarked(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
+// flight carries on after the restore, as across a server restart. The
+// guest of a frozen VM answers no detach, so its keeper is let go of as a
+// server restart lets go of it: the save goes ahead meanwhile and ends the
+// wait. A VM that died instead of being saved is not left asleep: its run
+// ends as that of any VM that died.
+func (s *Scheduler) saveMarked(ctx context.Context, entry *supervised, saver runtime.SaveRuntime, frozen bool) error {
 	s.mu.Lock()
 	cid := entry.containerID
 	// From here exec and terminal recovery treat the VM as frozen.
@@ -86,14 +90,32 @@ func (s *Scheduler) saveMarked(ctx context.Context, entry *supervised, saver run
 	// detached.
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wakeTimeout)
 	defer cancel()
-	detachErr := s.detachForSave(saveCtx, entry)
-	saveErr := saver.Save(saveCtx, cid)
+	var detachErr, saveErr error
+	if frozen {
+		detachCtx, saved := context.WithCancel(saveCtx)
+		detached := make(chan struct{})
+		go func() {
+			defer close(detached)
+			_ = s.detachForSave(detachCtx, entry)
+		}()
+		saveErr = saver.Save(saveCtx, cid)
+		saved()
+		<-detached
+	} else {
+		detachErr = s.detachForSave(saveCtx, entry)
+		saveErr = saver.Save(saveCtx, cid)
+	}
 	if saveErr == nil {
 		recordErr := s.recordSaved(entry, true)
 		s.endSleep(entry, true)
 		return errors.Join(detachErr, recordErr)
 	}
 	saveErr = errors.Join(fmt.Errorf("save the idle session: %w", saveErr), detachErr)
+	if vms, ok := s.cfg.Runtime.(runtime.FreezeRuntime); ok && frozen {
+		// A save refused before it thawed the VM; the brake freezes it
+		// again while the host is short of memory.
+		saveErr = errors.Join(saveErr, vms.Thaw(cid))
+	}
 	s.mu.Lock()
 	entry.saveFailedAt = time.Now().UTC()
 	s.mu.Unlock()
@@ -104,6 +126,9 @@ func (s *Scheduler) saveMarked(ctx context.Context, entry *supervised, saver run
 	s.mu.Lock()
 	entry.paused = false
 	s.mu.Unlock()
+	if info, err := s.cfg.Runtime.Inspect(ctx, cid); errors.Is(err, runtime.ErrNotFound) || err == nil && info.Exited {
+		return errors.Join(saveErr, s.unmarkAsleep(entry))
+	}
 	if err := s.reattach(ctx, entry, true); err != nil {
 		s.endSleep(entry, true)
 		return errors.Join(saveErr, err)

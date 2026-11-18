@@ -89,6 +89,8 @@ type engine struct {
 	capture map[string]bool
 	events  map[string]runtime.MemoryEvents
 	relays  map[string]*relay
+	// frozenAt is when freeze froze each VM that is still frozen.
+	frozenAt map[string]time.Time
 
 	netMu     sync.Mutex
 	reserved  map[int]bool
@@ -103,6 +105,7 @@ func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
 		cfg: cfg, root: filepath.Join(cfg.DataDir, "vm"), units: u, dial: dial, run: runCommand,
 		locks: map[string]*sync.Mutex{}, helpers: map[string]helper{}, gits: map[string]*guest.Git{}, booting: map[string]bool{},
 		fresh: map[string]bool{}, capture: map[string]bool{}, events: map[string]runtime.MemoryEvents{}, relays: map[string]*relay{}, reserved: map[int]bool{},
+		frozenAt:   map[string]time.Time{},
 		listenDNS:  func() (*dnsRelay, error) { return listenDNS(proxyAddr, vmSubnet, hostResolvers) },
 		cgroupRoot: "/sys/fs/cgroup", reportPoll: 4 * time.Second,
 	}
@@ -117,15 +120,20 @@ func runCommand(ctx context.Context, name string, args ...string) error {
 }
 
 func (e *engine) lock(key string) func() {
+	l := e.keyLock(key)
+	l.Lock()
+	return l.Unlock
+}
+
+func (e *engine) keyLock(key string) *sync.Mutex {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	l := e.locks[key]
 	if l == nil {
 		l = &sync.Mutex{}
 		e.locks[key] = l
 	}
-	e.mu.Unlock()
-	l.Lock()
-	return l.Unlock
+	return l
 }
 
 // helper returns the key's client, dialing once per VM lifetime; the client

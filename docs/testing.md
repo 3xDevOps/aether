@@ -822,7 +822,7 @@ runs every package that has them:
 | --- | --- | --- |
 | `internal/vmimage` | `TestKVMStandardImageRunsDocker` | The standard image from store disks, with Docker inside ([The guest kernel](#the-guest-kernel)) |
 | `internal/guest/helper` | `TestKVMHelper` | The helper as PID 1, driven through its client ([The VM helper](#the-vm-helper)) |
-| `internal/runtime/vm` | `TestKVM...` in each `kvm_*_test.go` | Sessions through the engine, with real systemd units and the server binary as monitor and helper: lifecycle, save and restore, a guest reboot, the home, the checkout, the network, Save environment, cold memory returning to the host, the memory a wake loads back |
+| `internal/runtime/vm` | `TestKVM...` in each `kvm_*_test.go` | Sessions through the engine, with real systemd units and the server binary as monitor and helper: lifecycle, save and restore, a guest reboot, the home, the checkout, the network, Save environment, cold memory returning to the host, the memory a wake loads back, a freeze stopping VMs that fill their memory at once |
 
 It needs root on a Linux x86-64 host with `/dev/kvm`, `cloud-hypervisor`,
 `qemu-img`, `mkfs.ext4`, `virtiofsd` at `/usr/libexec/virtiofsd`, systemd,

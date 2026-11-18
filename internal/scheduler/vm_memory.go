@@ -261,8 +261,9 @@ func (s *Scheduler) saveForMemory(ctx context.Context, working bool) bool {
 }
 
 // saveFits reports whether c's saved memory fits on the data filesystem,
-// which holds the VMs' disks, above the reserve that keeps them writing. A
-// VM whose memory is unknown does not: its save could write anything.
+// which holds the VMs' disks, above the level below which disk reclaim
+// deletes the saved memory of other sleeping sessions. A VM whose memory is
+// unknown does not: its save could write anything.
 func (s *Scheduler) saveFits(c memoryCandidate) bool {
 	if c.memory == 0 {
 		return false
@@ -275,7 +276,7 @@ func (s *Scheduler) saveFits(c memoryCandidate) bool {
 		slog.Warn("scheduler: memory guard: measure the data filesystem", "error", err)
 		return false
 	}
-	if data.FreeBytes < diskReserve(data.TotalBytes, s.cfg.MinFreeBytes)+c.memory {
+	if data.FreeBytes < diskReserve(data.TotalBytes, s.cfg.MinFreeBytes)+reclaimHeadroom+c.memory {
 		slog.Warn("scheduler: memory guard: no room on disk to save a session VM", "run", c.e.runID, "memory", c.memory, "free", data.FreeBytes)
 		return false
 	}
@@ -305,8 +306,10 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 	c.e.sleeping = true
 	c.e.sleepDone = make(chan struct{})
 	s.mu.Unlock()
-	wake := !c.idle
-	if c.idle {
+	// A frozen guest cannot say whether it is busy, so it wakes again.
+	frozen := s.vmFrozen(cid)
+	wake := !c.idle || frozen
+	if !wake {
 		busy, err := s.guestBusy(ctx, cid)
 		wake = busy || err != nil
 	}
@@ -322,6 +325,11 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 	if !working {
 		return s.savedForMemory(ctx, c.e, s.saveLive(ctx, c.e, saver), memorySavedIdleNote)
 	}
+	// Frozen, the VM takes no more memory while it is saved, and the save
+	// does not wait for its guest.
+	if vms, ok := s.cfg.Runtime.(runtime.FreezeRuntime); ok && !frozen {
+		frozen = vms.Freeze(cid) == nil
+	}
 	// A turn the agent started since the candidates were listed carries on
 	// after the wake.
 	note := memorySavedIdleNote
@@ -336,7 +344,7 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 			return false
 		}
 	}
-	return s.savedForMemory(ctx, c.e, s.saveMarked(ctx, c.e, saver), note)
+	return s.savedForMemory(ctx, c.e, s.saveMarked(ctx, c.e, saver, frozen), note)
 }
 
 // savedForMemory logs a save under memory pressure and publishes its

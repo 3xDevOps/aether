@@ -92,6 +92,7 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 		e.promoteCache(rec)
 		return nil
 	}
+	_ = e.thaw(key)
 	api := newCHAPI(e.path(key, apiSocket))
 	if state, stateErr := api.state(ctx); stateErr == nil && state == "Paused" {
 		if err = api.resume(ctx); err != nil {
@@ -244,8 +245,11 @@ func (e *engine) powerOff(ctx context.Context, rec *record) (bool, error) {
 	}
 }
 
+// kill thaws first, as stop and destroy do: a frozen unit handles no
+// SIGTERM, and would hold the stop for its whole TimeoutStopSec.
 func (e *engine) kill(ctx context.Context, key string) {
 	e.forgetHelper(key)
+	_ = e.thaw(key)
 	_ = e.units.Stop(ctx, unitName(key))
 }
 
@@ -416,6 +420,7 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 		cancel()
 	}
 	e.forgetHelper(key)
+	_ = e.thaw(key)
 	if err = e.units.Stop(ctx, unitName(key)); err != nil {
 		return err
 	}

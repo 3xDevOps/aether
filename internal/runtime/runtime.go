@@ -98,6 +98,21 @@ type SaveRuntime interface {
 	SavedMemory(ID) (uint64, error)
 }
 
+// FreezeRuntime optionally stops running containers where they stand, at
+// once and without their help, so they take no more of the host's memory,
+// and lets them run on later. A frozen container keeps its memory and
+// answers nothing. FreezeAll returns the containers it froze, and leaves
+// one the runtime is starting, stopping, saving or restoring for the next
+// call; Freeze fails on such a one. Frozen lists the frozen containers, the
+// longest frozen first. Save thaws the container it saves, and Stop and
+// Destroy the one they end.
+type FreezeRuntime interface {
+	FreezeAll() []ID
+	Freeze(ID) error
+	Frozen() []ID
+	Thaw(ID) error
+}
+
 // CaptureRuntime optionally starts a stopped session container with a main
 // process that does nothing in place of its command, and without its setup
 // script, so the server can make the session's final commit before the

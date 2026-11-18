@@ -231,8 +231,8 @@ type fakeUnits struct {
 	failNext   bool
 	stateErr   error
 	failResume bool
-	// cgroups is the cgroup root, which holds a memory.current and
-	// memory.stat for each running unit.
+	// cgroups is the cgroup root, which holds a memory.current, a
+	// memory.stat and a cgroup.freeze for each running unit.
 	cgroups string
 }
 
@@ -263,6 +263,9 @@ func (u *fakeUnits) Start(_ context.Context, name string, argv, properties []str
 		return err
 	}
 	if err = os.WriteFile(filepath.Join(u.cgroup(name), "memory.stat"), []byte("anon 1\ninactive_file 0\n"), 0o644); err != nil {
+		return err
+	}
+	if err = os.WriteFile(filepath.Join(u.cgroup(name), "cgroup.freeze"), []byte("0\n"), 0o644); err != nil {
 		return err
 	}
 	u.mu.Lock()
@@ -358,6 +361,10 @@ type fakeVMM struct {
 	// restoring counts the snapshots refused while an on-demand restore
 	// still loads memory.
 	restoring int
+	// snapshotFails refuses every snapshot, and stuck every resume, as a
+	// monitor that stopped answering does.
+	snapshotFails bool
+	stuck         bool
 }
 
 func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
@@ -385,6 +392,10 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 		case "vm.pause":
 			v.state = "Paused"
 		case "vm.resume":
+			if v.stuck {
+				http.Error(w, "no answer", http.StatusGatewayTimeout)
+				return
+			}
 			v.state = "Running"
 			if v.failResume {
 				http.Error(w, "reply lost", http.StatusGatewayTimeout)
@@ -393,6 +404,10 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 			if v.restoring > 0 {
 				v.restoring--
 				http.Error(w, `["Error from API","VM on-demand memory restore is still in progress"]`, http.StatusConflict)
+				return
+			}
+			if v.snapshotFails {
+				http.Error(w, "no space left on device", http.StatusInternalServerError)
 				return
 			}
 			var req struct {
