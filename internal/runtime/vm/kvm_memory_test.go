@@ -27,7 +27,7 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
 	spec := runtime.Spec{
 		Image: "docker.io/library/ubuntu:24.04", CreationKey: key,
-		Command: []string{"/bin/sh", "-c", "echo $$ >/var/tmp/main.pid; while :; do cat /var/tmp/hot >/dev/null 2>&1; sleep 2; done"},
+		Command: []string{"/bin/sh", "-c", "while :; do cat /var/tmp/hot >/dev/null 2>&1; sleep 2; done"},
 		Env:     map[string]string{"AETHER_RUN_ID": key}, CPULimit: 1, MemoryLimitBytes: 1 << 30,
 	}
 	if _, err := e.create(t.Context(), key, spec, options{Offline: true}); err != nil {
@@ -66,13 +66,14 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	if held < before+coldMiB<<20/2 {
 		t.Fatalf("reading %d MiB took the host's share of the guest from %d to only %d bytes", coldMiB, before, held)
 	}
-	// Main's read_bytes counts what its cats fetched from disk.
-	mainReads := func() uint64 {
-		return parseUint(t, guestFields(t, e, key, "awk '/^read_bytes:/ {print $2}' /proc/$(cat /var/tmp/main.pid)/io", 1)[0])
+	// The bytes read from the root disk, which holds the hot file; the
+	// helper's binary, whose cold pages leave too, is on a disk of its own.
+	rootReads := func() uint64 {
+		return parseUint(t, guestFields(t, e, key, "awk '{print $3 * 512}' $(dirname $(grep -lx root /sys/block/vd*/serial))/stat", 1)[0])
 	}
 	// Main reloads within 2 seconds whatever of its file the read pushed out.
 	time.Sleep(5 * time.Second)
-	readIn := mainReads()
+	readIn := rootReads()
 	deadline := read.Add(2*minAge + 3*time.Minute)
 	for now := guestRAMOnHost(t, key); now > held-coldMiB<<20/3; now = guestRAMOnHost(t, key) {
 		if time.Now().After(deadline) {
@@ -88,8 +89,8 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	if reclaimed < coldMiB<<20/3 {
 		t.Errorf("DAMON_RECLAIM paged out %d bytes, under a third of the %d MiB file that left", reclaimed, coldMiB)
 	}
-	if n := mainReads() - readIn; n > hotMiB<<20/8 {
-		t.Errorf("while the cold file left, Main read %d bytes of its file from disk: DAMON_RECLAIM evicted it", n)
+	if n := rootReads() - readIn; n > hotMiB<<20/8 {
+		t.Errorf("while the cold file left, the guest read %d bytes from its root disk: DAMON_RECLAIM evicted the file Main keeps reading", n)
 	}
 	cpu := guestFields(t, e, key, "cut -d' ' -f14,15 /proc/"+kdamond+"/stat; cut -d' ' -f1 /proc/uptime", 3)
 	ticks := parseUint(t, cpu[0]) + parseUint(t, cpu[1])
