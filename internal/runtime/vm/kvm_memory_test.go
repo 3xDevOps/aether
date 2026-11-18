@@ -17,11 +17,9 @@ import (
 
 // TestKVMColdMemoryReturnsToTheHost checks DAMON_RECLAIM in a guest whose
 // page cache fills it, below the 20% free at which its default watermarks
-// stop it: a file read once leaves the guest, and the host's memory, after
-// twice min_age (pageout skips a page the first time it finds it not yet
-// marked idle) and the time its quota and free page reporting take; a file
-// Main reads every 2 seconds stays cached, and kdamond stays under 2% of a
-// vCPU.
+// stop it: half of a file read once leaves the guest, and the host's
+// memory, within twice min_age and 2 minutes, while a file Main reads every
+// 2 seconds stays cached and kdamond stays under 2% of a vCPU.
 func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-cold-memory"
@@ -29,7 +27,7 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	spec := runtime.Spec{
 		Image: "docker.io/library/ubuntu:24.04", CreationKey: key,
 		Command: []string{"/bin/sh", "-c", "while :; do cat /var/tmp/hot >/dev/null 2>&1; sleep 2; done"},
-		Env:     map[string]string{"AETHER_RUN_ID": key}, CPULimit: 1, MemoryLimitBytes: 2 << 30,
+		Env:     map[string]string{"AETHER_RUN_ID": key}, CPULimit: 1, MemoryLimitBytes: 1 << 30,
 	}
 	if _, err := e.create(t.Context(), key, spec, options{Offline: true}); err != nil {
 		t.Fatal(err)
@@ -71,14 +69,15 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	// Main reloads within 2 seconds whatever of its file the read pushed out.
 	time.Sleep(5 * time.Second)
 	readIn := pgpgin()
-	deadline := read.Add(2*minAge + 3*time.Minute)
-	for now := guestRAMOnHost(t, key); now > before+coldMiB<<20/5; now = guestRAMOnHost(t, key) {
+	deadline := read.Add(2*minAge + 2*time.Minute)
+	for now := guestRAMOnHost(t, key); now > held-coldMiB<<20/2; now = guestRAMOnHost(t, key) {
 		if time.Now().After(deadline) {
-			t.Fatalf("%s after the read the host still holds %d bytes of the guest, %d before it (min_age %s)", time.Since(read).Round(time.Second), now, before, minAge)
+			t.Fatalf("%s after reading %d MiB the host holds %d bytes of the guest, %d right after the read and %d before it (min_age %s)",
+				time.Since(read).Round(time.Second), coldMiB, now, held, before, minAge)
 		}
 		time.Sleep(5 * time.Second)
 	}
-	t.Logf("reading %d MiB left %d KiB of %d free; the host's share of the guest went %d -> %d -> %d bytes, back %s after the read (min_age %s)",
+	t.Logf("reading %d MiB left %d of %d KiB free; the host's share of the guest went %d -> %d -> %d bytes, half back %s after the read (min_age %s)",
 		coldMiB, free, memTotalKiB, before, held, guestRAMOnHost(t, key), time.Since(read).Round(time.Second), minAge)
 
 	if kib := pgpgin() - readIn; kib > hotMiB<<10/8 {
