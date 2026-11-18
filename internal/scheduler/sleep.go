@@ -441,28 +441,26 @@ func heldAwakeLocked(e *supervised) string {
 }
 
 // sessionFacts adds what the agent session of an Enhanced run, the terminals
-// and the checkout recorded to f. A background shell nothing waits for, such
+// and the checkout recorded to f, every activity time even when it finds the
+// run busy. A background shell nothing waits for, such
 // as a dev server, keeps only a container awake, since a VM's save keeps it.
 // Work the agent waits for keeps a VM awake too, as nothing would wake the
 // VM when it ends. So does a wakeup the agent set: its timer counts only time
 // the VM runs, so a save would make it fire late.
 func (s *Scheduler) sessionFacts(run domain.RunID, enhanced, saving bool, f idleFacts) idleFacts {
 	if enhanced {
-		sess := s.acp.session(run)
-		if sess == nil {
+		if sess := s.acp.session(run); sess == nil {
 			f.busy = "the agent session is not open"
-			return f
+		} else {
+			st := sess.State()
+			switch {
+			case st.TurnInFlight || st.Background || !saving && len(st.Tasks) > 0 || st.Queued > 0 || len(st.Pending) > 0 || st.ToolsOpen || st.Compacting:
+				f.busy = "the agent is working"
+			case saving && st.WakeupPending:
+				f.busy = "a wakeup the agent set is pending"
+			}
+			f.active = append(f.active, st.LastProgress, st.TurnStartedAt, st.OpenedAt)
 		}
-		st := sess.State()
-		if st.TurnInFlight || st.Background || !saving && len(st.Tasks) > 0 || st.Queued > 0 || len(st.Pending) > 0 || st.ToolsOpen || st.Compacting {
-			f.busy = "the agent is working"
-			return f
-		}
-		if saving && st.WakeupPending {
-			f.busy = "a wakeup the agent set is pending"
-			return f
-		}
-		f.active = append(f.active, st.LastProgress, st.TurnStartedAt, st.OpenedAt)
 	}
 	keys := append(s.cfg.PTY.ActiveSessions(string(ptyhost.RunShellSession(run, ""))), ptyhost.RunSession(run))
 	for _, key := range keys {

@@ -225,8 +225,12 @@ type Scheduler struct {
 	wg          sync.WaitGroup
 
 	// capacityGate protects admission probes/accounting, never lifecycle state.
-	capacityGate         chan struct{}
-	reclaimMu            sync.Mutex
+	capacityGate chan struct{}
+	reclaimMu    sync.Mutex
+	// reclaimSweptAt is when reclaim last swept caches, images and scratch
+	// above the low watermark. Guarded by reclaimMu.
+	reclaimSweptAt       time.Time
+	idleCloseMu          sync.Mutex
 	pressureSkipLog      sync.Once
 	capacityReservations uint64
 
@@ -882,6 +886,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 				s.trySweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 			}
 			s.cleanupTerminalSidecars(ctx)
+			s.goCloseIdleRuns()
 			s.sweepScratch(ctx)
 			s.sweepBrowsers(ctx)
 			s.sweepCaches(ctx, false)
