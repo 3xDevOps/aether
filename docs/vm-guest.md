@@ -152,13 +152,19 @@ minute or two later; a third of one that filled the guest is back within
 about 3 minutes, and the rest follows more slowly
 (`TestKVMColdMemoryReturnsToTheHost`). Clean file pages are dropped. A dirty
 one leaves on a later pass, once the kernel's flusher has written it.
-Cold anonymous, tmpfs and shared memory pages, such as `/dev/shm`, go to
-the swap file (step 6 of [Boot](#boot)) until it is full. In a VM without
-swap, such as the dictation engine's, anonymous pages are skipped, and tmpfs
-and shared memory pages are tried and stay.
+With swap, cold anonymous, tmpfs and shared memory pages, such as
+`/dev/shm`, are tried too and go to the swap file (step 6 of
+[Boot](#boot)). DAMON rarely reaches idle program memory in a guest that is
+mostly free, though: a program's 64 MiB, left idle in an otherwise idle
+2 GiB VM, stayed in memory for 5 minutes in 5 of 5 VMs, with under 300 KiB
+of it swapped. In 2 more VMs, where the inputs were committed again
+(`commit_inputs=Y`) after the session started, all of it went to swap
+within 2.5 minutes; committing them at boot did not help, and the cause is
+not known. In a VM without swap, such as the dictation engine's, anonymous
+pages are skipped, and tmpfs and shared memory pages are tried and stay.
 
-The helper writes these to `/sys/module/damon_reclaim/parameters`, in this
-order:
+The helper writes these to `/sys/module/damon_reclaim/parameters`, `enabled`
+last:
 
 | Parameter | Why |
 | --- | --- |
@@ -168,7 +174,6 @@ order:
 | `monitor_region_end=<bytes>` | The end of the last `System RAM` range in `/proc/iomem`. Cloud Hypervisor puts guest RAM past 3 GiB at 4 GiB, and DAMON_RECLAIM watches one range, by default only the larger piece; this spans both. The gap between them holds no RAM, but DAMON counts it toward the quota. |
 | `skip_anon=N`, or `Y` without swap | Cold program memory goes to swap; without swap an anonymous page has nowhere to go. |
 | `enabled=Y` | Starts it. |
-| `commit_inputs=Y` | Applies the inputs once more. Without it, a program's 64 MiB left idle stayed in memory for 5 minutes in 4 of 4 VMs; with it, all of it went to swap within 2.5 minutes. The cause is not known. |
 
 The default quotas cap it at 128 MiB of memory tried and 10 ms of CPU a
 second. The kernel config must leave `CONFIG_LRU_GEN` off: with MGLRU on,

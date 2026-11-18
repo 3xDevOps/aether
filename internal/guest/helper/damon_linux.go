@@ -40,10 +40,6 @@ func startDAMONReclaim(swap bool) error {
 		{"monitor_region_end", strconv.FormatUint(end, 10)},
 		{"skip_anon", skipAnon},
 		{"enabled", "Y"},
-		// Measured, cause unknown: with the inputs applied only by
-		// enabled=Y, idle anonymous memory stayed for 5 minutes in 4 of 4
-		// VMs; committed once more, it went to swap.
-		{"commit_inputs", "Y"},
 	}
 	for _, p := range params {
 		if _, err := os.Stat(filepath.Join(damonReclaimParams, p.name)); errors.Is(err, os.ErrNotExist) {

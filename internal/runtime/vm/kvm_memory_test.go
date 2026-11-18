@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -21,22 +20,17 @@ import (
 // stop it: a third of a file read once leaves the guest, and the host's
 // memory, within twice min_age and 3 minutes, while a file Main reads every
 // 2 seconds stays cached and kdamond stays under 2% of a vCPU. The rest
-// follows more slowly, as DAMON splits it from memory in use. A program's
-// untouched memory goes to the guest's swap first. At a 2 GiB limit the
-// session holds enough of the guest's memory to leave under 20% free.
+// follows more slowly, as DAMON splits it from memory in use. At a 2 GiB
+// limit the session holds enough of the guest's memory to leave under 20%
+// free.
 func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-cold-memory"
 	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
 	spec := runtime.Spec{
 		Image: "docker.io/library/ubuntu:24.04", CreationKey: key,
 		Command: []string{"/bin/sh", "-c", "while :; do cat /var/tmp/hot >/dev/null 2>&1; sleep 2; done"},
 		Env:     map[string]string{"AETHER_RUN_ID": key}, CPULimit: 1, MemoryLimitBytes: 2 << 30,
-		Mounts: []runtime.Mount{{HostPath: self, ContainerPath: "/opt/aether-vmtest", ReadOnly: true}},
 	}
 	if _, err := e.create(t.Context(), key, spec, options{Offline: true}); err != nil {
 		t.Fatal(err)
@@ -58,26 +52,6 @@ func TestKVMColdMemoryReturnsToTheHost(t *testing.T) {
 		t.Errorf("DAMON_RECLAIM has skip_anon=%s in a guest with swap", params[3])
 	}
 	kdamond, memTotalKiB := params[4], parseUint(t, params[6])
-	const coldAnon = 64 << 20
-	_, att, err := e.spawn(t.Context(), key, guest.ProcessSpec{
-		ID: "hold", Argv: []string{"/opt/aether-vmtest", "-test.run", "^TestKVMHoldNow$"}, Env: []string{fmt.Sprint("AETHER_VM_TEST_HOLD_NOW=", coldAnon)},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = att.Close() }()
-	readUntil(t, att, "held")
-	// Nothing else presses on the guest's memory yet, so only DAMON_RECLAIM
-	// can move the program's memory to swap.
-	filled := time.Now()
-	for n := uint64(0); n < coldAnon/4; {
-		if time.Since(filled) > 2*minAge+3*time.Minute {
-			t.Fatalf("%s after the program filled %d bytes and left them, %d bytes of them are in swap", time.Since(filled).Round(time.Second), coldAnon, n)
-		}
-		time.Sleep(5 * time.Second)
-		n = parseUint(t, guestFields(t, e, key, "for p in /proc/[0-9]*; do grep -qas 'HoldNo[w]' $p/cmdline && awk '/^VmSwap:/ {print $2}' $p/status; done; true", 1)[0]) << 10
-	}
-	t.Logf("a quarter of the program's %d bytes went to swap %s after it filled them", coldAnon, time.Since(filled).Round(time.Second))
 
 	const hotMiB = 64
 	coldMiB := memTotalKiB * 9 / 10 >> 10
