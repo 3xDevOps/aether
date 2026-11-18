@@ -163,17 +163,18 @@ Many sessions share the same CI runners.
 - Keep a pull request as a draft while you iterate. Pull request CI runs
   only `changes`, `audit`, `lint`, `build-and-test`, `store-tests` and
   `dashboard`; the merge queue runs the full suite.
-- Push milestones freely; Greptile reviews them. Do not wait on CI or rerun
-  it between pushes.
+- Push milestones freely. Do not wait on CI or rerun it between pushes.
 - Run the checks for what you changed locally first; see
   [docs/testing.md](docs/testing.md).
 - Mark the pull request ready (`gh pr ready <n>`) only when it is done;
   then the merge gate applies.
-- The merge gate: an adversarial review by an Opus reviewer with a
-  fresh context that did not write the change (a subagent is enough; give
-  it the pull request, not the author's reasoning); Greptile findings that
-  are real are fixed and the rest resolved with a reason; `CI gate` green
-  on the current head. Then
+- The merge gate: an adversarial review of the current head by an Opus
+  reviewer with a fresh context that did not write the change (a subagent
+  is enough; give it the pull request, not the author's reasoning); real
+  findings fixed and the rest answered with a reason in the pull request;
+  after fixes that change code, another fresh reviewer checks the new head;
+  `CI gate` green on the current head. There is no review bot: do not wait
+  for one. Then
   `gh pr merge <n> --squash` puts it in the merge queue, which runs the
   full suite once per batch before `main` moves. Never pass `--admin`.
 - A UI change also gets a design review loop: a fresh-context Opus
