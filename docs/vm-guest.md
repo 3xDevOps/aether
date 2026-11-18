@@ -165,8 +165,8 @@ last:
 The default quotas cap it at 128 MiB of memory tried and 10 ms of CPU a
 second. The kernel config must leave `CONFIG_LRU_GEN` off: with MGLRU on,
 reading a file no longer clears the idle flag DAMON checks, and files in use
-would be paged out. The helper skips the step on a kernel (`vm-kernel`)
-that lacks any of these parameters or runs MGLRU
+would be paged out. The helper skips the step on a kernel, such as one set
+with `vm-kernel`, that lacks any of these parameters or runs MGLRU
 (`/sys/kernel/mm/lru_gen/enabled` is not `0x0000`); any other failure is
 reported as a `boot_error`. A server gets the kernel with its release
 ([Update the server](install.md#update-the-server)); a running or saved VM
