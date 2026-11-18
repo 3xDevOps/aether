@@ -272,9 +272,9 @@ func (u *fakeUnits) Start(_ context.Context, name string, argv, properties []str
 		u.failNext = false
 		for _, p := range properties {
 			if log, ok := strings.CutPrefix(p, "StandardOutput=append:"); ok {
-				f, err := os.OpenFile(log, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-				if err != nil {
-					return err
+				f, openErr := os.OpenFile(log, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+				if openErr != nil {
+					return openErr
 				}
 				_, err = f.WriteString("cloud-hypervisor: Error booting VM: KvmNotAvailable\n")
 				return errors.Join(err, f.Close())
