@@ -19,6 +19,13 @@ const (
 	restoreTimeout     = 60 * time.Second
 	syncTimeout        = 30 * time.Second
 	destroySyncTimeout = 5 * time.Second
+	// Free page reporting hands the guest's free memory to the host in
+	// passes 2 s apart, each about a sixteenth of it, so a check every
+	// reportPoll spans a pass; one that freed under reportSettled ends the
+	// wait. The kernel's own estimate for all of it is about 30 s.
+	reportPoll    = 4 * time.Second
+	reportSettled = 16 << 20
+	reportTimeout = 40 * time.Second
 )
 
 // save pauses the VM, writes its memory and device state to the snapshot
@@ -52,6 +59,11 @@ func (e *engine) save(ctx context.Context, key string) error {
 	// stays paused if the save fails, and cannot sync first.
 	paused := state == "Paused"
 	synced := !paused && e.syncGuest(ctx, key)
+	if synced {
+		// The second sync writes what the session wrote during the wait.
+		e.awaitReported(ctx, key)
+		synced = e.syncGuest(ctx, key)
+	}
 	if !paused {
 		if err = api.pause(ctx); err != nil {
 			return fmt.Errorf("vm runtime: save VM %s: %w", key, err)
@@ -104,6 +116,25 @@ func (e *engine) syncGuest(ctx context.Context, key string) bool {
 		return false
 	}
 	return true
+}
+
+// awaitReported waits while the host gets back the page cache Sync freed
+// in the guest, so the save writes only what the session uses.
+func (e *engine) awaitReported(ctx context.Context, key string) {
+	dir := filepath.Join(e.cgroupRoot, runtime.SessionSlice, unitName(key))
+	held, err := workingSet(dir)
+	for deadline := time.Now().Add(reportTimeout); err == nil && time.Now().Before(deadline); {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(reportPoll):
+		}
+		var now uint64
+		if now, err = workingSet(dir); err == nil && held < now+reportSettled {
+			return
+		}
+		held = now
+	}
 }
 
 // snapshotRestored snapshots the paused VM once Cloud Hypervisor has loaded

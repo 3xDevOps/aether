@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -204,4 +206,46 @@ func guestRAMOnHost(t *testing.T, key string) uint64 {
 	}
 	t.Fatalf("memory.stat of %s has no shmem", key)
 	return 0
+}
+
+// TestKVMSaveWritesOnlyWhatTheSessionUses saves a VM whose page cache fills
+// most of it: the save waits for free page reporting to hand the dropped
+// cache to the host, so the memory file holds little more than the session
+// uses. Saved at once, it held 1228 to 1315 MiB of the 1400 MiB cached.
+func TestKVMSaveWritesOnlyWhatTheSessionUses(t *testing.T) {
+	e := kvmEngine(t)
+	key := "run-save-small"
+	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
+	spec := runtime.Spec{
+		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, Command: []string{"/bin/sh", "-c", "exec sleep infinity"},
+		Env: map[string]string{"AETHER_RUN_ID": key}, CPULimit: 2, MemoryLimitBytes: 2 << 30,
+	}
+	if _, err := e.create(t.Context(), key, spec, options{Offline: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.start(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	guestFields(t, e, key, "head -c 1400M /dev/urandom >/var/tmp/f && sync && cat /var/tmp/f >/dev/null", 0)
+	held := guestRAMOnHost(t, key)
+	start := time.Now()
+	if err := e.save(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	took := time.Since(start)
+	var st unix.Stat_t
+	if err := unix.Stat(filepath.Join(e.path(key, snapshotDir), "memory-ranges"), &st); err != nil {
+		t.Fatal(err)
+	}
+	saved := uint64(st.Blocks) * 512
+	t.Logf("the save took %s and wrote %d MiB of memory; the host held %d MiB of the guest before it", took.Round(time.Millisecond), saved>>20, held>>20)
+	if saved > 400<<20 {
+		t.Errorf("the save wrote %d MiB of memory, most of the %d MiB the guest's page cache held", saved>>20, held>>20)
+	}
+	if err := e.restore(t.Context(), key); err != nil {
+		t.Fatal(err)
+	}
+	if got := guestFields(t, e, key, "wc -c </var/tmp/f", 1)[0]; got != "1468006400" {
+		t.Errorf("the restored guest reads %s bytes of its file, want 1468006400", got)
+	}
 }
