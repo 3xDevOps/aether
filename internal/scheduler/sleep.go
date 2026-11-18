@@ -859,15 +859,27 @@ func (s *Scheduler) recoverAsleep(ctx context.Context, r *domain.Run, sc sidecar
 }
 
 // stopRecoveredAsleep stops the running container of a run recovery adopted
-// asleep, or saves its VM. A wake or Relaunch that won the lifecycle lock
-// first and started the container on purpose keeps it running.
+// asleep, or saves its VM, as it stands if a server left it frozen: the
+// brake thaws a VM whose lifecycle lock is held. A wake or Relaunch that won
+// the lifecycle lock first and started the container on purpose keeps it
+// running.
 func (s *Scheduler) stopRecoveredAsleep(ctx context.Context, entry *supervised) {
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
+	frozen := s.vmFrozen(cid)
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
 	asleep := s.runs[entry.runID] == entry && !entry.asleepSince.IsZero()
 	s.mu.Unlock()
 	if !asleep {
+		return
+	}
+	if frozen {
+		if err := s.saveAsleepRunning(ctx, entry); err != nil {
+			slog.Warn("scheduler: save a sleeping session's VM", "run", entry.runID, "error", err)
+		}
 		return
 	}
 	if saver, ok := s.entrySaver(entry); ok {

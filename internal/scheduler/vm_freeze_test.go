@@ -367,6 +367,32 @@ func TestARestartTakesUpFrozenVMsWithoutLettingThemRun(t *testing.T) {
 	})
 }
 
+// A VM a server left frozen with an idle save of it cut off is saved by the
+// next as it stands, not let run for the save's sync.
+func TestARestartSavesAFrozenVMCaughtFallingAsleepAsItStands(t *testing.T) {
+	t.Parallel()
+	e, fr := newFreezeEnv(t)
+	vm := e.launchVM(t, fr.memoryRuntime, "say pong", 1<<30)
+	run := e.runOf(t, vm)
+	e.brake(fr, 4<<30)
+	e.brake(fr, 3<<30)
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run]
+	entry.asleepSince = time.Now().UTC()
+	err := e.sched.writeSidecar(entry.sidecar())
+	e.sched.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := e.restartACP(t)
+	if !fr.isSaved(vm) || !fr.foundFrozen(vm) {
+		t.Fatalf("after the restart the VM is saved %v, saved frozen %v; want both", fr.isSaved(vm), fr.foundFrozen(vm))
+	}
+	if state := s2.Sleep(run); state.AsleepSince == nil || !state.Saved {
+		t.Fatalf("the restart left the session %+v; want it asleep and saved", state)
+	}
+}
+
 // The server needs the guest of a VM whose agent it restarts, or whose
 // Background turn it ends: the brake thaws that VM and leaves it out, and
 // the guard saves another.
