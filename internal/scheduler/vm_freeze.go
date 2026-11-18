@@ -13,7 +13,7 @@ import (
 
 const (
 	// vmMemoryBrake is how often the brake reads the host's memory. Three
-	// session VMs filling theirs at once took 1.55 GiB/s of a 29 GiB host,
+	// session VMs filling theirs at once took 1.5 GiB/s of a 29 GiB host,
 	// whose floor is 2.9 GiB: the freeze lands with 2.1 GiB of it left.
 	vmMemoryBrake = 500 * time.Millisecond
 	// memoryFrozenNoteEvery keeps a session the brake freezes again and

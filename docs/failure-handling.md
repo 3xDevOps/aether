@@ -413,7 +413,7 @@ echo 0 | sudo tee /sys/fs/cgroup/aether.slice/aether-vm-*.service/cgroup.freeze
 ```
 
 The floor is sized for the fastest growth measured. On a 29 GiB host, three
-session VMs filling 5.5 GiB each at once took 1.4 GiB/s, 1.55 GiB/s at the
+session VMs filling 5.5 GiB each at once took 1.4 GiB/s, 1.5 GiB/s at the
 peak, and ran the host out in about 10 seconds, before the first save had
 finished. That host's floor is 2.9 GiB, which such a burst takes 1.9
 seconds to use, so the freeze lands with at least 2.1 GiB left. If nothing
