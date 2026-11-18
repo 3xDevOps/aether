@@ -1973,6 +1973,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		betweenTurns:        sc.BetweenTurns,
 		paused:              sc.Paused,
 		diskHeld:            sc.DiskHeld,
+		memorySaved:         sc.MemorySaved,
 		killRequested:       sc.KillRequested,
 		retained:            sc.Retained,
 		retainedUntil:       sc.RetainedUntil,

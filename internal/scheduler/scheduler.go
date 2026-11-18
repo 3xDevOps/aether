@@ -163,12 +163,14 @@ type Config struct {
 	// HarnessUpdateDisabled stops pre-launch updates of shipped harnesses
 	// installed in the member home.
 	HarnessUpdateDisabled bool
-	// Test-only overrides: turnTail of defaultTurnTail, and
-	// harnessUpdateContext of context.WithTimeout for a harness update.
+	// Test-only overrides: turnTail of defaultTurnTail,
+	// harnessUpdateContext of context.WithTimeout for a harness update, and
+	// hostMemory of the memory guard's /proc/meminfo read.
 	sleepAnyAgent        bool
 	turnTail             time.Duration
 	harnessUpdateContext func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 	filesystemCapacity   func(string) (disk.Usage, error)
+	hostMemory           func() (total, available uint64, err error)
 }
 
 const DefaultRunContainerTTL = 7 * 24 * time.Hour
@@ -234,6 +236,14 @@ type Scheduler struct {
 	vmDiskMu   sync.Mutex
 	vmDiskLow  bool
 	vmDiskBase map[runtime.ID]int64
+
+	// vmMemoryMu serializes the memory guard's checks. vmMemoryLow holds
+	// from the host falling short of memory until it has its stop level
+	// free again, and vmMemoryStallSince is when the host's memory stall
+	// last rose to its limit, zero below it.
+	vmMemoryMu         sync.Mutex
+	vmMemoryLow        bool
+	vmMemoryStallSince time.Time
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
@@ -387,10 +397,14 @@ type supervised struct {
 	stallTurnAt       time.Time // when the Enhanced turn the last stall parked started
 	paused            bool
 	diskHeld          bool // the pause is the disk guard's, which ends it
-	diskReleasedAt    time.Time
-	killRequested     bool
-	killActor         domain.MemberID
-	killBy            domain.RunID // the parent that stopped this child run
+	// memorySaved is the host memory of a working session VM the memory
+	// guard saved, which it wakes once that much is free again; zero for
+	// every other run.
+	memorySaved    uint64
+	diskReleasedAt time.Time
+	killRequested  bool
+	killActor      domain.MemberID
+	killBy         domain.RunID // the parent that stopped this child run
 	// agentReport is the last native execution report, independent of outcome
 	// presentation. Input deltas are never retained or replayed.
 	agentReport agentstatus.Report
@@ -818,10 +832,16 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		defer close(disksWatched)
 		s.watchVMDisks(watchCtx)
 	}()
+	memoryWatched := make(chan struct{})
+	go func() {
+		defer close(memoryWatched)
+		s.watchVMMemory(watchCtx)
+	}()
 	defer func() {
 		stopWatch()
 		<-watched
 		<-disksWatched
+		<-memoryWatched
 	}()
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {

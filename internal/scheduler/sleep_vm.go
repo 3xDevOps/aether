@@ -24,9 +24,9 @@ type woke struct {
 func (w woke) notice() string {
 	switch {
 	case w.restored:
-		return "Cloudfield had saved this idle session to disk and restored it. Its processes, terminals and conversation carry on where they were; connections to outside the session may have dropped while it slept."
+		return "Cloudfield had saved this session to disk and restored it. Its processes, terminals and conversation carry on where they were; connections to outside the session may have dropped while it slept."
 	case w.restoreErr != nil:
-		return "Cloudfield could not restore this idle session's saved state, so it started the session again from its disk. Processes and terminals that were running were stopped; the conversation, files and checkout are kept. The restore failed: " + w.restoreErr.Error()
+		return "Cloudfield could not restore this session's saved state, so it started the session again from its disk. Processes and terminals that were running were stopped; the conversation, files and checkout are kept. The restore failed: " + w.restoreErr.Error()
 	}
 	return "Cloudfield had stopped this idle session's container. Processes and terminals that were running were stopped; the conversation, files and checkout are kept."
 }
@@ -56,16 +56,29 @@ func (s *Scheduler) entrySaver(entry *supervised) (runtime.SaveRuntime, bool) {
 // the next server's recovery takes it up. Caller holds entry.lifecycleMu,
 // set sleeping and marked the run asleep.
 func (s *Scheduler) saveLive(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
-	s.mu.Lock()
-	cid, enhanced := entry.containerID, entry.acp && entry.launchMode == domain.LaunchACP
-	facts := s.liveFactsLocked(entry)
-	s.mu.Unlock()
 	// The agent may have started a turn of its own since the sweep looked;
 	// once detached, nothing here would see it.
-	if s.sessionFacts(entry.runID, enhanced, true, facts).busy != "" {
+	if s.agentWorking(entry) {
 		return errors.Join(errStayAwake, s.unmarkAsleep(entry))
 	}
+	return s.saveMarked(ctx, entry, saver)
+}
+
+// agentWorking reports whether entry's agent works, as a save of its VM
+// sees it.
+func (s *Scheduler) agentWorking(entry *supervised) bool {
 	s.mu.Lock()
+	enhanced := entry.acp && entry.launchMode == domain.LaunchACP
+	facts := s.liveFactsLocked(entry)
+	s.mu.Unlock()
+	return s.sessionFacts(entry.runID, enhanced, true, facts).busy != ""
+}
+
+// saveMarked is saveLive for a run whatever its agent is doing. A turn in
+// flight carries on after the restore, as across a server restart.
+func (s *Scheduler) saveMarked(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
+	s.mu.Lock()
+	cid := entry.containerID
 	// From here exec and terminal recovery treat the VM as frozen.
 	entry.paused = true
 	s.mu.Unlock()
