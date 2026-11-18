@@ -297,9 +297,11 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 	s.mu.Lock()
 	entry.asleepSince = time.Time{}
 	entry.quietFrom = time.Now().UTC()
+	memorySaved := entry.memorySaved
+	entry.memorySaved = 0
 	err = s.writeSidecar(entry.sidecar())
 	if err != nil {
-		entry.asleepSince = entry.quietFrom
+		entry.asleepSince, entry.memorySaved = entry.quietFrom, memorySaved
 	}
 	s.mu.Unlock()
 	if err != nil {
@@ -405,18 +407,9 @@ func (s *Scheduler) resumes(agent string) bool {
 
 // liveFactsLocked reads an open Enhanced run's state. Caller holds s.mu.
 func (s *Scheduler) liveFactsLocked(e *supervised) idleFacts {
-	var busy string
+	busy := heldAwakeLocked(e)
 	switch {
-	case e.status != domain.RunRunning && e.status != domain.RunNeedsAttention:
-		busy = "not running"
-	case e.paused || e.retained || e.destroyPending || e.finalizing || e.killRequested || e.exitObserved:
-		busy = "paused or ending"
-	case e.switching != "" || e.switchIntent != nil || e.moving || e.accountSwap != nil || e.usageLimit != "":
-		busy = "changing mode or account"
-	case len(e.pendingInputs) > 0 || len(e.sudo) > 0:
-		busy = "a request waits for an answer"
-	case e.awake > 0:
-		busy = "a delivery, exec or browser operation is in flight"
+	case busy != "":
 	case e.activity == domain.ActivityWorking || e.activity == domain.ActivityWaitingTools:
 		busy = "working"
 	case e.betweenTurns:
@@ -425,6 +418,26 @@ func (s *Scheduler) liveFactsLocked(e *supervised) idleFacts {
 	return idleFacts{busy: busy, active: []time.Time{
 		e.startedAt, e.quietFrom, e.lastWorking, e.turnStartedAt, e.typedAt, e.browsedAt, e.execAt,
 	}}
+}
+
+// heldAwakeLocked names what keeps an open run awake however long it is
+// quiet and whatever the host is short of, empty when nothing does: a sleep
+// would break a transition, a request or an operation in flight. Caller
+// holds s.mu.
+func heldAwakeLocked(e *supervised) string {
+	switch {
+	case e.status != domain.RunRunning && e.status != domain.RunNeedsAttention:
+		return "not running"
+	case e.paused || e.retained || e.destroyPending || e.finalizing || e.killRequested || e.exitObserved:
+		return "paused or ending"
+	case e.switching != "" || e.switchIntent != nil || e.moving || e.accountSwap != nil || e.usageLimit != "":
+		return "changing mode or account"
+	case len(e.pendingInputs) > 0 || len(e.sudo) > 0:
+		return "a request waits for an answer"
+	case e.awake > 0:
+		return "a delivery, exec or browser operation is in flight"
+	}
+	return ""
 }
 
 // sessionFacts adds what the agent session of an Enhanced run, the terminals
@@ -749,6 +762,7 @@ func (s *Scheduler) markAsleep(entry *supervised) error {
 	entry.asleepSince = time.Now().UTC()
 	entry.wakeErr = nil
 	entry.asleepSaved = false
+	entry.memorySaved = 0
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		entry.asleepSince = time.Time{}
 		return fmt.Errorf("record the sleep: %w", err)
@@ -760,6 +774,7 @@ func (s *Scheduler) markAsleep(entry *supervised) error {
 func (s *Scheduler) unmarkAsleep(entry *supervised) error {
 	s.mu.Lock()
 	entry.asleepSince = time.Time{}
+	entry.memorySaved = 0
 	err := s.writeSidecar(entry.sidecar())
 	s.mu.Unlock()
 	s.endSleep(entry, false)

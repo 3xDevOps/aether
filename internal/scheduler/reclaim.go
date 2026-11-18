@@ -138,13 +138,14 @@ func (s *Scheduler) reclaimLevel(ctx context.Context) (free uint64, short, ok bo
 }
 
 // savedByAge returns the runs asleep in a saved VM, the longest asleep
-// first.
+// first. One the memory guard saved while it worked is left out: its saved
+// memory holds work in flight, not an idle session.
 func (s *Scheduler) savedByAge() []*supervised {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var entries []*supervised
 	for _, entry := range s.runs {
-		if _, saving := s.saver(entry.containerID); saving && entry.asleepSaved && !entry.sleeping {
+		if _, saving := s.saver(entry.containerID); saving && entry.asleepSaved && !entry.sleeping && entry.memorySaved == 0 {
 			entries = append(entries, entry)
 		}
 	}

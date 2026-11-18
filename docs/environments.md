@@ -312,7 +312,10 @@ not stalling on memory (its cgroup's `memory.pressure`, `some avg60` below
 10%). Otherwise the launch fails with `scheduler: insufficient disk headroom`,
 `scheduler: insufficient host memory headroom` or `scheduler: host capacity
 unavailable`. Cloudfield never stops a running agent to make room, and reopening
-a retained session needs no check. [Recover from disk
+a retained session needs no check. A refusal for low available memory first
+saves idle session VMs to disk and checks once more. When the host runs out of
+memory, a session VM can be saved to disk while it works, with every process
+kept, and woken again once memory is back. [Recover from disk
 pressure](failure-handling.md#recover-from-disk-pressure) and [Recover from
 memory pressure](failure-handling.md#recover-from-memory-pressure) have the
 thresholds and what to do.
