@@ -395,6 +395,10 @@ func (s *Service) Confirm(ctx context.Context, member domain.MemberID, id string
 // the call waiting for the card, or else runs the call itself, and records
 // any other decision in the conversation.
 func (s *Service) decide(ctx context.Context, m *member, id, state string) error {
+	// raise registers a call's wait, then reads the card again; a decision
+	// between the two would reach neither the wait nor the call.
+	m.raising.Lock()
+	defer m.raising.Unlock()
 	moved, err := s.cfg.Store.MoveAssistantCard(ctx, m.id, id, []string{protocol.AssistantCardPending}, store.AssistantCardMove{State: state, Decided: true})
 	if err != nil {
 		return fmt.Errorf("assistant: decide card %s: %w", id, err)
