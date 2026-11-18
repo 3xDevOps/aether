@@ -428,8 +428,11 @@ func (s *Scheduler) liveFactsLocked(e *supervised) idleFacts {
 }
 
 // sessionFacts adds what the agent session of an Enhanced run, the terminals
-// and the checkout recorded to f. A wakeup the agent set keeps a VM awake:
-// its timer counts only time the VM runs, so a save would make it fire late.
+// and the checkout recorded to f. A background shell nothing waits for, such
+// as a dev server, keeps only a container awake, since a VM's save keeps it.
+// Work the agent waits for keeps a VM awake too, as nothing would wake the
+// VM when it ends. So does a wakeup the agent set: its timer counts only time
+// the VM runs, so a save would make it fire late.
 func (s *Scheduler) sessionFacts(run domain.RunID, enhanced, saving bool, f idleFacts) idleFacts {
 	if enhanced {
 		sess := s.acp.session(run)
@@ -438,7 +441,7 @@ func (s *Scheduler) sessionFacts(run domain.RunID, enhanced, saving bool, f idle
 			return f
 		}
 		st := sess.State()
-		if st.TurnInFlight || st.Background || len(st.Tasks) > 0 || st.Queued > 0 || len(st.Pending) > 0 || st.ToolsOpen || st.Compacting {
+		if st.TurnInFlight || st.Background || !saving && len(st.Tasks) > 0 || st.Queued > 0 || len(st.Pending) > 0 || st.ToolsOpen || st.Compacting {
 			f.busy = "the agent is working"
 			return f
 		}
@@ -548,31 +551,23 @@ func (s *Scheduler) launchedEnhanced(ctx context.Context, e *supervised) bool {
 // foregroundJobScript prints the command of a process that holds a
 // terminal's foreground, such as a dev server, an editor or a REPL started
 // in a shell tab. A shell waiting at its prompt holds its own terminal and
-// is not one, nor is the agent the run supervisor (supervisor.go) runs in a
-// Standard session's terminal. The supervisor's name is split so this
-// script's own command line never matches it. Fields after the command in
-// /proc/<pid>/stat: state, ppid, pgrp, session, tty_nr, tpgid.
-const foregroundJobScript = `name=aether-run-; name=${name}supervisor; supervisors=" "
-for cmdline in /proc/[0-9]*/cmdline; do
-	grep -qa -- "$name" "$cmdline" 2>/dev/null || continue
-	pid=${cmdline#/proc/}; supervisors="$supervisors${pid%/cmdline} "
-done
-for stat in /proc/[0-9]*/stat; do
+// is not one. Fields after the command in /proc/<pid>/stat: state, ppid,
+// pgrp, session, tty_nr, tpgid.
+const foregroundJobScript = `for stat in /proc/[0-9]*/stat; do
 	read -r line 2>/dev/null <"$stat" || continue
 	comm=${line#*(}
 	comm=${comm%)*}
 	set -- ${line##*) }
 	[ "$6" -gt 0 ] 2>/dev/null && [ "$3" = "$6" ] || continue
-	case $supervisors in *" $2 "*) continue ;; esac
 	case $comm in
 	bash | sh | dash | zsh | fish | ash | ksh | mksh) ;;
 	*) printf '%s\n' "$comm"; exit 0 ;;
 	esac
 done`
 
-// foregroundJob names a command running in the foreground of one of the
+// foregroundJob reports a command running in the foreground of one of the
 // container's terminals, which keeps the session awake.
-func (s *Scheduler) foregroundJob(ctx context.Context, cid runtime.ID) (string, error) {
+func (s *Scheduler) foregroundJob(ctx context.Context, cid runtime.ID) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", foregroundJobScript}, "")
@@ -580,25 +575,27 @@ func (s *Scheduler) foregroundJob(ctx context.Context, cid runtime.ID) (string, 
 		err = fmt.Errorf("exit %d: %s", code, strings.TrimSpace(stderr))
 	}
 	if err != nil {
-		return "", fmt.Errorf("look for a terminal's foreground command: %w", err)
+		return false, fmt.Errorf("look for a terminal's foreground command: %w", err)
 	}
-	return strings.TrimSpace(stdout), nil
+	return strings.TrimSpace(stdout) != "", nil
 }
 
-// guestCPUScript prints how much of the guest's CPU time, in percent, was
-// not idle over one second. /proc/stat's first line: cpu user nice system
-// idle iowait irq softirq steal.
+// guestCPUScript prints the guest's CPU use over one second in percent of
+// one core, so 200 is two busy cores. /proc/stat's first line: cpu user
+// nice system idle iowait irq softirq steal; one cpuN line follows per core.
 const guestCPUScript = `read -r _ u1 n1 s1 i1 w1 q1 f1 _ </proc/stat
 sleep 1
 read -r _ u2 n2 s2 i2 w2 q2 f2 _ </proc/stat
+cpus=0
+while read -r name _; do case $name in cpu[0-9]*) cpus=$((cpus + 1)) ;; esac; done </proc/stat
 busy=$(( u2 + n2 + s2 + q2 + f2 - u1 - n1 - s1 - q1 - f1 ))
 idle=$(( i2 + w2 - i1 - w1 ))
-echo $(( busy * 100 / (busy + idle + 1) ))`
+echo $(( busy * 100 * cpus / (busy + idle + 1) ))`
 
-// guestBusyPercent is the CPU use above which a VM counts as working: an
-// idle agent, shell or dev server stays well below it, a build or a test
-// run above.
-const guestBusyPercent = 10
+// guestBusyPercent is the CPU use, in percent of one core, above which a VM
+// counts as working: an idle agent, shell or dev server stays well below
+// half a core, a build or a test run, even a single-threaded one, above.
+const guestBusyPercent = 50
 
 // guestBusy reports whether the VM cid still works on something, such as a
 // build or a test run the agent or a terminal left running without output.
@@ -662,23 +659,19 @@ func (s *Scheduler) sleepLive(ctx context.Context, entry *supervised) error {
 		s.endSleep(entry, false)
 		return errStayAwake
 	}
-	// Work that still runs keeps the session awake: a command in a
-	// terminal's foreground, and in a VM anything that uses the CPU.
-	if job, err := s.foregroundJob(ctx, cid); err != nil || job != "" {
+	// Work that still runs keeps the session awake: in a container a command
+	// in a terminal's foreground, which the stop would end, and in a VM, whose
+	// save keeps every process, anything that uses the CPU.
+	probe := s.foregroundJob
+	if saving {
+		probe = s.guestBusy
+	}
+	if busy, err := probe(ctx, cid); err != nil || busy {
 		s.endSleep(entry, false)
 		if err != nil {
-			slog.Warn("scheduler: keep a session awake whose terminals could not be read", "run", run, "error", err)
+			slog.Warn("scheduler: keep a session awake whose work could not be read", "run", run, "error", err)
 		}
 		return errStayAwake
-	}
-	if saving {
-		if busy, err := s.guestBusy(ctx, cid); err != nil || busy {
-			s.endSleep(entry, false)
-			if err != nil {
-				slog.Warn("scheduler: keep a session awake whose CPU use could not be read", "run", run, "error", err)
-			}
-			return errStayAwake
-		}
 	}
 	if err := s.markAsleep(entry); err != nil {
 		s.endSleep(entry, false)

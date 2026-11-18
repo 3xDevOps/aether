@@ -600,12 +600,12 @@ only time the dashboard reports typing. A session that waits for you after
 its turn ended, or waits for CI or another session, is idle.
 
 These keep a session awake however long it is quiet: a background task the
-agent started, such as a dev server; a command in the foreground of a
-terminal or shell tab, such as a dev server, an editor or a REPL (a shell at
-its prompt does not count); a session that waits for a process; a session you
-paused; a session that hit its usage limit; a session switching modes or
-accounts; and a session started in Standard and switched to Enhanced, whose
-container would rerun its launch command.
+agent started, such as a dev server, a subagent or a monitor; a command in
+the foreground of a terminal or shell tab, such as a dev server, an editor or
+a REPL (a shell at its prompt does not count); a session that waits for a
+process; a session you paused; a session that hit its usage limit; a session
+switching modes or accounts; and a session started in Standard and switched
+to Enhanced, whose container would rerun its launch command.
 
 The session wakes when you send a message, change its model, mail
 reaches it, you type in its terminal, open a shell tab, use its Browser tab,
@@ -673,11 +673,19 @@ lost, so more sessions sleep, sooner:
   do.
 - `--run-sleep-after` defaults to `5m` for session VMs. A value you set
   applies to VMs and containers alike.
-- The conditions above keep a VM awake as they keep a container, and so
-  do two more: a VM using more than a tenth of its CPU, such as a build or
-  a test run left in the background, and a wakeup the agent set that has
-  yet to fire. A save that fails leaves the session running; Cloudfield tries
-  again after another `--run-sleep-after`.
+- A save keeps every process, so a dev server does not keep a VM awake:
+  neither a command in a terminal's foreground nor a background shell the
+  agent started and does not wait for. It sleeps with the VM and answers
+  again after the wake. A VM using more than half a CPU core, such as a
+  build or a test run, stays awake. The other conditions above keep a VM
+  awake as they keep a container, the agent's subagents and monitors among
+  them, except a switch from Standard, which a restore never reruns. So
+  does a wakeup the agent set that has yet to fire. Nothing from outside
+  wakes a VM: a tunnel such as `cloudflared` or `ngrok`, a webhook receiver,
+  or a quiet download or remote `ssh` job freezes with it and may lose its
+  connection, so keep such a session in use, or set `--run-sleep-after` to
+  `0`. A save that fails leaves the session running; Cloudfield tries again
+  after another `--run-sleep-after`.
 - A closed session is saved as soon as the close finishes, instead of
   staying paused in memory, unless `--run-sleep-after` is `0`. It stays
   paused through the save, so nothing changes its files after the close's
