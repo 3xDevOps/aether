@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/sysstats"
 )
 
 const (
@@ -122,7 +123,7 @@ func (e *engine) syncGuest(ctx context.Context, key string) bool {
 // in the guest, so the save writes only what the session uses.
 func (e *engine) awaitReported(ctx context.Context, key string) {
 	dir := filepath.Join(e.cgroupRoot, runtime.SessionSlice, unitName(key))
-	held, err := workingSet(dir)
+	held, err := sysstats.CgroupWorkingSet(dir)
 	for deadline := time.Now().Add(reportTimeout); err == nil && time.Now().Before(deadline); {
 		select {
 		case <-ctx.Done():
@@ -130,7 +131,7 @@ func (e *engine) awaitReported(ctx context.Context, key string) {
 		case <-time.After(e.reportPoll):
 		}
 		var now uint64
-		if now, err = workingSet(dir); err == nil && held < now+reportSettled {
+		if now, err = sysstats.CgroupWorkingSet(dir); err == nil && held < now+reportSettled {
 			return
 		}
 		held = now
