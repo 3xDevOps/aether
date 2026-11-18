@@ -365,9 +365,9 @@ What changes:
   git work on them runs inside the VM ([vm-guest.md](vm-guest.md#checkouts)).
   The home, the login files and the other host files a session mounts go
   through the VM's file service
-  ([vm-guest.md](vm-guest.md#the-file-service)): writes show in the
-  member's other sessions within a second, and read-only mounts stay
-  read-only.
+  ([vm-guest.md](vm-guest.md#the-file-service)): a file another session
+  wrote reads as written from the next open, shows in listings and `stat`
+  within a second, and read-only mounts stay read-only.
 - `/tmp` is on the session's data disk. `/aether-cache` is the session's own
   copy of the member's newest caches, made when the session is created. A
   session's caches become the member's newest when its VM stops for good:
