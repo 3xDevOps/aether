@@ -954,10 +954,13 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 `lint`, `build-and-test`, `store-tests`, `dashboard`, both `integration` jobs,
 `arm64` and `dashboard-e2e` run on [Blacksmith](https://docs.blacksmith.sh/)
 runners (`blacksmith-4vcpu-ubuntu-2604`, and `blacksmith-4vcpu-ubuntu-2404-arm`
-for `arm64`), declared for actionlint in `.github/actionlint.yaml`. A pull
-request from a fork runs `lint`, `build-and-test`, `store-tests` and
-`dashboard` on `ubuntu-latest` instead, so outside code never reaches
-Blacksmith or its caches. Blacksmith's Ubuntu 26.04 image mounts `/tmp` as a
+for `arm64`), declared for actionlint in `.github/actionlint.yaml`. A fork
+pull request's runs of `lint`, `build-and-test`, `store-tests` and `dashboard`
+default to `ubuntu-latest` instead. A fork can edit the workflow, so what
+keeps its code off Blacksmith is the repository's fork approval policy,
+`all_external_contributors`: a maintainer approves every outside
+contributor's runs first (`gh api
+repos/3xDevOps/cloudfield/actions/permissions/fork-pr-contributor-approval`). Blacksmith's Ubuntu 26.04 image mounts `/tmp` as a
 tmpfs of half the runner's memory, too small for the server's disk-headroom
 check, so in the Docker suite jobs
 `.github/actions/free-disk` sets `TMPDIR=/t`, on the root disk and short enough
