@@ -18,17 +18,17 @@ import (
 func init() {
 	register(command{
 		name:  "answer",
-		short: "answer a session's question or permission request (aether sessions <session-id> lists them)",
-		usage: "aether answer <session-id> <request-id> <option-id> [--values <json>]\n" +
-			"aether answer <session-id> <question-id> <answer|->",
-		example: "aether answer run-d6ay38tj8j req-7 allow-1\n" +
-			"aether answer run-d6ay38tj8j q-1 \"use the staging database\"",
+		short: "answer a session's question or permission request (cloudfield sessions <session-id> lists them)",
+		usage: "cloudfield answer <session-id> <request-id> <option-id> [--values <json>]\n" +
+			"cloudfield answer <session-id> <question-id> <answer|->",
+		example: "cloudfield answer run-d6ay38tj8j req-7 allow-1\n" +
+			"cloudfield answer run-d6ay38tj8j q-1 \"use the staging database\"",
 		run: runAnswer,
 	})
 }
 
-const answerUsage = "usage: aether answer <session-id> <request-id> <option-id> [--values '<json object>']\n" +
-	"   or: aether answer <session-id> <question-id> \"<answer>\"|-   (a teammate's question)"
+const answerUsage = "usage: cloudfield answer <session-id> <request-id> <option-id> [--values '<json object>']\n" +
+	"   or: cloudfield answer <session-id> <question-id> \"<answer>\"|-   (a teammate's question)"
 
 func runAnswer(args []string) error {
 	if len(args) < 3 || strings.HasPrefix(args[0], "-") || strings.HasPrefix(args[1], "-") {

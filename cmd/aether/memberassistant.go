@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	memberAssistantUsage      = "usage: aether member assistant [--auto-approve on|off]\n       aether member assistant rules [--revoke <id>]"
-	memberAssistantRulesUsage = "usage: aether member assistant rules [--revoke <id>]"
+	memberAssistantUsage      = "usage: cloudfield member assistant [--auto-approve on|off]\n       cloudfield member assistant rules [--revoke <id>]"
+	memberAssistantRulesUsage = "usage: cloudfield member assistant rules [--revoke <id>]"
 )
 
 // memberAssistant implements `aether member assistant`: without flags it

@@ -54,7 +54,7 @@ func installSysbox(w io.Writer) {
 
 func sysboxCmd(args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: aether-server sysbox status | install")
+		return errors.New("usage: cloudfield-server sysbox status | install")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

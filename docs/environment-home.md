@@ -22,7 +22,7 @@ The home survives every stop, save, reset and server restart:
   nvm refuses to switch versions while `NPM_CONFIG_PREFIX` is set, so put `unset
   NPM_CONFIG_PREFIX` before nvm's lines in `~/.bashrc` if you use it.
 - Agent logins and other files the agent writes.
-- Agent configuration, uploaded with `aether config push` or edited in
+- Agent configuration, uploaded with `cloudfield config push` or edited in
   **Files**.
 - The GitHub login in `~/.config/gh/hosts.yml`, the public signing key
   `~/.ssh/aether_signing.pub`, and `~/.gitconfig` (git identity, gh's
@@ -74,7 +74,7 @@ set yourself is never cleaned. Logins, CLIs and keys stay in the home.
 ## Set up an agent
 
 [harnesses.md](harnesses.md#set-up-an-agent) has the steps: **Set up** on the
-**Agents** page, or `aether agent add <name>` and `aether agent login <name>` on
+**Agents** page, or `cloudfield agent add <name>` and `cloudfield agent login <name>` on
 your computer. The agent, its login and its settings land in your home, so you
 do not save the environment afterwards.
 
@@ -88,7 +88,7 @@ agent**.
 
 Cloudfield updates a shipped agent in `~/.local/bin` in the background when a session
 launches, at most every 6 hours
-([harnesses.md](harnesses.md#updates-before-launch)). `aether agent remove
+([harnesses.md](harnesses.md#updates-before-launch)). `cloudfield agent remove
 <name>` deletes only its `~/.local/bin` links. Packages, login and settings stay
 ([harnesses.md](harnesses.md#remove-an-agent)).
 
@@ -115,7 +115,7 @@ device login in your browser, then select **I've logged in**.
 Run, on your computer:
 
 ```sh
-aether github connect
+cloudfield github connect
 ```
 
 ```text
@@ -125,7 +125,7 @@ signing key SHA256:2E3v9x... registered on GitHub
 
 If your environment has no `gh` login, its login lacks the
 `admin:ssh_signing_key` scope, or the environment is stopped, an admin's
-`aether github connect` runs the dashboard's device flow first and prints:
+`cloudfield github connect` runs the dashboard's device flow first and prints:
 
 ```text
 url: https://github.com/login/device
@@ -145,7 +145,7 @@ same code.
 
 A member who is not an admin gets `github.oauth.start requires the admin role`
 and logs in by hand instead. The environment needs `gh` 2.81.0 or newer (the
-standard image has one). In `aether terminal`, run:
+standard image has one). In `cloudfield terminal`, run:
 
 ```sh
 gh auth login --hostname github.com --git-protocol https --web \
@@ -154,7 +154,7 @@ gh auth login --hostname github.com --git-protocol https --web \
 
 gh prints a one-time code and a URL; finish in a browser on your own machine.
 gh may say it could not open a browser. That is expected in a container. Then
-run `aether github connect` again.
+run `cloudfield github connect` again.
 
 This command, and the admin dashboard flow, confirm the `gh` login, write gh's
 credential helper and your identity into `~/.gitconfig`, create an ed25519
@@ -162,7 +162,7 @@ signing key on the server if you have none, write its public half to
 `~/.ssh/aether_signing.pub`, turn on commit signing (`gpg.format=ssh`,
 `commit.gpgsign=true`), and register the public key on your account. git in
 your sessions and environment signs through the server's signing agent at
-`SSH_AUTH_SOCK`. It is safe to run again. `aether member git` keeps the
+`SSH_AUTH_SOCK`. It is safe to run again. `cloudfield member git` keeps the
 identity in `~/.gitconfig` in step with your name and address.
 
 > [!WARNING]
@@ -176,9 +176,9 @@ identity in `~/.gitconfig` in step with your name and address.
 
 | Error | Fix |
 | --- | --- |
-| `github: not logged in to github.com in the environment terminal; run aether github connect: HTTP 401: Bad credentials` | Run `aether github connect`. The line ends with gh's own reason. |
+| `github: not logged in to github.com in the environment terminal; run aether github connect: HTTP 401: Bad credentials` | Run `cloudfield github connect`. The line ends with gh's own reason. |
 | `github: the gh login on github.com lacks the admin:ssh_signing_key scope; run gh auth refresh -h github.com -s admin:ssh_signing_key in the environment terminal` | Run the command it names. Nothing in the home was changed. |
-| `github: the signing key registered on the account does not match this member's key (fingerprint SHA256:... not listed)` | Run `aether github connect` again. |
+| `github: the signing key registered on the account does not match this member's key (fingerprint SHA256:... not listed)` | Run `cloudfield github connect` again. |
 | `github: gh is not on PATH in the environment terminal; ask a server admin to run aether server update, then run aether terminal stop and open the terminal again: ...` | See [No gh in the environment](#no-gh-in-the-environment). |
 | `github: the gh in the environment terminal is too old to check the login: 2.81.0 is the oldest gh that answers auth status --json; ...` | See [No gh in the environment](#no-gh-in-the-environment). |
 
@@ -191,15 +191,15 @@ anything is generated. Install the OpenSSH client there
 Three kinds of environment can lack a usable `gh`:
 
 - A saved environment from before the standard image shipped `gh`. Install gh
-  in the terminal and save again, or run `aether env reset`.
+  in the terminal and save again, or run `cloudfield env reset`.
 - A standard image without `gh`. Only an admin can move it, by updating the
-  server (`aether server update`, [install.md](install.md#upgrading)). The
+  server (`cloudfield server update`, [install.md](install.md#upgrading)). The
   refusal names the exact command for the server's image.
 - A `gh` you installed into `~/.local/bin`. It comes first on `PATH` and the
   home survives every image, so remove it with `rm ~/.local/bin/gh` or replace
   it with 2.81.0 or newer.
 
-After either image fix, run `aether terminal stop` and open the terminal
+After either image fix, run `cloudfield terminal stop` and open the terminal
 again, because your environment keeps the image it started from.
 
 ## Upload and edit configuration
@@ -209,14 +209,14 @@ configuration) lives in a directory such as `~/.claude`, and sessions read the s
 path in your home. To copy yours from a computer, open **Agents → Agent config
 files**, click **Copy prompt** and paste it into an agent on that computer
 ([quickstart](quickstart.md#upload-agent-configuration)). That agent uses
-`aether config`, which you can also run yourself:
+`cloudfield config`, which you can also run yourself:
 
 ```sh
-aether config ls                                # each agent, its directory, what is always left out
-aether config ls [-r] <agent> [path]            # what the server has
-aether config cat <agent> <path>                # print one server text file
-aether config push [--dry-run] [--overwrite] <agent> <path>...
-aether config push [--dry-run] [--overwrite] <agent> <path> --from <file>
+cloudfield config ls                                # each agent, its directory, what is always left out
+cloudfield config ls [-r] <agent> [path]            # what the server has
+cloudfield config cat <agent> <path>                # print one server text file
+cloudfield config push [--dry-run] [--overwrite] <agent> <path>...
+cloudfield config push [--dry-run] [--overwrite] <agent> <path> --from <file>
 ```
 
 A path is a file or directory inside the agent's directory, relative to it,
@@ -240,7 +240,7 @@ created 1, replaced 0, skipped 1 identical, refused 1, left out 4 in ~/.claude (
 
 - Credential files, `*.pem`, `.env`, `.env.*`, runtime and history paths
   (sessions, caches, plugin caches), symlinks, special files and
-  `.aether-profile-ignore` are never read. `aether config ls` lists each
+  `.aether-profile-ignore` are never read. `cloudfield config ls` lists each
   agent's credential and runtime paths.
 - A file the secret scanner flags is left out on your computer, so its bytes
   never leave it. There is no override.

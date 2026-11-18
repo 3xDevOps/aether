@@ -7,7 +7,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const runSwitchUsage = "usage: aether session switch <session-id> --mode standard|enhanced"
+const runSwitchUsage = "usage: cloudfield session switch <session-id> --mode standard|enhanced"
 
 func runSwitch(args []string) error {
 	runID := args[0]

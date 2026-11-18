@@ -19,8 +19,8 @@ func init() {
 	register(command{
 		name:    "login",
 		short:   "sign in to an edge to reach servers without SSH or network setup",
-		usage:   "aether login [--edge <url>] [--label <name>] [--json]",
-		example: "aether login --json",
+		usage:   "cloudfield login [--edge <url>] [--label <name>] [--json]",
+		example: "cloudfield login --json",
 		flags:   true,
 		run:     runLogin,
 	})
@@ -54,7 +54,7 @@ func runLogin(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether login [--edge <url>] [--label <name>] [--json]")
+		return fmt.Errorf("usage: cloudfield login [--edge <url>] [--label <name>] [--json]")
 	}
 	client, err := edgeClient(*edgeURL)
 	if err != nil {

@@ -11,10 +11,10 @@ func init() {
 	register(command{
 		name:  "budget",
 		short: "show or set a workspace's spend cap",
-		usage: "aether budget [--workspace <name>]\n" +
-			"aether budget set [--workspace <name>] [--limit <usd>] [--warn <usd>] [--override]",
-		example: "aether budget --workspace app\n" +
-			"aether budget set --workspace app --limit 50 --warn 40",
+		usage: "cloudfield budget [--workspace <name>]\n" +
+			"cloudfield budget set [--workspace <name>] [--limit <usd>] [--warn <usd>] [--override]",
+		example: "cloudfield budget --workspace app\n" +
+			"cloudfield budget set --workspace app --limit 50 --warn 40",
 		flags: true,
 		run:   runBudget,
 	})

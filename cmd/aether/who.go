@@ -16,9 +16,9 @@ func init() {
 	register(command{
 		name:  "who",
 		short: "show who is online and which sessions they are watching",
-		usage: "aether who [--workspace <name>] [--run <session-id>]",
-		example: "aether who\n" +
-			"aether who --run run-d6ay38tj8j",
+		usage: "cloudfield who [--workspace <name>] [--run <session-id>]",
+		example: "cloudfield who\n" +
+			"cloudfield who --run run-d6ay38tj8j",
 		flags: true,
 		run:   runWho,
 	})

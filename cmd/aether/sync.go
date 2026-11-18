@@ -22,8 +22,8 @@ func init() {
 	register(command{
 		name:    "sync",
 		short:   "live-overlay a local directory onto a session's worktree",
-		usage:   "aether sync --live [--force] <local-dir> <session-id>",
-		example: "aether sync --live ~/src/app run-d6ay38tj8j",
+		usage:   "cloudfield sync --live [--force] <local-dir> <session-id>",
+		example: "cloudfield sync --live ~/src/app run-d6ay38tj8j",
 		flags:   true,
 		run:     runSync,
 	})
@@ -37,10 +37,10 @@ func runSync(args []string) error {
 		return err
 	}
 	if !*live {
-		return fmt.Errorf("usage: aether sync --live [--force] <local-dir> <session>")
+		return fmt.Errorf("usage: cloudfield sync --live [--force] <local-dir> <session>")
 	}
 	if fs.NArg() != 2 {
-		return fmt.Errorf("usage: aether sync --live [--force] <local-dir> <session>")
+		return fmt.Errorf("usage: cloudfield sync --live [--force] <local-dir> <session>")
 	}
 	localDir, runID := fs.Arg(0), fs.Arg(1)
 

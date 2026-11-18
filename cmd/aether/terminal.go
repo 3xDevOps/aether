@@ -18,13 +18,13 @@ func init() {
 	register(command{
 		name:  "terminal",
 		short: "open or manage your Environment terminal, or run one command in it",
-		usage: "aether terminal [--tab <name>]\n" +
-			"aether terminal status\n" +
-			"aether terminal stop\n" +
-			"aether terminal exec <command>...",
-		example: "aether terminal\n" +
-			"aether terminal status\n" +
-			"aether terminal exec git status",
+		usage: "cloudfield terminal [--tab <name>]\n" +
+			"cloudfield terminal status\n" +
+			"cloudfield terminal stop\n" +
+			"cloudfield terminal exec <command>...",
+		example: "cloudfield terminal\n" +
+			"cloudfield terminal status\n" +
+			"cloudfield terminal exec git status",
 		run: runTerminal,
 	})
 }
@@ -78,7 +78,7 @@ func runTerminal(args []string) error {
 }
 
 func terminalUsage() error {
-	return errors.New("usage: aether terminal [--tab <name>] [status|stop|exec <command>...]")
+	return errors.New("usage: cloudfield terminal [--tab <name>] [status|stop|exec <command>...]")
 }
 
 func terminalStatus() error {

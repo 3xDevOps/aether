@@ -20,7 +20,7 @@ func configCmd(args []string) error {
 	// flag package stops at the first non-flag argument, so parsing first
 	// would silently drop a --config that follows "show" or "set".
 	if len(args) == 0 {
-		return errors.New("usage: aether-server config <show|path|set|edit> [--config <file>]")
+		return errors.New("usage: cloudfield-server config <show|path|set|edit> [--config <file>]")
 	}
 	sub, args := args[0], args[1:]
 	fs := flag.NewFlagSet("config", flag.ExitOnError)
@@ -45,7 +45,7 @@ func configCmd(args []string) error {
 		return nil
 	case "set":
 		if len(rest) != 2 {
-			return errors.New("usage: aether-server config set <key> <value>")
+			return errors.New("usage: cloudfield-server config set <key> <value>")
 		}
 		return configSet(os.Stdout, *path, rest[0], rest[1])
 	case "edit":

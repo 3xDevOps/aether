@@ -18,10 +18,10 @@ func workspaceSettings(args []string) error {
 	messageOthers := fs.String("message-others", "", "who may message, control and kill other members' sessions: everyone or admins-only")
 	maxLive := fs.Int("child-max-live", 0, "subsessions one tree may have busy at once; more wait in a queue")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w\nusage: aether workspace settings [--workspace <name-or-id>] [--message-others everyone|admins-only] [--child-max-live <n>]", err)
+		return fmt.Errorf("%w\nusage: cloudfield workspace settings [--workspace <name-or-id>] [--message-others everyone|admins-only] [--child-max-live <n>]", err)
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether workspace settings [--workspace <name-or-id>] [--message-others everyone|admins-only] [--child-max-live <n>]")
+		return fmt.Errorf("usage: cloudfield workspace settings [--workspace <name-or-id>] [--message-others everyone|admins-only] [--child-max-live <n>]")
 	}
 	change := false
 	limits := protocol.WorkspaceChildLimitsParams{}

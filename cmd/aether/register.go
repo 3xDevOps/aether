@@ -12,7 +12,7 @@ import (
 
 type command struct {
 	name, short string
-	// usage holds one line per form, each starting "aether <name>", and an
+	// usage holds one line per form, each starting "cloudfield <name>", and an
 	// indented line continues the one before it; help for a subcommand
 	// shows only the forms that start with its words.
 	usage   string

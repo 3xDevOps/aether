@@ -31,7 +31,7 @@ func TestDispatchHelp(t *testing.T) {
 		t.Errorf("relaunch help = %q, want the kept-container wording", out)
 	}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if tail := strings.Join(lines[len(lines)-2:], "\n"); !strings.Contains(tail, "aether status") || !strings.Contains(tail, "coding agents: aether help agents") {
+	if tail := strings.Join(lines[len(lines)-2:], "\n"); !strings.Contains(tail, "cloudfield status") || !strings.Contains(tail, "coding agents: cloudfield help agents") {
 		t.Errorf("help ends with %q, want where to start and the agents guide", tail)
 	}
 }
@@ -63,7 +63,7 @@ func TestEveryCommandAnswersHelp(t *testing.T) {
 		paths := []string{c.name}
 		for _, line := range strings.Split(c.usage, "\n") {
 			words := strings.Fields(line)
-			if len(words) < 2 || words[0] != "aether" {
+			if len(words) < 2 || words[0] != "cloudfield" {
 				continue
 			}
 			n := 1
@@ -81,7 +81,7 @@ func TestEveryCommandAnswersHelp(t *testing.T) {
 				t.Errorf("aether %s --help: %v", path, herr)
 				continue
 			}
-			if !strings.HasPrefix(out, "usage: aether "+path) {
+			if !strings.HasPrefix(out, "usage: cloudfield "+path) {
 				t.Errorf("aether %s --help prints %q, want its usage first", path, out)
 			}
 			if slices.Contains(flagSubcommands, path) && !strings.Contains(out, "\nflags:\n  -") {
@@ -90,7 +90,7 @@ func TestEveryCommandAnswersHelp(t *testing.T) {
 			if path != c.name {
 				continue
 			}
-			for _, want := range append(strings.Split(c.usage, "\n"), c.short, "\nexample:\n  aether "+c.name) {
+			for _, want := range append(strings.Split(c.usage, "\n"), c.short, "\nexample:\n  cloudfield "+c.name) {
 				if !strings.Contains(out, want) {
 					t.Errorf("aether %s --help lacks %q:\n%s", c.name, want, out)
 				}
@@ -132,7 +132,7 @@ func TestFlagSetHelpAndErrors(t *testing.T) {
 		t.Errorf("aether sessions --json -h = %q, %v; want the flags and no error", out, err)
 	}
 	err = dispatch([]string{"sessions", "--nope"})
-	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -nope; see aether sessions --help") {
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -nope; see cloudfield sessions --help") {
 		t.Errorf("aether sessions --nope = %v, want the flag error and the help command", err)
 	}
 	out, err = captureStdout(t, func() error { return dispatch([]string{"help", "agents"}) })
@@ -211,22 +211,22 @@ func TestSteerUsage(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"kill"}, "usage: aether kill <session-id>"},
-		{[]string{"delete"}, "usage: aether delete <session-id>"},
-		{[]string{"delete", "run-1", "run-2"}, "usage: aether delete <session-id>"},
-		{[]string{"archive"}, "usage: aether archive <session-id>"},
-		{[]string{"archive", "run-1", "run-2"}, "usage: aether archive <session-id>"},
-		{[]string{"unarchive"}, "usage: aether unarchive <session-id>"},
-		{[]string{"pause"}, "usage: aether pause <session-id>"},
-		{[]string{"resume"}, "usage: aether resume <session-id>"},
-		{[]string{"message"}, "usage: aether message <session-id> <message...>"},
-		{[]string{"message", "run-1"}, "usage: aether message <session-id> <message...>"},
-		{[]string{"close"}, "usage: aether close <session-id> --outcome merged|abandoned"},
-		{[]string{"close", "run-1"}, "usage: aether close <session-id> --outcome merged|abandoned"},
-		{[]string{"reopen"}, "usage: aether reopen <session-id>"},
-		{[]string{"env"}, "usage: aether env save|reset"},
-		{[]string{"env", "save", "extra"}, "usage: aether env save|reset"},
-		{[]string{"env", "reset", "extra"}, "usage: aether env save|reset"},
+		{[]string{"kill"}, "usage: cloudfield kill <session-id>"},
+		{[]string{"delete"}, "usage: cloudfield delete <session-id>"},
+		{[]string{"delete", "run-1", "run-2"}, "usage: cloudfield delete <session-id>"},
+		{[]string{"archive"}, "usage: cloudfield archive <session-id>"},
+		{[]string{"archive", "run-1", "run-2"}, "usage: cloudfield archive <session-id>"},
+		{[]string{"unarchive"}, "usage: cloudfield unarchive <session-id>"},
+		{[]string{"pause"}, "usage: cloudfield pause <session-id>"},
+		{[]string{"resume"}, "usage: cloudfield resume <session-id>"},
+		{[]string{"message"}, "usage: cloudfield message <session-id> <message...>"},
+		{[]string{"message", "run-1"}, "usage: cloudfield message <session-id> <message...>"},
+		{[]string{"close"}, "usage: cloudfield close <session-id> --outcome merged|abandoned"},
+		{[]string{"close", "run-1"}, "usage: cloudfield close <session-id> --outcome merged|abandoned"},
+		{[]string{"reopen"}, "usage: cloudfield reopen <session-id>"},
+		{[]string{"env"}, "usage: cloudfield env save|reset"},
+		{[]string{"env", "save", "extra"}, "usage: cloudfield env save|reset"},
+		{[]string{"env", "reset", "extra"}, "usage: cloudfield env save|reset"},
 	}
 	for _, tc := range cases {
 		err := dispatch(tc.args)

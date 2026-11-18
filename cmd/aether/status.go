@@ -26,9 +26,9 @@ func init() {
 	register(command{
 		name:  "status",
 		short: "show this computer's link, edge sign-ins, server, workspaces and agents, and the next setup step",
-		usage: "aether status [--json]",
-		example: "aether status\n" +
-			"aether status --json",
+		usage: "cloudfield status [--json]",
+		example: "cloudfield status\n" +
+			"cloudfield status --json",
 		flags: true,
 		run:   runStatus,
 	})
@@ -82,7 +82,7 @@ func runStatus(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return errors.New("usage: aether status [--json]")
+		return errors.New("usage: cloudfield status [--json]")
 	}
 	report, err := gatherStatus()
 	if !*jsonOut {

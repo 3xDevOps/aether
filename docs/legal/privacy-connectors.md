@@ -89,7 +89,7 @@ to train models. The code does none of these.]
   scopes, is deployed; until then scopes choose which tools are listed but
   the server does not check each call against them.]
 - Revoke a connector in the Cloudfield app under **Settings → ChatGPT and
-  Claude**, or with `aether mcp revoke <id>`. Removing it in ChatGPT or
+  Claude**, or with `cloudfield mcp revoke <id>`. Removing it in ChatGPT or
   Claude alone does not revoke it on the server.
 - Delete your edge account at `https://auth.onaether.dev/account`.
 - Ask your server administrator for data held on your server, and

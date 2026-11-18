@@ -67,7 +67,7 @@ What each agent can do:
   ([Sessions in VMs](failure-handling.md#sessions-in-vms)).
 - **Set up suggests** is the mode **Set up** picks first. The dashboard then
   remembers your choice per agent
-  ([Choose Enhanced](enhanced-sessions.md#choose-enhanced)), and `aether session`
+  ([Choose Enhanced](enhanced-sessions.md#choose-enhanced)), and `cloudfield session`
   defaults to Enhanced where it is installed, else Standard. A Background session of an agent it suggests Enhanced for
   uses the agent's ACP server once it is installed
   ([Background sessions](enhanced-sessions.md#background-sessions)).
@@ -81,11 +81,11 @@ You do this once per agent, per person.
 1. On your own computer, install the agent:
 
    ```sh
-   aether agent add <name>
+   cloudfield agent add <name>
    ```
 
    On a terminal, this opens your environment's terminal, the same shell
-   `aether terminal` opens, types the vendor's install command and leaves you in
+   `cloudfield terminal` opens, types the vendor's install command and leaves you in
    that shell. Without a terminal (an agent's shell, CI), it runs the install
    on the server, waits up to 10 minutes, prints the end of the install log and
    `installed <name>`, then `sign in with: aether agent login <name>`. A failed
@@ -98,13 +98,13 @@ You do this once per agent, per person.
    pick Standard or Enhanced, installs the agent, and opens a terminal. Use
    **Copy login command**, paste at a shell prompt, review it, then press Enter.
 
-   The environment has no `aether` command (only `aether-internal`), so run
-   `aether` commands on your computer, never in this shell.
+   The environment has no `cloudfield` command, so run
+   `cloudfield` commands on your computer, never in this shell.
 
 2. Sign in:
 
    ```sh
-   aether agent login <name>
+   cloudfield agent login <name>
    ```
 
    On a terminal, this opens the environment's terminal with the agent's
@@ -115,13 +115,13 @@ You do this once per agent, per person.
    terminal on your computer before you finish the browser flow:
 
    ```sh
-   aether forward terminal <callback-port>
+   cloudfield forward terminal <callback-port>
    ```
 
    Device-code logins need no forward.
 
    Without a terminal, only a device-code sign-in, which needs nothing typed
-   back, can run. Today that is Codex: `aether agent login codex` runs
+   back, can run. Today that is Codex: `cloudfield agent login codex` runs
    `codex login --device-auth` in a new terminal tab, `login-codex-<id>`,
    prints its output as plain text as it arrives, so the URL and code reach
    you, and waits for it to end. It then prints
@@ -143,7 +143,7 @@ You do this once per agent, per person.
 3. Check the agent:
 
    ```sh
-   aether agent list
+   cloudfield agent list
    ```
 
    ```text
@@ -162,7 +162,7 @@ You do this once per agent, per person.
    accepts the login:
 
    ```sh
-   aether account usage
+   cloudfield account usage
    ```
 
    ```text
@@ -176,12 +176,12 @@ You do this once per agent, per person.
 
 The login and executable live in your home, so every container you launch sees
 them. If you skip the login, the agent's own login prompt appears in the session's
-terminal. Attach with `aether attach <session>` and finish it there.
+terminal. Attach with `cloudfield attach <session>` and finish it there.
 
 Installing `codex`, `pi`, `copilot` or `gemini` needs `npm`. If `npm` is not on
 the environment's `PATH`, the install fails with, for example,
 `npm is not in this environment's PATH, and codex installs through npm`. The
-dashboard's **Set up** and `aether agent add` without a terminal the
+dashboard's **Set up** and `cloudfield agent add` without a terminal the
 install under `mktemp` and `timeout`, so the image must provide both. Without
 them it fails with `timeout: not found` and exit status 127.
 
@@ -191,16 +191,16 @@ A key stored as a workspace secret replaces the agent's login in that
 workspace's sessions. The human runs this on their own computer, for example:
 
 ```sh
-aether workspace env set --secret ANTHROPIC_API_KEY
+cloudfield workspace env set --secret ANTHROPIC_API_KEY
 ```
 
 The value is read from stdin; on a terminal the command prompts with input
 hidden. Codex ignores `OPENAI_API_KEY` and reads `CODEX_API_KEY` in
 Background sessions only; for every Codex mode, run `codex login --with-api-key`
-in `aether terminal`. Each agent's key is under
+in `cloudfield terminal`. Each agent's key is under
 [Per-agent setup](#per-agent-setup). Pick another workspace with `--workspace
 <name-or-id>`. Never pass a key as `NAME=value`: that puts it on the command
-line and stores a plain variable that `aether workspace env list` shows.
+line and stores a plain variable that `cloudfield workspace env list` shows.
 
 > [!WARNING]
 > On a team server, anyone who can launch a session in the workspace or message one
@@ -237,9 +237,9 @@ While the server knows a login is signed out:
 | Dashboard, for your own account | **\<Agent\> is signed out** (the login file) or **\<Agent\>'s sign-in was refused** (a refusal) with the problem and **Sign in on Agents**, on every page but Agents and the refused session, which show it themselves |
 | **Agents** page, **Settings → Agents** | **Signed out** or **Sign-in refused** with the problem, and **Log in** |
 | Launch dialog | **Signed out** or **Sign-in refused** on the account or agent, with the problem and the way to sign in |
-| `aether agent list` | `signed out` under `LOGIN FILE`, then `claude is signed out: <problem>` and `sign in again: ...` |
-| `aether status` | `agent: claude: installed, signed out: <problem>` and `next:` naming `aether agent login claude` |
-| `aether agent list --json`, `agent.list` | `login_problem`, and `login_blocks_launch` |
+| `cloudfield agent list` | `signed out` under `LOGIN FILE`, then `claude is signed out: <problem>` and `sign in again: ...` |
+| `cloudfield status` | `agent: claude: installed, signed out: <problem>` and `next:` naming `aether agent login claude` |
+| `cloudfield agent list --json`, `agent.list` | `login_problem`, and `login_blocks_launch` |
 | Connector `aether_launch_options`, `aether_list_workspaces` | `signed_in: false` and `signed_out` with the problem, the way to sign in, and whether a launch is refused until then |
 | A refused turn or open | The session's reason ends with whose login it is and where to sign in ([enhanced-sessions.md](enhanced-sessions.md)) |
 
@@ -266,7 +266,7 @@ the server cannot see, such as an `apiKeyHelper` or `env` in
 login with the agent's own sign-out, or sign in again.
 
 The account's owner signs in again on the **Agents** page (**Log in**) or with
-`aether agent login <name>`. Nothing needs dismissing: every surface reads the
+`cloudfield agent login <name>`. Nothing needs dismissing: every surface reads the
 login again and clears by itself.
 
 ### Enhanced adapters
@@ -274,7 +274,7 @@ login again and clears by itself.
 Some agents serve ACP from their own CLI (`omp acp`, `opencode acp`,
 `copilot --acp`, `gemini --acp`, `agent --force acp`). Installing the agent
 installs that. Claude Code, Codex and pi need a separate npm adapter package:
-`claude-agent-acp`, `codex-acp` and `pi-acp`. `aether agent add <name>
+`claude-agent-acp`, `codex-acp` and `pi-acp`. `cloudfield agent add <name>
 --enhanced` installs the agent and its adapter, pinned to the version Cloudfield
 tests against. The dashboard's **Set up** does the same when you pick Enhanced.
 
@@ -287,18 +287,18 @@ it. A CLI in `~/.local/bin` is the one Cloudfield
 Enhanced sessions with the next CLI update, without a Cloudfield release. The
 adapter runs its own copy instead when the CLI is not on `PATH`, or its
 `--version` is older than the adapter's copy or prints no version Cloudfield can
-read within 10 seconds. Update a CLI in your home in `aether terminal`, with
+read within 10 seconds. Update a CLI in your home in `cloudfield terminal`, with
 `claude update` or the `npm install` line under [Codex](#codex), and one
 installed in the image by rebuilding the image. A `CLAUDE_CODE_EXECUTABLE` or
 `CODEX_PATH` set as a workspace variable wins, so a session can go back to the
 adapter's own Codex with `CODEX_PATH` set to
 `<home>/.local/lib/node_modules/@agentclientprotocol/codex-acp/node_modules/.bin/codex`,
-where `<home>` is what `echo "$HOME"` prints in `aether terminal`: `/root`, or
+where `<home>` is what `echo "$HOME"` prints in `cloudfield terminal`: `/root`, or
 `/home/aether` in an image whose user is not root.
 
 ### Per-agent setup
 
-Run each login in your environment's shell, which `aether terminal` opens from
+Run each login in your environment's shell, which `cloudfield terminal` opens from
 your computer. API keys set in the server's environment
 (`/etc/aether/aether-server.env` with the shipped systemd unit) replace the
 login. To send an agent through a model gateway such as LiteLLM or OpenRouter,
@@ -325,7 +325,7 @@ prompt `[Your previous response had no visible output...]`. A Cloudfield turn
 ends with a report and no text after it, so every `claude` session gets
 `CLAUDE_CODE_TERMINAL_MCP_TOOLS=mcp__aether__aether_report`, which exempts a
 turn in which `aether_report` succeeded since the last user message. A report
-through `aether-internal report` runs as the shell tool and still gets the
+through `cloudfield-internal report` runs as the shell tool and still gets the
 extra call, so the role card names `aether_report` first. Only Enhanced
 sessions have the `aether_report` tool, and a running session picks the
 variable up when its container is next launched.
@@ -346,7 +346,7 @@ set `openai_base_url` in `~/.codex/config.toml`.
 A Standard Codex run starts `codex app-server` in the session's sandbox and
 attaches the Codex terminal to it with `codex --remote`. Cloudfield follows the
 same session through that app-server: Codex reports the start and end of each
-turn, and mail and your messages from the dashboard or `aether message` arrive
+turn, and mail and your messages from the dashboard or `cloudfield message` arrive
 as a new turn when Codex is idle, or as a steer added to the running turn. They
 show in the terminal as prompts, under Cloudfield's attribution banner. Press
 Esc in the terminal to stop a turn. Cloudfield loads no hooks into Standard
@@ -390,7 +390,7 @@ the agent database under `~/.omp/agent/`. `ANTHROPIC_API_KEY` or
 `ANTHROPIC_BASE_URL` sends Anthropic requests to a gateway.
 
 `omp` is a shipped name, and a shipped name always wins over a definition you
-stored with `aether agent add omp`. To launch your own build, register it under
+stored with `cloudfield agent add omp`. To launch your own build, register it under
 a name Cloudfield does not ship.
 
 #### OpenCode
@@ -399,11 +399,11 @@ Run `opencode auth login` and pick your provider. The login lands in
 `~/.local/share/opencode/auth.json`. `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in
 the server's environment is the API-key alternative, with `ANTHROPIC_BASE_URL`
 or `OPENAI_BASE_URL` for a gateway. OpenCode settings and plugins live in
-`~/.config/opencode`, the root `aether config` and **Files** use. That root does
+`~/.config/opencode`, the root `cloudfield config` and **Files** use. That root does
 not follow `XDG_CONFIG_HOME`, `OPENCODE_CONFIG_DIR` or `OPENCODE_CONFIG`.
 
 Cloudfield never updates OpenCode, because an upgrade can cross a major version
-that Cloudfield's launch wrapper refuses. Update it yourself in `aether
+that Cloudfield's launch wrapper refuses. Update it yourself in `cloudfield
 terminal`.
 
 #### GitHub Copilot CLI
@@ -484,25 +484,25 @@ Claude Code, Copilot, pi, oh-my-pi and OpenCode load Cloudfield's inbox hooks
 for you on a Standard session that has a task. Codex needs none: its app-server
 hands it mail. Gemini CLI and Cursor CLI do not load hooks.
 Without hooks, mail reaches those agents only when they run
-`aether-internal inbox`.
+`cloudfield-internal inbox`.
 
 To install hooks for Gemini or Cursor, run these inside a session and merge the
 output into the agent's settings, keeping any hooks you already have:
 
 ```sh
-aether-internal hook file gemini.json    # merge into ~/.gemini/settings.json
-aether-internal hook file cursor.json    # merge into ~/.cursor/hooks.json
+cloudfield-internal hook file gemini.json    # merge into ~/.gemini/settings.json
+cloudfield-internal hook file cursor.json    # merge into ~/.cursor/hooks.json
 ```
 
 Restart the agent afterwards. In Gemini, `/hooks list` shows the hook, named
 `aether-inbox`. Do not install a copy for an agent whose session already loads
-hooks. `aether-internal skill` prints `Inbox hooks (<agent>): loaded by this
+hooks. `cloudfield-internal skill` prints `Inbox hooks (<agent>): loaded by this
 session's launch; do not install a manual copy.` when the launch loaded them.
 
 ### Remove an agent
 
 ```sh
-aether agent remove <name>
+cloudfield agent remove <name>
 ```
 
 For a shipped agent this deletes its links in `~/.local/bin`, so the launcher
@@ -544,7 +544,7 @@ example, `codex in ~/.local/bin was not installed with npm, so Cloudfield cannot
 update it`.
 
 Cloudfield does not roll an update back. To turn updates off for the whole
-server, run `sudo aether-server config set agent-update false`, then restart it.
+server, run `sudo cloudfield-server config set agent-update false`, then restart it.
 
 ## Usage limits
 
@@ -586,11 +586,11 @@ error instead of moving.
 
 ### Modes and what the session container does
 
-`aether session` takes `--mode enhanced`, `standard` or `background`. Without
+`cloudfield session` takes `--mode enhanced`, `standard` or `background`. Without
 `--mode`, the server starts Enhanced where the agent's Enhanced mode is
 installed on the launch's account, and Standard otherwise.
 
-- Standard sessions the agent's terminal UI in a persistent PTY. `aether attach
+- Standard sessions the agent's terminal UI in a persistent PTY. `cloudfield attach
   <session>` puts you in it. After the agent exits, the container opens a login
   shell, and the session stays open until you Close, Kill or Delete it.
 - Enhanced sessions the agent over ACP next to a login shell. Close and reopen work
@@ -692,7 +692,7 @@ oh-my-pi keeps its logins in `~/.omp/agent/agent.db`, among about a dozen
 SQLite databases spread through `~/.omp`. In session VMs the server holds the
 logins instead: it runs omp's own auth broker, `omp auth-broker serve`, for
 each account a session uses, from the oh-my-pi release pinned at
-`/usr/local/libexec/aether/omp`. `aether-server vm install` puts it there, and
+`/usr/local/libexec/aether/omp`. `cloudfield-server vm install` puts it there, and
 the server downloads it in the background when it starts without it; until
 then omp in VMs cannot sign in. The broker opens the account's
 `~/.omp/agent/agent.db`, the one copy of its logins, and refreshes them, so no
@@ -767,7 +767,7 @@ not run omp there while VM sessions use the account.
 
 ### Choose a model
 
-`aether session --model <model>` or the **Model** field in the dashboard passes the
+`cloudfield session --model <model>` or the **Model** field in the dashboard passes the
 model to the agent as is. Empty keeps the agent's default. Every shipped agent
 takes a model. For Enhanced sessions the model is set over ACP after the session
 opens.
@@ -785,7 +785,7 @@ A model that is not a single argument is refused before launch:
 model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes
 ```
 
-The dashboard, `aether agent models <name>` and the connector's
+The dashboard, `cloudfield agent models <name>` and the connector's
 `aether_launch_options` list the models of Claude Code and Codex, read from the
 installed CLI on your login: what `claude` or `codex app-server` reports, with
 each model's id and name. Claude Code's aliases resolve to its newest models,
@@ -794,7 +794,7 @@ other agents, type the model name. Any id is accepted; Claude Code also takes a
 full model id such as `claude-fable-5-2` that its list shows only as an alias.
 
 The list is cached for an hour and discovered again after Cloudfield updates the
-agent; `aether agent models <name> --refresh` or the dashboard's refresh button
+agent; `cloudfield agent models <name> --refresh` or the dashboard's refresh button
 discovers it now. A failed discovery shows the CLI's real error, for example
 `codex exited 127: sh: 3: codex: not found` or
 `claude models: run in the environment terminal: context deadline exceeded`,
@@ -806,7 +806,7 @@ owner's terminal is not running, the error says so.
 
 ### Choose an effort
 
-`aether session --effort <level>` or the **Effort** field in the dashboard sets the
+`cloudfield session --effort <level>` or the **Effort** field in the dashboard sets the
 agent's effort or thinking level for the session. Empty keeps the agent's default.
 The dashboard shows the field only for an agent that has levels, and offers
 only those:
@@ -859,14 +859,14 @@ reaches the agent depends on the agent:
 
 System-prompt delivery survives compaction. Instructions after the task do not.
 A launch with no instructions has no brief either. In that case the agent has
-to run `aether-internal skill` and `aether-internal memory brief` itself.
+to run `cloudfield-internal skill` and `cloudfield-internal memory brief` itself.
 
 ### Custom and unlisted agents
 
 Any CLI can be a session's agent. Register one for yourself:
 
 ```sh
-aether agent add mycli --standard "mycli {task}" --background "mycli -p {task}"
+cloudfield agent add mycli --standard "mycli {task}" --background "mycli -p {task}"
 ```
 
 Without flags the command prompts for `Standard command [<name> {task}]:` and
@@ -883,9 +883,9 @@ in.
 | `--login <path>` | A login file, such as `--login ~/.cursor/auth.json`. With it the Agents page shows **Login found**. Without it setup never shows the agent as logged in |
 
 The name is what you choose at launch, and it need not match the executable.
-`aether agent add mycursor --standard "agent {task}"` runs `agent`. Cloudfield
+`cloudfield agent add mycursor --standard "agent {task}"` runs `agent`. Cloudfield
 ships inbox hooks for a fixed set of names, so a differently named agent gets
-none and `aether-internal skill` says `no packaged integration`.
+none and `cloudfield-internal skill` says `no packaged integration`.
 
 Your definition shapes launches only in your own containers, and runs only on
 your own account. Shipped names and the reserved names `custom` and `fake` cannot
@@ -902,11 +902,11 @@ For inbox support, status reporting and the contract the CLI has to follow, see
 #### The `fake` agent
 
 `fake` has no login and no fixed command. The server reads its command from
-`AETHER_FAKE_AGENT` at launch, so it runs whatever script you name. The session's
+`CLOUDFIELD_FAKE_AGENT` at launch, so it runs whatever script you name. The session's
 checkout is mounted at `/workspace`:
 
 ```sh
-sudo AETHER_FAKE_AGENT="sh /workspace/agent.sh {task}" aether-server serve --data-dir /var/lib/aether
+sudo CLOUDFIELD_FAKE_AGENT="sh /workspace/agent.sh {task}" cloudfield-server serve --data-dir /var/lib/aether
 ```
 
 The [quickstart](quickstart.md#prove-the-plumbing-without-an-agent-subscription)
@@ -916,7 +916,7 @@ uses it to prove the whole lifecycle without a vendor account.
 
 When agents run subsessions or share files, other sessions and people send them
 messages. Cloudfield keeps those in a durable mailbox and tells the agent to read it.
-The reading itself is a command, `aether-internal inbox`. The agent learns mail
+The reading itself is a command, `cloudfield-internal inbox`. The agent learns mail
 is waiting in one of two ways. A **hook** runs at a boundary such as a prompt or
 a finished tool call. **Idle wake** starts a new turn in a session that has been
 waiting. Which agents get which is in the table above. Both are managed for you,
@@ -929,7 +929,7 @@ sessions do not use hooks: the server prompts the idle session instead. So does 
 Standard Codex run, through its app-server, with or without a task: the server
 prompts the session with the inbox notice, as a new turn when idle and as a
 steer mid-turn. Without any of these, the agent reads mail only when it runs
-`aether-internal inbox`.
+`cloudfield-internal inbox`.
 
 Claude Code is the one with a hook-based idle wake in Standard mode. Its wake
 starts a turn with no human input, and the terminal shows **Stop hook feedback**.
@@ -969,7 +969,7 @@ finished turn and after you press Esc.
 
 ## Agent configuration: import and Files
 
-`aether config push` uploads an agent's configuration directory from your
+`cloudfield config push` uploads an agent's configuration directory from your
 computer to your home on the server, and **Files → Home** edits it there
 ([environment-home.md](environment-home.md#upload-and-edit-configuration)).
 Existing and future sessions see the change at once. A shared account does not

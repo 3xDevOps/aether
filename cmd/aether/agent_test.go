@@ -227,7 +227,7 @@ func TestParseAgentAdd(t *testing.T) {
 	if opts.name != "myagent" || opts.standard != "myagent {task}" || opts.background != "" {
 		t.Fatalf("opts = %+v", opts)
 	}
-	if _, err := parseAgentAdd(nil); err == nil || !strings.Contains(err.Error(), "usage: aether agent add") {
+	if _, err := parseAgentAdd(nil); err == nil || !strings.Contains(err.Error(), "usage: cloudfield agent add") {
 		t.Fatalf("missing name error = %v, want usage", err)
 	}
 	if _, err := parseAgentAdd([]string{"myagent", "--workspace", "ws"}); err == nil {
@@ -237,7 +237,7 @@ func TestParseAgentAdd(t *testing.T) {
 
 func TestAgentRemoveUsage(t *testing.T) {
 	for _, args := range [][]string{nil, {"remove"}, {"remove", "a", "b"}} {
-		if err := runAgent(args); err == nil || !strings.Contains(err.Error(), "usage: aether agent ") {
+		if err := runAgent(args); err == nil || !strings.Contains(err.Error(), "usage: cloudfield agent ") {
 			t.Fatalf("runAgent(%v) error = %v, want usage", args, err)
 		}
 	}
@@ -299,7 +299,7 @@ func TestAgentModelsPrintsTheListAndTheError(t *testing.T) {
 
 func TestAgentModelsUsage(t *testing.T) {
 	for _, args := range [][]string{nil, {"--refresh"}, {"claude", "extra"}} {
-		if err := agentModels(args); err == nil || !strings.Contains(err.Error(), "usage: aether agent models") {
+		if err := agentModels(args); err == nil || !strings.Contains(err.Error(), "usage: cloudfield agent models") {
 			t.Fatalf("agentModels(%q) = %v, want the usage", args, err)
 		}
 	}

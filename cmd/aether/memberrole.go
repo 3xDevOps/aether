@@ -16,7 +16,7 @@ import (
 // last super admin.
 func memberRole(args []string) error {
 	if len(args) != 2 {
-		return fmt.Errorf("usage: aether member role <member-id> <super_admin|admin|collaborator|viewer>")
+		return fmt.Errorf("usage: cloudfield member role <member-id> <super_admin|admin|collaborator|viewer>")
 	}
 	memberID, role := args[0], args[1]
 	if !domain.Role(role).Valid() {

@@ -15,29 +15,29 @@ shown beside the status says why it is there.
 | When | What you see | What Cloudfield does | What you do |
 | --- | --- | --- | --- |
 | The server restarts or is killed, and session sandboxes survive | Sessions keep their status. | Reattaches to every live sandbox. An Enhanced agent keeps running under its keeper, and the new server adopts its conversation, turn and open requests ([Restarts and failures](enhanced-sessions.md#restarts-and-failures)). A kill accepted before the crash is issued again. | Nothing. When the keeper is gone, the conversation is restored in a fresh process and a turn that was cut off parks with `turn interrupted`: send a message to continue. |
-| The host reboots, or Docker restarts without `live-restore` | Live sessions read `interrupted` with `server restarted: container exited <code>` (or `server restarted` when the container is gone). | Commits the partial work as `wip: <task>`, publishes the session branch and keeps the checkout. | Pull the branch (`aether pull <session-id>`) or start a new session. An interrupted session cannot be reopened. |
-| A server update is interrupted, or the new version cannot boot | `aether server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
+| The host reboots, or Docker restarts without `live-restore` | Live sessions read `interrupted` with `server restarted: container exited <code>` (or `server restarted` when the container is gone). | Commits the partial work as `wip: <task>`, publishes the session branch and keeps the checkout. | Pull the branch (`cloudfield pull <session-id>`) or start a new session. An interrupted session cannot be reopened. |
+| A server update is interrupted, or the new version cannot boot | `cloudfield server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
 | Host memory is low, or the server stalls on memory | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | [Recover from memory pressure](#recover-from-memory-pressure). |
-| An Enhanced Claude Code session is idle for `--run-sleep-after` (30 minutes) | The Chat view shows **Asleep since <time>**; `aether sessions` shows `(asleep)`. | Stops the container with `docker stop`, freeing its memory and CPU, and keeps its disk and checkout. | Nothing. The next message wakes it ([Idle sleep](#idle-sleep)). |
+| An Enhanced Claude Code session is idle for `--run-sleep-after` (30 minutes) | The Chat view shows **Asleep since <time>**; `cloudfield sessions` shows `(asleep)`. | Stops the container with `docker stop`, freeing its memory and CPU, and keeps its disk and checkout. | Nothing. The next message wakes it ([Idle sleep](#idle-sleep)). |
 | A Standard or Enhanced session in a VM is idle for `--run-sleep-after` (5 minutes) | As above. | Saves the whole VM to disk with every process in it, freeing its memory and CPU. | Nothing. The next message restores it ([Sessions in VMs](#sessions-in-vms)). |
-| An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced session is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the session supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`aether attach <session-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
+| An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced session is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the session supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`cloudfield attach <session-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
 | A Standard agent exits | The session stays live and its terminal shows a login shell. | Opens a shell in place of the agent. It never restarts the agent. | Start the agent again in that shell, or close the session. |
 | A Background agent exits | `completed`, or `failed` with `agent exited <code>: <last line of output>`. | Commits and publishes the branch, then removes the container. | Read the full output in the session's transcript. |
 | The agent hits its account's usage limit | `Usage limit reached on <owner>'s account; ...` when it cannot continue. | Moves the session to another account that has usage left. | [Usage limit mid-session](#usage-limit-mid-session). |
 | The owner of the session's shared account revokes the share | `account share revoked: <owner> revoked access to their account; ...` when it cannot continue. | Moves the session to another account the launcher may use, or fails it and removes its container. | [Account sharing](security.md#account-sharing). |
-| An agent update fails, or the vendor is unreachable | Timeline note `could not update <agent> from <version>: the updater exited <code>: <output>`. | Launches whatever is installed without waiting for the update. Tries again from that home after 15 minutes. | Usually nothing. `sudo aether-server config set agent-update false` turns updates off. |
+| An agent update fails, or the vendor is unreachable | Timeline note `could not update <agent> from <version>: the updater exited <code>: <output>`. | Launches whatever is installed without waiting for the update. Tries again from that home after 15 minutes. | Usually nothing. `sudo cloudfield-server config set agent-update false` turns updates off. |
 | An agent update an older Cloudfield interrupted left the agent's npm package missing | The launch that starts the repair may not find the agent. | Restores the copy in `~/.local/lib/.<agent>-update.*/previous` in the background, before contacting npm. | Launch again. The next launch finds the agent. |
 | An SSH connection drops during an attach | The CLI or dashboard disconnects. | Nothing changes for the session: its terminal lives on the server. Input that never reached the server is dropped whole. | Attach again. The full transcript replays before live output. |
-| An `aether forward` connection drops | The local port stops answering. | Closes both ends of the tunnel. | Run `aether forward <run-id|terminal> <port>` again. |
+| A `cloudfield forward` connection drops | The local port stops answering. | Closes both ends of the tunnel. | Run `cloudfield forward <run-id|terminal> <port>` again. |
 | A launch cannot refresh the workspace mirror | The launch fails with `gitengine: mirror <kind> for branch "<branch>": <diagnostic>`. No session is created. | Never falls back to an older base on its own. | [Launch and mirror failures](#launch-and-mirror-failures). |
 | Your environment's main shell exits | The environment terminal closes. | Stops the terminal and keeps the stopped container. | Open the environment again. It starts the container, or rebuilds it from your saved image. |
 | An Enhanced session fails | **Disconnected**, with `enhanced session failed: <error>` or `enhanced session ended: ...`. | Keeps the session up on its login shell. | [Enhanced sessions](#enhanced-sessions). |
 | A session runs out of memory | Timeline note `Out of memory: the kernel killed a process in this session at its <n> GiB memory limit (peak <n> GiB)`. | Nothing automatic. The killed process may be a tool, the agent or the shell. | Check whether the agent is still running. Raise `--run-memory` if it keeps happening. |
 | The kernel's file-watch limits are spent | Server log `gitengine: cannot watch checkout for file changes; polling for diff snapshots instead`. | Launches the session anyway and checks its files every 60 seconds. | [Raise file-watch limits](#raise-file-watch-limits). |
 | Another process holds the database at startup | `store: begin migration <n>: database is locked (5) (SQLITE_BUSY)` | The server exits. | Find and stop the other writer, then start again. Never delete the database. |
-| The first start after an upgrade takes minutes | Clients cannot connect and the server logs nothing yet. `sudo aether-server update` prints `aether-server is migrating the database at schema <n> to <m>; waiting for it`. | Migrates the database before it serves. Migration 109 reads every stored event to build three indexes: on a 9 GB event log that took 1-2 minutes in testing, longer on a busy disk. | Wait. A restart starts the migration over, and an update rolls back a release that starts twice without finishing. Before the update, free the database's size again plus a tenth of it: the update copies the database into `server-update/`, and the migration adds indexes of about 4% of the event log's size (400 MB on 9 GB in testing), as much again in `aether.db-wal`, and sort files in `/var/tmp`. |
-| `sudo aether-server update` takes minutes while many sessions are open | The update waits after the new server starts. The server log shows `scheduler: recovery: reconnecting sessions sessions=<n> at_once=4`, then `scheduler: recovery: session started run=<id>` and `scheduler: recovery: session done run=<id> took=<duration>` for each session, then `scheduler: recovery: sessions done`. | Reconnects every open session before it counts as started, 4 at a time, so one slow session does not hold up the rest. An update still rolls back if a session has not finished 5 minutes after the database migration. | Wait. `sudo journalctl -u aether-server -f` shows each session; a session with `session started` and no `session done` is the one still reconnecting, and a long `took` names a slow one. |
+| The first start after an upgrade takes minutes | Clients cannot connect and the server logs nothing yet. `sudo cloudfield-server update` prints `aether-server is migrating the database at schema <n> to <m>; waiting for it`. | Migrates the database before it serves. Migration 109 reads every stored event to build three indexes: on a 9 GB event log that took 1-2 minutes in testing, longer on a busy disk. | Wait. A restart starts the migration over, and an update rolls back a release that starts twice without finishing. Before the update, free the database's size again plus a tenth of it: the update copies the database into `server-update/`, and the migration adds indexes of about 4% of the event log's size (400 MB on 9 GB in testing), as much again in `aether.db-wal`, and sort files in `/var/tmp`. |
+| `sudo cloudfield-server update` takes minutes while many sessions are open | The update waits after the new server starts. The server log shows `scheduler: recovery: reconnecting sessions sessions=<n> at_once=4`, then `scheduler: recovery: session started run=<id>` and `scheduler: recovery: session done run=<id> took=<duration>` for each session, then `scheduler: recovery: sessions done`. | Reconnects every open session before it counts as started, 4 at a time, so one slow session does not hold up the rest. An update still rolls back if a session has not finished 5 minutes after the database migration. | Wait. `sudo journalctl -u aether-server -f` shows each session; a session with `session started` and no `session done` is the one still reconnecting, and a long `took` names a slow one. |
 | The server is down when a schedule is due | Nothing. | Skips the missed occurrence and waits for the next one. | Launch the session by hand if it matters. |
 
 A lost connection does not prove that a command failed. Before you retry
@@ -48,7 +48,7 @@ continue its turn, so an action can run twice.
 ## Session activity
 
 A live session carries a state that says what it is doing. The dashboard and
-`aether sessions` show its label.
+`cloudfield sessions` show its label.
 
 | State | Label | Meaning |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ A live session carries a state that says what it is doing. The dashboard and
 | `waiting-ci` | Waiting for CI | The agent reported `waiting --for ci`. |
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
-| `waiting` | Turn ended, or Stale wait for a stale wait (`aether sessions`: Waiting) | The turn ended with no report (`turn ended without a report`), the session stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
+| `waiting` | Turn ended, or Stale wait for a stale wait (`cloudfield sessions`: Waiting) | The turn ended with no report (`turn ended without a report`), the session stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
 | `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Cloudfield cannot continue from, an Enhanced turn that waits for a reply, or a [broken wait](#waits-cloudfield-can-check). |
 | `finished` | Finished: review | An interactive session reported `success`. Asks nothing of you. |
 | `failed` | Failed | The session reported `failure`, or its turn failed. |
@@ -79,7 +79,7 @@ background tasks lasts exactly as long as they do.
 
 A waiting report can name conditions Cloudfield checks for the agent, such as
 a pull request's checks finishing, so it wakes the agent when one resolves.
-While the session shows such a wait, `aether sessions <session-id>` prints a `wait` line, the session record carries
+While the session shows such a wait, `cloudfield sessions <session-id>` prints a `wait` line, the session record carries
 `wait {kind, detail, verified_at, error}`, and the state is judged by the
 evidence:
 
@@ -120,10 +120,10 @@ its state: `turn`, `report` (the agent's own report), `turn-end`, `stall`,
 `human`, or `disconnect`. While the session shows a reported wait the event
 carries `wait` too. A wait whose source was read again at least a minute
 later is published as a same-status event with `reread: true`;
-`aether timeline` and the dashboard's activity feed leave it out unless
+`cloudfield timeline` and the dashboard's activity feed leave it out unless
 filtered to `run.status`, `changes.list` leaves it out, and the
 dashboard's lanes and trace bars never draw it as a state change. A live
-session's record carries its latest `cause` too. `aether timeline <session-id>`
+session's record carries its latest `cause` too. `cloudfield timeline <session-id>`
 prints it after the state, for example
 `running -> needs-attention (waiting for 2 subsessions) · waiting-agents by
 workers`. The dashboard ends each state's tooltip with it, for example
@@ -153,7 +153,7 @@ Any new turn clears the review, and a later success report asks again.
 ### Before a close
 
 Closing a session that others still depend on asks first. **Close session…**,
-**Mark complete**, **Open in Standard** and `aether close` read
+**Mark complete**, **Open in Standard** and `cloudfield close` read
 `run.close_check` ([local-gateway.md](local-gateway.md#independent-execution-and-input-state))
 and list what the close affects: protection, an open pull request, commits that
 may not be merged, mail from other sessions, sessions waiting for this one to
@@ -164,7 +164,7 @@ holds the focus. A check that fails shows its error and
 still lets you close. Closing as merged skips the unmerged-commits warning:
 you are saying the work is merged.
 
-`aether close` prints the warnings to stderr and asks `Close anyway? [y/N]` on
+`cloudfield close` prints the warnings to stderr and asks `Close anyway? [y/N]` on
 a terminal; `--force` skips the question. Without a terminal it prints them
 and closes, so scripts keep working. A failed check prints its error. On a
 terminal it then asks too, unless the server is older than the CLI and has no
@@ -180,7 +180,7 @@ Close anyway? [y/N]:
 ### Needs you
 
 One rule decides whether a session needs a person. The **Needs you** list,
-`aether sessions --needs-you`, `aether wait` (exit 3, except that a finished
+`cloudfield sessions --needs-you`, `cloudfield wait` (exit 3, except that a finished
 success exits 0, a failure exits 1 and a broken wait exits 5), the Insights count of sessions that need
 you, `attention.list`
 ([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)), push
@@ -191,7 +191,7 @@ waiting on agents, CI or a process and a reported success.
 A reported success is never a need. While its `review` is `ready` or `later`
 the session shows in **Finished: review**, its own group with its own
 count below Needs you, and the label `Finished: review` in the dashboard and
-`aether sessions`. `attention.list` still returns it, as kind `ready` with the
+`cloudfield sessions`. `attention.list` still returns it, as kind `ready` with the
 reason `Finished: review the result`, after every item that asks something.
 
 Only a top-level session can be Needs you or Finished: review. An attached
@@ -207,7 +207,7 @@ above. A subsession has no **Mark complete** of its own; it finishes by
 reporting to its parent. A watch someone asked for on a subsession still
 hears of its finish; the assistant's own follow of a session it launched or
 messaged does not. The dashboard reads a subsession's success as "Finished:
-reported to its parent" in a muted check, and `aether sessions` as
+reported to its parent" in a muted check, and `cloudfield sessions` as
 `Finished: reported to its parent`.
 
 | Session | Needs you | Notifies |
@@ -250,7 +250,7 @@ poll and before refusing a launch, in this order, until it is back above:
 3. Checkouts of every finished session, whatever their age. Skipped when
    `--checkout-ttl` is negative.
 4. Other members' stopped environments. Anything they installed and
-   did not save with `aether env save` is lost; their homes are kept.
+   did not save with `cloudfield env save` is lost; their homes are kept.
 5. Caches and unused standard and browser images.
 6. Leftover scratch directories.
 
@@ -286,7 +286,7 @@ working below the reserve, and so does reopening a closed session whose containe
 is still there. To free space yourself:
 
 1. Open **Insights → System** to see what uses the space.
-2. Delete sessions you no longer need with **Delete run** or `aether delete
+2. Delete sessions you no longer need with **Delete run** or `cloudfield delete
    <session-id>`. That removes the checkout, transcript and records; the
    published branch, the timeline and the cost totals stay.
 3. Free retained sandboxes with **Free retained sandboxes…** (admins).
@@ -299,7 +299,7 @@ is still there. To free space yourself:
 | `aether.db` | Deleting runs or the workspace. |
 | `repos/` | Nothing. Every push and session branch is kept. |
 
-Archiving a session (**Archive finished sessions…** or `aether archive <session-id>`) only
+Archiving a session (**Archive finished sessions…** or `cloudfield archive <session-id>`) only
 hides it and frees nothing. **Archive finished sessions…** also offers live
 sessions idle and done for over a day; it closes each one you leave checked
 before archiving it.
@@ -417,7 +417,7 @@ dump; it stops the server.
 
 ## Recover from a failed server update
 
-`aether server update` downloads and verifies both binaries before it replaces
+`cloudfield server update` downloads and verifies both binaries before it replaces
 either, so a bad tag or a failed download changes nothing. A scheduled update
 that fails on the network or the release host is retried at the next idle
 moment, up to three times, then recorded as `failed`.
@@ -432,7 +432,7 @@ that copy is lost.
 1. Read the result:
 
    ```sh
-   aether server update --status
+   cloudfield server update --status
    ```
 
    ```text
@@ -466,19 +466,19 @@ moved since. To repair the mirror itself (admins):
 1. Read the diagnostic:
 
    ```sh
-   aether workspace mirror status --workspace <workspace>
+   cloudfield workspace mirror status --workspace <workspace>
    ```
 
 2. Fix the cause from the server, not from your laptop. Check DNS and outbound
    access from the server host. For TLS errors, fix the server's git
    certificate trust; never turn verification off. For a deploy key, check
    that the key is still installed upstream.
-3. Refresh with `aether workspace mirror refresh --workspace <workspace>`.
+3. Refresh with `cloudfield workspace mirror refresh --workspace <workspace>`.
 
 A new or reconfigured mirror stays `pending` until an admin adopts a revision
 of its current generation, and every launch is refused until then. The
-refusal ends with the adopt command, and `aether workspace mirror status` and
-`aether workspace mirror refresh` print it with the workspace's values filled
+refusal ends with the adopt command, and `cloudfield workspace mirror status` and
+`cloudfield workspace mirror refresh` print it with the workspace's values filled
 in:
 
 ```text
@@ -494,7 +494,7 @@ candidate**.
 
 An upstream that was rewritten or diverged stays held (`rewritten` or
 `diverged`) until an admin reviews it and adopts the new revision with
-`aether workspace mirror adopt --workspace <workspace> --generation <n>
+`cloudfield workspace mirror adopt --workspace <workspace> --generation <n>
 --commit <reviewed-sha> --yes`. Published session branches stay fetchable while a
 mirror is failing.
 
@@ -509,11 +509,11 @@ login shell stay up.
 | The session cannot start, for example because the agent is not signed in | **Disconnected**, `enhanced session failed: <error>`. Messages are refused with `scheduler: the enhanced session is not running: <error>`. | Fix the cause, then press **Retry Enhanced** in the Chat view. |
 | The agent's process exits | The turn in flight shows **Turn interrupted**; **Disconnected**, `enhanced session ended: the agent's ACP server exited with code <n>`, with `; stderr: <tail>` when it printed any. | **Retry Enhanced**. |
 | The agent drops its conversation but keeps running, as Claude's adapter does when Claude Code dies | **Prompt failed** with `Session not found`, then **Agent conversation lost** while Cloudfield restores the conversation. Lost again within 5 minutes: **Disconnected**, `enhanced session failed: the agent lost its conversation again within 5 minutes: ...`. | Send the failed message again. After a second loss, **Retry Enhanced**. |
-| The agent refuses a turn with `Authentication required` | **Sign-in refused**, or **Agent signed out** when the login file cannot sign the agent in, while Cloudfield restarts the agent in its container, then `enhanced turn failed: ... Authentication required ...; <owner>'s <agent> login is signed out. Sign in, then send the message again: dashboard Agents page, or aether agent login <agent>`, or `...; Cloudfield restarted the agent to reread <owner>'s login: send the message again. Refused again? Sign in: ...` when the login file looks sound. The account owner's dashboard shows **\<agent\> is signed out** or **\<agent\>'s sign-in was refused** until the login works again. | Send the message again when the reason says so. Otherwise the account's owner signs in on the **Agents** page or with `aether agent login <agent>`, then you send it again ([harnesses.md](harnesses.md#when-a-login-is-signed-out)). |
+| The agent refuses a turn with `Authentication required` | **Sign-in refused**, or **Agent signed out** when the login file cannot sign the agent in, while Cloudfield restarts the agent in its container, then `enhanced turn failed: ... Authentication required ...; <owner>'s <agent> login is signed out. Sign in, then send the message again: dashboard Agents page, or aether agent login <agent>`, or `...; Cloudfield restarted the agent to reread <owner>'s login: send the message again. Refused again? Sign in: ...` when the login file looks sound. The account owner's dashboard shows **\<agent\> is signed out** or **\<agent\>'s sign-in was refused** until the login works again. | Send the message again when the reason says so. Otherwise the account's owner signs in on the **Agents** page or with `cloudfield agent login <agent>`, then you send it again ([harnesses.md](harnesses.md#when-a-login-is-signed-out)). |
 | `run.launch` answers `<owner>'s <agent> login is signed out: <problem>. Sign in, then launch again: dashboard Agents page, or aether agent login <agent>` | The login file on the account cannot sign the agent in. Nothing was created. | The account's owner signs in, then launch again. A workspace variable that signs the agent in, such as `ANTHROPIC_API_KEY`, lets the launch through ([harnesses.md](harnesses.md#use-an-api-key)). |
 | Root in one of your sessions took your shared home, for example a package install that ran `systemd-tmpfiles` | **Home restored** with the owner and mode Cloudfield found, before the agent starts again. If restoring fails: **Disconnected**, `enhanced session failed: the agent cannot read its home: ...`. | Send the refused message again. Run `sudo chown "$(id -u):$(id -g)" "$HOME" && sudo chmod u+rwx "$HOME"` in the session's **Terminal** tab, which runs as the session's user, when restoring failed, or when the agent stays connected while its tools fail with `permission denied` or exit status 127, which no restore covers. After a failed restore, press **Retry Enhanced**. |
 | The server restarts mid-turn | The turn keeps running in the adopted conversation; a message queued behind it is sent again unless the agent already had it. In a session VM, a name lookup made while the server is down fails: the server answers the VM's DNS. | Nothing. Run again a command that failed to resolve a name. |
-| The server restarts and cannot reattach to the agent's keeper, or the session's sandbox predates keepers | **Agent restarted** with the reason, then **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `aether-internal terminal` terminals keep running. | Send a message to continue. |
+| The server restarts and cannot reattach to the agent's keeper, or the session's sandbox predates keepers | **Agent restarted** with the reason, then **Needs you**, `turn interrupted`. Background tasks the agent was running are gone; commands in its `cloudfield-internal terminal` terminals keep running. | Send a message to continue. |
 | You cancel a turn or press Stop | **Waiting**, `turn cancelled`. | Send a message when you want it to go on. |
 | A Claude background task never ends | `running`, `working in background: <n> tasks`. | Press Stop. |
 | The old session cannot be restored | A new session starts; the item log says why. | Repeat context the agent lost. |
@@ -592,8 +592,8 @@ conversation survives a restart. Sessions in VMs sleep differently: see
 
 Activity is any of these within the window: a turn, queued prompt, open
 permission request or question; agent output or a file change in the
-checkout; output or typing in the session's terminal or a shell tab; an
-`aether ssh` process or port forward still open; a Browser tab action such as
+checkout; output or typing in the session's terminal or a shell tab; a
+`cloudfield ssh` process or port forward still open; a Browser tab action such as
 navigating or clicking (an open Browser tab's own polling does not count); a
 member typing in the composer while another member watches the session, the
 only time the dashboard reports typing. A session that waits for you after
@@ -609,7 +609,7 @@ container would rerun its launch command.
 
 The session wakes when you send a message, change its model, mail
 reaches it, you type in its terminal, open a shell tab, use its Browser tab,
-start `aether ssh` or a port forward to it, run `aether resume <session-id>`,
+start `cloudfield ssh` or a port forward to it, run `cloudfield resume <session-id>`,
 or choose **Wake** in the Chat view. Opening the session or its Browser tab
 without acting does not wake it. A port forward wakes the session, but a server
 that ran detached, such as one started with `nohup`, stopped with the sleep:
@@ -653,12 +653,12 @@ container disappears does: its checkout and branch are kept.
 
 A closed Enhanced Claude Code session's paused container is stopped the same
 way once it has been closed for `--run-sleep-after`. **Relaunch** or
-`aether reopen <session-id>` starts it again and restores the conversation.
+`cloudfield reopen <session-id>` starts it again and restores the conversation.
 `--run-container-ttl` and `--checkout-ttl` work as before for sleeping
 sessions.
 
 To keep every session awake, run
-`sudo aether-server config set run-sleep-after 0`, then
+`sudo cloudfield-server config set run-sleep-after 0`, then
 `sudo systemctl restart aether-server`. Any other duration, such as `2h`,
 changes the idle time the same way, for containers and VMs alike. There is
 no dashboard setting.
@@ -701,7 +701,7 @@ Enhanced Claude Code session stays awake while a wakeup it set with
 fire, and while a recurring `CronCreate` job runs, until `CronDelete`.
 Timers that Cloudfield cannot see, such as a Standard session's or a `sleep`
 in a script, wait for the next wake. Cloudfield's own wakes still wake a
-sleeping session, Standard or Enhanced: mail, `aether-internal report
+sleeping session, Standard or Enhanced: mail, `cloudfield-internal report
 --until` conditions and watches reach it as any message does.
 
 A Standard session's Chat and Terminal views, and an Enhanced session's
@@ -735,11 +735,11 @@ restart or update leaves sleeping VMs asleep; the next use wakes them.
 
 | Action | Container | Checkout | Reopen |
 | --- | --- | --- | --- |
-| **Close** (`aether close <session-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory, until an Enhanced Claude Code session's container is stopped after `--run-sleep-after` ([Idle sleep](#idle-sleep)). A session VM is saved to disk at once instead. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `aether reopen <session-id>`. The deadline is cleared while the session is live; the next close sets a new 7 days. |
+| **Close** (`cloudfield close <session-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory, until an Enhanced Claude Code session's container is stopped after `--run-sleep-after` ([Idle sleep](#idle-sleep)). A session VM is saved to disk at once instead. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `cloudfield reopen <session-id>`. The deadline is cleared while the session is live; the next close sets a new 7 days. |
 | A Background session finishes | Removed at once. | Kept for `--checkout-ttl` (72 hours) after the session ends. | No. |
-| **Kill run** (`aether kill <session-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the session ends. | No. |
+| **Kill run** (`cloudfield kill <session-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the session ends. | No. |
 | **Free sandbox…** | Removed. History stays. | Kept until `--checkout-ttl` after the session ended. | No. |
-| **Delete run** (`aether delete <session-id>`) | Removed. | Removed with the transcript and records. | No. |
+| **Delete run** (`cloudfield delete <session-id>`) | Removed. | Removed with the transcript and records. | No. |
 
 Every row removes the session's browser companion, the Chromium container
 behind its Browser tab. A relaunched session creates a new companion when its
@@ -767,7 +767,7 @@ the reason gains `evidence unavailable: session checkout missing`.
 A checkout over the evidence storage limit cannot be captured, so the session
 gets no evidence packet. Cloudfield commits the checkout's files as a `wip:`
 commit, publishes the session branch, adds `evidence unavailable: evidence
-storage limit exceeded` to the session's reason (shown by `aether sessions
+storage limit exceeded` to the session's reason (shown by `cloudfield sessions
 <session-id>` and the dashboard), and only then removes the checkout. If the
 commit, the publish or that reason write fails, the checkout stays.
 
@@ -788,11 +788,11 @@ and includes any Docker error.
 
 ## Tuning
 
-`aether-server serve` reads these from `/etc/aether/server.conf`. Set one by
+`cloudfield-server serve` reads these from `/etc/aether/server.conf`. Set one by
 its flag name, then restart. For durations and ceilings, `0` means the default.
 
 ```sh
-sudo aether-server config set stall-threshold 20m
+sudo cloudfield-server config set stall-threshold 20m
 sudo systemctl restart aether-server
 ```
 

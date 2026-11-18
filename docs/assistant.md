@@ -17,7 +17,7 @@ Each member's assistant runs in a sandbox of its own, created from the
 server's standard image: the container `aether-assistant-<member>`, or with
 `session-runtime vm` the VM unit `aether-vm-assistant-<member id>.service`.
 Your sessions and your [environment](environments.md) (the persistent sandbox
-`aether terminal` opens) cannot see it:
+`cloudfield terminal` opens) cannot see it:
 
 - Its home is `<data>/assistant/<member>/home` on the server. It mounts
   nothing from your home or any other member's: no `CLAUDE.md`, `AGENTS.md`,
@@ -426,8 +426,8 @@ it passed. **Revoke** deletes it in one click and applies to the next card.
 The CLI does the same:
 
 ```sh
-aether member assistant rules                    # list
-aether member assistant rules --revoke <rule-id>
+cloudfield member assistant rules                    # list
+cloudfield member assistant rules --revoke <rule-id>
 ```
 
 ```
@@ -470,9 +470,9 @@ it is on, the panel says **Acts without asking**. The dashboard asks you to
 confirm before turning it on. The CLI does not ask:
 
 ```sh
-aether member assistant                     # show the setting
-aether member assistant --auto-approve on
-aether member assistant --auto-approve off
+cloudfield member assistant                     # show the setting
+cloudfield member assistant --auto-approve on
+cloudfield member assistant --auto-approve off
 ```
 
 ```
@@ -595,7 +595,7 @@ already did stays done.
 Before the assistant had its own container it ran in your environment, in
 `~/.aether/assistant`, and kept its sessions in your home. That state, and the
 login it borrowed from your home, are not moved, because any session could have
-changed them. Delete the old state from `aether terminal`; the session
+changed them. Delete the old state from `cloudfield terminal`; the session
 directory is named after your home's path, `-root--aether-assistant` when it
 is `/root`:
 

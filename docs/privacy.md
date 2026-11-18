@@ -271,7 +271,7 @@ you are there. It is not stored, and no other member sees it.
 
 ## Slack
 
-Off until an admin runs `sudo aether-server slack setup`
+Off until an admin runs `sudo cloudfield-server slack setup`
 ([slack.md](slack.md)) and a member links a Slack account. For each linked
 member the server sends Slack the titles of the sessions that need them, the
 need lines (which can quote an agent's reason), the text and options of
@@ -287,7 +287,7 @@ or removing the bot does not delete messages already sent. The tokens stay in
 ## What an edge stores
 
 An **edge** is the relay and sign-in service that lets a computer running
-`aether` reach a server over SSH without Tailscale ([edge.md](edge.md)). The
+`cloudfield` reach a server over SSH without Tailscale ([edge.md](edge.md)). The
 Android app uses it only in Edge mode. Whoever runs an edge, the publisher for
 `auth.cloudfield.ai`, `edge.cloudfield.ai`, `auth.onaether.dev` and
 `edge.onaether.dev`, holds the following. The edge cannot read terminal,
@@ -303,9 +303,9 @@ address, path, status and user agent.
 | What | Why | Kept |
 | --- | --- | --- |
 | Your GitHub account: an account id the edge assigns, GitHub's user id, your login, verified primary email and display name, and when you last signed in with GitHub | To sign you in and to match invitations | Until you delete it on the edge's Account page, or its operator deletes it with `aether-edge accounts delete` |
-| Each signed-in device: its label (the machine's host name unless you chose one), its public key, a hash of its token, when it signed in and was last used | To let that device connect | Until you revoke it with `aether logout` or the edge's Devices page |
+| Each signed-in device: its label (the machine's host name unless you chose one), its public key, a hash of its token, when it signed in and was last used | To let that device connect | Until you revoke it with `cloudfield logout` or the edge's Devices page |
 | Browser sign-ins at the edge: a hash of the cookie | To keep you signed in there | 30 days after last use |
-| A pending sign-in from `aether login`: the device label, public key and the IP address it started from | To show you on the confirmation page where the sign-in came from | Until the device collects its token or is denied; an expired one (after 10 minutes) until the next sign-in starts |
+| A pending sign-in from `cloudfield login`: the device label, public key and the IP address it started from | To show you on the confirmation page where the sign-in came from | Until the device collects its token or is denied; an expired one (after 10 minutes) until the next sign-in starts |
 | Each server you claim: its id, its host name, the access policy it announces, you as its owner | To route connections and show you your servers | Until the owner removes it, or the edge's operator removes or blocks it. Deleting your account removes you as its owner |
 | Each server the edge let your account connect to: its id and your GitHub user id | To tell every server that may hold your identity when you delete your account | Until you delete your account |
 | A deletion owed to a server that was offline when you deleted your account: that server's id and your GitHub user id | To tell that server to remove your identity | Until it is sent, when the server next connects; at most 1000 per server |
@@ -325,7 +325,7 @@ accepted connections only at debug level, which the server does not emit.
 Revoking your devices removes them from the edge; the account record stays.
 To delete it yourself, open the edge's Account page,
 `https://auth.cloudfield.ai/account` or `https://auth.onaether.dev/account`
-for the project's edge; `aether logout --delete-account` prints that address. The page asks you to sign in with
+for the project's edge; `cloudfield logout --delete-account` prints that address. The page asks you to sign in with
 GitHub in that browser within the last 5 minutes and to type your
 login ([edge.md](edge.md#deleting-an-account)). The edge then deletes the
 account, its devices and sessions, and tells each server it reached to
@@ -409,7 +409,7 @@ To preserve a reviewed capture before cleanup, open **Captures…** from the
 session's **More** menu or a terminal's **Tools**, select it under **Select
 transient captures to retain**, optionally enter verification notes, and
 choose **Retain selected captures**. An agent with the advertised capability uses
-`aether-internal artifact retain` with selected `artifact_ids`, optional
+`cloudfield-internal artifact retain` with selected `artifact_ids`, optional
 `verification_notes`, and an `idempotency_key`. This copies only the selected
 PNGs into the existing retained packet storage and returns a
 `packet_id`; it does not verify the application or report an outcome.
@@ -492,8 +492,8 @@ gotcha, preference or outcome), up to 20 file paths it cites, the member it
 is attributed to, the session, agent and commit it came from, and who pinned
 it and when. Notes reach the store three ways:
 
-- An agent writes one with `aether-internal memory add`, or a member with
-  `aether memory add`: at most 1024 bytes of text.
+- An agent writes one with `cloudfield-internal memory add`, or a member with
+  `cloudfield memory add`: at most 1024 bytes of text.
 - When a session's agent reports success or failure, the server writes one
   outcome note for that session: the report's summary and next action, with the
   files and HEAD commit of the session's latest snapshot. A later report
@@ -520,12 +520,12 @@ report or answer with a secret is still recorded, with its text replaced by
 secrets it has rules for, so keep credentials out of reports and answers.
 
 Notes do not expire. A collaborator or admin deletes one with
-`aether memory rm <id>`, or every note attributed to a session with `aether memory rm --run <session>`. Deleting a session deletes its unpinned notes; pinned notes stay until
+`cloudfield memory rm <id>`, or every note attributed to a session with `cloudfield memory rm --run <session>`. Deleting a session deletes its unpinned notes; pinned notes stay until
 removed. Deleting the workspace deletes all of its notes. A replaced note stays, hidden from
 search unless asked for with `--all`, until it is removed. Removing a member
 keeps the notes attributed to them.
 
-Before a release migrates the schema, `aether-server update` and **Update
+Before a release migrates the schema, `cloudfield-server update` and **Update
 now** copy the database to `<data-dir>/aether.db.pre-update` and delete
 that copy once the new release has started. A note deleted while the copy
 exists is still in it, and a rollback restores it.
@@ -608,7 +608,7 @@ which no other app can hold and which grants nothing.
 - At an edge: see [What an edge stores](#what-an-edge-stores).
 - On the server: the server's administrator owns the data directory and can
   delete a session, a member home, or the whole directory
-  ([install.md](install.md#uninstalling)). `aether member remove` removes
+  ([install.md](install.md#uninstalling)). `cloudfield member remove` removes
   your environment, deletes your member record and erases your
   member home. It refuses while anything still points at you - a session you
   launched, a schedule you own, or an agent profile you pushed - so an

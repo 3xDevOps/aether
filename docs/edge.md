@@ -28,7 +28,7 @@ flowchart LR
 The edge splices the two outbound connections. SSH runs end to end between
 client and server, so the edge cannot read it. The edge says who signed in; the
 server alone decides what that person may do. Tailnet identities, member SSH
-keys, invite codes and `aether gui` keep working beside the edge.
+keys, invite codes and `cloudfield gui` keep working beside the edge.
 
 | Term | Meaning |
 | --- | --- |
@@ -47,17 +47,17 @@ and servers at its first pair, `https://auth.onaether.dev` and
 
 ### Turning it on
 
-The edge is off until you turn it on. `aether-server setup` turns on
+The edge is off until you turn it on. `cloudfield-server setup` turns on
 `https://edge.cloudfield.ai` when the host has no Tailscale or you turn tailnet
 sign-in off, and prints what the edge can see. With tailnet sign-in on, it asks
 `Turn on the edge too`, defaulting to no. Otherwise use
-`aether-server install --edge-url <url> --edge-access <policy>` (it refuses
+`cloudfield-server install --edge-url <url> --edge-access <policy>` (it refuses
 `--edge-url` without `--edge-access`), or the config keys:
 
 ```sh
-sudo aether-server config set edge-url https://edge.cloudfield.ai
-sudo aether-server config set edge-access approved-devices
-sudo aether-server config set edge-url ""     # off
+sudo cloudfield-server config set edge-url https://edge.cloudfield.ai
+sudo cloudfield-server config set edge-access approved-devices
+sudo cloudfield-server config set edge-url ""     # off
 sudo systemctl restart aether-server          # apply the change
 ```
 
@@ -66,22 +66,22 @@ from `/etc/aether/aether-server.env`.
 
 The server pins the edge's signing key on first connection, so a new host name
 for the same edge keeps the pin and the owner. An edge with another key is
-refused with `edge key changed` until you run `sudo aether-server edge trust`.
+refused with `edge key changed` until you run `sudo cloudfield-server edge trust`.
 To move to another edge:
 
 ```sh
-sudo aether-server edge leave                 # unenroll at the old edge, forget its owner
-sudo aether-server config set edge-url https://<edge-host>
-sudo aether-server edge trust                 # compare the key with the one the edge's operator publishes, type yes
+sudo cloudfield-server edge leave                 # unenroll at the old edge, forget its owner
+sudo cloudfield-server config set edge-url https://<edge-host>
+sudo cloudfield-server edge trust                 # compare the key with the one the edge's operator publishes, type yes
 sudo systemctl restart aether-server
-sudo aether-server edge claim-code --admin <member id>   # or, from a super admin's linked terminal: aether edge connect
+sudo cloudfield-server edge claim-code --admin <member id>   # or, from a super admin's linked terminal: cloudfield edge connect
 ```
 
 ### Moving to another address of the edge
 
 The project's edge answers at `https://edge.cloudfield.ai`, which new setups
 use, and at `https://edge.onaether.dev`. Updates never change `edge-url` in
-`/etc/aether/server.conf`, and `aether-server setup` keeps it, so a server set
+`/etc/aether/server.conf`, and `cloudfield-server setup` keeps it, so a server set
 up at `https://edge.onaether.dev` stays there, with its links, connectors and
 join links. To move it, at a quiet time:
 
@@ -91,7 +91,7 @@ join links. To move it, at a quiet time:
    ```sh
    systemctl cat aether-server | grep ExecStart
    grep edge-url /etc/aether/server.conf
-   sudo aether-server edge status
+   sudo cloudfield-server edge status
    ```
 
    Expect `ExecStart=/usr/local/bin/aether-server serve --config
@@ -104,7 +104,7 @@ join links. To move it, at a quiet time:
 2. Move. The server keeps running:
 
    ```sh
-   sudo aether-server edge move https://edge.cloudfield.ai
+   sudo cloudfield-server edge move https://edge.cloudfield.ai
    ```
 
    ```
@@ -130,7 +130,7 @@ join links. To move it, at a quiet time:
    sudo systemctl restart aether-server
    ```
 
-4. Check with `sudo aether-server edge status`: it exits 0, prints
+4. Check with `sudo cloudfield-server edge status`: it exits 0, prints
    `edge         https://edge.cloudfield.ai`, the connector URLs under
    `https://edge.cloudfield.ai/mcp`, the same `edge key` and `owner`, and
    `connection   connected since <time>; ...`, with no `running` line.
@@ -186,7 +186,7 @@ After the move:
 
 - The edge key stays pinned and the owner stays: the server keeps both per edge
   key, not per address.
-- `aether-server edge status` names the new address and the connector URLs at
+- `cloudfield-server edge status` names the new address and the connector URLs at
   it. Until the restart it also prints `running      the running server is at
   <old address>; restart to apply edge-url: sudo systemctl restart aether-server`.
 - Connectors registered at the old address keep working while the edge
@@ -200,7 +200,7 @@ After the move:
   registered at the old address fail until the server is updated or moved back.
 
 A client keeps the address it already uses, before and after a server moves.
-Without `--edge`, `aether login`, `logout`, `servers`, `link --claim` and the
+Without `--edge`, `cloudfield login`, `logout`, `servers`, `link --claim` and the
 dashboard's edge verbs use the one edge the machine is signed in to; with
 several, the project's edge at an address it holds a token for, the new one
 first; with none, the project's edge at an address a saved link names, the new
@@ -216,7 +216,7 @@ new host key is a new server that must be claimed and linked again.
 Until an account claims it, the edge relays nothing for a server except claim
 connections. Setup ends with a claim link,
 `aether://claim?edge=...&server=<server id>#<secret>`, and the claim code
-`<server id>-<secret>`, valid for 30 minutes and 5 attempts. `sudo aether-server
+`<server id>-<secret>`, valid for 30 minutes and 5 attempts. `sudo cloudfield-server
 edge claim-code` prints a new one, with its expiry as `valid for 30 min, until
 2026-10-25 15:04 UTC`, and says when it replaces an earlier code that still
 worked, which then stops working. It is refused while the server has an owner,
@@ -225,8 +225,9 @@ and without `--admin` while it has members.
 1. Start the server: `sudo systemctl daemon-reload && sudo systemctl enable
    --now aether-server`.
 2. On your computer, open the claim link (the desktop app's Connect step also
-   accepts it pasted), or run `aether link --claim '<claim link>'`. The claim
-   link names its edge, so `--edge` is not needed; `aether link --claim <code>`
+   accepts it pasted), or run `cloudfield link --claim '<claim link>'` (`aether`
+   on Windows, where `cloudfield.cmd` splits a link at its `&`). The claim
+   link names its edge, so `--edge` is not needed; `cloudfield link --claim <code>`
    takes the bare code and claims through `--edge`, else the one edge you are
    signed in to.
 
@@ -241,25 +242,25 @@ over the tailnet), a super admin claims it under **Settings → Remote access �
 my GitHub account**, or from a linked terminal:
 
 ```sh
-aether login --edge <edge url>   # if this machine is not signed in there
-aether edge connect
+cloudfield login --edge <edge url>   # if this machine is not signed in there
+cloudfield edge connect
 ```
 
 This binds your GitHub account to your own member, changes no role, and adds the
 edge to the current link. If the server already has an owner it prints `this
 server is already connected to <edge url> as github <login>` and changes
 nothing. Any other claim on a server with members is refused with `server is
-already claimed`. `aether link --claim` adds `; link it with: aether link
+already claimed`. `cloudfield link --claim` adds `; link it with: aether link
 <server id>`, which is also the answer when you run a claim again after it
-succeeded. Until the edge has recorded the server, `aether invite
---github|--email`, the Invite dialog and `aether member link` are refused with
+succeeded. Until the edge has recorded the server, `cloudfield invite
+--github|--email`, the Invite dialog and `cloudfield member link` are refused with
 `the edge has not recorded this server yet ... connect your GitHub account
-first`. If the edge cannot record a claim, `sudo aether-server edge status`
+first`. If the edge cannot record a claim, `sudo cloudfield-server edge status`
 shows `ownership report refused: <reason>`.
 
 ### Checking the connection
 
-`sudo aether-server edge status` prints the edge, policy, server id, the
+`sudo cloudfield-server edge status` prints the edge, policy, server id, the
 [connector](#mcp-connectors) URL (the universal one while the server is connected
 at edge protocol 3), the pinned edge key, the owner and the
 connection. `connection` reads `connected since <time>`, `stale: ...` when the
@@ -274,7 +275,7 @@ when the edge is on but the server is not connected (never connected, stale or
 disconnected), so a script can wait on it:
 
 ```sh
-timeout 300 sh -c 'until sudo aether-server edge status >/dev/null; do sleep 5; done'
+timeout 300 sh -c 'until sudo cloudfield-server edge status >/dev/null; do sleep 5; done'
 ```
 
 It exits 1 on any other error, such as the edge being off or the state being
@@ -299,9 +300,9 @@ claim-code --admin <member id>`, gives it an owner again.
 ### Signing in and linking
 
 ```sh
-aether login              # prints an address and a code; open the address, sign in with GitHub, enter the code
-aether servers            # servers your account reaches
-aether logout             # revokes this device's token at the edge and deletes it here
+cloudfield login              # prints an address and a code; open the address, sign in with GitHub, enter the code
+cloudfield servers            # servers your account reaches
+cloudfield logout             # revokes this device's token at the edge and deletes it here
 ```
 
 Confirm only a code you started. `--edge <url>` takes the relay origin; without
@@ -309,10 +310,10 @@ it commands use the one edge this machine is signed in to, else the project's
 edge at the address this machine already uses, else `https://edge.cloudfield.ai`
 ([Moving to another address of the edge](#moving-to-another-address-of-the-edge)). The device key `edge-device-key` and the token file
 `edge-tokens.json` live in the client's config directory with mode 0600.
-`aether servers` shows the access policy the edge reports; the server enforces
+`cloudfield servers` shows the access policy the edge reports; the server enforces
 its own.
 
-`aether login --json` is for a script or a coding agent that relays the code to
+`cloudfield login --json` is for a script or a coding agent that relays the code to
 you: it opens no browser, prints one JSON line, then waits for you to confirm
 and prints a second:
 
@@ -331,10 +332,10 @@ safest first:
 
 | Command | Where the id comes from | Who you trust |
 | --- | --- | --- |
-| `aether link <join link>` | The invitation link an admin sent | The admin and the channel they used |
-| `aether link --claim <code>` | The claim link printed on the server's console | Whoever handed it to you |
-| `aether link <server id>` | The admin, from Settings → Remote access or `sudo aether-server edge status` | The admin and the channel. The edge cannot substitute another server |
-| `aether link --from-edge <server id>` | `aether servers`, which the edge supplies | The edge. One that lists a false id can send your first link to another server |
+| `cloudfield link <join link>` | The invitation link an admin sent | The admin and the channel they used |
+| `cloudfield link --claim <code>` | The claim link printed on the server's console | Whoever handed it to you |
+| `cloudfield link <server id>` | The admin, from Settings → Remote access or `sudo cloudfield-server edge status` | The admin and the channel. The edge cannot substitute another server |
+| `cloudfield link --from-edge <server id>` | `cloudfield servers`, which the edge supplies | The edge. One that lists a false id can send your first link to another server |
 
 `--from-edge` shows the server's name, id, host key and policy, then asks `link
 and pin this server? [y/N]`. Compare the host key with `sudo ssh-keygen -lf
@@ -343,8 +344,8 @@ and pin this server? [y/N]`. Compare the host key with `sudo ssh-keygen -lf
 falls back to the edge. The direct path admits approved devices only, so under
 `account` a new device works through the edge but not directly until approved.
 
-`aether link` points the repository's `aether` remote at
-`<server id>.edge.aether.invalid` and sets `core.sshCommand` to `aether
+`cloudfield link` points the repository's `aether` remote at
+`<server id>.edge.aether.invalid` and sets `core.sshCommand` to `cloudfield
 edge-ssh`, so `git push aether` goes through the edge. If the repository already
 sets a different `core.sshCommand`, it prints the line to add instead.
 
@@ -365,7 +366,7 @@ approve <code>` instead.
 ### Members, invitations and devices
 
 Invitations, device approval and removing access are in
-[teams.md](teams.md#through-an-edge). `aether member identities <id>` lists the
+[teams.md](teams.md#through-an-edge). `cloudfield member identities <id>` lists the
 GitHub accounts bound to a member.
 
 #### Join page
@@ -379,7 +380,7 @@ edge.
 
 ### Access policies
 
-Each server chooses its policy and enforces it itself. `aether-server setup`
+Each server chooses its policy and enforces it itself. `cloudfield-server setup`
 asks `Who may reach this server through the edge?`: `1` is `account`, `2` is
 `approved-devices`.
 
@@ -404,8 +405,8 @@ administrator approves.
 Only on the server's host. No dashboard action or client command changes it.
 
 ```sh
-sudo aether-server config set edge-access approved-devices
-sudo aether-server device review     # before restarting: see what a switch affects
+sudo cloudfield-server config set edge-access approved-devices
+sudo cloudfield-server device review     # before restarting: see what a switch affects
 sudo systemctl restart aether-server
 ```
 
@@ -442,9 +443,9 @@ is the exception to end to end encryption, under both policies.
 
 | Action | Relayed connections | Direct connections with the device key |
 | --- | --- | --- |
-| `aether member remove <id>`, `aether device revoke <id>` | Closed at once | Closed at once |
-| Revoking in `sudo aether-server device review` | Closed within 3 seconds | The same |
-| `aether logout`, or revoking on the edge's Devices page | Closed at once | Stay open, and new ones are admitted: the device is still approved on the server |
+| `cloudfield member remove <id>`, `cloudfield device revoke <id>` | Closed at once | Closed at once |
+| Revoking in `sudo cloudfield-server device review` | Closed within 3 seconds | The same |
+| `cloudfield logout`, or revoking on the edge's Devices page | Closed at once | Stay open, and new ones are admitted: the device is still approved on the server |
 | Deleting the account ([Deleting an account](#deleting-an-account)) | Closed at once | Closed: each server removes the account's edge devices (when it next connects to the edge, if it is offline) |
 | `aether-edge accounts block` or `delete` by the edge's operator | Stay open until they end or the edge restarts | `delete` reaches each server at its next enrollment |
 
@@ -452,7 +453,7 @@ A revocation made on a server works without the edge. To end a device
 completely, revoke it on both the edge and the server. A device token never
 expires. A sign-in code lasts 10 minutes, an edge session 30 days after last use,
 an invitation 7 days and a claim code 30 minutes. If the edge cannot be reached,
-`aether logout` keeps the token so you can retry. It never deletes the device key
+`cloudfield logout` keeps the token so you can retry. It never deletes the device key
 or a link. With the token revoked, a link fails through the edge with `device
 token revoked`, and its `--addr` path still works with the approved device key.
 SSH keys and tailnet identities are unaffected.
@@ -461,14 +462,14 @@ SSH keys and tailnet identities are unaffected.
 
 - Servers keep running and reconnect on their own. Running work is untouched.
 - Relayed connections drop. Links with `--addr`, tailnet members, member SSH keys,
-  invite codes, `aether gui` and the tailnet dashboard work as before.
+  invite codes, `cloudfield gui` and the tailnet dashboard work as before.
 - Every revocation and approval made on a server works.
-- `aether login`, `aether servers`, `aether logout` and account deletion fail with
+- `cloudfield login`, `cloudfield servers`, `cloudfield logout` and account deletion fail with
   the edge's error.
 
 A server reinstalled with a new data directory has a new host key and so a new
 id. When the edge has no live registration for the linked id but sees other
-servers of your account online, it lists them, and `aether link --from-edge <id>`
+servers of your account online, it lists them, and `cloudfield link --from-edge <id>`
 links the new one.
 
 ### Recovering a GitHub account
@@ -479,13 +480,13 @@ expire, and stay on every server until revoked.
 
 1. Sign in on the edge's Devices page (`https://auth.cloudfield.ai/devices` on the
    project's edge) and revoke every device you do not recognize.
-2. On each server, run `aether device list` and `aether device revoke
-   <device-id>` for each unknown device. On the machine, `sudo aether-server
+2. On each server, run `cloudfield device list` and `cloudfield device revoke
+   <device-id>` for each unknown device. On the machine, `sudo cloudfield-server
    device review` shows each device with its account and first-seen time.
 3. Under `account`, if the account was an admin's or super admin's, check what
-   they could have done: `aether member list`, `aether invite list`, and the SSH keys and tailnet
-   logins `device review` lists. Revoke with `aether invite revoke <id>` and
-   `aether member remove <id>`. An invite code minted by an approved device is a
+   they could have done: `cloudfield member list`, `cloudfield invite list`, and the SSH keys and tailnet
+   logins `device review` lists. Revoke with `cloudfield invite revoke <id>` and
+   `cloudfield member remove <id>`. An invite code minted by an approved device is a
    file in the server's invites directory until redeemed or expired, and no
    command lists it.
 4. If the account was linked to a member while someone else held it, remove the
@@ -494,8 +495,8 @@ expire, and stay on every server until revoked.
    keys and tailnet identity stay:
 
    ```sh
-   aether member identities <member-id>
-   aether member unlink <member-id> github:<user id>
+   cloudfield member identities <member-id>
+   cloudfield member unlink <member-id> github:<user id>
    ```
 
 Under `approved-devices` the attacker's devices are pending and had no access.
@@ -508,28 +509,28 @@ account is restored on the machine. The server must have no owner, as after the 
 deletes their account:
 
 ```sh
-sudo aether-server edge claim-code --admin <member id>
+sudo cloudfield-server edge claim-code --admin <member id>
 ```
 
 This prints a claim link bound to that member. They open it signed in with
-the account they now use, or runs `aether link --claim <code>`. The server binds
+the account they now use, or runs `cloudfield link --claim <code>`. The server binds
 the account to that member, approves the device and becomes owned by that
 account. It creates no member and raises no role: a member who is not an admin is
 refused (`is collaborator, not an admin; the claim was refused`), as is an account
-bound to another member. Find the member id with `aether member list`.
+bound to another member. Find the member id with `cloudfield member list`.
 
 ### Ownership and deleting an account
 
-`aether member transfer <member-id>` hands ownership at the edge to an admin or super
+`cloudfield member transfer <member-id>` hands ownership at the edge to an admin or super
 admin with a linked GitHub account. Only a super admin can run it. It fails with `ownership report refused: <reason>`
 when the edge refuses or does not answer within 10 seconds, and the server keeps
 its previous owner. It is refused while the server is not connected to the edge
 or has no owner, or when the target has two linked accounts (remove one with
-`aether member unlink`). A transfer never creates a super admin or changes a role.
+`cloudfield member unlink`). A transfer never creates a super admin or changes a role.
 
 When the owner's identity leaves the server (the member was removed or the account
 deleted), the server is **ownerless**. It stays enrolled and keeps relaying for
-its members. Give it an owner with **Connect my GitHub account**, `aether edge
+its members. Give it an owner with **Connect my GitHub account**, `cloudfield edge
 connect` or [Console recovery](#console-recovery).
 
 #### Deleting an account
@@ -539,7 +540,7 @@ the project's edge). It lists the servers the account owns and belongs to, and
 needs a GitHub sign-in in this browser from the last 5 minutes plus the account's
 login typed back. Otherwise it is refused with `deleting an account needs a
 sign-in in this browser from the last 5m0s: sign in again at <url>, then delete it
-within 5m0s`. `aether logout --delete-account` lists the same servers and where to
+within 5m0s`. `cloudfield logout --delete-account` lists the same servers and where to
 delete.
 
 Transfer ownership of each server the account owns first. Deleting ends the
@@ -548,7 +549,7 @@ its edge devices (when it next connects, if it is offline). No server loses a
 member, role or data. An SSH key or tailnet identity of the same person keeps
 working until an admin removes it, and invitations to the login or email stay
 until revoked. Signing in again creates a new account that no server knows: link
-it with `aether member link`, or an admin invites it, which creates a new member.
+it with `cloudfield member link`, or an admin invites it, which creates a new member.
 Before deleting the only way a super admin reaches a server, make sure another super admin
 exists or that they also have an SSH key or tailnet identity there.
 Otherwise only the machine's administrator can restore them
@@ -557,7 +558,7 @@ Otherwise only the machine's administrator can restore them
 ### The dashboard
 
 The edge serves no dashboard. A dashboard that reaches a server through an edge
-is `aether gui` on a computer, or the [Android app](install.md#android-app) in
+is `cloudfield gui` on a computer, or the [Android app](install.md#android-app) in
 Edge mode ([local-gateway.md](local-gateway.md)). A phone without that mode
 reaches a dashboard over a tailnet
 ([networking.md](networking.md#the-dashboard)).
@@ -569,7 +570,7 @@ sessions as a member ([connectors.md](connectors.md)). The edge forwards it at t
 URLs, and the server authenticates every request:
 
 - `https://<relay host>/mcp`, the universal URL every server on the edge
-  shares. `aether mcp` and `sudo aether-server edge status` print it once the
+  shares. `cloudfield mcp` and `sudo cloudfield-server edge status` print it once the
   server and the edge both speak edge protocol 3 or later.
 - `https://<relay host>/mcp/<server id>`, the server's own URL. Connectors
   added there keep working.
@@ -663,12 +664,12 @@ malformed ones.
 
 The server decides the rest. It takes the assertion only under
 `edge-access account`, with `edge-reviewer` on (off by default; set it on
-the server's host with `sudo aether-server config set edge-reviewer true`
+the server's host with `sudo cloudfield-server config set edge-reviewer true`
 and restart), and once an admin bound the login to a member who is no admin
-with `aether member link --reviewer <login> <member-id>`. Otherwise the
+with `cloudfield member link --reviewer <login> <member-id>`. Otherwise the
 consent page refuses with the reason; under `approved-devices` it asks for a
 pairing code as for anyone. A connector the reviewer authorized acts as that
-member, and every call checks again: `aether member unlink <member-id>
+member, and every call checks again: `cloudfield member unlink <member-id>
 reviewer:<login>` deletes the connectors it authorized, so binding the
 login again does not revive them; turning `edge-reviewer` off or making the
 member an admin cuts them off at their next call. A new password, written
@@ -766,7 +767,7 @@ settings → OAuth Apps → New OAuth App**. The edge asks for the scope `user:e
 
 | Field | Value |
 | --- | --- |
-| Application name | `Aether` |
+| Application name | `Cloudfield` |
 | Homepage URL | `https://<signin-host>` |
 | Authorization callback URL | `https://<signin-host>/signin/github/callback` (must match exactly) |
 | Enable Device Flow | Off: the edge runs its own device flow |
@@ -910,7 +911,7 @@ limits.
   container: a named volume, or a directory owned by uid 65532 (`chown -R
   65532:65532 <dir> && chmod 0700 <dir>`). A container started without it makes
   a new signing key, which every server refuses with `edge key changed`, and
-  every client must run `aether login` again.
+  every client must run `cloudfield login` again.
 - The client secret is a file mounted read-only, readable by uid 65532. Never
   put it in an image layer or a committed file. `AETHER_EDGE_GITHUB_CLIENT_SECRET`
   works, but `docker inspect` shows it.
@@ -1153,20 +1154,20 @@ Check from another machine:
 2. `curl -sS -H 'Aether-Edge-Version: 1' https://<relay-host>/v1/edge` prints the
    signing key and its fingerprint. `sudo ssh-keygen -lf
    /var/lib/aether-edge/edge_key` on the edge prints the same one. Publish it
-   where server operators compare it during `aether-server edge trust`, and back
+   where server operators compare it during `cloudfield-server edge trust`, and back
    the key up now.
-3. On a laptop, `aether login --edge https://<relay-host>`, confirm the code,
-   then `aether servers --edge https://<relay-host>`.
+3. On a laptop, `cloudfield login --edge https://<relay-host>`, confirm the code,
+   then `cloudfield servers --edge https://<relay-host>`.
 4. Enroll a canary server on another machine and keep it running:
 
    ```sh
-   sudo aether-server install --edge-url https://<relay-host> --edge-access approved-devices
+   sudo cloudfield-server install --edge-url https://<relay-host> --edge-access approved-devices
    sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
-   sudo aether-server edge status        # edge key matches step 2; connection: connected since ...
-   sudo aether-server edge claim-code
+   sudo cloudfield-server edge status        # edge key matches step 2; connection: connected since ...
+   sudo cloudfield-server edge claim-code
    ```
 
-   Then `aether link --claim <code> --edge https://<relay-host>` and `aether
+   Then `cloudfield link --claim <code> --edge https://<relay-host>` and `aether
    sessions` on the laptop.
 
 ### Monitoring
@@ -1222,7 +1223,7 @@ and whoever holds a copy can act as the edge, so encrypt it. If it is lost while
 missing, and edge.db holds accounts or servers that pin it`): put it back with
 `aether-edge restore --key <key file> <database backup>`. With no copy, start over
 with a new data directory, and every server refuses the new key with `edge key
-changed` until `sudo aether-server edge trust`.
+changed` until `sudo cloudfield-server edge trust`.
 
 Back `edge.db` up daily. `aether-edge backup` copies a consistent snapshot while
 the edge runs, to a directory, a new file, or `-` for standard output;
@@ -1236,7 +1237,7 @@ docker exec aether-edge aether-edge backup - > edge-$(date -u +%Y%m%d).db
 
 `backup` never removes old copies, and a full volume stops the next upgrade, so
 rotate them and copy them off the machine. A lost `edge.db` forgets every
-account, device token and owner: each client runs `aether login` again, and each
+account, device token and owner: each client runs `cloudfield login` again, and each
 server drops its owner and logs ``edge: the edge does not know this server's
 owner; claim it again with a code from `aether-server edge claim-code` ``.
 Members, roles and devices live on the servers and survive. Restoring an older

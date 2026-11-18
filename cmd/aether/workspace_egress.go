@@ -11,9 +11,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const workspaceEnvEgressUsage = "usage: aether workspace env egress list [--workspace <name-or-id>]\n" +
-	"   or: aether workspace env egress on|off [--workspace <name-or-id>]\n" +
-	"   or: aether workspace env egress allow|deny [--workspace <name-or-id>] <host> [<host> ...]   (a host is example.com or *.example.com)"
+const workspaceEnvEgressUsage = "usage: cloudfield workspace env egress list [--workspace <name-or-id>]\n" +
+	"   or: cloudfield workspace env egress on|off [--workspace <name-or-id>]\n" +
+	"   or: cloudfield workspace env egress allow|deny [--workspace <name-or-id>] <host> [<host> ...]   (a host is example.com or *.example.com)"
 
 func workspaceEnvEgress(args []string) error {
 	if len(args) < 1 {

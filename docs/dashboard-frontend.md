@@ -6,8 +6,8 @@ in its own sandbox, a container or virtual machine on the server. The dashboard 
 watch, message and review them, and holds the pages for agents, files,
 templates, members and settings.
 
-It is one static bundle served through either dashboard gateway: `aether gui`
-on the user's machine, or `aether-server --web-port` over HTTPS on the
+It is one static bundle served through either dashboard gateway: `cloudfield gui`
+on the user's machine, or `cloudfield-server --web-port` over HTTPS on the
 server's tailnet addresses. Next.js 16.3.4 produces the static export, React
 19 + TypeScript render the client runtime, Tailwind v4 and the Radix-based
 primitives in `src/components/ui/` provide the components, and Zustand holds
@@ -45,8 +45,8 @@ cd web && bun run typecheck  # tsc --noEmit
 
 `bun run dev` starts `dev-server.mjs`, the development-only Node loopback
 server. It defaults to `127.0.0.1:3000`, accepts `--port`/`-p` and
-`--hostname`/`-H`, and uses `AETHER_DASHBOARD` as its gateway target. The
-target may be a local `aether gui` URL or a server-hosted HTTPS dashboard;
+`--hostname`/`-H`, and uses `CLOUDFIELD_DASHBOARD` as its gateway target. The
+target may be a local `cloudfield gui` URL or a server-hosted HTTPS dashboard;
 local targets also proxy `/local`, while both targets proxy `/api` and `/ws`
 with WebSocket support. The proxy preserves the browser `Host` and `Origin`
 headers so the shared gateway remains the WebSocket origin boundary. Other
@@ -59,10 +59,10 @@ dev URL:
 
 ```sh
 # terminal 1
-aether gui --port 8080 --url
+cloudfield gui --port 8080 --url
 
 # terminal 2
-cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
+cd web && CLOUDFIELD_DASHBOARD=http://127.0.0.1:8080 \
   bun run dev -- --port 3000 --hostname 127.0.0.1
 # open http://127.0.0.1:3000/?token=<token-from-aether-gui>
 ```
@@ -70,8 +70,8 @@ cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
 The client moves `?token=` into `sessionStorage` under `aether.token`, removes
 only that query parameter from the address bar, and sends the value as a
 Bearer token on HTTP or a `token` query parameter on WebSockets. The token is
-minted per `aether gui` process and stops working when that process exits.
-When `AETHER_DASHBOARD` points at the server gateway instead, the browser
+minted per `cloudfield gui` process and stops working when that process exits.
+When `CLOUDFIELD_DASHBOARD` points at the server gateway instead, the browser
 sends no token: Tailscale WhoIs identifies the phone or development browser
 on every request.
 
@@ -89,14 +89,14 @@ The shipped phone path is the server-hosted gateway, checked by hand as
 
 For a contributor's loop against a dashboard build that is not embedded in a
 server yet, use the development server as a LAN-facing proxy to a local
-`aether gui`:
+`cloudfield gui`:
 
 ```sh
 # terminal 1, on the computer the phone will reach
-aether gui --port 8080 --url
+cloudfield gui --port 8080 --url
 
 # terminal 2, with <lan-ip> that computer's address on the phone's network
-cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
+cd web && CLOUDFIELD_DASHBOARD=http://127.0.0.1:8080 \
   bun run dev -- --port 3000 --hostname <lan-ip>
 # on the phone: http://<lan-ip>:3000/?token=<token-from-aether-gui>
 ```
@@ -112,7 +112,7 @@ cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
 - `--hostname` has to be the address typed on the phone. Next's development
   server permits only localhost and the hostname it was started on; any other
   origin needs `allowedDevOrigins` in `web/next.config.ts`.
-- The token is minted per `aether gui` process, and the phone needs that one.
+- The token is minted per `cloudfield gui` process, and the phone needs that one.
   Nothing else authenticates the local development proxy.
 - A tunnel or proxy in front of this must preserve `Host` and `Origin`. One
   that rewrites `Host` breaks every WebSocket - the terminal, the event feed
@@ -1082,7 +1082,7 @@ Repository step applies the first such pick, unless the field was edited,
 link is in flight or a clone is connected. A window the shell cannot resolve
 rejects with `no window asked for the folder dialog`.
 Both properties are optional on the type for the same reason `shellVersion`
-exists: a shell built by an older `aether gui build` lacks them.
+exists: a shell built by an older `cloudfield gui build` lacks them.
 
 ### Launch splash
 
@@ -1335,7 +1335,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   failure, is named as the servers the edge does see online beside the
   server id the dashboard is linked to. Each failure is stored with the
   server id it was measured on. A failure measured on another server than
-  the linked one means the gateway followed a re-link (`aether link
+  the linked one means the gateway followed a re-link (`cloudfield link
   --from-edge`): the dashboard re-reads the link status, resets the
   connection as for any server switch, and shows the failure under the new
   server's id. An offline computer is the client-to-edge layer on a link
@@ -1345,7 +1345,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   instead of an empty sidebar and an empty board behind a toast. Which hop
   failed picks the copy: `network` says this machine has no network at all
   and names wifi and a VPN, `server` says the server did not answer through
-  the selected transport, `gateway` says the local `aether gui` process
+  the selected transport, `gateway` says the local `cloudfield gui` process
   stopped answering, `tailnet` says the phone got no answer from the server
   that serves it the page, and an access refusal preserves the gateway's own
   reason. A fetch that got no answer at all is `gateway` only on the desktop
@@ -1355,7 +1355,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   arrives as `data.refusal` on the gateway's `503`, and `refusalHop` in
   `src/store/sync.ts` maps its `kind` to a class, never its wording:
   `edge-server` (the edge holds no live registration for the server id;
-  `aether-server edge status` on that host reports the server's side of the
+  `cloudfield-server edge status` on that host reports the server's side of the
   same connection and can disagree), `edge-not-claimed` (the edge
   recorded the server's owner, and the server has not applied the claim to
   its live connection yet; says to retry), `edge-refused`
@@ -1378,9 +1378,9 @@ Removal also repairs the selection and open route before any refresh awaits.
   server.** `connect` reads `GET /api/v1/capabilities` before it opens the
   stream, and a `401` there means the local gateway refused its token. The
   store records that refusal verbatim, stops retrying and tells the member to
-  open a fresh URL from `aether gui`. The token is minted per process and held
+  open a fresh URL from `cloudfield gui`. The token is minted per process and held
   in the tab's session storage, so a bookmarked URL, a second tab or a
-  restarted `aether gui` needs a newly printed URL. On the server gateway
+  restarted `cloudfield gui` needs a newly printed URL. On the server gateway
   there is no token check: WhoIs identifies the source address on every
   request, while a tagged node is denied and an unavailable identity service
   reports its own `403` or `503` refusal.
@@ -1522,7 +1522,7 @@ may do. `useSelfRole()` and `useIsAdmin()` in the same hooks file read the
 role off `server.info`'s member record, and every admin affordance needs both
 predicates: the gateway can carry the method *and* the caller holds the admin
 role. Reads are gated on capability only, so the roster is reachable on the
-server-hosted dashboard as well as through `aether gui`; the server remains
+server-hosted dashboard as well as through `cloudfield gui`; the server remains
 the authority and checks every call again. A non-admin cannot edit membership
 or roles but can grant or revoke access to their own agent account.
 
@@ -1535,7 +1535,7 @@ patch, disk gauge and capabilities descriptor are read through `GET`;
 development and retained capture bytes also use an authenticated binary `GET`,
 not base64 in control JSON. The shared browser's observation-only WebSocket is
 `/ws/dev/browser/{run_id}`; actions stay on the typed HTTP control API.
-`aether gui` sends its per-process token as `Authorization: Bearer` on HTTP
+`cloudfield gui` sends its per-process token as `Authorization: Bearer` on HTTP
 and as `?token=` on WebSockets. The server-hosted gateway sends no token;
 WhoIs authenticates each request.
 
@@ -1676,7 +1676,7 @@ card's previous object while it is unchanged (`dequal`), so the memoized
 `RunCard` skips it.
 
 A **subsession** is a session that another session's agent started with
-`aether-internal subsession start` ([subsessions](plans/2026-10-26-subsessions.md));
+`cloudfield-internal subsession start` ([subsessions](plans/2026-10-26-subsessions.md));
 its parent is that session and its root the top of the tree. Every surface reads
 one hierarchy: `runParents` in `map-layout.ts` takes a session's parent
 from `parent_run_id`, and
@@ -2198,7 +2198,7 @@ return `{"run": Run}` and need the same
 permission as `run.close`.
 
 The Needs you group, its counts and badges follow the session-state attention
-rule push notifications, watches and `aether sessions --needs-you`
+rule push notifications, watches and `cloudfield sessions --needs-you`
 share ([failure-handling.md](failure-handling.md)): a live session (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
 `disconnected`, or `failed` while `outcome_unseen`. Waiting, every Waiting
@@ -2216,7 +2216,7 @@ Needs you means the viewer can resolve it.
 
 The queued message and teammate question rows are the dashboard's own:
 they come from the room, which the session's `state` does not cover, so push and
-`aether sessions --needs-you` do not announce them.
+`cloudfield sessions --needs-you` do not announce them.
 `src/lib/needs-you.ts` holds the conditions as one table, checked in order;
 `needsYou(run, ctx)` returns the first that applies:
 
@@ -2247,7 +2247,7 @@ device as. It is read at hydration, on each `member.device` event (published
 under the workspace id `server`, so the event's unknown workspace does not
 drop it), and whenever the tab returns to the foreground or the browser
 comes back online, which catches a failed read and an approval made with
-`sudo aether-server device approve`, which publishes no event:
+`sudo cloudfield-server device approve`, which publishes no event:
 
 | Device | Who it needs | Reason line | Actions |
 | --- | --- | --- | --- |
@@ -2315,7 +2315,7 @@ the `workspace.timeline` stream keep it current (`pausedFromTimeline` in
 `src/store/board.ts`).
 
 **Unreviewed outcome** marks a success or failure reported with
-`aether-internal report` that the owner has not opened. Interactive Standard
+`cloudfield-internal report` that the owner has not opened. Interactive Standard
 and Enhanced sessions stay live at `needs-attention`, with the reason
 `agent reported success` or `agent reported failure`; Background sessions finish.
 The server owns `outcome_unseen`, so it survives reloads and needs only the
@@ -2565,7 +2565,7 @@ the server's events with an RPC response.
   (`isRetainedRun`). A freed or expired session no longer offers it, and the
   server checks the lifecycle again if the session changed after the menu opened.
 - **Relaunch** resumes a retained Standard or Enhanced session after explicit
-  Close (`aether reopen` on the command line). It is offered in **More** and
+  Close (`cloudfield reopen` on the command line). It is offered in **More** and
   as the primary button in the composer slot of a finished session, which calls
   `run.relaunch` and swaps the finished record for the live one the server
   returns. A session is eligible while the server reports `container_retained_until`
@@ -3078,7 +3078,7 @@ ask, and never on a phone (`phoneScreen`), which has no editor to hand the
 session to. A paused session shows it disabled with **Resume the session first**. Its
 dialog has a **VS Code**, a **Cursor** and a **Zed** button, each navigating
 to that editor's deep link for the ssh host `<run-id>.aether` and the
-checkout `/workspace`, then `ssh <session-id>.aether` and `aether ssh-config` as
+checkout `/workspace`, then `ssh <session-id>.aether` and `cloudfield ssh-config` as
 copyable commands for whoever has not set the host up. The item is
 not offered for a session whose id is not one lowercase host label (`runHost`),
 the only kind the links and the command are built from. The dashboard calls
@@ -3150,7 +3150,7 @@ over polled controller metadata; the controller's name remains visible
 beside **You control** or **You control in another session since <time>**.
 That text appears when `run.room.status` names your member with a
 `control_session_id` other than this tab's: another tab, device or
-`aether attach`, held since the lease's `acquired_at`.
+`cloudfield attach`, held since the lease's `acquired_at`.
 **Multiplayer** still opens Details for shared notes and run facts.
 The strip is one row whenever the controls fit beside a 6rem roster, which
 covers desktop windows. Only when they cannot, as on a phone with
@@ -3387,7 +3387,7 @@ new agent conversation (`store/session-steps.ts`). In a segment, the agent's
 prose stays in the conversation as `assistant` rows, and the work between
 two pieces of prose (thoughts, tool calls, plans, subagent launches and
 answered requests) joins one `steps` block. The prose after the last block
-is the answer. The `aether-internal report` call (or `aether_report` tool)
+is the answer. The `cloudfield-internal report` call (or `aether_report` tool)
 that ends a Cloudfield turn joins the block before the prose it follows, so a
 reply written before reporting stays the answer. A segment without work,
 such as `ping` and `pong`, has no block. The
@@ -5681,7 +5681,7 @@ Top to bottom:
   Dana", or "Pinned for you" or "Pinned for Dana" on a pin for one member's
   briefs) and **Superseded**; cited files are in the detail. Under a mouse,
   hover or focus shows **Pin for every new session** or **Pin for your new sessions**
-  (no `scope`, so the note keeps its own, as `aether memory pin`), **Unpin**,
+  (no `scope`, so the note keeps its own, as `cloudfield memory pin`), **Unpin**,
   **Replace** and **Remove**; a replaced note offers only **Remove**. On a
   touch screen a tap opens the detail instead. A pin or unpin glides the row
   into its group. While a new search or filter is read, the previous list
@@ -5721,11 +5721,11 @@ A row opens `memory.show`: the note's text, its provenance (author, session and
 its ID, commit, pull request, files, the report or question it came from,
 when it was written and pinned, what replaced it) and the supersede chain in
 replacement order, each other note a link. A member who may push gets **Pin
-for me only** (`scope: member`, as `aether memory pin --me`), **Pin** on a
+for me only** (`scope: member`, as `cloudfield memory pin --me`), **Pin** on a
 workspace-scope note, **Unpin**, **Replace…** and **Remove**, which closes the
 detail and offers **Undo** in the footer; a replaced note offers no pin and
 no **Replace…**. **Replace**, from a row or the detail, opens the composer as
-`aether memory add --supersedes`: the note's text, its kind (an outcome
+`cloudfield memory add --supersedes`: the note's text, its kind (an outcome
 note's becomes decision), its files and **Only me** for a member-scope note.
 It sends `supersedes` with the note's ID; from the detail it then opens the
 replacement. For a pinned note the server moves the pin to the replacement in
@@ -6263,8 +6263,8 @@ carries.
 The browser reads and uploads nothing. The section gives the member a prompt
 to paste into a coding agent on the computer that has their configuration;
 that agent picks the files, asks the member, and uploads them with
-`aether config ls` and `aether config push`, so that computer needs the
-`aether` CLI linked to this server. The two sentences above the prompt say so and link
+`cloudfield config ls` and `cloudfield config push`, so that computer needs the
+`cloudfield` CLI linked to this server. The two sentences above the prompt say so and link
 the quickstart's install and link steps.
 
 The prompt is `configPrompt` in `src/lib/config-prompt.ts`, a plain module
@@ -6698,7 +6698,7 @@ has loaded.
   mask.
 - **Import .env…** (`components/workspace-environment-import.tsx`) takes
   pasted `NAME=VALUE` lines or a chosen file, parsed by `lib/dotenv.ts`, the
-  format `aether workspace env import` reads. It lists each name as **New** or
+  format `cloudfield workspace env import` reads. It lists each name as **New** or
   **Replaces the current value**, counts the lines it skips, and has **Store
   as secrets** ticked. An empty value has nothing to hide and is added
   plain; over a saved secret it stays a secret with no value, which **Save**
@@ -7235,7 +7235,7 @@ fills the field unless it was edited or the step moved on since (see the
 bridge paragraph above). On a shell built before that, leaving the step and
 coming back is the way out of a chooser that died without answering. Typing
 stays the fallback, because a browser tab has no dialog and a shell built by
-an older `aether gui build` has no method.
+an older `cloudfield gui build` has no method.
 
 The step adds the `aether` remote (`link.repo`) and then seeds the workspace:
 where the local gateway serves `repo.push` it shows a **Push now** button.
@@ -7252,7 +7252,7 @@ status is unresolved or identifies a mirror. Configuring or fetching a source
 never silently authorizes its candidate.
 
 When `link.repo` answers an `origin`, the connected line adds `Sessions push to
-<origin>`: the upstream a session pushes to, the same one `aether link --repo`
+<origin>`: the upstream a session pushes to, the same one `cloudfield link --repo`
 prints. That push destination is separate from the Source control read source.
 A link that recorded none says nothing about one.
 
@@ -7360,7 +7360,7 @@ id and the host key fingerprint `edge.hostkey` read, and links only on **Link
 and pin**, because that id comes from the edge. Opened from Settings > This computer > **Link another server**, the step
 starts on this picker with a server already linked; linking an edge server makes it the default and keeps the
 previous edge default as a saved server named by its server id. **Claim
-or invite link** takes the claim link or code `aether-server setup` printed
+or invite link** takes the claim link or code `cloudfield-server setup` printed
 and refuses a claim link naming another edge than the one signed in; a join
 link pasted there opens the Join panel below. It shows below the server
 list; **Other ways to link** holds **Server id from your admin**, which the
@@ -7377,7 +7377,7 @@ stays mounted, hidden, while another card is shown, so a link in flight
 keeps its busy state. Connect
 distinguishes no configured server from a linked one, shows **Continue** only
 once a server is configured, and refreshes on Retry and when the window
-regains focus, so a separate `aether link` command appears without
+regains focus, so a separate `cloudfield link` command appears without
 restarting the GUI.
 
 A link a shell hands over ([URL state](#url-state)) opens
@@ -7441,7 +7441,7 @@ not on the step.
 ## Update prompts
 
 The dashboard tracks three update targets: the **server**, **this client**
-(the `aether` binary running `aether gui`) and the **desktop shell**.
+(the `aether` binary running `cloudfield gui`) and the **desktop shell**.
 `src/store/updates.ts` derives each target's state from the store:
 `up_to_date`, `checking`, `check_failed`, `available`, `required`,
 `scheduled`, `channel_wait`, `applying`, `restarting`, `ready_to_restart`,
@@ -7518,7 +7518,7 @@ that runs a newer release than a client refuses that client
   background too.
 
   The CLI and shell rows come from `update.check`, because the dashboard can
-  update only the machine running `aether gui`. The server row comes from
+  update only the machine running `cloudfield gui`. The server row comes from
   the server's own background release check. Any member may read the
   server's status.
 
@@ -7660,7 +7660,7 @@ that runs a newer release than a client refuses that client
   The outcome stays on the store, so the row keeps saying what happened
   after the re-checks report this machine as current:
   - the paths replaced;
-  - the `restart_command` for a co-located `aether-server`;
+  - the `restart_command` for a co-located `cloudfield-server`;
   - a rebuild still running, or its real error with `aether gui build`.
 
   A `403` answer means the macOS dialog was cancelled or the password
@@ -7740,7 +7740,7 @@ that runs a newer release than a client refuses that client
   - **Copy details** copies the versions, the message, the manual command
     and the last error;
   - **Reload**;
-  - **Switch to <name>** for every other server saved with `aether link
+  - **Switch to <name>** for every other server saved with `cloudfield link
     --name`, through `link.switch`.
 
   A dashboard served by the server itself is never gated. It reloads
@@ -7762,16 +7762,16 @@ that runs a newer release than a client refuses that client
   own storage would start empty each time. Clicking the notification opens
   the dialog and runs a check.
 - **The desktop shell has a prompt of its own.** The SPA ships inside the
-  CLI, but the Electron shell around it is whatever `aether gui build`
+  CLI, but the Electron shell around it is whatever `cloudfield gui build`
   last installed. The shell's `package.json` carries the complete CLI
   version beside its npm-valid version, and the install records the CLI's
   executable path in `resources/aether-cli.json`.
   `desktop/main.js` starts the recorded binary ahead of `PATH` (unless
-  `AETHER_BIN` overrides it) and hands the build version to the renderer.
+  `CLOUDFIELD_BIN` overrides it) and hands the build version to the renderer.
   `desktop/preload.js` exposes it as `window.aetherDesktop.shellVersion`.
   On a local gateway, a shell whose version differs from the capabilities
   version by release precedence raises *The desktop app is out of date.*
-  with `aether gui build`. Two builds of one tag do not count as
+  with `cloudfield gui build`. Two builds of one tag do not count as
   different. A browser tab and a server-hosted dashboard have no local
   shell to compare. The prompt is independent of `update_available`: the
   CLI is usually current *after* an update that left the shell old.
@@ -7779,7 +7779,7 @@ that runs a newer release than a client refuses that client
   The bridge also carries `onCheckForUpdates` (the menu item) and
   `notifyUpdate`. On Windows and Linux, `controls.showMenu` opens the
   title-bar menu. All three are optional, because a shell built by an older
-  `aether gui build` lacks them.
+  `cloudfield gui build` lacks them.
 
 ## Keyboard and focus
 
@@ -8186,7 +8186,7 @@ relevant confirmation. Preserve verbatim gateway errors in assertions when
 they are part of the contract.
 
 `web/e2e/` is the layout and browser-behavior layer. Playwright drives a real
-browser against the local `aether gui` gateway and the server it proxies,
+browser against the local `cloudfield gui` gateway and the server it proxies,
 while the same static bundle is also usable through the server-hosted
 gateway. `keyboard-focus` checks Escape ordering across an open dialog, the
 footer menu and a session view, confirms that a focused control paints the app
@@ -8282,7 +8282,7 @@ and a real touch device are checked by hand. Give the server a dashboard port
 and restart it:
 
 ```sh
-sudo aether-server config set web-port 443
+sudo cloudfield-server config set web-port 443
 sudo systemctl restart aether-server
 ```
 

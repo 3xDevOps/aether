@@ -12,15 +12,15 @@ func init() {
 	register(command{
 		name:    "pause",
 		short:   "pause a session",
-		usage:   "aether pause <session-id>",
-		example: "aether pause run-d6ay38tj8j",
+		usage:   "cloudfield pause <session-id>",
+		example: "cloudfield pause run-d6ay38tj8j",
 		run:     runPause,
 	})
 }
 
 func runPause(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether pause <session-id>")
+		return fmt.Errorf("usage: cloudfield pause <session-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
 		return actOnRun(c, os.Stdout, protocol.MethodRunPause, args[0])

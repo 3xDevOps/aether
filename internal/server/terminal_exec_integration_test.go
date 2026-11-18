@@ -60,7 +60,7 @@ func TestIntegrationTerminalExec(t *testing.T) {
 	if stdout, stderr, code = viewer.run("", aether, "terminal", "status"); !strings.HasPrefix(stdout, "status\trunning\n") || code != 0 {
 		t.Fatalf("terminal status after exec = stdout %q stderr %q status %d, want the environment exec started", stdout, stderr, code)
 	}
-	if _, stderr, code = viewer.run("", aether, "terminal", "exec"); code != 1 || !strings.Contains(stderr, "usage: aether terminal") {
+	if _, stderr, code = viewer.run("", aether, "terminal", "exec"); code != 1 || !strings.Contains(stderr, "usage: cloudfield terminal") {
 		t.Fatalf("terminal exec without a command = stderr %q status %d, want the usage error", stderr, code)
 	}
 	if _, stderr, code = viewer.run("", aether, "terminal", "stop"); code != 0 {

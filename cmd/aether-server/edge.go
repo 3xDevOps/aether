@@ -24,7 +24,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const edgeUsage = "usage: aether-server edge <status|claim-code [--admin <member id>]|trust|move <address>|leave> [--config <file>]"
+const edgeUsage = "usage: cloudfield-server edge <status|claim-code [--admin <member id>]|trust|move <address>|leave> [--config <file>]"
 
 const serviceLogNext = "next\tsudo systemctl status aether-server; sudo journalctl -u aether-server -n 50 --no-pager"
 
@@ -461,7 +461,7 @@ type deviceStore interface {
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 }
 
-const deviceUsage = "usage: aether-server device <approve <code> | review> [--config <file>]"
+const deviceUsage = "usage: cloudfield-server device <approve <code> | review> [--config <file>]"
 
 func deviceCmd(args []string) error {
 	if len(args) == 0 {

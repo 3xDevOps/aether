@@ -17,51 +17,51 @@ func init() {
 	register(command{
 		name:  "member",
 		short: "list, approve, color, set the git identity of, set your assistant's auto-approval and approval rules, change the role of, link, list or unlink the edge accounts of, merge, transfer server ownership to, or remove members",
-		usage: "aether member list\n" +
-			"aether member approve <member-id>\n" +
-			"aether member remove <member-id>\n" +
-			"aether member color <#rrggbb> [<member-id>]\n" +
-			"aether member git [--name <name>] [--email <email>] [<member-id>]\n" +
-			"aether member assistant [--auto-approve <on|off>]\n" +
-			"aether member assistant rules [--revoke <rule-id>]\n" +
-			"aether member role <member-id> <super_admin|admin|collaborator|viewer>\n" +
-			"aether member link --github <login>\n" +
-			"aether member link --email <address>\n" +
-			"aether member link --reviewer <login> <member-id>\n" +
-			"aether member identities <member-id>\n" +
-			"aether member unlink <member-id> <provider>:<subject>\n" +
-			"aether member merge start\n" +
-			"aether member merge <code> [--keep <member-id>] [--keep-admin] [--yes]\n" +
-			"aether member merge accept [<proposal-id>] [--keep-admin] [--yes]\n" +
-			"aether member merge cancel\n" +
-			"aether member merges\n" +
-			"aether member transfer <member-id>",
-		example: "aether member list\n" +
-			"aether member approve mem-rbekp4h6fx\n" +
-			"aether member role mem-rbekp4h6fx collaborator\n" +
-			"aether member git --name \"Alice Doe\" --email alice@example.com\n" +
-			"aether member assistant --auto-approve on\n" +
-			"aether member assistant rules\n" +
-			"aether member identities mem-rbekp4h6fx",
+		usage: "cloudfield member list\n" +
+			"cloudfield member approve <member-id>\n" +
+			"cloudfield member remove <member-id>\n" +
+			"cloudfield member color <#rrggbb> [<member-id>]\n" +
+			"cloudfield member git [--name <name>] [--email <email>] [<member-id>]\n" +
+			"cloudfield member assistant [--auto-approve <on|off>]\n" +
+			"cloudfield member assistant rules [--revoke <rule-id>]\n" +
+			"cloudfield member role <member-id> <super_admin|admin|collaborator|viewer>\n" +
+			"cloudfield member link --github <login>\n" +
+			"cloudfield member link --email <address>\n" +
+			"cloudfield member link --reviewer <login> <member-id>\n" +
+			"cloudfield member identities <member-id>\n" +
+			"cloudfield member unlink <member-id> <provider>:<subject>\n" +
+			"cloudfield member merge start\n" +
+			"cloudfield member merge <code> [--keep <member-id>] [--keep-admin] [--yes]\n" +
+			"cloudfield member merge accept [<proposal-id>] [--keep-admin] [--yes]\n" +
+			"cloudfield member merge cancel\n" +
+			"cloudfield member merges\n" +
+			"cloudfield member transfer <member-id>",
+		example: "cloudfield member list\n" +
+			"cloudfield member approve mem-rbekp4h6fx\n" +
+			"cloudfield member role mem-rbekp4h6fx collaborator\n" +
+			"cloudfield member git --name \"Alice Doe\" --email alice@example.com\n" +
+			"cloudfield member assistant --auto-approve on\n" +
+			"cloudfield member assistant rules\n" +
+			"cloudfield member identities mem-rbekp4h6fx",
 		run: runMember,
 	})
 }
 
 func runMember(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether member <list|approve|color|git|assistant|role|link|identities|unlink|merge|merges|transfer|remove>")
+		return fmt.Errorf("usage: cloudfield member <list|approve|color|git|assistant|role|link|identities|unlink|merge|merges|transfer|remove>")
 	}
 	switch args[0] {
 	case "list":
 		return memberList()
 	case "approve":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: aether member approve <member-id>")
+			return fmt.Errorf("usage: cloudfield member approve <member-id>")
 		}
 		return memberApprove(args[1])
 	case "remove":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: aether member remove <member-id>")
+			return fmt.Errorf("usage: cloudfield member remove <member-id>")
 		}
 		return memberRemove(args[1])
 	case "color":
@@ -76,7 +76,7 @@ func runMember(args []string) error {
 		return memberLink(args[1:])
 	case "identities":
 		if len(args) != 2 {
-			return fmt.Errorf("usage: aether member identities <member-id>")
+			return fmt.Errorf("usage: cloudfield member identities <member-id>")
 		}
 		return memberIdentities(args[1])
 	case "unlink":
@@ -161,8 +161,8 @@ func memberLink(args []string) error {
 		})
 	}
 	if (*github == "") == (*email == "") || fs.NArg() != 0 || *reviewer != "" {
-		return fmt.Errorf("usage: aether member link --github <login> | --email <address>\nlinks a GitHub account to your own member; to join two members you already are, use aether member merge start\n" +
-			"usage: aether member link --reviewer <login> <member-id>\nbinds the edge's reviewer account to a member who is no admin")
+		return fmt.Errorf("usage: cloudfield member link --github <login> | --email <address>\nlinks a GitHub account to your own member; to join two members you already are, use cloudfield member merge start\n" +
+			"usage: cloudfield member link --reviewer <login> <member-id>\nbinds the edge's reviewer account to a member who is no admin")
 	}
 	params := protocol.MemberIdentityLinkParams{Login: *github, Email: *email}
 	return withControl(func(c *protocol.Client) error {
@@ -203,7 +203,7 @@ func memberIdentities(id string) error {
 // authorized are deleted. The member, its role, its other
 // accounts, SSH key and tailnet identity stay.
 func memberUnlink(args []string) error {
-	const usage = "usage: aether member unlink <member-id> <provider>:<subject>\n" +
+	const usage = "usage: cloudfield member unlink <member-id> <provider>:<subject>\n" +
 		"the identity as aether member identities prints it; the member or an admin"
 	if len(args) != 2 {
 		return errors.New(usage)
@@ -231,7 +231,7 @@ func memberUnlink(args []string) error {
 // edge records it only from that report.
 func memberTransfer(args []string) error {
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
-		return fmt.Errorf("usage: aether member transfer <member-id>\nadmins only; the new owner must already be an admin with a linked GitHub account")
+		return fmt.Errorf("usage: cloudfield member transfer <member-id>\nadmins only; the new owner must already be an admin with a linked GitHub account")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.ServerOwnerTransferResult

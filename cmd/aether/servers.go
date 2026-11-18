@@ -13,8 +13,8 @@ func init() {
 	register(command{
 		name:    "servers",
 		short:   "list the servers your edge account can link",
-		usage:   "aether servers [--edge <url>]",
-		example: "aether servers",
+		usage:   "cloudfield servers [--edge <url>]",
+		example: "cloudfield servers",
 		flags:   true,
 		run:     runServers,
 	})
@@ -27,7 +27,7 @@ func runServers(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether servers [--edge <url>]")
+		return fmt.Errorf("usage: cloudfield servers [--edge <url>]")
 	}
 	client, err := edgeClient(*edgeURL)
 	if err != nil {

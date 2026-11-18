@@ -36,7 +36,7 @@ returns that note instead of a copy. `--supersedes <id>` replaces a note: the
 old one disappears from search unless you pass `--all`, and a pin moves to the
 new note. A member pin stays with the member who pinned it. If a live note
 already holds the replacement's text, that note becomes the replacement.
-`aether memory show` lists the chain in replacement order: the notes this one
+`cloudfield memory show` lists the chain in replacement order: the notes this one
 replaced, farthest first, then the notes that replaced it.
 
 ## What sessions see automatically
@@ -76,8 +76,8 @@ Members pin notes; agents cannot. A pinned note's title goes into the brief of
 every new session:
 
 ```sh
-aether memory pin note-hwwtypyr97          # every new session in the workspace
-aether memory pin --me note-z7c6ep47d5     # only your own new sessions
+cloudfield memory pin note-hwwtypyr97          # every new session in the workspace
+cloudfield memory pin --me note-z7c6ep47d5     # only your own new sessions
 ```
 
 A pin costs its title plus 64 bytes. Workspace pins share 1024 bytes, and each
@@ -134,13 +134,13 @@ how long.
 
 ## How agents use it
 
-Inside a session, the agent uses `aether-internal memory` (or the MCP tools
+Inside a session, the agent uses `cloudfield-internal memory` (or the MCP tools
 `aether_memory_search` and `aether_memory_add`, see [mcp-bridge.md](mcp-bridge.md)):
 
 ```sh
-aether-internal memory add --kind gotcha --file internal/scheduler/reattach.go "Reattach races the lease sweeper; take the lease before reading the container state."
-aether-internal memory search reattach lease
-aether-internal memory brief                 # the session's own brief
+cloudfield-internal memory add --kind gotcha --file internal/scheduler/reattach.go "Reattach races the lease sweeper; take the lease before reading the container state."
+cloudfield-internal memory search reattach lease
+cloudfield-internal memory brief                 # the session's own brief
 ```
 
 An agent can add at most 20 notes per session, and only while its owner may push
@@ -158,19 +158,19 @@ collaborator or admin role ([teams.md](teams.md#roles)).
 
 | Command | What it does |
 | --- | --- |
-| `aether memory ls [--kind K] [--file P] [--all] [--limit N]` | The newest notes, 100 by default |
-| `aether memory search [--kind K] [--file P] [--all] [--limit N] WORDS` | Notes matching any word, best first, 10 by default |
-| `aether memory show ID` | One note with its author and what it replaced |
-| `aether memory add --kind K [--pin] [--me] [--file P]... [--supersedes ID] TEXT` | Add a note; `--pin` pins it, `--me` limits it to your briefs |
-| `aether memory pin [--me] ID` / `unpin ID` | Add a note to briefs or take it out; it stays searchable |
-| `aether memory rm ID` / `rm --run SESSION` | Delete one note, or every note a session wrote |
-| `aether memory brief [--member M]` | The brief your next session would get; `--member` (admin only) shows member M's, which holds their member pins |
+| `cloudfield memory ls [--kind K] [--file P] [--all] [--limit N]` | The newest notes, 100 by default |
+| `cloudfield memory search [--kind K] [--file P] [--all] [--limit N] WORDS` | Notes matching any word, best first, 10 by default |
+| `cloudfield memory show ID` | One note with its author and what it replaced |
+| `cloudfield memory add --kind K [--pin] [--me] [--file P]... [--supersedes ID] TEXT` | Add a note; `--pin` pins it, `--me` limits it to your briefs |
+| `cloudfield memory pin [--me] ID` / `unpin ID` | Add a note to briefs or take it out; it stays searchable |
+| `cloudfield memory rm ID` / `rm --run SESSION` | Delete one note, or every note a session wrote |
+| `cloudfield memory brief [--member M]` | The brief your next session would get; `--member` (admin only) shows member M's, which holds their member pins |
 
 The dashboard's **Memory** page has the same operations. Its **Add note**
 composer takes cited files one per line, and **Replace** on a live note opens
 that composer filled from the note and saves it as `--supersedes` does.
 **Remove** waits five seconds, with **Undo**, before it sends `memory.rm`. Each
-change appears in **Activity** and in `aether timeline --type memory.change`,
+change appears in **Activity** and in `cloudfield timeline --type memory.change`,
 naming who made it.
 
 ## Limits
@@ -195,18 +195,18 @@ The CLI prints errors as `aether: rpc error <code>: <message>`. Agents see
 | Search returns 1 to 100 notes | `memory.search: limit must be between 1 and 100; got 101` |
 | Unknown note | `memory.rm: store: not found: memory note note-0000000000` |
 
-`aether memory add --pin` keeps the note when the pin is refused and says so:
+`cloudfield memory add --pin` keeps the note when the pin is refused and says so:
 `memory.add: note-ypysnvwf06 is stored but not pinned: memory.pin: ...`.
 
 ## Remove what a bad session wrote
 
-Find the session in the `RUN` column of `aether memory ls`, then delete everything
+Find the session in the `RUN` column of `cloudfield memory ls`, then delete everything
 attributed to it, pinned notes and its outcome note
 included:
 
 ```sh
-aether memory rm --run run-955qyxqmae
-aether memory rm note-hwwtypyr97             # or one note
+cloudfield memory rm --run run-955qyxqmae
+cloudfield memory rm note-hwwtypyr97             # or one note
 ```
 
 Removal is permanent. Notes the bad session replaced become searchable again,
@@ -220,7 +220,7 @@ enough to be a rule, put it in `AGENTS.md` or `CLAUDE.md` through a pull
 request so it is reviewed with the code, then retire the note:
 
 ```sh
-aether memory show note-h151ddhqzh     # the text and the commit it was written at
+cloudfield memory show note-h151ddhqzh     # the text and the commit it was written at
 # edit AGENTS.md or CLAUDE.md on a branch and open a pull request
-aether memory rm note-h151ddhqzh       # once the pull request is merged
+cloudfield memory rm note-h151ddhqzh       # once the pull request is merged
 ```

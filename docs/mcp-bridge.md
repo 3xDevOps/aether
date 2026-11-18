@@ -3,8 +3,9 @@
 Cloudfield's MCP bridge is an in-container MCP server for six coordination
 tools and two team memory tools, registered automatically for Enhanced sessions
 and manually elsewhere. The canonical agent interface is the
-`aether-internal` CLI, which is automatically available in every managed
-container and can load a version-matched skill on demand. The bridge does not mirror the whole `aether-internal` surface.
+`cloudfield-internal` CLI (`aether-internal` in containers created before the
+rename and in micro VM sessions), which is available in every managed
+container and can load a version-matched skill on demand. The bridge does not mirror the whole `cloudfield-internal` surface.
 
 When coordination assets are available, the server stages verified executable
 bytes read-only at the in-container paths used by the existing surfaces:
@@ -67,10 +68,10 @@ for mail in the turn with `aether_inbox`; never report while still working;
 subagents and spawned workflows never report. Both come from `coord.status`,
 asked once with a 2-second limit: without `coord.report` in its
 capabilities there is no brief and the card has no report lines, and
-without an answer the instructions only point at `aether-internal skill`.
+without an answer the instructions only point at `cloudfield-internal skill`.
 
 The canonical CLI remains available without MCP. A shell-capable agent can
-invoke `aether-internal` directly and request its live, version-matched skill
+invoke `cloudfield-internal` directly and request its live, version-matched skill
 on demand. A container or terminal without a session identity can use general
 help or the non-session skill guidance, but status, messaging and reporting return unavailable. Lack of manual MCP registration is not
 an overlap-only or notice-only mode.
@@ -126,7 +127,7 @@ notes.
 
 `aether_status` lists every capability of the session, including `dev.*` methods
 that have no MCP tool. Its tool description tells the agent to run
-`aether-internal skill` for those.
+`cloudfield-internal skill` for those.
 
 `aether_status` lists the peers described in
 [Wire v3](coordination.md#wire-v3); a peer's `run_id` is the `to_run_id` for
@@ -208,7 +209,7 @@ terminal hook.
 ## `run.report` is not `coord.report`
 
 `aether_report` is the MCP spelling of durable `coord.report`, and has the
-same evidence-before-acceptance behavior as `aether-internal report`.
+same evidence-before-acceptance behavior as `cloudfield-internal report`.
 
 The staged binary at `/opt/aether/aether-server` also retains the separate
 agent lifecycle command:

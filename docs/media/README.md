@@ -4,22 +4,22 @@ There is no demo GIF yet. The README carries a placeholder rather than faked
 media; this file is the recipe for producing the real one.
 
 Target: `docs/media/demo.gif`, referenced from the README as
-`![Aether demo](docs/media/demo.gif)`.
+`![Cloudfield demo](docs/media/demo.gif)`.
 
 ## What to show
 
 One continuous take, roughly 25-40 seconds, no cuts and no narration. The point
 is that the work happens somewhere else and comes back as a branch.
 
-1. **Launch** (~5s) - `aether session "add a health check endpoint" --agent claude`
+1. **Launch** (~5s) - `cloudfield session "add a health check endpoint" --agent claude`
    in a terminal. The run ID prints.
-2. **Watch** (~15s) - `aether gui`, then the dashboard: the run card moving
+2. **Watch** (~15s) - `cloudfield gui`, then the dashboard: the run card moving
    through the board, the live terminal mirror with the agent actually working,
    the diff timeline picking up changed files.
-3. **Message** (~5s) - optional but the best moment if it fits: `aether message`
+3. **Message** (~5s) - optional but the best moment if it fits: `cloudfield message`
    from the terminal and the colored banner appearing in the dashboard's
    terminal view a second later.
-4. **Pull** (~8s) - back in the terminal, `aether pull <run>` and then
+4. **Pull** (~8s) - back in the terminal, `cloudfield pull <run>` and then
    `git diff main...aether/cloudfield/run-<slug>-<id>` showing real code.
 
 Cut it before anything hangs. If the agent takes a long pause, record again -
@@ -36,7 +36,7 @@ do not speed up the middle, because a sped-up terminal reads as fake.
   timing with it first.
 - Clear the board of unrelated runs, and use a display name that is not
   `admin`.
-- No tokens on screen. `aether gui` puts one in the URL bar: hide the address
+- No tokens on screen. `cloudfield gui` puts one in the URL bar: hide the address
   bar, or crop it out.
 
 ## Recording

@@ -14,36 +14,36 @@ func init() {
 	register(command{
 		name:  "account",
 		short: "share agent accounts, list accounts available to use, and show their vendor usage",
-		usage: "aether account list\n" +
-			"aether account usage [--json]\n" +
-			"aether account share <member-id>\n" +
-			"aether account revoke <member-id>",
-		example: "aether account list\n" +
-			"aether account usage --json\n" +
-			"aether account share mem-rbekp4h6fx",
+		usage: "cloudfield account list\n" +
+			"cloudfield account usage [--json]\n" +
+			"cloudfield account share <member-id>\n" +
+			"cloudfield account revoke <member-id>",
+		example: "cloudfield account list\n" +
+			"cloudfield account usage --json\n" +
+			"cloudfield account share mem-rbekp4h6fx",
 		run: runAccount,
 	})
 }
 
 func runAccount(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: aether account <list|usage|share|revoke>")
+		return fmt.Errorf("usage: cloudfield account <list|usage|share|revoke>")
 	}
 	switch args[0] {
 	case "list":
 		if len(args) != 1 {
-			return fmt.Errorf("usage: aether account list")
+			return fmt.Errorf("usage: cloudfield account list")
 		}
 		return accountList()
 	case "usage":
 		jsonOut := len(args) == 2 && args[1] == "--json"
 		if len(args) != 1 && !jsonOut {
-			return fmt.Errorf("usage: aether account usage [--json]")
+			return fmt.Errorf("usage: cloudfield account usage [--json]")
 		}
 		return accountUsage(jsonOut)
 	case "share", "revoke":
 		if len(args) != 2 {
-			return fmt.Errorf("usage: aether account %s <member-id>", args[0])
+			return fmt.Errorf("usage: cloudfield account %s <member-id>", args[0])
 		}
 		return accountChange(args[0], args[1])
 	default:

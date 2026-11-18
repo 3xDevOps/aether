@@ -9,7 +9,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const memberGitUsage = "usage: aether member git [--name <name>] [--email <email>] [member-id]"
+const memberGitUsage = "usage: cloudfield member git [--name <name>] [--email <email>] [member-id]"
 
 // memberGit implements `aether member git [member-id]`: without flags it
 // shows the identity commits for that member are authored as; --name and

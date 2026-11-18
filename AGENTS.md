@@ -69,7 +69,7 @@ make test-integration
 ```
 
 The dashboard end-to-end suite drives a real browser against a real
-`aether gui` gateway and a real server. It needs Docker, real git, and
+`cloudfield gui` gateway and a real server. It needs Docker, real git, and
 Playwright's browser:
 
 ```sh

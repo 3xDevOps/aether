@@ -14,7 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/server"
 )
 
-const dictationUsage = "usage: aether-server dictation <install [--gpu]|status|remove> [--config <file>]"
+const dictationUsage = "usage: cloudfield-server dictation <install [--gpu]|status|remove> [--config <file>]"
 
 func dictationCmd(args []string) error {
 	if len(args) == 0 {

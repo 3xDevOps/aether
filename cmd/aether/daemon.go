@@ -21,19 +21,19 @@ func init() {
 	register(command{
 		name:  "daemon",
 		short: "run or install the local git sync daemon",
-		usage: "aether daemon run [--repo <path>] [--workspace <name>] [--base <branch>] [--remote <name>]\n" +
+		usage: "cloudfield daemon run [--repo <path>] [--workspace <name>] [--base <branch>] [--remote <name>]\n" +
 			"    [--server <host:port>] [--server-id <id>] [--edge-url <url>] [--key <file>] [--known-hosts <file>] [--user <name>]\n" +
-			"aether daemon install [--repo <path>] [--workspace <name>] [--base <branch>] [--remote <name>]\n" +
+			"cloudfield daemon install [--repo <path>] [--workspace <name>] [--base <branch>] [--remote <name>]\n" +
 			"    [--server <host:port>] [--server-id <id>] [--edge-url <url>] [--key <file>] [--known-hosts <file>] [--user <name>]",
-		example: "aether daemon run --repo ~/src/app --workspace app\n" +
-			"aether daemon install --repo ~/src/app --workspace app",
+		example: "cloudfield daemon run --repo ~/src/app --workspace app\n" +
+			"cloudfield daemon install --repo ~/src/app --workspace app",
 		run: daemonCmd,
 	})
 }
 
 func daemonCmd(args []string) error {
 	if len(args) < 1 {
-		return errors.New("usage: aether daemon <run|install> [flags]")
+		return errors.New("usage: cloudfield daemon <run|install> [flags]")
 	}
 	switch args[0] {
 	case "run":
@@ -49,8 +49,8 @@ func daemonCmd(args []string) error {
 // `daemon install` on fs and returns the bound Config.
 func daemonFlags(fs *flag.FlagSet) *syncd.Config {
 	cfg := &syncd.Config{}
-	fs.StringVar(&cfg.Server, "server", "", "aether-server SSH address, host:port (default: the linked server)")
-	fs.StringVar(&cfg.ServerID, "server-id", "", "server id of an edge link; pins the host key and authenticates with the device key from aether login")
+	fs.StringVar(&cfg.Server, "server", "", "cloudfield-server SSH address, host:port (default: the linked server)")
+	fs.StringVar(&cfg.ServerID, "server-id", "", "server id of an edge link; pins the host key and authenticates with the device key from cloudfield login")
 	fs.StringVar(&cfg.EdgeURL, "edge-url", "", "edge URL of an edge link, tried after --server when both are set")
 	fs.StringVar(&cfg.KeyPath, "key", "", "SSH private key file (default: ssh-agent, then ~/.ssh/id_ed25519, id_ecdsa, id_rsa)")
 	fs.StringVar(&cfg.KnownHostsPath, "known-hosts", "", "known_hosts file for host key verification (default ~/.ssh/known_hosts)")

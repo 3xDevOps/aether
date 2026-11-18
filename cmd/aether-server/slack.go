@@ -15,7 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/slack"
 )
 
-const slackUsage = "usage: aether-server slack <setup|remove> [--config <file>]"
+const slackUsage = "usage: cloudfield-server slack <setup|remove> [--config <file>]"
 
 func slackCmd(args []string) error {
 	if len(args) == 0 {
