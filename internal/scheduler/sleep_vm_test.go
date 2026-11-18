@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -191,24 +192,56 @@ func TestAVMSleepsBySavingAndWakesWithItsAgentRunning(t *testing.T) {
 	waitItems(t, e.sched, run.ID, "the wake's notice", noticed("Woke from sleep", "carry on where they were"))
 }
 
-// Work that still runs keeps a VM awake as it keeps a container: an agent's
-// background task, and in a VM also a guest that uses the CPU.
-func TestRunningWorkKeepsAVMAwake(t *testing.T) {
+// A save keeps every process, so a dev server keeps a VM awake only while
+// it uses the CPU, whether the agent runs it as a background shell or a
+// terminal has it in the foreground.
+func TestOnlyBusyWorkKeepsAVMAwake(t *testing.T) {
 	t.Parallel()
 	e, _, sr := newSaveEnv(t, false)
-	task := e.launchClaudeACP(t, acpmock.PromptDevServer)
-	waitItems(t, e.sched, task.ID, "the task's turn", turnEnded("end_turn", 1))
-	e.stayAwake(t, task.ID, "the agent's dev server ran")
-
-	run := e.launchACP(t, "say pong")
-	waitItems(t, e.sched, run.ID, "the turn", turnEnded("end_turn", 1))
-	e.onGuestCPU("60")
+	run := e.launchClaudeACP(t, acpmock.PromptDevServer)
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	var cpu atomic.Value
+	cpu.Store("150")
+	e.rt.mu.Lock()
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		switch {
+		case slices.Contains(argv, guestCPUScript):
+			return 0, cpu.Load().(string) + "\n", nil
+		case slices.Contains(argv, foregroundJobScript):
+			return 0, "next-server\n", nil
+		}
+		return 0, "", nil
+	}
+	e.rt.mu.Unlock()
+	e.waitIdle(t, run.ID)
 	e.stayAwake(t, run.ID, "the guest was busy")
-	e.onGuestCPU("1")
+	cpu.Store("20")
 	e.sleepRun(t, run.ID)
 	if !sr.isSaved(e.cid(t, run.ID)) {
 		t.Fatal("the VM was not saved once idle")
 	}
+}
+
+// Work the agent waits for, such as a workflow or a monitor, keeps a VM
+// awake: a save would freeze it, and the turn that reports on it with it.
+func TestWorkTheAgentWaitsForKeepsAVMAwake(t *testing.T) {
+	t.Parallel()
+	e, _, _ := newSaveEnv(t, false)
+	run := e.launchClaudeACP(t, acpmock.PromptHold)
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	waitFor(t, "the workflow held", func() bool { return e.sched.acp.session(run.ID).State().Background })
+	e.stayAwake(t, run.ID, "the agent waited for its workflow")
+}
+
+// waitIdle waits until nothing in run's own state keeps it awake, so a sweep
+// reaches the probes of what runs in its container or VM.
+func (e *testEnv) waitIdle(t *testing.T, run domain.RunID) {
+	t.Helper()
+	waitFor(t, "the session idle", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return e.sched.liveFactsLocked(e.sched.runs[run]).busy == ""
+	})
 }
 
 // A save that fails, as one of a VM that still shares a folder, leaves the
