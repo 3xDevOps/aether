@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -208,12 +209,7 @@ func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo
 	if err != nil {
 		return err
 	}
-	if repo != "" {
-		_, err = borrowObjects(store, filepath.Join(repo, "objects"), key)
-	} else if err = os.Remove(filepath.Join(store, "objects", "info", "alternates")); errors.Is(err, fs.ErrNotExist) {
-		err = nil
-	}
-	if err != nil {
+	if err = e.switchAlternates(store, repo, key); err != nil {
 		return err
 	}
 	// The new pack is in place before the old ones go, as in git repack -d.
@@ -228,6 +224,25 @@ func (e *Engine) shareHistory(ctx context.Context, key domain.RunID, store, repo
 	return err
 }
 
+// switchAlternates makes the store borrow repo's objects, by a path relative
+// to its own so a moved data directory keeps it, or nothing when repo is "".
+func (e *Engine) switchAlternates(store, repo string, key domain.RunID) error {
+	e.alternatesMu.Lock()
+	defer e.alternatesMu.Unlock()
+	if repo == "" {
+		if err := os.Remove(filepath.Join(store, "objects", "info", "alternates")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	rel, err := filepath.Rel(filepath.Join(store, "objects"), filepath.Join(repo, "objects"))
+	if err != nil {
+		return err
+	}
+	_, err = borrowObjects(store, rel, key)
+	return err
+}
+
 // borrowedRepo is the workspace repository whose objects the store at dir
 // borrows, or "" when it borrows none.
 func (e *Engine) borrowedRepo(dir string) (string, error) {
@@ -238,29 +253,39 @@ func (e *Engine) borrowedRepo(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	repo := filepath.Dir(strings.TrimSpace(string(data)))
+	objects := strings.TrimSpace(string(data))
+	if !filepath.IsAbs(objects) {
+		objects = filepath.Join(dir, "objects", objects)
+	}
+	repo := filepath.Dir(objects)
 	if filepath.Dir(repo) != filepath.Clean(e.cfg.ReposDir) {
 		return "", nil
 	}
 	return repo, nil
 }
 
-// reserveRepack reserves, against the receive floor, the disk that a rewrite
-// of the packs in dirs may write into store.
-func (e *Engine) reserveRepack(store string, dirs ...string) (func(), error) {
+// reserveShare reserves, against the receive floor, the disk the objects the
+// store's refs reach take now, which bounds what shareHistory writes.
+func (e *Engine) reserveShare(ctx context.Context, store string) (func(), error) {
+	roots, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", "refs/aether/")
+	if err != nil {
+		return nil, err
+	}
+	objects, err := e.gitInput(ctx, store, e.gitEnv(), []byte(roots), "rev-list", "--objects", "--no-object-names", "--stdin")
+	if err != nil {
+		return nil, err
+	}
+	sizes, err := e.gitInput(ctx, store, e.gitEnv(), []byte(objects+"\n"), "cat-file", "--batch-check=%(objectsize:disk)")
+	if err != nil {
+		return nil, err
+	}
 	var size int64
-	for _, dir := range dirs {
-		packs, err := os.ReadDir(filepath.Join(dir, "objects", "pack"))
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, err
+	for field := range strings.FieldsSeq(sizes) {
+		n, parseErr := strconv.ParseInt(field, 10, 64)
+		if parseErr != nil {
+			return nil, fmt.Errorf("gitengine: size of a history object: %w", parseErr)
 		}
-		for _, pack := range packs {
-			info, err := pack.Info()
-			if err != nil {
-				return nil, err
-			}
-			size += info.Size()
-		}
+		size += n
 	}
 	grant, err := e.reserveVMReceive(store, size)
 	if err != nil {
@@ -288,8 +313,8 @@ func (e *Engine) unpinHistory(ctx context.Context, key domain.RunID, store strin
 }
 
 // unshareHistory gives every store that borrows repo's objects its own copy
-// of what it borrows, before repo is removed. The stores, not the pins in
-// repo, say who borrows: a repo whose removal stopped halfway may not read.
+// of what it borrows, before repo is removed. The stores say who borrows,
+// live ones that hold no pin too.
 func (e *Engine) unshareHistory(ctx context.Context, repo string) error {
 	entries, err := os.ReadDir(e.cfg.CheckoutsDir)
 	if err != nil {
@@ -318,7 +343,7 @@ func (e *Engine) unshareStore(ctx context.Context, key domain.RunID, repo string
 	if borrowed, borrowErr := e.borrowedRepo(store); borrowErr != nil || borrowed != filepath.Clean(repo) {
 		return borrowErr
 	}
-	release, err := e.reserveRepack(store, store, repo)
+	release, err := e.reserveShare(ctx, store)
 	if err != nil {
 		return err
 	}
@@ -384,7 +409,10 @@ func (e *Engine) shareDetachedStore(ctx context.Context, key domain.RunID, repos
 			return statErr
 		}
 	}
-	if _, err = os.Stat(filepath.Join(store, "HEAD")); err != nil {
+	// A first snapshot refused before staging leaves a store with no HEAD.
+	if _, err = os.Stat(filepath.Join(store, "HEAD")); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
 		return err
 	}
 	base, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", "refs/aether/base")
@@ -395,7 +423,7 @@ func (e *Engine) shareDetachedStore(ctx context.Context, key domain.RunID, repos
 		if !e.hasObject(ctx, repo, strings.TrimSpace(base)) {
 			continue
 		}
-		release, reserveErr := e.reserveRepack(store, store)
+		release, reserveErr := e.reserveShare(ctx, store)
 		if reserveErr != nil {
 			return reserveErr
 		}

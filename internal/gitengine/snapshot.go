@@ -560,6 +560,9 @@ func (e *Engine) removeRunHistory(ctx context.Context, run domain.RunID) error {
 		return err
 	}
 	e.stopDiffWatch(run, false)
+	// Unpinning rewrites packed-refs, which an evidence prune's gc locks.
+	e.repoMaintenanceMu.Lock()
+	defer e.repoMaintenanceMu.Unlock()
 	lock := e.snapshotLock(run)
 	lock.Lock()
 	defer lock.Unlock()
@@ -631,6 +634,8 @@ func (e *Engine) requireSnapshotTree(ctx context.Context, store, id string) erro
 // removed checkout and is left as it is: a checkout read racing that removal
 // must not point it at objects that are about to go.
 func (e *Engine) scratchObjects(dir, checkout string, run domain.RunID) (string, error) {
+	e.alternatesMu.Lock()
+	defer e.alternatesMu.Unlock()
 	if repo, err := e.borrowedRepo(dir); err != nil || repo != "" {
 		return filepath.Join(dir, "index"), err
 	}

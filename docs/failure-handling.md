@@ -848,23 +848,25 @@ commit, the publish or that reason write fails, the checkout stays.
 
 Removing a checkout first moves the session's diff history out of it into
 `checkouts/<run-id>.diffsnap/`, which stays; this reads the session's diff
-events from the event log. That store holds only what the session's
-snapshots added and reads the fork point from the workspace repository in
-`repos/`, where the ref `refs/aether/sessions/<run-id>` keeps it from
-`git gc` until the session is deleted. Deleting a workspace first copies the
-fork point into the history of any other workspace's session that still
-reads it, as one with an extra repository does. Stores that older servers
-wrote with their own copy of the fork point shrink the same way, one at a
-time, after the server starts. A store waits for the next start when the
-disk has 256 MiB or less free, or no room for a copy of the store with
-128 MiB to spare; the server then logs `server: share diff history with
-workspace repositories` with the error. If any step fails, the checkout
-stays and the
+events from the event log. If any step fails, the checkout stays and the
 server logs `scheduler: checkout gc: capture before cleanup` with the session,
 the attempt, the next retry time and the error. Retries wait 15 minutes,
 doubling to at most 6 hours, and continue until cleanup succeeds; nothing is
 removed without its history. The wait restarts from 15 minutes when the
 server restarts.
+
+That store holds only what the session's snapshots added. It reads the fork
+point from the workspace repository in `repos/`, where the ref
+`refs/aether/sessions/<run-id>` keeps it from `git gc` until the session is
+deleted. Deleting a workspace first copies the fork point into each store that
+still reads it, such as another workspace's session that used it as an extra
+repository. Stores that older servers wrote with their own copy of the fork
+point shrink the same way, one at a time, after the server starts. Both copy
+and shrink refuse a store while the disk has 256 MiB or less free, or less
+than its size plus 128 MiB, with `the server has too little free disk`. A
+refused workspace deletion fails with that error; a refused store waits for
+the next start, and the server logs `server: share diff history with
+workspace repositories`.
 
 A member's containers share one uid:gid mapping, so a launch under another
 mapping is refused while one of them is live. A closed session whose cleanup

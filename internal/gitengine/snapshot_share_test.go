@@ -105,13 +105,13 @@ func orphanForkPoint(t *testing.T, e *Engine, repo string) {
 	}
 }
 
-func requireHistory(t *testing.T, e *Engine, run domain.RunID, from, to string) {
+func requireHistory(t *testing.T, e *Engine, from, to string) {
 	t.Helper()
-	patch, err := e.RunPatch(t.Context(), run, PatchRequest{From: from, To: to})
+	patch, err := e.RunPatch(t.Context(), "run1", PatchRequest{From: from, To: to})
 	if err != nil || !strings.Contains(patch.Text, "+// second session edit") || !strings.Contains(patch.Text, "+second") {
 		t.Fatalf("recorded interval = %+v, %v", patch, err)
 	}
-	patch, err = e.RunPatch(t.Context(), run, PatchRequest{})
+	patch, err = e.RunPatch(t.Context(), "run1", PatchRequest{})
 	if err != nil || !patch.Recorded || !strings.Contains(patch.Text, "+// first session edit") || !strings.Contains(patch.Text, "+++ b/notes.txt") {
 		t.Fatalf("recorded diff against the fork point = %+v, %v", patch, err)
 	}
@@ -154,11 +154,28 @@ func TestRemovedCheckoutHistoryBorrowsOnlyTheForkPoint(t *testing.T) {
 	if _, err = e.scratchObjects(store, filepath.Join(filepath.Dir(store), "run1"), "run1"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := os.ReadFile(filepath.Join(store, "objects", "info", "alternates")); strings.TrimSpace(string(got)) != filepath.Join(repo, "objects") {
-		t.Fatalf("the store borrows %q, not the workspace repository", got)
+	if got, err := e.borrowedRepo(store); err != nil || got != repo {
+		t.Fatalf("the store borrows from %q, %v, not the workspace repository", got, err)
 	}
 	orphanForkPoint(t, e, repo)
-	requireHistory(t, e, "run1", from, to)
+	requireHistory(t, e, from, to)
+
+	// The store names the repository by a relative path, so a data
+	// directory moved elsewhere keeps the history.
+	root := filepath.Dir(e.cfg.ReposDir)
+	if err = os.Rename(root, root+"-moved"); err != nil {
+		t.Fatal(err)
+	}
+	moved := e.cfg
+	moved.ReposDir, moved.CheckoutsDir = filepath.Join(root+"-moved", "repos"), filepath.Join(root+"-moved", "checkouts")
+	movedEngine, err := New(moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireHistory(t, movedEngine, from, to)
+	if err = errors.Join(movedEngine.Close(), os.Rename(root+"-moved", root)); err != nil {
+		t.Fatal(err)
+	}
 
 	base, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "refs/aether/base")
 	if err != nil {
@@ -226,7 +243,7 @@ func TestShareDetachedHistoryShrinksStoresThatCopiedTheForkPoint(t *testing.T) {
 		t.Fatalf("pins = %q", pin)
 	}
 	orphanForkPoint(t, e, repo)
-	requireHistory(t, e, "run1", from, to)
+	requireHistory(t, e, from, to)
 	if err = e.ShareDetachedHistory(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +259,7 @@ func TestShareDetachedHistoryShrinksStoresThatCopiedTheForkPoint(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(store, "objects", "info", "alternates")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("history still borrows from a removed workspace: %v", err)
 	}
-	requireHistory(t, e, "run1", from, to)
+	requireHistory(t, e, from, to)
 	// A removal that stopped halfway leaves a directory git cannot read.
 	if err = os.MkdirAll(filepath.Join(repo, "objects"), 0o700); err != nil {
 		t.Fatal(err)
