@@ -35,22 +35,22 @@ concurrency:
 
 # GitHub-hosted and Blacksmith runners are ephemeral, so untrusted pull
 # request code does not need an admin gate before checkout. A fork pull
-# request's runs default to ubuntu-latest; a fork can edit this file, so the
-# repository's fork approval policy is what keeps its code off Blacksmith.
-# Caches save only on runs on main: a merge-queue run's caches are scoped to
-# its own queue branch. Go module archives are separate from compiler
-# archives, whose keys also include their native or cross-build lane. Each
-# lane has one writer; build-and-test owns Blacksmith Linux amd64 native Go
-# and bun, release-build owns GitHub-hosted Linux amd64 Go modules and bun,
-# windows owns Windows amd64 native Go, arm64 owns Linux arm64 native Go,
-# and the windows-install arm64 update leg owns Windows arm64 Go. These Go
-# owners also save modules for their host. kvm and fork pull request runs,
-# the GitHub-hosted native Linux Go jobs, restore release-build's modules
-# and bun and have no compiler-cache writer. Each windows-install update leg
+# request's runs default to ubuntu-latest. A fork can edit this file, so
+# before approving a fork's run, check its .github/ changes for a Blacksmith
+# label. Caches save only on runs on main: a merge-queue run's caches are
+# scoped to its own queue branch. Go module archives are separate from
+# compiler archives, whose keys also include their native or cross-build
+# lane. Each lane has one writer; build-and-test owns Blacksmith Linux amd64
+# native Go and bun, release-build owns GitHub-hosted Linux amd64 Go modules
+# and bun, windows owns Windows amd64 native Go, arm64 owns Linux arm64
+# native Go, and the windows-install arm64 update leg owns Windows arm64 Go.
+# These Go owners also save modules for their host. kvm restores
+# release-build's modules; fork pull request runs restore its modules and
+# bun. Neither has a compiler-cache writer. Each windows-install update leg
 # owns its architecture's Windows npm caches. On Blacksmith, actions/cache
 # uses Blacksmith's store, which GitHub-hosted jobs cannot read; buildx
-# type=gha caches stay in GitHub's. runner.environment stays in every key so
-# a self-hosted archive is never restored onto a hosted VM.
+# type=gha caches stay in GitHub's. runner.environment stays in every go and
+# bun key so a self-hosted archive is never restored onto a hosted VM.
 
 jobs:
   # Lists changed files and decides whether the code jobs run. A merge-queue
