@@ -13,7 +13,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/gitengine"
+	"github.com/3xDevOps/Aether/internal/guest"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -45,7 +47,7 @@ const (
 	cleanupRetryMax        = 6 * time.Hour
 )
 
-// cleanupRetry counts the failed cleanups of the checkout a run left when it
+// cleanupRetry counts the failed tries at one cleanup step of a run that
 // finished at finished.
 type cleanupRetry struct {
 	finished time.Time
@@ -53,12 +55,24 @@ type cleanupRetry struct {
 	next     time.Time
 }
 
+func (r cleanupRetry) due(finished, now time.Time) bool {
+	return !r.finished.Equal(finished) || !now.Before(r.next)
+}
+
+func (r cleanupRetry) failed(finished, now time.Time) cleanupRetry {
+	if !r.finished.Equal(finished) {
+		r = cleanupRetry{finished: finished}
+	}
+	r.attempts++
+	r.next = now.Add(min(cleanupRetryBase<<min(r.attempts-1, 5), cleanupRetryMax))
+	return r
+}
+
 // cleanupDue reports whether run's checkout cleanup may be tried now.
 func (s *Scheduler) cleanupDue(run domain.RunID, finished time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	retry, ok := s.cleanupRetries[run]
-	return !ok || !retry.finished.Equal(finished) || !s.cfg.Now().Before(retry.next)
+	return s.cleanupRetries[run].due(finished, s.cfg.Now())
 }
 
 func (s *Scheduler) cleanupFailed(run domain.RunID, finished time.Time, err error) {
@@ -67,15 +81,147 @@ func (s *Scheduler) cleanupFailed(run domain.RunID, finished time.Time, err erro
 	if s.cleanupRetries == nil {
 		s.cleanupRetries = make(map[domain.RunID]cleanupRetry)
 	}
-	retry := s.cleanupRetries[run]
-	if !retry.finished.Equal(finished) {
-		retry = cleanupRetry{finished: finished}
-	}
-	retry.attempts++
-	retry.next = s.cfg.Now().Add(min(cleanupRetryBase<<min(retry.attempts-1, 5), cleanupRetryMax))
+	retry := s.cleanupRetries[run].failed(finished, s.cfg.Now())
 	s.cleanupRetries[run] = retry
 	slog.Warn("scheduler: checkout gc: capture before cleanup", "run", run,
 		"attempt", retry.attempts, "retry_at", retry.next, "error", err)
+}
+
+// captureStoppedVM captures run, whose VM stopped before the session's
+// final commit, by booting the VM to make it: the server never reads a VM's
+// disks itself. A failed boot is tried again later, backing off as checkout
+// cleanups do, and the checkout stays. Only a VM that is gone ends this, as
+// no boot can make its commit: the run's reason records the work as lost,
+// and cleanup goes ahead. A runtime that boots no VMs keeps everything.
+func (s *Scheduler) captureStoppedVM(ctx context.Context, r *domain.Run, cause error, cleanup func(context.Context) error, capture func(context.Context) (protocol.EvidencePacket, error)) (protocol.EvidencePacket, error) {
+	booter, ok := s.cfg.Runtime.(runtime.CaptureRuntime)
+	if !ok {
+		return protocol.EvidencePacket{}, cause
+	}
+	// A note already given, by an earlier capture or another cleanup step,
+	// is the outcome.
+	if _, noted := withoutCleanupNote(r.Reason); noted == "" {
+		cid, err := s.cfg.Runtime.FindByCreationKey(ctx, string(r.ID))
+		if err != nil && !errors.Is(err, runtime.ErrNotFound) {
+			return protocol.EvidencePacket{}, fmt.Errorf("scheduler: find the stopped VM: %w", err)
+		}
+		if err == nil {
+			return s.bootToCapture(ctx, booter, r, cid, cause, capture)
+		}
+		slog.Warn("scheduler: release session whose VM is gone with its work", "run", r.ID, "error", err)
+		if err := s.noteCleanup(ctx, r.ID, workUncapturedReason); err != nil {
+			return protocol.EvidencePacket{}, err
+		}
+		s.mu.Lock()
+		delete(s.captureBoots, r.ID)
+		s.mu.Unlock()
+	}
+	if cleanup == nil {
+		return protocol.EvidencePacket{}, nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
+	defer cancel()
+	if err := cleanup(cleanupCtx); err != nil {
+		return protocol.EvidencePacket{}, fmt.Errorf("scheduler: clean up session whose work was not captured: %w", err)
+	}
+	return protocol.EvidencePacket{}, nil
+}
+
+// captureBootPendingLocked is the error a capture of run gives while a boot
+// to commit its work backs off, nil otherwise. Caller holds s.mu.
+func (s *Scheduler) captureBootPendingLocked(r *domain.Run, cause error) error {
+	if retry, ok := s.captureBoots[r.ID]; ok && !retry.due(finishedAt(r), s.cfg.Now()) {
+		return fmt.Errorf("%w; Cloudfield boots the VM to commit it again at %s", cause, retry.next.Format(time.RFC3339))
+	}
+	return nil
+}
+
+func finishedAt(r *domain.Run) time.Time {
+	if r.FinishedAt == nil {
+		return time.Time{}
+	}
+	return *r.FinishedAt
+}
+
+// bootToCapture boots run's stopped VM without its main command, makes the
+// session's final commit and publishes its branch as a close does, captures
+// it, and stops the VM. One capture boot runs at a time on the server, so
+// each sees the memory the last one took, and one that waited for another
+// captures first, in case that boot made the commit. A host short of
+// memory defers the boot to the next try, as admission refuses a launch. A
+// boot that fails otherwise backs off; one a shutdown cut short does not.
+func (s *Scheduler) bootToCapture(ctx context.Context, booter runtime.CaptureRuntime, r *domain.Run, cid runtime.ID, cause error, capture func(context.Context) (protocol.EvidencePacket, error)) (protocol.EvidencePacket, error) {
+	waited := false
+	select {
+	case s.captureBootGate <- struct{}{}:
+	default:
+		waited = true
+		select {
+		case s.captureBootGate <- struct{}{}:
+		case <-ctx.Done():
+			return protocol.EvidencePacket{}, fmt.Errorf("%w; waiting for another capture boot: %w", cause, ctx.Err())
+		}
+	}
+	defer func() { <-s.captureBootGate }()
+	s.mu.Lock()
+	pending := s.captureBootPendingLocked(r, cause)
+	s.mu.Unlock()
+	if pending != nil {
+		return protocol.EvidencePacket{}, pending
+	}
+	if waited {
+		if packet, err := capture(ctx); !errors.Is(err, guest.ErrVMNotRunning) {
+			return packet, err
+		}
+	}
+	available, floor, err := s.hostMemory()
+	if err == nil && available < floor+startupMemoryBytes {
+		err = fmt.Errorf("%w: %d available bytes; reserve %d bytes plus %d bytes", ErrMemoryPressure, available, floor, startupMemoryBytes)
+	}
+	if err != nil {
+		return protocol.EvidencePacket{}, fmt.Errorf("%w; Cloudfield boots the VM to commit it once the host has memory: %w", cause, err)
+	}
+	msg := "wip: "
+	if r.Status == domain.RunCompleted || r.Status == domain.RunMerged {
+		msg = "aether: "
+	}
+	var packet protocol.EvidencePacket
+	var captureErr error
+	err = func() error {
+		// The VM is removed with the session; one left running only waits
+		// for that.
+		defer func() {
+			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
+			defer cancel()
+			if stopErr := s.cfg.Runtime.Stop(stopCtx, cid, s.cfg.StopGrace); stopErr != nil && !errors.Is(stopErr, runtime.ErrNotFound) {
+				slog.Warn("scheduler: stop the VM booted to commit its work", "run", r.ID, "error", stopErr)
+			}
+		}()
+		if bootErr := booter.BootForCapture(ctx, cid); bootErr != nil {
+			return fmt.Errorf("scheduler: boot the stopped VM to commit its work: %w", bootErr)
+		}
+		if _, commitErr := s.commitAll(ctx, r.ID, msg+taskLine(r.Task)); commitErr != nil {
+			return fmt.Errorf("scheduler: commit the stopped VM's work: %w", commitErr)
+		}
+		if _, publishErr := s.cfg.Git.PublishRunBranch(ctx, r.ID); publishErr != nil {
+			return fmt.Errorf("scheduler: publish the stopped VM's work: %w", publishErr)
+		}
+		packet, captureErr = capture(ctx)
+		return nil
+	}()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case err == nil:
+		delete(s.captureBoots, r.ID)
+		return packet, captureErr
+	case ctx.Err() == nil:
+		if s.captureBoots == nil {
+			s.captureBoots = make(map[domain.RunID]cleanupRetry)
+		}
+		s.captureBoots[r.ID] = s.captureBoots[r.ID].failed(finishedAt(r), s.cfg.Now())
+	}
+	return protocol.EvidencePacket{}, err
 }
 
 // onlyCheckoutNotFound reports whether err is gitengine.ErrCheckoutNotFound
@@ -117,6 +263,14 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 	if r == nil || r.ID != run {
 		return fmt.Errorf("scheduler: evidence session lookup returned no matching session")
 	}
+	// A VM whose boot to commit is under way or backing off still holds the
+	// work; trying the capture again now would only fail the same way.
+	s.mu.Lock()
+	err = s.captureBootPendingLocked(r, guest.ErrVMNotRunning)
+	s.mu.Unlock()
+	if err != nil {
+		return fmt.Errorf("scheduler: capture evidence: %w", err)
+	}
 	related, unresolved, roomSource := s.roomEvidenceWithFact(ctx, r.WorkspaceID, run)
 	req := evidence.Request{
 		RunID:                 run,
@@ -129,21 +283,8 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 		SourceFacts:           []store.EvidenceSourceFact{roomSource},
 		Provenance:            "scheduler-finish",
 	}
-	// Git refuses a checkout over its size bound or the disk's headroom on
-	// every retry, so waiting for that capture would pin the container and
-	// checkout whose removal frees the disk.
-	var packet protocol.EvidencePacket
-	if cleanup == nil {
-		packet, err = service.Capture(ctx, req)
-		if errors.Is(err, gitengine.ErrEvidenceStorageLimit) {
-			// The checkout outlives this capture, so nothing is lost yet.
-			slog.Warn("scheduler: release run without evidence", "run", run, "error", err)
-			return nil
-		}
-		if errors.Is(err, gitengine.ErrCheckoutNotFound) {
-			return s.recordEvidenceUnavailable(ctx, run, err)
-		}
-	} else {
+	capture := func(ctx context.Context) (protocol.EvidencePacket, error) { return service.Capture(ctx, req) }
+	if cleanup != nil {
 		// cleanup removes the checkout: its work must be on the run branch.
 		req.Uncaptured = func(ctx context.Context, refusal error) error {
 			if _, commitErr := s.commitAll(ctx, run, "wip: "+taskLine(r.Task)); commitErr != nil {
@@ -155,25 +296,43 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 			slog.Warn("scheduler: remove checkout without evidence", "run", run, "error", refusal)
 			return s.noteCleanup(ctx, run, evidenceOverLimitReason)
 		}
-		packet, err = service.CaptureBeforeCleanup(ctx, req, cleanup)
+		capture = func(ctx context.Context) (protocol.EvidencePacket, error) {
+			return service.CaptureBeforeCleanup(ctx, req, cleanup)
+		}
+	}
+	packet, err := capture(ctx)
+	if errors.Is(err, guest.ErrVMNotRunning) {
+		packet, err = s.captureStoppedVM(ctx, r, err, cleanup, capture)
+	}
+	// Git refuses a checkout over its size bound or the disk's headroom on
+	// every retry, so waiting for that capture would pin the container and
+	// checkout whose removal frees the disk.
+	if cleanup == nil {
+		if errors.Is(err, gitengine.ErrEvidenceStorageLimit) {
+			// The checkout outlives this capture, so nothing is lost yet.
+			slog.Warn("scheduler: release run without evidence", "run", run, "error", err)
+			return nil
+		}
 		if errors.Is(err, gitengine.ErrCheckoutNotFound) {
-			// No retry can capture a checkout that is gone. Extra
-			// repositories may still hold work, so it is published before
-			// what remains of the run is removed.
-			if _, commitErr := s.commitAll(ctx, run, "wip: "+taskLine(r.Task)); commitErr != nil && !onlyCheckoutNotFound(commitErr) {
-				return fmt.Errorf("scheduler: commit extra repositories: %w", commitErr)
-			}
-			if _, publishErr := s.cfg.Git.PublishRunBranch(ctx, run); publishErr != nil && !onlyCheckoutNotFound(publishErr) {
-				return fmt.Errorf("scheduler: publish extra repositories: %w", publishErr)
-			}
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
-			cleanupErr := cleanup(cleanupCtx)
-			cancel()
-			if cleanupErr != nil {
-				return fmt.Errorf("scheduler: clean up session without checkout: %w", cleanupErr)
-			}
 			return s.recordEvidenceUnavailable(ctx, run, err)
 		}
+	} else if errors.Is(err, gitengine.ErrCheckoutNotFound) {
+		// No retry can capture a checkout that is gone. Extra repositories
+		// may still hold work, so it is published before what remains of
+		// the run is removed.
+		if _, commitErr := s.commitAll(ctx, run, "wip: "+taskLine(r.Task)); commitErr != nil && !onlyCheckoutNotFound(commitErr) {
+			return fmt.Errorf("scheduler: commit extra repositories: %w", commitErr)
+		}
+		if _, publishErr := s.cfg.Git.PublishRunBranch(ctx, run); publishErr != nil && !onlyCheckoutNotFound(publishErr) {
+			return fmt.Errorf("scheduler: publish extra repositories: %w", publishErr)
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
+		cleanupErr := cleanup(cleanupCtx)
+		cancel()
+		if cleanupErr != nil {
+			return fmt.Errorf("scheduler: clean up session without checkout: %w", cleanupErr)
+		}
+		return s.recordEvidenceUnavailable(ctx, run, err)
 	}
 	if err != nil {
 		return fmt.Errorf("scheduler: capture evidence: %w", err)
@@ -476,26 +635,27 @@ func (s *Scheduler) recordEvidenceUnavailable(ctx context.Context, run domain.Ru
 
 // noteCleanup appends note to a terminal run's reason unless cleanup already
 // noted one there. It returns nil only once the reason carries a note, except
-// that a missing checkout is carried into the reason a run not yet terminal
-// ends with, and needs no note on a deleted run.
+// that a missing checkout or uncaptured work is carried into the reason a run
+// not yet terminal ends with, and a missing checkout needs no note on a
+// deleted run.
 func (s *Scheduler) noteCleanup(ctx context.Context, run domain.RunID, note string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, err := s.cfg.Store.GetRun(ctx, run)
-	if errors.Is(err, store.ErrNotFound) && note == evidenceUnavailableReason {
+	if errors.Is(err, store.ErrNotFound) && (note == evidenceUnavailableReason || note == workUncapturedReason) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("scheduler: record cleanup note: %w", err)
 	}
 	if !r.Status.Terminal() {
-		if note != evidenceUnavailableReason {
+		if note == evidenceOverLimitReason {
 			return fmt.Errorf("scheduler: record cleanup note: session %s is %s", run, r.Status)
 		}
 		if s.evidenceUnavailable == nil {
-			s.evidenceUnavailable = make(map[domain.RunID]struct{})
+			s.evidenceUnavailable = make(map[domain.RunID]string)
 		}
-		s.evidenceUnavailable[run] = struct{}{}
+		s.evidenceUnavailable[run] = note
 		return nil
 	}
 	if _, noted := withoutCleanupNote(r.Reason); noted != "" {

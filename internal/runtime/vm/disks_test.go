@@ -48,3 +48,45 @@ func TestHoldDisksStopsAFrozenVMUntilItsResume(t *testing.T) {
 		t.Error("resume left the held VM stopped or its session frozen")
 	}
 }
+
+// A VM the disk guard holds still runs, so a capture only starts its vCPUs:
+// no second boot, and its session stays frozen.
+func TestBootForCaptureStartsTheVCPUsOfAHeldVM(t *testing.T) {
+	h := newHarness(t)
+	h.createWithCheckoutDisk("run-b")
+	if err := h.engine.pause(t.Context(), "run-b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.holdDisks(t.Context(), "run-b"); err != nil {
+		t.Fatal(err)
+	}
+	g := h.guest("run-b")
+	boots := len(g.boots)
+	if err := (&Runtime{vms: h.engine}).BootForCapture(t.Context(), runtime.ID(idPrefix+"run-b")); err != nil {
+		t.Fatal(err)
+	}
+	if h.engine.halted(t.Context(), "run-b") || !g.isSessionFrozen() || len(g.boots) != boots {
+		t.Errorf("after the capture boot: halted %v, frozen %v, boots %d, want %d", h.engine.halted(t.Context(), "run-b"), g.isSessionFrozen(), len(g.boots), boots)
+	}
+}
+
+// A saved VM is restored for capture, not started from its disks: its saved
+// memory may hold writes its disks do not. Its session stays frozen, so the
+// agent a sleep saved running does not work on.
+func TestBootForCaptureRestoresASavedVM(t *testing.T) {
+	h := newHarness(t)
+	h.createWithCheckoutDisk("run-a")
+	if err := h.engine.save(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	g := h.guest("run-a")
+	boots := len(g.boots)
+	if err := (&Runtime{vms: h.engine}).BootForCapture(t.Context(), runtime.ID(idPrefix+"run-a")); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := h.engine.load("run-a")
+	if err != nil || rec.Saved || len(g.boots) != boots || !g.isSessionFrozen() {
+		t.Errorf("after the capture boot: %v, saved %v, boots %d (want %d), frozen %v; want the VM restored with its session frozen",
+			err, rec != nil && rec.Saved, len(g.boots), boots, g.isSessionFrozen())
+	}
+}

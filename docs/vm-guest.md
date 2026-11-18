@@ -519,8 +519,10 @@ a server-wide counter, so several at once - and the second copy a published
 branch makes into the workspace repository - hold to that floor together
 rather than each spending the same free space.
 The server records the committed tree; while the VM does not run,
-evidence retains that tree, and without one capture fails and cleanup keeps
-the checkout's disk, since only the VM can read it. Pausing a VM whose
+evidence retains that tree. Without one, since only the VM can read the
+checkout's disk, the server boots the VM with an idle main process and no
+setup script to make the commit
+([What stays after a session ends](failure-handling.md#what-stays-after-a-session-ends)). Pausing a VM whose
 checkouts live on its own disks freezes the session cgroup with the
 helper's `FreezeSession`, as Docker's pause freezes a container's, and
 leaves the VM running: the git service is outside the session, so Close

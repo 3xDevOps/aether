@@ -79,6 +79,7 @@ type engine struct {
 	gits    map[string]*guest.Git
 	booting map[string]bool
 	fresh   map[string]bool
+	capture map[string]bool
 	events  map[string]runtime.MemoryEvents
 	relays  map[string]*relay
 
@@ -94,7 +95,7 @@ func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
 	return &engine{
 		cfg: cfg, root: filepath.Join(cfg.DataDir, "vm"), units: u, dial: dial, run: runCommand,
 		locks: map[string]*sync.Mutex{}, helpers: map[string]helper{}, gits: map[string]*guest.Git{}, booting: map[string]bool{},
-		fresh: map[string]bool{}, events: map[string]runtime.MemoryEvents{}, relays: map[string]*relay{}, reserved: map[int]bool{},
+		fresh: map[string]bool{}, capture: map[string]bool{}, events: map[string]runtime.MemoryEvents{}, relays: map[string]*relay{}, reserved: map[int]bool{},
 		listenDNS:  func() (*dnsRelay, error) { return listenDNS(proxyAddr, vmSubnet, hostResolvers) },
 		cgroupRoot: "/sys/fs/cgroup",
 	}
@@ -321,9 +322,14 @@ func hostMemoryBytes() (int64, error) {
 // start cold-starts a stopped VM on the disks it had, as docker start keeps
 // a container's writable layer; on a running one it only makes sure Main
 // was started, as a redundant docker start does.
-func (e *engine) start(ctx context.Context, key string) (err error) {
+func (e *engine) start(ctx context.Context, key string) error {
 	unlock := e.lock(key)
 	defer unlock()
+	return e.startLocked(ctx, key)
+}
+
+// startLocked is start for a caller holding the VM's lock.
+func (e *engine) startLocked(ctx context.Context, key string) (err error) {
 	rec, err := e.load(key)
 	if err != nil {
 		return err
@@ -386,7 +392,8 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 	if err = e.boot(ctx, rec); err != nil {
 		return err
 	}
-	if !rec.SetupDone {
+	// A boot for capture runs no setup script.
+	if !rec.SetupDone && !e.flag(e.capture, key) {
 		rec.SetupDone = true
 		if err = e.store(rec); err != nil {
 			return err
@@ -619,14 +626,17 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 	}
 	// The setup script runs once per VM, as once per container: the root
 	// disk keeps what it did.
-	script := rec.SetupScript
+	argv, script := rec.Command, rec.SetupScript
 	if rec.SetupDone {
 		script = ""
+	}
+	if e.flag(e.capture, rec.Key) {
+		argv, script = captureMain, ""
 	}
 	e.setFlag(e.booting, rec.Key, true)
 	err = h.Boot(upCtx, guest.BootSpec{
 		Main: guest.ProcessSpec{
-			ID: guest.MainID, Argv: rec.Command, Env: rec.Env, User: rec.User, Dir: rec.WorkingDir, TTY: tty,
+			ID: guest.MainID, Argv: argv, Env: rec.Env, User: rec.User, Dir: rec.WorkingDir, TTY: tty,
 			NoNewPrivileges: !rec.Sudo,
 		},
 		SetupScript: script, NestedDocker: rec.NestedDocker, PidsLimit: rec.PidsLimit,

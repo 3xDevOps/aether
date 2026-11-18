@@ -282,11 +282,17 @@ type Scheduler struct {
 	// unstartableImages maps a saved environment image that failed to start
 	// a session container to the cause. Guarded by mu.
 	unstartableImages map[string]string
-	// evidenceUnavailable holds active runs whose capture found the checkout
-	// gone, for the reason they are interrupted with. Guarded by mu.
-	evidenceUnavailable map[domain.RunID]struct{}
+	// evidenceUnavailable holds the cleanup note of active runs whose
+	// capture found the checkout gone or gave up on its VM, for the reason
+	// they are interrupted with. Guarded by mu.
+	evidenceUnavailable map[domain.RunID]string
 	// cleanupRetries backs off checkout cleanups that failed. Guarded by mu.
 	cleanupRetries map[domain.RunID]cleanupRetry
+	// captureBoots backs off boots of stopped VMs to capture their work.
+	// Guarded by mu. captureBootGate lets one such boot run at a time; a
+	// waiter can leave on its context.
+	captureBoots    map[domain.RunID]cleanupRetry
+	captureBootGate chan struct{}
 	// checkoutSweepGate lets one checkout sweep run at a time, so no checkout
 	// is retried before its backoff is recorded. A waiter can leave on its
 	// context.
@@ -757,6 +763,7 @@ func New(cfg Config) (*Scheduler, error) {
 		harnesses:            harnesses,
 		capacityGate:         make(chan struct{}, 1),
 		checkoutSweepGate:    make(chan struct{}, 1),
+		captureBootGate:      make(chan struct{}, 1),
 		superCtx:             ctx,
 		superCancel:          cancel,
 		recoveryReady:        make(chan struct{}),
