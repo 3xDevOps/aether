@@ -270,11 +270,11 @@ func (s *Store) NewDataDisk(ctx context.Context, path string, size int64) (Disk,
 	return Disk{Path: path, Format: FormatRaw}, nil
 }
 
-// SaveBase saves disk, a copy of a root disk made from base, as a new base
-// disk tagged ref, and takes the copy: a raw one moves into the store, and a
-// qcow2 one is read over base, never over the backing file its header names.
-// The new base keeps base's image configuration, with labels replacing those
-// of the same keys.
+// SaveBase saves disk, a copy no VM uses of a root disk made from base, as
+// a new base disk tagged ref, and takes the copy: a raw one moves into the
+// store, and a qcow2 one is flattened over base, never over the backing file
+// its header names. The new base keeps base's image configuration, with
+// labels replacing those of the same keys.
 func (s *Store) SaveBase(ctx context.Context, disk Disk, base Base, ref string, labels map[string]string) (Base, error) {
 	work, err := os.MkdirTemp(s.tmpDir(), "save-")
 	if err != nil {
