@@ -74,7 +74,6 @@ func newAdmissionEnv(t *testing.T, mutate func(*Config)) (*testEnv, *admissionRu
 	e := newTestEnv(t, func(cfg *Config) {
 		rt = &admissionRuntime{fakeRuntime: cfg.Runtime.(*fakeRuntime), host: healthyAdmissionHost()}
 		cfg.Runtime = rt
-		cfg.filesystemCapacity = healthyAdmissionData
 		if mutate != nil {
 			mutate(cfg)
 		}
