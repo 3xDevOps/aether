@@ -707,9 +707,13 @@ sleeping session, Standard or Enhanced: mail, `cloudfield-internal report
 A Standard session's Chat and Terminal views, and an Enhanced session's
 Chat view, show **Asleep since** with a **Wake** button while it sleeps.
 
-A wake takes a second or two on local NVMe: on a test host, a message to a
-sleeping Claude Code or Codex session running a dev server and a
-`docker compose` stack was accepted 0.7 to 1.5 seconds after it was sent,
+A wake loads the saved memory on demand: the VM runs at once, each page read
+from the saved file on its first use and the rest in the background. On a
+hosted test runner, a VM with 1.5 GiB of saved memory on disk ran its first
+command 0.8 to 1.5 seconds after the wake began, where reading the whole
+file first took 4.5 seconds. Before on-demand restore, on a test host, a
+message to a sleeping Claude Code or Codex session running a dev server and
+a `docker compose` stack was accepted 0.7 to 1.5 seconds after it was sent,
 **Relaunch** of a closed one took 3 seconds, and a start from disk after a
 failed restore 5 seconds. The Chat view and the session's terminal say
 `Cloudfield had saved this idle session to disk and restored it`.
