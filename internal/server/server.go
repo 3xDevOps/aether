@@ -802,6 +802,32 @@ func (s *Server) Run(ctx context.Context) error {
 			s.serveWeb(runCtx)
 		}()
 	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		workspaceOf := func(ctx context.Context, key domain.RunID) (domain.WorkspaceID, error) {
+			parent, _ := domain.ParentRun(key)
+			run, err := s.db.GetRun(ctx, parent)
+			if errors.Is(err, store.ErrNotFound) {
+				return "", nil
+			}
+			if err != nil {
+				return "", err
+			}
+			if run.ID == key {
+				return run.WorkspaceID, nil
+			}
+			for _, extra := range run.Extras {
+				if extra.Key == key {
+					return extra.WorkspaceID, nil
+				}
+			}
+			return "", nil
+		}
+		if err := s.git.ShareDetachedHistory(runCtx, workspaceOf); err != nil && runCtx.Err() == nil {
+			slog.Warn("server: share diff history with workspace repositories", "error", err)
+		}
+	}()
 	go func() {
 		defer wg.Done()
 		if err := s.sched.Start(runCtx); err != nil {

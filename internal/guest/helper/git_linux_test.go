@@ -944,10 +944,10 @@ func TestStoppedVMSessionIsShownFromItsLastSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := filepath.Join(filepath.Dir(p.repo), "..", "checkouts", string(testRun)+".diffsnap")
-	if _, err = os.Stat(filepath.Join(store, "objects", "info", "alternates")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the removed checkout's history still borrows the workspace's objects: %v", err)
+	if got, _ := os.ReadFile(filepath.Join(store, "objects", "info", "alternates")); filepath.Join(store, "objects", strings.TrimSpace(string(got))) != filepath.Join(p.repo, "objects") {
+		t.Fatalf("the removed checkout's history borrows %q, not the workspace's objects", got)
 	}
-	if err = os.RemoveAll(p.repo); err != nil {
+	if err = p.host.RemoveWorkspaceRepo(ctx, testWorkspace); err != nil {
 		t.Fatal(err)
 	}
 	patch, err := p.host.RunPatch(ctx, testRun, gitengine.PatchRequest{})

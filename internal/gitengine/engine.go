@@ -128,6 +128,9 @@ type Engine struct {
 	// repoMaintenanceMu prevents internal repository writers from racing
 	// evidence object pruning and repacking.
 	repoMaintenanceMu sync.Mutex
+	// alternatesMu makes a snapshot store's alternates check and rewrite one
+	// step, so a checkout read cannot undo the switch that shares a store.
+	alternatesMu sync.Mutex
 	// vmReceiveMu guards vmReceiveReserved, the bytes concurrent receives of
 	// VM objects have promised to write but not yet freed. Each receive counts
 	// against it so several at once cannot jointly spend past the free-disk
@@ -238,7 +241,9 @@ func (e *Engine) InitWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) (
 }
 
 // RemoveWorkspaceRepo removes all branches and private refs after the server
-// has fenced workspace admission and purged its run artifacts.
+// has fenced workspace admission and purged its run artifacts. Diff history
+// of other workspaces' sessions that borrows from it, an extra repository's,
+// gets its own copy first.
 func (e *Engine) RemoveWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID) error {
 	repo, err := e.repoPath(ws)
 	if err != nil {
@@ -251,7 +256,19 @@ func (e *Engine) RemoveWorkspaceRepo(ctx context.Context, ws domain.WorkspaceID)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(repo); err != nil {
+	if err := e.unshareHistory(ctx, repo); err != nil {
+		return err
+	}
+	// Moved out of the repositories first, so a removal that stops halfway
+	// leaves nothing history could borrow part of a fork point from.
+	removed := repo + ".removed"
+	if err := os.RemoveAll(removed); err != nil {
+		return fmt.Errorf("gitengine: remove workspace repository: %w", err)
+	}
+	if err := os.Rename(repo, removed); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("gitengine: remove workspace repository: %w", err)
+	}
+	if err := os.RemoveAll(removed); err != nil {
 		return fmt.Errorf("gitengine: remove workspace repository: %w", err)
 	}
 	e.mu.Lock()

@@ -327,11 +327,27 @@ func TestKVMCheckoutLivesOnTheVMDisk(t *testing.T) {
 	if read, err = h.git.FilesRead(ctx, ws, run, "", "after-commit.txt", 0); err != nil || string(read.Content) != "after\n" {
 		t.Fatalf("files read of an ended session = %+v, %v", read, err)
 	}
-	if err := h.git.RemoveRunCheckout(ctx, run); err != nil {
+	if err = h.git.RemoveRunCheckout(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(store, "objects", "info", "alternates")); !os.IsNotExist(err) {
-		t.Fatalf("removed checkout's history still borrows the workspace's objects: %v", err)
+	t.Logf("history store of the removed checkout: %s", strings.Join(strings.Fields(hostGit(t, store, "count-objects", "-vH")), " "))
+	fork, last := hostGit(t, store, "rev-parse", "refs/aether/base"), hostGit(t, store, "rev-parse", "refs/aether/published")
+	if pin := hostGit(t, repo, "rev-parse", "refs/aether/sessions/"+key); pin != fork {
+		t.Fatalf("the workspace pins %s for the history, not its fork point %s", pin, fork)
+	}
+	// The workspace drops the session's commits, which the history borrowed
+	// while the VM ran; main keeps the fork point for the tests after this.
+	unrelated := hostGit(t, repo, "commit-tree", "-m", "unrelated", hostGit(t, repo, "hash-object", "-t", "tree", "-w", "/dev/null"))
+	for _, ref := range strings.Fields(hostGit(t, repo, "for-each-ref", "--format=%(refname)", "refs/heads/")) {
+		if ref != "refs/heads/main" {
+			hostGit(t, repo, "update-ref", ref, unrelated)
+		}
+	}
+	hostGit(t, repo, "reflog", "expire", "--expire=now", "--all")
+	hostGit(t, repo, "gc", "--prune=now", "--quiet")
+	if patch, err = h.git.RunPatch(ctx, run, gitengine.PatchRequest{From: fork, To: last}); err != nil ||
+		!strings.Contains(patch.Text, "+two") || !strings.Contains(patch.Text, "+++ b/after-commit.txt") {
+		t.Fatalf("history of a removed checkout after its workspace pruned the session's commits = %+v, %v", patch, err)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(h.repos), "checkouts", key, "disk.qcow2")); !os.IsNotExist(err) {
 		t.Fatalf("removed checkout's disk remains: %v", err)

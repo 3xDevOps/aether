@@ -551,9 +551,11 @@ view and diffs come from the last snapshot the server recorded: nothing can
 have changed the checkout since. A Files write or upload to a sleeping
 session wakes it first; one to an ended session, whose VM was removed,
 fails. Removing the checkout
-deletes its disk and first copies into the session's diff history what that
-history borrowed from the workspace repository, so the history outlives the
-workspace's own objects.
+deletes its disk and first repacks the session's diff history to what its
+snapshots added beyond the fork point, which it keeps borrowing from the
+workspace repository under the ref `refs/aether/sessions/<run-id>`, so
+`git gc` there never prunes it
+([What stays after a session ends](failure-handling.md#what-stays-after-a-session-ends)).
 
 ## Versions
 

@@ -168,7 +168,7 @@ func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T
 	if err := e.ensureScratchGitDir(ctx, store, checkout); err != nil {
 		t.Fatal(err)
 	}
-	index, err := scratchIndex(store, checkout, "run1")
+	index, err := e.scratchIndex(store, checkout, "run1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,8 +315,8 @@ func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T
 	if err := e.RemoveRunCheckout(ctx, "run1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(store, "objects", "info", "alternates")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("checkout alternate survived detachment: %v", err)
+	if got, _ := os.ReadFile(filepath.Join(store, "objects", "info", "alternates")); strings.Contains(string(got), checkout) {
+		t.Fatalf("checkout alternate survived detachment: %s", got)
 	}
 	patch, err = e.RunPatch(ctx, "run1", PatchRequest{From: borrowed, To: tree})
 	if err != nil || !strings.Contains(patch.Text, "-older") || !strings.Contains(patch.Text, "+legacy") {
