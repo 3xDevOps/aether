@@ -525,9 +525,10 @@ type attached struct {
 }
 
 // diskArgs states every disk's format to Cloud Hypervisor, which would
-// otherwise guess it from bytes a session may have written. Only qcow2 disks,
-// which the server makes over bases no session wrote, may open a backing
-// file.
+// otherwise guess it from bytes a session may have written. Only qcow2 disks
+// may open a backing file: the server makes each with its backing format
+// pinned to raw, which Cloud Hypervisor follows, so a base a session wrote
+// reads as data.
 func diskArgs(disks []attached) ([]string, error) {
 	args := make([]string, len(disks))
 	for i, a := range disks {

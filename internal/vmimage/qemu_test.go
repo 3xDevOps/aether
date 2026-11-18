@@ -97,7 +97,7 @@ func TestQemuImgNamesFormatsAndNeverOpensAHeadersBackingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen, converts := map[string]bool{}, 0
+	seen, commits := map[string]bool{}, 0
 	for line := range strings.Lines(string(recorded)) {
 		args := strings.Split(strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\x1f"), "\x1f")
 		seen[args[0]] = true
@@ -106,30 +106,29 @@ func TestQemuImgNamesFormatsAndNeverOpensAHeadersBackingFile(t *testing.T) {
 			if !hasPair(args, "-f", "qcow2") || !hasPair(args, "-F", "raw") || !slices.Contains(args, "-u") {
 				t.Errorf("qemu-img %v: a create must name both formats and not open its backing file (-u)", args)
 			}
-		case "convert":
-			i := slices.Index(args, "--image-opts")
-			if i < 0 || slices.Contains(args, "-f") {
-				t.Errorf("qemu-img %v: a convert must describe its input with --image-opts", args)
+		case "commit":
+			if !slices.Contains(args, "--image-opts") || !slices.Contains(args, "-d") || slices.Contains(args, "-f") {
+				t.Errorf("qemu-img %v: a commit must describe its input with --image-opts and keep it (-d)", args)
 				continue
 			}
-			opts := args[len(args)-2]
+			opts := args[len(args)-1]
 			_, backing, _ := strings.Cut(opts, ",backing.file.filename=")
-			recordedBase := backing == base.Path || strings.HasPrefix(backing, s.tmpDir()) && strings.HasSuffix(backing, "/base.raw")
-			if !strings.HasPrefix(opts, "driver=qcow2,") || !strings.Contains(opts, ",backing.driver=raw,") || !recordedBase {
-				t.Errorf("qemu-img %v: the input %q must be qcow2 over a raw base the store recorded", args, opts)
+			storeCopy := strings.HasPrefix(backing, s.tmpDir()) && strings.HasSuffix(backing, "/disk.raw")
+			if !strings.HasPrefix(opts, "driver=qcow2,") || !strings.Contains(opts, ",backing.driver=raw,") || !storeCopy {
+				t.Errorf("qemu-img %v: the input %q must be qcow2 over the store's raw copy of a base it recorded", args, opts)
 			}
-			converts++
+			commits++
 		default:
 			t.Errorf("qemu-img %v: a call this test does not check", args)
 		}
 	}
-	if !seen["create"] || converts != 2 {
-		t.Errorf("recorded calls %q, want creates and a convert for the save and for the cache", recorded)
+	if !seen["create"] || commits != 2 {
+		t.Errorf("recorded calls %q, want creates and a commit for the save and for the cache", recorded)
 	}
 
 	// Every qemu-img call in the module's code is one the store made above.
 	sites := qemuImgCalls(t, filepath.Join("..", ".."))
-	if want := []string{"vmimage/store.go:create", "vmimage/store.go:convert"}; !slices.Equal(sites, want) {
+	if want := []string{"vmimage/store.go:create", "vmimage/store.go:commit"}; !slices.Equal(sites, want) {
 		t.Errorf("qemu-img is called at %v, want only %v: check every new call in this test", sites, want)
 	}
 }

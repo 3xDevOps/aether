@@ -308,12 +308,19 @@ func (s *Store) SaveBase(ctx context.Context, disk Disk, base Base, ref string, 
 }
 
 // flatten writes the qcow2 disk at path, read over the raw file backing and
-// never over the backing file its header names, to dst as a sparse raw disk.
+// never over the backing file its header names, to dst as a sparse raw disk:
+// a copy of backing, cloned where the filesystem can, with path's clusters
+// committed into it, so only those take new blocks. qemu-img commit opens
+// path for writing and repairs it when its dirty bit is set, so path must be
+// a file no VM uses.
 func flatten(ctx context.Context, path, backing, dst string) error {
+	if err := copyDisk(ctx, backing, dst); err != nil {
+		return err
+	}
 	escape := strings.NewReplacer(",", ",,").Replace
-	return run(ctx, "qemu-img", "convert", "-q", "-O", "raw", "--image-opts",
+	return run(ctx, "qemu-img", "commit", "-q", "-d", "--image-opts",
 		"driver=qcow2,file.driver=file,file.filename="+escape(path)+
-			",backing.driver=raw,backing.file.driver=file,backing.file.filename="+escape(backing), dst)
+			",backing.driver=raw,backing.file.driver=file,backing.file.filename="+escape(dst))
 }
 
 // Tag points target at the base source is tagged to.

@@ -3,6 +3,7 @@
 package vm
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -86,7 +87,9 @@ func rootSession(t *testing.T, e *engine, key, image string, mounts ...runtime.M
 // that the member's next session, whose cache is a qcow2 disk over that
 // session-written base, gets those bytes back as data. The next session
 // writes another header through its own qcow2 cache, and the session after
-// it reads that back from the base promotion flattened. It then saves an
+// it reads that back from the base promotion flattened. Deleting the last VM
+// over the older base frees it at once, and a VM started again while a
+// promotion reads its cache disk gets one of its own. It then saves an
 // environment from a root disk over an image and again from one over a saved
 // image, timing both.
 func TestKVMGuestWrittenQcow2HeadersStayData(t *testing.T) {
@@ -155,6 +158,7 @@ func TestKVMGuestWrittenQcow2HeadersStayData(t *testing.T) {
 	vmRun(t, e, "run-vmdisk-a", "echo kept > /aether-cache/marker")
 	writeHeader(t, e, "run-vmdisk-a", "cache", qcow2Header(secret))
 	promote("run-vmdisk-a", secret)
+	first := filepath.Join(poolDir, newest())
 	layered("run-vmdisk-b", qcow2Header(secret))
 
 	r := &Runtime{vms: e}
@@ -172,25 +176,43 @@ func TestKVMGuestWrittenQcow2HeadersStayData(t *testing.T) {
 	writeHeader(t, e, "run-vmdisk-b", "cache", qcow2Header(other))
 	promote("run-vmdisk-b", other)
 	layered("run-vmdisk-e", qcow2Header(other))
-	// A VM that starts again while its cache is being promoted gets a cache
-	// disk of its own that still holds what it wrote.
+	if err := e.destroy(t.Context(), "run-vmdisk-b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Errorf("the older cache only a removed VM read through is still on disk: %v", err)
+	}
+	// A VM that starts again while a promotion still reads its cache disk,
+	// as the link held here does, gets a cache disk of its own that holds
+	// what it wrote, and never writes the one the promotion reads.
 	vmRun(t, e, "run-vmdisk-e", "echo again > /aether-cache/again")
 	if err := e.stop(t.Context(), "run-vmdisk-e", 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.start(t.Context(), "run-vmdisk-e"); err != nil {
+	rec, err := e.load("run-vmdisk-e")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if out, _ := vmRun(t, e, "run-vmdisk-e", "cat /aether-cache/again"); out != "again\n" {
+	held := filepath.Join(src, "promotion-cache")
+	if err = os.Link(rec.Cache.Path, held); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := os.ReadFile(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.start(t.Context(), "run-vmdisk-e"); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := vmRun(t, e, "run-vmdisk-e", "cat /aether-cache/again && echo later > /aether-cache/later && sync"); out != "again\n" {
 		t.Errorf("a VM started again during its cache's promotion lost what it wrote: %q", out)
 	}
-	rec, err := e.load("run-vmdisk-e")
 	var st syscall.Stat_t
-	if err == nil {
-		err = syscall.Stat(rec.Cache.Path, &st)
-	}
-	if err != nil || st.Nlink != 1 {
+	if err = syscall.Stat(rec.Cache.Path, &st); err != nil || st.Nlink != 1 {
 		t.Errorf("a VM started again shares its cache disk with a promotion: %d links, %v", st.Nlink, err)
+	}
+	if got, _ := os.ReadFile(held); !bytes.Equal(got, stopped) {
+		t.Error("a VM started again wrote the cache disk a promotion reads")
 	}
 
 	took = rootSession(t, e, "run-vmdisk-c", fromImage)

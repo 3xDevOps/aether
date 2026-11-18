@@ -115,8 +115,9 @@ session wrote, such as a saved environment or a member's newest cache, reads
 as plain bytes even when it starts like a qcow2 header that names a host
 file. A guest writes only the data of its qcow2 disk, never its header. A
 member's cache pool serves only that member's sessions, and Save
-environment and cache promotion read a qcow2 disk over the base the server
-recorded, never over the backing file its header names.
+environment and cache promotion write a qcow2 disk's data into a raw copy
+of the base the server recorded, never into the backing file its header
+names.
 
 - Agents run as uid `1000`, or as an image's own non-root user. What they may
   do as root depends on the session's [permission tier](#permission-tiers).

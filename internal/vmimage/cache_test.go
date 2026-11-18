@@ -124,12 +124,29 @@ func TestCachePoolLayersCachesOverRawBases(t *testing.T) {
 	if got := head(t, newest.Path, len(header)); !bytes.Equal(got, header) {
 		t.Errorf("a session's write reached the pool's newest cache: %q", got)
 	}
+	// The dirty bit Cloud Hypervisor leaves on a disk it did not close makes
+	// qemu-img repair a disk it opens for writing.
+	f, err := os.OpenFile(next.Path, os.O_WRONLY, 0)
+	if err == nil {
+		_, err = f.WriteAt([]byte{1}, 79)
+		err = errors.Join(err, f.Close())
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	vmDisk, err := os.ReadFile(next.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	layered, err := s.SnapshotCache(next)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = s.PromoteCache("pool1", layered); err != nil {
 		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(next.Path); !bytes.Equal(got, vmDisk) {
+		t.Error("promotion wrote the cache disk of the VM it read")
 	}
 	flat, err := s.readNewest(filepath.Join(s.cachesDir(), "pool1"))
 	if err != nil {

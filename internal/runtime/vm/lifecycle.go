@@ -385,8 +385,9 @@ func (e *engine) lost(ctx context.Context, key string) (int, error) {
 	return lostExitCode, e.store(rec)
 }
 
-// destroy removes the VM and every file it had; a missing VM is not an
-// error. The key's lock stays: a caller may be waiting on it.
+// destroy removes the VM, every file it had and the shared disks only it
+// read through; a missing VM is not an error. The key's lock stays: a caller
+// may be waiting on it.
 func (e *engine) destroy(ctx context.Context, key string) error {
 	if checkKey(key) != nil {
 		return nil
@@ -428,6 +429,10 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 	delete(e.fresh, key)
 	delete(e.events, key)
 	e.mu.Unlock()
+	// The VM is gone either way; the hourly sweep retries what this one left.
+	if err = e.cfg.Images.Sweep(); err != nil {
+		slog.Warn("vm runtime: delete the disks only a removed VM used", "vm", key, "error", err)
+	}
 	return nil
 }
 

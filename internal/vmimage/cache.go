@@ -150,11 +150,12 @@ func (s *Store) UnshareCache(ctx context.Context, disk Disk) error {
 	return nil
 }
 
-// PromoteCache writes a snapshot SnapshotCache took as a raw disk, a qcow2
-// one read over its base, and makes that pool's newest cache, or drops the
-// pool's caches when it takes more than cacheLimit, then deletes the
-// snapshot and every cache of the pool no disk uses. A snapshot older than
-// the pool's newest cache, whose promotion finished first, changes nothing.
+// PromoteCache writes a snapshot SnapshotCache took as a raw disk, a copy
+// of a qcow2 one read over its base, and makes that pool's newest cache, or
+// drops the pool's caches when it takes more than cacheLimit, then deletes
+// the snapshot and every cache of the pool no disk uses. A snapshot older
+// than the pool's newest cache, whose promotion finished first, changes
+// nothing.
 func (s *Store) PromoteCache(pool, snapshot string) error {
 	defer func() { _ = os.RemoveAll(snapshot) }()
 	if !validPool(pool) {
@@ -165,7 +166,10 @@ func (s *Store) PromoteCache(pool, snapshot string) error {
 	disk, cache, base := filepath.Join(snapshot, "disk.raw"), filepath.Join(snapshot, "cache"), filepath.Join(snapshot, "base.raw")
 	var err error
 	if _, statErr := os.Stat(base); statErr == nil {
-		err = flatten(ctx, cache, base, disk)
+		top := filepath.Join(snapshot, "top.qcow2")
+		if err = copyDisk(ctx, cache, top); err == nil {
+			err = flatten(ctx, top, base, disk)
+		}
 	} else {
 		err = copyDisk(ctx, cache, disk)
 	}
