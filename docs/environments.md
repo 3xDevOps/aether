@@ -484,9 +484,12 @@ What changes:
 
 ## After a session closes
 
-Reporting success or failure leaves an interactive session open for follow-up, and
-quiet sessions do not expire; an idle Enhanced Claude Code session sleeps
-instead ([Idle sleep](failure-handling.md#idle-sleep)). **Close** keeps the session's container for seven days
+Reporting success or failure leaves an interactive session open for follow-up.
+An idle Enhanced Claude Code session sleeps, and so does any idle session in a
+VM ([Idle sleep](failure-handling.md#idle-sleep)). A session with no activity
+for 7 days, waiting for you or not, is closed for you as
+**Close** would close it ([What stays after a session
+ends](failure-handling.md#what-stays-after-a-session-ends)). **Close** keeps the session's container for seven days
 (`--run-container-ttl`) so you can **Relaunch** it, unless disk runs low first. The seven days pause
 while the session is relaunched and start over at its next close. Close
 removes the session's browser companion, the Chromium container behind its

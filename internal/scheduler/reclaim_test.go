@@ -56,6 +56,44 @@ func TestReclaimDiskIgnoresAFloorLargerThanTheDisk(t *testing.T) {
 	}
 }
 
+// Reclaim starts once a filesystem is 85% full and frees what nobody loses
+// down to 80%; a closed session's container goes only below the floor plus
+// its headroom.
+func TestReclaimDiskRunsByWatermarks(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	scratch := filepath.Join(e.sched.scratchRoot(), "run-orphan")
+	old := time.Now().Add(-2 * scratchOrphanAge)
+	if err := os.MkdirAll(scratch, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(scratch, old, old); err != nil {
+		t.Fatal(err)
+	}
+	var free atomic.Uint64
+	free.Store(16 << 30)
+	setFreeBytes(e, &free)
+	e.sched.reclaimDisk(t.Context(), "")
+	if _, err := os.Stat(scratch); err != nil {
+		t.Fatalf("reclaim ran on a filesystem 84%% full: %v", err)
+	}
+	free.Store(14 << 30)
+	e.sched.reclaimDisk(t.Context(), "")
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("reclaim kept scratch on a filesystem 86%% full: %v", err)
+	}
+
+	run := closeRetained(t, e, "closed session")
+	e.sched.reclaimDisk(t.Context(), "")
+	if e.rt.byName(string(run.ID)) == nil {
+		t.Fatal("reclaim removed a closed session's container above the floor's headroom")
+	}
+	free.Store(8 << 30)
+	e.sched.reclaimDisk(t.Context(), "")
+	if e.rt.byName(string(run.ID)) != nil {
+		t.Fatal("reclaim kept a closed session's container below the floor's headroom")
+	}
+}
+
 func TestReclaimDiskRemovesClosedRunContainerFirstAndStopsWhenRecovered(t *testing.T) {
 	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
 	run := closeRetained(t, e, "closed session")

@@ -15,6 +15,15 @@ import (
 // space, so admission rarely meets a refusal.
 const reclaimHeadroom uint64 = 4 << 30
 
+// reclaimStartUsed and reclaimTargetUsed are the percentages of a filesystem
+// in use at which reclaim starts and down to which it frees what nobody
+// loses, at most every reclaimSweepEvery.
+const (
+	reclaimStartUsed  = 85
+	reclaimTargetUsed = 80
+	reclaimSweepEvery = 5 * time.Minute
+)
+
 // reclaimDisk waits for any running pass, then runs one. keep names a member
 // whose kept terminal is being opened, which the pass must not remove.
 func (s *Scheduler) reclaimDisk(ctx context.Context, keep domain.MemberID) {
@@ -23,25 +32,56 @@ func (s *Scheduler) reclaimDisk(ctx context.Context, keep domain.MemberID) {
 	s.reclaimDiskLocked(ctx, keep)
 }
 
-// reclaimDiskLocked frees rebuildable data until every measured filesystem has
-// the floor plus reclaimHeadroom free, evicting the data that is cheapest to
-// rebuild last, and stops as soon as it does. The caller holds reclaimMu.
+// reclaimDiskLocked starts once a measured filesystem is reclaimStartUsed
+// full or below its floor plus reclaimHeadroom. It first frees what nobody
+// loses, unused images, caches past their budget or age and scratch, until
+// every filesystem is down to reclaimTargetUsed. Below the floor's headroom
+// it then frees what sessions and members would lose, and every cache,
+// until that headroom is back. It stops as soon as it is. The caller holds
+// reclaimMu.
 func (s *Scheduler) reclaimDiskLocked(ctx context.Context, keep domain.MemberID) {
 	if s.cfg.MinFreeBytes < 0 || ctx.Err() != nil {
 		return
 	}
-	free, short, ok := s.reclaimLevel(ctx)
+	free, short, ok := s.reclaimLevel(ctx, reclaimStartUsed)
 	if !ok || !short {
 		return
 	}
-	// recovered re-measures after a step and logs the change.
-	recovered := func(step string) bool {
-		after, short, ok := s.reclaimLevel(ctx)
+	// recovered re-measures after a step against used and logs the change.
+	recovered := func(step string, used uint64) bool {
+		after, short, ok := s.reclaimLevel(ctx, used)
 		slog.Info("scheduler: disk reclaim", "step", step, "free_before", free, "free_after", after)
 		free = after
 		return !ok || !short || ctx.Err() != nil
 	}
+	if now := time.Now(); now.Sub(s.reclaimSweptAt) >= reclaimSweepEvery {
+		s.reclaimSweptAt = now
+		s.sweepCaches(ctx, false)
+		s.sweepScratch(ctx)
+		if recovered("unused images, old caches and scratch", reclaimTargetUsed) {
+			return
+		}
+	}
+	// A used share of 100 leaves only the floor plus reclaimHeadroom.
+	if _, low, ok := s.reclaimLevel(ctx, 100); !ok || !low {
+		return
+	}
+	floor := func(step string) bool { return recovered(step, 100) }
+	if s.reclaimSessions(ctx, keep, floor) {
+		return
+	}
+	s.sweepCaches(ctx, true)
+	if floor("caches and images") {
+		return
+	}
+	s.sweepScratch(ctx)
+	floor("scratch")
+}
 
+// reclaimSessions frees, in order, sleeping VMs' saved memory, closed
+// sessions' containers, finished checkouts and members' stopped terminals,
+// and reports whether recovered said that was enough.
+func (s *Scheduler) reclaimSessions(ctx context.Context, keep domain.MemberID, recovered func(step string) bool) bool {
 	for _, entry := range s.savedByAge() {
 		note, err := s.dropSavedState(ctx, entry)
 		if err != nil {
@@ -53,7 +93,7 @@ func (s *Scheduler) reclaimDiskLocked(ctx context.Context, keep domain.MemberID)
 		}
 		s.publishTimeline(ctx, entry.workspaceID, entry.runID, "", events.TimelineNote, note)
 		if recovered("saved session state") {
-			return
+			return true
 		}
 	}
 
@@ -69,7 +109,7 @@ func (s *Scheduler) reclaimDiskLocked(ctx context.Context, keep domain.MemberID)
 		s.publishTimeline(ctx, entry.workspaceID, entry.runID, "", events.TimelineNote,
 			"Removed this closed session's container early because disk space was low; the session can no longer be reopened, and its branch and history are kept")
 		if recovered("closed session container") {
-			return
+			return true
 		}
 	}
 
@@ -77,7 +117,7 @@ func (s *Scheduler) reclaimDiskLocked(ctx context.Context, keep domain.MemberID)
 	if s.cfg.CheckoutTTL > 0 {
 		s.sweepCheckouts(ctx, time.Now().UTC())
 		if recovered("finished checkouts") {
-			return
+			return true
 		}
 	}
 
@@ -94,24 +134,17 @@ func (s *Scheduler) reclaimDiskLocked(ctx context.Context, keep domain.MemberID)
 				continue
 			}
 			if destroyed && recovered("stopped terminal") {
-				return
+				return true
 			}
 		}
 	}
-
-	s.sweepCaches(ctx, true)
-	if recovered("caches and images") {
-		return
-	}
-
-	s.sweepScratch(ctx)
-	recovered("scratch")
+	return false
 }
 
-// reclaimLevel reports the lowest free bytes among the filesystems that are
-// below their floor plus reclaimHeadroom, or among all when none is. ok is
-// false when a measurement failed.
-func (s *Scheduler) reclaimLevel(ctx context.Context) (free uint64, short, ok bool) {
+// reclaimLevel reports the lowest free bytes among the filesystems more than
+// used percent full or below their floor plus reclaimHeadroom, or among all
+// when none is. ok is false when a measurement failed.
+func (s *Scheduler) reclaimLevel(ctx context.Context, used uint64) (free uint64, short, ok bool) {
 	probeCtx, cancel := context.WithTimeout(ctx, capacityProbeTimeout)
 	defer cancel()
 	filesystems, _, err := s.measureCapacity(probeCtx)
@@ -123,10 +156,13 @@ func (s *Scheduler) reclaimLevel(ctx context.Context) (free uint64, short, ok bo
 	lowShort := uint64(math.MaxUint64)
 	for _, fs := range filesystems {
 		free = min(free, fs.FreeBytes)
-		target := diskReserve(fs.TotalBytes, s.cfg.MinFreeBytes) + reclaimHeadroom
-		// A target the filesystem cannot hold is never met, so evicting
+		target := fs.TotalBytes / 100 * (100 - used)
+		// A floor the filesystem cannot hold is never met, so evicting
 		// toward it would only destroy reopenable runs and unsaved state.
-		if target < fs.TotalBytes && fs.FreeBytes < target {
+		if floor := diskReserve(fs.TotalBytes, s.cfg.MinFreeBytes) + reclaimHeadroom; floor < fs.TotalBytes {
+			target = max(target, floor)
+		}
+		if fs.FreeBytes < target {
 			short = true
 			lowShort = min(lowShort, fs.FreeBytes)
 		}

@@ -233,9 +233,15 @@ which browsers showed a need, so one announced before it is not replaced.
 Every launch checks that the Cloudfield data filesystem and Docker's storage
 keep a reserve free: by default the larger of 5 GiB and 5% of the filesystem,
 capped at 20 GiB, plus 1 GiB for this launch and each one already starting.
-When free space
-drops below the reserve plus 4 GiB, Cloudfield frees space on its own, on every
-poll and before refusing a launch, in this order, until it is back above:
+Cloudfield frees space on its own, on every poll and before refusing a
+launch. When a filesystem is 85% full it removes, at most every 5 minutes,
+what nobody loses: unused standard and browser images, caches over their
+budget or unused for long, and leftover scratch directories, until it is at
+most 80% full. Those are the marks and the period of Kubernetes' image
+garbage collection. When free space drops below the reserve plus 4 GiB it
+then frees what sessions and members would lose, in this order, until it is
+back above, and after them every cache, image and scratch directory nobody
+uses:
 
 1. The saved memory of sleeping Enhanced session VMs whose agent restores
    its conversation, the longest asleep first
@@ -253,8 +259,6 @@ poll and before refusing a launch, in this order, until it is back above:
    `--checkout-ttl` is negative.
 4. Other members' stopped environments. Anything they installed and
    did not save with `cloudfield env save` is lost; their homes are kept.
-5. Caches and unused standard and browser images.
-6. Leftover scratch directories.
 
 If that is not enough, the launch is refused:
 
@@ -790,6 +794,7 @@ restart or update leaves sleeping VMs asleep; the next use wakes them.
 | Action | Container | Checkout | Reopen |
 | --- | --- | --- | --- |
 | **Close** (`cloudfield close <session-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory, until an Enhanced Claude Code session's container is stopped after `--run-sleep-after` ([Idle sleep](#idle-sleep)). A session VM is saved to disk at once instead. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `cloudfield reopen <session-id>`. The deadline is cleared while the session is live; the next close sets a new 7 days. |
+| No activity for 7 days in a live session, `needs-attention` included | As **Close**, with the outcome `completed`. Its timeline notes `Closed after 7 days without activity`. Only activity counts: a question waiting for an answer, a pause or a turn that made no progress does not keep it open, while an open exec or port forward, a change of mode or account, and a session the memory guard saved while it worked do. A sleeping session's 7 days run from its sleep; an awake one's restart with the server. A sleeping session VM is woken first to commit; while admission refuses the wake, it stays open until the next hourly check. | As **Close**. | As **Close**. Once its container is gone, launch a new session on its branch. |
 | A Background session finishes | Removed at once. | Kept for `--checkout-ttl` (72 hours) after the session ends. | No. |
 | **Kill run** (`cloudfield kill <session-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the session ends. | No. |
 | **Free sandbox…** | Removed. History stays. | Kept until `--checkout-ttl` after the session ended. | No. |
