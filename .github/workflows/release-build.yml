@@ -115,7 +115,7 @@ jobs:
   # an image name unchecked.
   release-inputs:
     permissions: {}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 5
     steps:
       # The same rules release-manifest, android-version-code.sh and
@@ -187,17 +187,18 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2604
           - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
       - name: Build the versioned browser companion
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: useblacksmith/build-push-action@v2 # v6.19.2
         with:
           context: .
           file: images/browser/Dockerfile
@@ -207,7 +208,6 @@ jobs:
           provenance: false
           sbom: false
           tags: ghcr.io/3xdevops/aether-browser:${{ inputs.tag }}-${{ matrix.arch }}
-          cache-from: type=gha,scope=browser-${{ matrix.arch }}-main
       - name: Prove sandbox, local app, actions, captures and streams
         env:
           BROWSER_IMAGE: ghcr.io/3xdevops/aether-browser:${{ inputs.tag }}-${{ matrix.arch }}
@@ -231,12 +231,13 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 10
     outputs:
       digest: ${{ steps.verify.outputs.digest }}
     steps:
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
@@ -326,11 +327,11 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2604
           - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
@@ -340,7 +341,8 @@ jobs:
       - name: Read the short commit
         id: commit
         run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
       - name: Generate edge image labels
         id: edge-meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
@@ -354,7 +356,7 @@ jobs:
       # No build cache: the image builds in about a minute, and a cache
       # written by other workflows must not reach a published image.
       - name: Build the edge image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: useblacksmith/build-push-action@v2 # v6.19.2
         with:
           context: .
           file: images/edge/Dockerfile
@@ -394,12 +396,13 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 10
     outputs:
       digest: ${{ steps.publish.outputs.digest }}
     steps:
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
@@ -408,7 +411,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       # Full history, as in edge-image, so the short commit in the sha- tag
       # is the one `aether-edge version` prints.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
@@ -561,10 +564,10 @@ jobs:
     needs: release-inputs
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
@@ -582,7 +585,7 @@ jobs:
     needs: release-inputs
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -590,7 +593,7 @@ jobs:
         goos: [linux, darwin, windows]
         goarch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
@@ -639,10 +642,10 @@ jobs:
     needs: release-inputs
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
@@ -670,9 +673,9 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: windows-latest
+            runner: blacksmith-4vcpu-windows-2025
           - arch: arm64
-            runner: windows-11-arm
+            runner: blacksmith-4vcpu-windows-2025
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -697,7 +700,7 @@ jobs:
     needs: [release-inputs, release-binaries, desktop-windows]
     permissions:
       contents: read
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -729,7 +732,7 @@ jobs:
     needs: release-inputs
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 45
     steps:
       # No other job receives signing secrets. The first step refuses missing
@@ -755,7 +758,7 @@ jobs:
           keystore="$RUNNER_TEMP/aether-android.jks"
           printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$keystore"
           echo "ANDROID_KEYSTORE_FILE=$keystore" >> "$GITHUB_ENV"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
@@ -804,15 +807,16 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2604
           - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
       - name: Generate standard image labels
         id: standard-meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
@@ -823,7 +827,7 @@ jobs:
       # Native builds retain Ubuntu's normal update behavior without QEMU's
       # arm64 apt cost. Smoke and push use this same loaded image.
       - name: Build the standard environment image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: useblacksmith/build-push-action@v2 # v6.19.2
         with:
           context: .
           file: images/standard/Dockerfile
@@ -834,7 +838,6 @@ jobs:
           sbom: false
           tags: ${{ steps.standard-meta.outputs.tags }}
           labels: ${{ steps.standard-meta.outputs.labels }}
-          cache-from: type=gha,scope=standard-${{ matrix.arch }}-main
       - name: Prove the standard toolchain and native Git
         env:
           STANDARD_IMAGE: ghcr.io/3xdevops/aether-standard:${{ inputs.tag }}-${{ matrix.arch }}
@@ -856,12 +859,13 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 10
     outputs:
       digest: ${{ steps.publish.outputs.digest }}
     steps:
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
@@ -956,12 +960,12 @@ jobs:
     needs: [release-inputs, browser-manifest, edge-manifest, standard-manifest]
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 10
     outputs:
       store-schema: ${{ steps.store.outputs.schema }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
@@ -1004,7 +1008,7 @@ jobs:
     environment: ${{ inputs.signing-environment }}
     permissions:
       contents: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     outputs:
       pointer-if-above-names-release: ${{ steps.if-above.outputs.names }}
@@ -1041,7 +1045,7 @@ jobs:
             ;;
           esac
           echo "Signed and published with the tools of main commit \`$TOOLS_COMMIT\`" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ inputs.tools-commit }}
           persist-credentials: false
@@ -1246,7 +1250,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 10
     steps:
       - name: Require this release to be GitHub's Latest
@@ -1307,7 +1311,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 10
     steps:
       - name: Require this release to be GitHub's Latest

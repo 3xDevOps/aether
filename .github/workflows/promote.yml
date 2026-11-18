@@ -46,7 +46,7 @@ jobs:
   promote-policy:
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 5
     steps:
       - name: Require main
@@ -55,7 +55,7 @@ jobs:
             echo "::error::Promote runs only from refs/heads/main, not $GITHUB_REF"
             exit 1
           fi
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: refs/heads/main
           persist-credentials: false
@@ -70,7 +70,7 @@ jobs:
     needs: promote-policy
     environment: release
     permissions: {}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 5
     steps:
       - name: Require the release signing key
@@ -87,7 +87,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 10
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
@@ -100,7 +100,7 @@ jobs:
       first-pointer: ${{ steps.plan.outputs.first-pointer }}
       tools: ${{ steps.plan.outputs.tools }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: refs/heads/main
           persist-credentials: false

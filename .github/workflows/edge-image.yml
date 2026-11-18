@@ -31,17 +31,17 @@ jobs:
         include:
           - arch: amd64
             name: build, smoke and upgrade (amd64)
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2604
             upgrade: true
             # The tags, to build the previous release.
             fetch-depth: 0
           - arch: arm64
             name: build and smoke (arm64)
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
             upgrade: false
             fetch-depth: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref }}
@@ -57,13 +57,10 @@ jobs:
           current=$(sudo cat /etc/docker/daemon.json 2>/dev/null || printf '{}')
           printf '%s' "$current" | jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json >/dev/null
           sudo systemctl restart docker
-      - uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-config-inline: |
-            [registry."docker.io"]
-              mirrors = ["mirror.gcr.io"]
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
       - name: Build the edge image
-        uses: docker/build-push-action@v6
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: images/edge/Dockerfile

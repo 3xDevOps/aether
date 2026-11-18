@@ -62,7 +62,7 @@ jobs:
   # classifier alone, fails open and runs them. The checkout carries no
   # credentials.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 5
     # actions: write lets the merge queue step below cancel runs.
     permissions:
@@ -75,7 +75,7 @@ jobs:
       suite: ${{ steps.classify.outputs.suite }}
       vm: ${{ steps.classify.outputs.vm }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref || github.sha }}
@@ -148,10 +148,10 @@ jobs:
   audit:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || github.event_name == 'pull_request' || needs.changes.outputs.suite == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
         with:
           persist-credentials: false
       - name: Public boundary
@@ -160,10 +160,10 @@ jobs:
   lint:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
         with:
           persist-credentials: false
       - uses: actions/setup-go@v6
@@ -213,10 +213,10 @@ jobs:
   build-and-test:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
         with:
           persist-credentials: false
       - uses: actions/setup-go@v6
@@ -272,10 +272,10 @@ jobs:
   store-tests:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.go == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
         with:
           persist-credentials: false
       - uses: actions/setup-go@v6
@@ -291,10 +291,10 @@ jobs:
   dashboard:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -341,7 +341,7 @@ jobs:
       - store-tests
       - dashboard
       - suite
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 5
     steps:
       # No job's rule skips it in the merge queue, so a skip there means a

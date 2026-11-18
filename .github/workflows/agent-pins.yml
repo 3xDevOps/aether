@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   bump:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 15
     env:
       BRANCH: bot/agent-pins
@@ -36,7 +36,7 @@ jobs:
         with:
           app-id: ${{ vars.AGENT_PINS_APP_ID }}
           private-key: ${{ secrets.AGENT_PINS_APP_KEY }}
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
         with:
           ref: main
           token: ${{ steps.app.outputs.token }}

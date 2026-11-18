@@ -28,7 +28,7 @@ jobs:
   publisher-policy:
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     outputs:
       allowed: ${{ steps.select.outputs.allowed }}
     steps:
@@ -60,7 +60,7 @@ jobs:
     if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
     environment: release
     permissions: {}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 5
     steps:
       - name: Require the release signing key
@@ -80,7 +80,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 10
     outputs:
       sha: ${{ steps.authorize.outputs.sha }}
@@ -90,7 +90,7 @@ jobs:
       hotfix: ${{ steps.authorize.outputs.hotfix }}
       pointer-if-above: ${{ steps.authorize.outputs.pointer-if-above }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           # Read policy scripts from trusted main before executing tag code.
           # workflow_sha names the tag revision on a tag push.

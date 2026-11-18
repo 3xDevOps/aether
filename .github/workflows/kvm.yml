@@ -18,10 +18,10 @@ permissions:
 jobs:
   kvm:
     name: make test-kvm
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: useblacksmith/checkout@v1
         with:
           persist-credentials: false
       - uses: actions/setup-go@v6

@@ -54,7 +54,7 @@ jobs:
   publisher-policy:
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     outputs:
       allowed: ${{ steps.select.outputs.allowed }}
     steps:
@@ -75,7 +75,7 @@ jobs:
             exit 1
             ;;
           esac
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: refs/heads/main
           persist-credentials: false
@@ -119,7 +119,7 @@ jobs:
       id-token: write
       artifact-metadata: write
       packages: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 20
     env:
       TAG: ${{ inputs.tag }}
@@ -129,7 +129,7 @@ jobs:
     steps:
       # The verifier, its embedded release keys and the version ordering
       # come from main, never from the release being promoted.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: refs/heads/main
           persist-credentials: false

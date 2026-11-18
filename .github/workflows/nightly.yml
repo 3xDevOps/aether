@@ -33,7 +33,7 @@ jobs:
     if: vars.NIGHTLY_ENABLED == 'true'
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 5
     steps:
       # The job's if compares without case; this takes only the exact,
@@ -52,7 +52,7 @@ jobs:
             echo "::error::nightly runs only from refs/heads/main, not $GITHUB_REF"
             exit 1
           fi
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         if: github.event_name == 'workflow_dispatch'
         with:
           ref: refs/heads/main
@@ -69,7 +69,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 15
     outputs:
       run: ${{ steps.plan.outputs.run }}
@@ -81,7 +81,7 @@ jobs:
     steps:
       # The full history and every tag: the walk back from main's head and
       # the build: lines of the nightly tags.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: refs/heads/main
           fetch-depth: 0
@@ -120,10 +120,10 @@ jobs:
     environment: nightly
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: ${{ needs.plan.outputs.tools }}
           persist-credentials: false
@@ -196,7 +196,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
       - name: Require NIGHTLY_PRUNE_ENABLED to be exactly true
@@ -207,7 +207,7 @@ jobs:
             echo "::error::NIGHTLY_PRUNE_ENABLED is '$NIGHTLY_PRUNE_ENABLED', not true; set it with gh variable set NIGHTLY_PRUNE_ENABLED --body true, and check gh variable list --org for one of that name"
             exit 1
           fi
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: useblacksmith/checkout@v1 # v4.4.0
         with:
           ref: refs/heads/main
           persist-credentials: false

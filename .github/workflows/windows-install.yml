@@ -9,7 +9,7 @@ permissions:
 jobs:
   install:
     name: install (${{ matrix.shell }}, Node ${{ matrix.node }}, desktop ${{ matrix.desktop }})
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -115,9 +115,9 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: windows-latest
+            runner: blacksmith-4vcpu-windows-2025
           - arch: arm64
-            runner: windows-11-arm
+            runner: blacksmith-4vcpu-windows-2025
     defaults:
       run:
         shell: powershell
