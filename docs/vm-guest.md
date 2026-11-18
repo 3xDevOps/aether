@@ -154,9 +154,15 @@ mounted. It is package `internal/guest/home`, API
   reach: paths are resolved beneath their share without following a
   symlink, only regular files and directories are opened, and a read-only
   or overlaid share is never written.
-- The guest trusts what it learned of a name or a file for one second, so a
-  change from another session shows within it. An `O_APPEND` write appends
-  at the host's end of the file.
+- The guest trusts what it learned of a name, including that it does not
+  exist, and of a file's attributes for one second, so a new file or a
+  change from another session shows in a listing or `stat` within it.
+  Opening a file gets the host's current version: the guest keeps its
+  cached pages and attributes only of a file the host has not changed
+  since the guest last opened it, as NFS's close-to-open consistency does.
+  An agent that reads a login another session just refreshed reads the
+  new login whole, unless another process in the VM still has the old one
+  open. An `O_APPEND` write appends at the host's end of the file.
 - `flock` and `fcntl` locks hold only within one VM, and memory maps are not
   shared across VMs. A SQLite database or a lock file in the home is not
   protected against the member's other sessions, as it is under Docker;
