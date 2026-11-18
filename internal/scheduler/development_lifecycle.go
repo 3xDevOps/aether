@@ -376,6 +376,7 @@ func (s *Scheduler) recoverDevelopment(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return
 			}
+			defer s.needGuest(entry.containerID)()
 			if err := s.RecoverDevelopmentTerminals(ctx, entry.runID); err != nil && ctx.Err() == nil {
 				slog.Warn("scheduler: recovery: session terminals unavailable", "run", entry.runID, "error", err)
 			}

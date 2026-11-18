@@ -9,7 +9,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-func TestFreezeAllFreezesEveryRunningVMButOneMidOperation(t *testing.T) {
+func TestFreezeTakesARunningVMThatIsNotMidOperation(t *testing.T) {
 	h := newHarness(t)
 	for _, key := range []string{"run-a", "run-b", "run-c"} {
 		h.createStarted(key, sessionSpec(key))
@@ -17,14 +17,21 @@ func TestFreezeAllFreezesEveryRunningVMButOneMidOperation(t *testing.T) {
 	if err := h.engine.stop(t.Context(), "run-c", 0); err != nil {
 		t.Fatal(err)
 	}
-
+	if froze, err := h.engine.freeze("run-c"); froze || err == nil {
+		t.Fatalf("freeze of a stopped VM = %v, %v", froze, err)
+	}
 	unlock := h.engine.lock("run-b")
-	if froze := h.engine.freezeAll(); !slices.Equal(froze, []runtime.ID{idPrefix + "run-a"}) {
-		t.Fatalf("with run-b mid-operation and run-c stopped, freezeAll froze %v", froze)
+	if froze, err := h.engine.freeze("run-b"); froze || err == nil {
+		t.Fatalf("freeze of a VM mid-operation = %v, %v", froze, err)
 	}
 	unlock()
-	if froze := h.engine.freezeAll(); !slices.Equal(froze, []runtime.ID{idPrefix + "run-b"}) {
-		t.Fatalf("the next freezeAll froze %v, want the VM the first left out", froze)
+	for _, key := range []string{"run-a", "run-b"} {
+		if froze, err := h.engine.freeze(key); !froze || err != nil {
+			t.Fatalf("freeze %s = %v, %v", key, froze, err)
+		}
+	}
+	if froze, err := h.engine.freeze("run-a"); froze || err != nil {
+		t.Fatalf("freeze of a frozen VM = %v, %v", froze, err)
 	}
 	if data, err := os.ReadFile(h.engine.freezeFile("run-a")); err != nil || strings.TrimSpace(string(data)) != "1" {
 		t.Fatalf("the freezer of a frozen VM reads %q, %v", data, err)

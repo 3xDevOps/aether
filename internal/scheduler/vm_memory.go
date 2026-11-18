@@ -28,6 +28,7 @@ const (
 
 const (
 	memorySavedWorkingNote = "Saved to disk while it worked: the server was running out of memory. It wakes on its own once memory is free again, with every process where it was."
+	memorySavedFrozenNote  = "Saved to disk: the server was running out of memory. It wakes on its own once memory is free again, with every process where it was."
 	memorySavedIdleNote    = "Saved to disk early: the server was running out of memory. It wakes on its next use, with every process where it was."
 )
 
@@ -319,6 +320,7 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 	}
 	// A guest the brake froze cannot say whether it is busy: it is saved
 	// as it stands, and wakes again as one that was.
+	unasked := frozen && c.idle
 	if frozen {
 		wake, working = true, true
 	}
@@ -338,6 +340,9 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 	note := memorySavedIdleNote
 	if wake || s.agentWorking(c.e) {
 		note = memorySavedWorkingNote
+		if unasked && !s.agentWorking(c.e) {
+			note = memorySavedFrozenNote
+		}
 		s.mu.Lock()
 		c.e.memorySaved = c.memory
 		err := s.writeSidecar(c.e.sidecar())

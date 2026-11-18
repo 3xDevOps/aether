@@ -231,18 +231,22 @@ func (e *engine) savedMemory(key string) (uint64, error) {
 // resumeAfter resumes the VM a failed save paused. A snapshot that outlasts
 // chAPITimeout keeps the monitor, which answers one call at a time, from
 // answering the resume for another chAPITimeout: a VM whose monitor then
-// does not report it running either is stopped, so the caller finds a VM
-// that died, never one paused behind its back.
+// neither answers nor resumes it is stopped, so the caller finds a VM that
+// died, never one paused behind its back.
 func (e *engine) resumeAfter(ctx context.Context, api chAPI, key string, cause error) error {
 	ctx = context.WithoutCancel(ctx)
 	err := api.resume(ctx)
-	if err == nil {
-		return fmt.Errorf("vm runtime: save VM %s: %w", key, cause)
+	if err != nil {
+		stateCtx, cancel := context.WithTimeout(ctx, helperCallTimeout)
+		state, stateErr := api.state(stateCtx)
+		cancel()
+		// The reply was lost, or the monitor answers again and gets the
+		// resume it was too busy for.
+		if stateErr == nil && (state == "Running" || state == "Paused" && api.resume(ctx) == nil) {
+			err = nil
+		}
 	}
-	stateCtx, cancel := context.WithTimeout(ctx, helperCallTimeout)
-	state, stateErr := api.state(stateCtx)
-	cancel()
-	if stateErr == nil && state == "Running" {
+	if err == nil {
 		return fmt.Errorf("vm runtime: save VM %s: %w", key, cause)
 	}
 	e.kill(ctx, key)

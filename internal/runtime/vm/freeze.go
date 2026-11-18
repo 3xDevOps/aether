@@ -14,18 +14,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-func (r *Runtime) FreezeAll() []runtime.ID { return r.vms.freezeAll() }
-
-func (r *Runtime) Freeze(id runtime.ID) error {
+func (r *Runtime) Freeze(id runtime.ID) (bool, error) {
 	key, ok := vmKey(id)
 	if !ok {
-		return errors.New("vm runtime: only a VM can be frozen")
+		return false, errors.New("vm runtime: only a VM can be frozen")
 	}
-	froze, err := r.vms.freeze(key)
-	if err == nil && !froze && !r.vms.frozen(key) {
-		err = fmt.Errorf("vm runtime: VM %s is not running, or is busy starting, stopping, saving or restoring", key)
-	}
-	return err
+	return r.vms.freeze(key)
 }
 
 func (r *Runtime) Frozen() []runtime.ID { return r.vms.frozenVMs() }
@@ -52,47 +46,26 @@ func (e *engine) frozen(key string) bool {
 	return err == nil && strings.TrimSpace(string(data)) == "1"
 }
 
-// freeze reports whether it froze key's VM. It never waits: a VM whose lock
-// is held is in the middle of a start, stop, save or restore that needs its
-// monitor to answer, and is left to the next call.
+// freeze reports whether it froze key's VM; one already frozen stays so. It
+// never waits: a VM whose lock is held is in the middle of a start, stop,
+// save or restore that needs its monitor to answer, and is refused, as is
+// one that does not run.
 func (e *engine) freeze(key string) (bool, error) {
 	l := e.keyLock(key)
 	if !l.TryLock() {
-		return false, nil
+		return false, fmt.Errorf("vm runtime: freeze VM %s: it is starting, stopping, saving or restoring", key)
 	}
 	defer l.Unlock()
 	if e.frozen(key) {
 		return false, nil
 	}
-	err := e.writeFreezer(key, "1")
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
+	if err := e.writeFreezer(key, "1"); err != nil {
 		return false, fmt.Errorf("vm runtime: freeze VM %s: %w", key, err)
 	}
 	e.mu.Lock()
 	e.frozenAt[key] = time.Now()
 	e.mu.Unlock()
 	return true, nil
-}
-
-func (e *engine) freezeAll() []runtime.ID {
-	keys, err := e.keys()
-	if err != nil {
-		slog.Warn("vm runtime: freeze the VMs", "error", err)
-	}
-	var froze []runtime.ID
-	for _, key := range keys {
-		ok, err := e.freeze(key)
-		if err != nil {
-			slog.Warn("vm runtime: freeze a VM", "error", err)
-		}
-		if ok {
-			froze = append(froze, runtime.ID(idPrefix+key))
-		}
-	}
-	return froze
 }
 
 // frozenVMs reads the units, so it also finds the VMs a server that has

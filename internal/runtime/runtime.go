@@ -98,17 +98,16 @@ type SaveRuntime interface {
 	SavedMemory(ID) (uint64, error)
 }
 
-// FreezeRuntime optionally stops running containers where they stand, at
-// once and without their help, so they take no more of the host's memory,
-// and lets them run on later. A frozen container keeps its memory and
-// answers nothing. FreezeAll returns the containers it froze, and leaves
-// one the runtime is starting, stopping, saving or restoring for the next
-// call; Freeze fails on such a one. Frozen lists the frozen containers, the
-// longest frozen first. Save thaws the container it saves, and Stop and
-// Destroy the one they end.
+// FreezeRuntime optionally stops a running container where it stands, at
+// once and without its help, so it takes no more of the host's memory, and
+// lets it run on later. A frozen container keeps its memory and answers
+// nothing. Freeze reports whether it froze the container, false for one
+// already frozen, and fails without waiting on one that does not run or
+// that the runtime is starting, stopping, saving or restoring. Frozen lists
+// the frozen containers, the longest frozen first. Save thaws the container
+// it saves, and Stop and Destroy the one they end.
 type FreezeRuntime interface {
-	FreezeAll() []ID
-	Freeze(ID) error
+	Freeze(ID) (bool, error)
 	Frozen() []ID
 	Thaw(ID) error
 }

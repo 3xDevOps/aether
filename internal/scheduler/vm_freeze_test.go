@@ -24,28 +24,17 @@ type freezeRuntime struct {
 	savedFrozen map[runtime.ID]bool
 }
 
-func (r *freezeRuntime) FreezeAll() []runtime.ID {
-	use, _ := r.MemoryUse(context.Background())
+func (r *freezeRuntime) Freeze(id runtime.ID) (bool, error) {
+	if r.isSaved(id) {
+		return false, errors.New("the VM is not running")
+	}
 	r.freezeMu.Lock()
 	defer r.freezeMu.Unlock()
-	var froze []runtime.ID
-	for id := range use {
-		if !slices.Contains(r.frozen, id) {
-			froze = append(froze, id)
-		}
+	if slices.Contains(r.frozen, id) {
+		return false, nil
 	}
-	slices.Sort(froze)
-	r.frozen = append(r.frozen, froze...)
-	return froze
-}
-
-func (r *freezeRuntime) Freeze(id runtime.ID) error {
-	r.freezeMu.Lock()
-	defer r.freezeMu.Unlock()
-	if !slices.Contains(r.frozen, id) {
-		r.frozen = append(r.frozen, id)
-	}
-	return nil
+	r.frozen = append(r.frozen, id)
+	return true, nil
 }
 
 func (r *freezeRuntime) Frozen() []runtime.ID {
@@ -93,6 +82,12 @@ func (r *freezeRuntime) foundFrozen(id runtime.ID) bool {
 	return r.savedFrozen[id]
 }
 
+// brake is one check of the memory brake with available bytes free.
+func (e *testEnv) brake(fr *freezeRuntime, available uint64) {
+	fr.setAvailable(available)
+	e.sched.brakeVMMemory(context.Background(), fr)
+}
+
 func newFreezeEnv(t *testing.T) (*testEnv, *freezeRuntime) {
 	t.Helper()
 	var fr *freezeRuntime
@@ -112,13 +107,11 @@ func TestTheMemoryBrakeFreezesEveryVMAndEachEndsThawedOrSavedThenWoken(t *testin
 	subs := map[domain.RunID]events.Subscription{idleRun: e.subscribe(t), workingRun: e.subscribe(t)}
 
 	// 4 GiB is above the 3.2 GiB floor: nothing freezes.
-	fr.setAvailable(4 << 30)
-	e.sched.brakeVMMemory(t.Context(), fr)
+	e.brake(fr, 4<<30)
 	if frozen := fr.Frozen(); len(frozen) != 0 {
 		t.Fatalf("the brake froze %v above the floor", frozen)
 	}
-	fr.setAvailable(3 << 30)
-	e.sched.brakeVMMemory(t.Context(), fr)
+	e.brake(fr, 3<<30)
 	if frozen := fr.Frozen(); len(frozen) != 2 {
 		t.Fatalf("below the floor the brake froze %v, want both VMs", frozen)
 	}
@@ -137,14 +130,14 @@ func TestTheMemoryBrakeFreezesEveryVMAndEachEndsThawedOrSavedThenWoken(t *testin
 	}
 	// 4 GiB available again: the VM still frozen thaws, and the session
 	// that never slept carries on.
-	e.sched.brakeVMMemory(t.Context(), fr)
+	e.brake(fr, 4<<30)
 	if frozen := fr.Frozen(); len(frozen) != 0 {
 		t.Fatalf("with memory back above the floor %v stayed frozen", frozen)
 	}
 	if e.asleep(workingRun) {
 		t.Fatal("the thawed session was put to sleep")
 	}
-	e.sched.brakeVMMemory(t.Context(), fr)
+	e.brake(fr, 4<<30)
 	if e.sched.vmMemoryBraked {
 		t.Fatal("the brake still holds with every VM running")
 	}
@@ -157,31 +150,39 @@ func TestTheMemoryBrakeFreezesEveryVMAndEachEndsThawedOrSavedThenWoken(t *testin
 }
 
 // A session the server is working on needs its guest to answer: the brake
-// thaws it at once, and freezes it with the rest when that is done.
+// leaves it running, and freezes it with the rest when that is done.
 func TestTheMemoryBrakeLeavesASessionTheServerWorksOnRunning(t *testing.T) {
 	t.Parallel()
 	e, fr := newFreezeEnv(t)
 	kept := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
 	killed := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
 	closing := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
+	adopted := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 1<<30)
 	keptRun, killedRun, closingRun := e.runOf(t, kept), e.runOf(t, killed), e.runOf(t, closing)
 	e.sched.mu.Lock()
 	keptEntry, closingEntry := e.sched.runs[keptRun], e.sched.runs[closingRun]
 	e.sched.runs[killedRun].killRequested = true
 	e.sched.mu.Unlock()
+	taken := e.sched.needGuest(adopted)
 	sub := e.subscribe(t)
-	fr.setAvailable(3 << 30)
 
+	// The close begins after a check listed its VM: the next check freezes
+	// it, and thaws it before it returns.
+	e.brake(fr, 4<<30)
 	closingEntry.lifecycleMu.Lock()
-	e.sched.brakeVMMemory(t.Context(), fr)
-	closingEntry.lifecycleMu.Unlock()
+	e.brake(fr, 3<<30)
 	if frozen := fr.Frozen(); !slices.Equal(frozen, []runtime.ID{kept}) {
 		t.Fatalf("frozen = %v, want only the session nothing is being done to", frozen)
 	}
-	waitTimelineEvent(t, sub, keptEntry.runID, events.TimelineNote)
-	e.sched.brakeVMMemory(t.Context(), fr)
-	if frozen := fr.Frozen(); !slices.Equal(frozen, []runtime.ID{kept, closing}) {
-		t.Fatalf("frozen = %v, want the session whose close is over frozen too", frozen)
+	waitTimelineEvent(t, sub, keptRun, events.TimelineNote)
+	closingEntry.lifecycleMu.Unlock()
+	taken()
+	e.brake(fr, 3<<30)
+	e.brake(fr, 3<<30)
+	frozen := fr.Frozen()
+	slices.Sort(frozen)
+	if want := slices.Sorted(slices.Values([]runtime.ID{kept, closing, adopted})); !slices.Equal(frozen, want) {
+		t.Fatalf("frozen = %v, want %v: every session the server is done with, and not the one being killed", frozen, want)
 	}
 
 	// Thawed and frozen again as memory comes and goes: no second note.
@@ -191,7 +192,7 @@ func TestTheMemoryBrakeLeavesASessionTheServerWorksOnRunning(t *testing.T) {
 	if err := fr.Thaw(kept); err != nil {
 		t.Fatal(err)
 	}
-	e.sched.brakeVMMemory(t.Context(), fr)
+	e.brake(fr, 3<<30)
 	e.sched.mu.Lock()
 	again := keptEntry.frozenNotedAt
 	e.sched.mu.Unlock()
@@ -207,8 +208,8 @@ func TestAMemoryRefusalSavesAFrozenIdleVM(t *testing.T) {
 	e, fr := newFreezeEnv(t)
 	idle := e.launchVM(t, fr.memoryRuntime, "say pong", 4<<30)
 	working := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 4<<30)
-	fr.setAvailable(3 << 30)
-	e.sched.brakeVMMemory(t.Context(), fr)
+	e.brake(fr, 4<<30)
+	e.brake(fr, 3<<30)
 
 	release, err := e.sched.reserveCapacity(t.Context())
 	if err != nil {

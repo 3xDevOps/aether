@@ -67,8 +67,10 @@ func TestKVMFreezeStopsABurstBeforeTheHostRunsOut(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	rate := float64(taken()>>20) / time.Since(started).Seconds()
-	if froze := e.freezeAll(); len(froze) != len(keys) {
-		t.Fatalf("freezeAll froze %v, want the three VMs", froze)
+	for _, key := range keys {
+		if froze, err := e.freeze(key); !froze || err != nil {
+			t.Fatalf("freeze %s = %v, %v", key, froze, err)
+		}
 	}
 	// A vCPU finishes the page fault it is in before it freezes.
 	time.Sleep(time.Second)

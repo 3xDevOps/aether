@@ -99,6 +99,10 @@ func (s *Scheduler) saveMarked(ctx context.Context, entry *supervised, saver run
 			_ = s.detachForSave(detachCtx, entry)
 		}()
 		saveErr = saver.Save(saveCtx, cid)
+		if saveErr != nil {
+			// The detach, and the reattach below, need the guest to answer.
+			s.endFrozenSave(entry, cid)
+		}
 		saved()
 		<-detached
 	} else {
@@ -111,8 +115,6 @@ func (s *Scheduler) saveMarked(ctx context.Context, entry *supervised, saver run
 		return errors.Join(detachErr, recordErr)
 	}
 	saveErr = errors.Join(fmt.Errorf("save the idle session: %w", saveErr), detachErr)
-	// The reattach below needs the guest to answer.
-	s.endFrozenSave(entry, cid)
 	s.mu.Lock()
 	entry.saveFailedAt = time.Now().UTC()
 	s.mu.Unlock()
