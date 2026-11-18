@@ -184,7 +184,6 @@ func (e *engine) flag(m map[string]bool, key string) bool {
 
 // options are what a VM of one kind needs beyond its spec.
 type options struct {
-	KeepRoot bool
 	// Offline gives the VM no network device.
 	Offline bool
 	// Lifetime has systemd end the VM after it, even when no server is
@@ -264,7 +263,7 @@ func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts
 		WorkingDir: cmp.Or(spec.WorkingDir, base.Config.WorkingDir, "/"), Command: spec.Command, TTY: spec.TTY,
 		SetupScript: spec.SetupScript, SecretEnv: spec.SecretEnv, NestedDocker: spec.NestedDocker, Sudo: spec.Sudo,
 		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: shared, CheckoutDisks: disks, Mounts: spec.Mounts, Net: index, Egress: spec.Egress,
-		KeepRoot: opts.KeepRoot, Lifetime: opts.Lifetime, OwnedDirs: opts.OwnedDirs, Serves: opts.Serves,
+		Lifetime: opts.Lifetime, OwnedDirs: opts.OwnedDirs, Serves: opts.Serves,
 	}
 	if opts.Browser {
 		if err = e.attachBrowser(ctx, rec); err != nil {
@@ -319,7 +318,8 @@ func hostMemoryBytes() (int64, error) {
 	return 0, errors.New("vm runtime: /proc/meminfo has no MemTotal")
 }
 
-// start cold-starts a stopped VM; on a running one it only makes sure Main
+// start cold-starts a stopped VM on the disks it had, as docker start keeps
+// a container's writable layer; on a running one it only makes sure Main
 // was started, as a redundant docker start does.
 func (e *engine) start(ctx context.Context, key string) (err error) {
 	unlock := e.lock(key)
@@ -345,7 +345,9 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 		}
 		rec.Saved = false
 	}
-	if rec.Booted && !rec.KeepRoot {
+	// A root disk the setup script never finished on, as on every VM made
+	// before setup ran once per VM, starts over from the base.
+	if rec.Booted && rec.SetupScript != "" && !rec.SetupDone {
 		if rec.Root, err = e.cfg.Images.NewRootDisk(ctx, rec.Base, e.path(key, rootDisk)); err != nil {
 			return fmt.Errorf("vm runtime: root disk: %w", err)
 		}
@@ -383,6 +385,12 @@ func (e *engine) start(ctx context.Context, key string) (err error) {
 	}()
 	if err = e.boot(ctx, rec); err != nil {
 		return err
+	}
+	if !rec.SetupDone {
+		rec.SetupDone = true
+		if err = e.store(rec); err != nil {
+			return err
+		}
 	}
 	e.setFlag(e.fresh, key, true)
 	return nil
@@ -609,13 +617,19 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 	if rec.TTY {
 		tty = &guest.Size{Cols: 80, Rows: 24}
 	}
+	// The setup script runs once per VM, as once per container: the root
+	// disk keeps what it did.
+	script := rec.SetupScript
+	if rec.SetupDone {
+		script = ""
+	}
 	e.setFlag(e.booting, rec.Key, true)
 	err = h.Boot(upCtx, guest.BootSpec{
 		Main: guest.ProcessSpec{
 			ID: guest.MainID, Argv: rec.Command, Env: rec.Env, User: rec.User, Dir: rec.WorkingDir, TTY: tty,
 			NoNewPrivileges: !rec.Sudo,
 		},
-		SetupScript: rec.SetupScript, NestedDocker: rec.NestedDocker, PidsLimit: rec.PidsLimit,
+		SetupScript: script, NestedDocker: rec.NestedDocker, PidsLimit: rec.PidsLimit,
 	})
 	e.setFlag(e.booting, rec.Key, false)
 	var setup *guest.SetupError
@@ -631,18 +645,16 @@ func (e *engine) boot(ctx context.Context, rec *record) error {
 	return nil
 }
 
-// startKept is start, with a failure of a VM that keeps its root disk that
-// is not the disk's own marked runtime.ErrStartLater, so its unsaved
+// startKept is start, with a failure that is not the VM's own (its root
+// disk's or its setup script's) marked runtime.ErrStartLater, so its unsaved
 // changes are not thrown away with it.
 func (e *engine) startKept(ctx context.Context, key string) error {
 	err := e.start(ctx, key)
-	if err == nil || errors.Is(err, runtime.ErrUnstartableImage) || ctx.Err() != nil {
+	_, setup := errors.AsType[*runtime.SetupError](err)
+	if err == nil || setup || errors.Is(err, runtime.ErrUnstartableImage) || errors.Is(err, runtime.ErrNotFound) || ctx.Err() != nil {
 		return err
 	}
-	if rec, loadErr := e.load(key); loadErr == nil && rec.KeepRoot {
-		return fmt.Errorf("%w: %w", runtime.ErrStartLater, err)
-	}
-	return err
+	return fmt.Errorf("%w: %w", runtime.ErrStartLater, err)
 }
 
 func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {

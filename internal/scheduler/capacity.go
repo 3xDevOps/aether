@@ -26,6 +26,9 @@ var (
 	ErrMemoryPressure     = errors.New("scheduler: insufficient host memory headroom")
 	ErrBrowserCPUCapacity = errors.New("scheduler: insufficient browser CPU capacity")
 	ErrCapacityUnknown    = errors.New("scheduler: host capacity unavailable")
+	// errServerStalled is a memory refusal no save can lift in time: the
+	// server's own minute of memory pressure.
+	errServerStalled = errors.New("the server stalled on memory")
 )
 
 const (
@@ -94,16 +97,25 @@ func diskReserve(total uint64, override int64) uint64 {
 	return max(uint64(5<<30), min(total/20, uint64(20<<30)))
 }
 
+// memoryFloor is the host memory admission keeps available.
+func memoryFloor(total uint64) uint64 {
+	return max(uint64(2<<30), total/10)
+}
+
 // reserveCapacity serializes the bounded probe and accounting independently of
 // Scheduler.mu. Every admission sees outstanding provisioning allowances, not
 // the sum of container memory ceilings. A completed reservation is released
 // under the same gate so the next probe cannot reuse a pre-completion snapshot.
 func (s *Scheduler) reserveCapacity(ctx context.Context) (func(), error) {
 	release, err := s.tryReserveCapacity(ctx)
-	if errors.Is(err, ErrDiskFull) && ctx.Err() == nil {
-		// One reclaim pass, then fresh measurements. Never loop or
-		// reinterpret unavailable capacity.
+	// One reclaim or save pass, then fresh measurements. Never loop or
+	// reinterpret unavailable capacity.
+	switch {
+	case ctx.Err() != nil:
+	case errors.Is(err, ErrDiskFull):
 		s.reclaimDisk(ctx, "")
+		return s.tryReserveCapacity(ctx)
+	case errors.Is(err, ErrMemoryPressure) && !errors.Is(err, errServerStalled) && s.saveIdleVMs(ctx):
 		return s.tryReserveCapacity(ctx)
 	}
 	return release, err
@@ -185,7 +197,7 @@ func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 		if capacity.MemoryTotalBytes == 0 || capacity.MemoryAvailableBytes > capacity.MemoryTotalBytes {
 			return nil, fmt.Errorf("%w: host memory measurement is invalid", ErrCapacityUnknown)
 		}
-		floor := max(uint64(2<<30), capacity.MemoryTotalBytes/10)
+		floor := memoryFloor(capacity.MemoryTotalBytes)
 		if !hasProvisioningHeadroom(capacity.MemoryAvailableBytes, floor, startupMemoryBytes, s.capacityReservations) {
 			return nil, fmt.Errorf("%w: %d available bytes; reserve %d bytes plus %d bytes per provisioning (%d already in flight)",
 				ErrMemoryPressure, capacity.MemoryAvailableBytes, floor, startupMemoryBytes, s.capacityReservations)
@@ -208,8 +220,8 @@ func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 				slog.Info("scheduler: skipping the memory pressure check; the server has no cgroup of its own with memory.pressure", "cgroup_root", cgroupRoot)
 			})
 		} else if *pressure >= maxMemoryPressure {
-			return nil, fmt.Errorf("%w: the server stalled on memory for %.1f%% of the last 60s (its cgroup's memory.pressure, some avg60); launches are refused at %.0f%%",
-				ErrMemoryPressure, *pressure, maxMemoryPressure)
+			return nil, fmt.Errorf("%w: %w for %.1f%% of the last 60s (its cgroup's memory.pressure, some avg60); launches are refused at %.0f%%",
+				ErrMemoryPressure, errServerStalled, *pressure, maxMemoryPressure)
 		}
 	}
 	if err := probeCtx.Err(); err != nil {

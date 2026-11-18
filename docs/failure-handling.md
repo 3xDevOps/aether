@@ -18,7 +18,7 @@ shown beside the status says why it is there.
 | The host reboots, or Docker restarts without `live-restore` | Live sessions read `interrupted` with `server restarted: container exited <code>` (or `server restarted` when the container is gone). | Commits the partial work as `wip: <task>`, publishes the session branch and keeps the checkout. | Pull the branch (`cloudfield pull <session-id>`) or start a new session. An interrupted session cannot be reopened. |
 | A server update is interrupted, or the new version cannot boot | `cloudfield server update --status` shows `failed` or `rolled_back`. | Replaces nothing until every binary is verified. Rolls back a version that cannot finish booting. | [Recover from a failed server update](#recover-from-a-failed-server-update). |
 | Free disk falls toward the floor | Launch refused with `scheduler: insufficient disk headroom: ...`. | Frees space on its own first, in a fixed order. | [Recover from disk pressure](#recover-from-disk-pressure). |
-| Host memory is low, or the server stalls on memory | Launch refused with `scheduler: insufficient host memory headroom: ...`. | Starts nothing new. Running work is left alone. | [Recover from memory pressure](#recover-from-memory-pressure). |
+| Host memory is low, or the server stalls on memory | Launch refused with `scheduler: insufficient host memory headroom: ...`. | For low available memory, saves idle session VMs to disk and checks once more before it refuses. Saves awake session VMs to disk, never kills one, while the host is short of memory. | [Recover from memory pressure](#recover-from-memory-pressure). |
 | An Enhanced Claude Code session is idle for `--run-sleep-after` (30 minutes) | The Chat view shows **Asleep since <time>**; `cloudfield sessions` shows `(asleep)`. | Stops the container with `docker stop`, freeing its memory and CPU, and keeps its disk and checkout. | Nothing. The next message wakes it ([Idle sleep](#idle-sleep)). |
 | A Standard or Enhanced session in a VM is idle for `--run-sleep-after` (5 minutes) | As above. | Saves the whole VM to disk with every process in it, freeing its memory and CPU. | Nothing. The next message restores it ([Sessions in VMs](#sessions-in-vms)). |
 | An agent goes silent | `needs-attention`, reason `stalled: no output or file changes for <duration>`, state **Waiting**. An Enhanced session is **Possibly stalled**: `stalled: possibly — no progress for <duration>, <phase>, transport open`. | Keeps the session supervised. It returns to `running` as soon as the agent writes output, makes progress or changes a file. | Attach (`cloudfield attach <session-id>`) or send a message. See [Picking a stall threshold](#picking-a-stall-threshold). |
@@ -243,7 +243,9 @@ poll and before refusing a launch, in this order, until it is back above:
    sleeping session's saved memory because disk space was low; it starts
    again from its disk when it next wakes, and restores its conversation`.
    Sessions that could not start again from their disk, Standard ones
-   among them, keep theirs.
+   among them, keep theirs, and so do sessions the memory guard saved while
+   their agent worked ([Recover from memory
+   pressure](#recover-from-memory-pressure)).
 2. Containers of closed sessions, the soonest to expire first. The timeline notes
    `Removed this closed session's container early because disk space was low; the
    session can no longer be reopened, and its branch and history are kept`.
@@ -348,12 +350,52 @@ its cgroup, the stall check is skipped and the server logs that once. A file it 
 parse refuses launches with `scheduler: host capacity unavailable`, like the
 other probes.
 
+A launch or wake that memory refuses first saves idle session VMs
+to disk, the longest idle first, until twice the floor is free, then
+checks once more. It never saves a VM whose agent is working, and saves
+none when only the server's own memory pressure refused it.
+
+With `--session-runtime vm`, a memory guard reads `/proc/meminfo` and
+`/proc/pressure/memory` every 5 seconds. It starts when available memory
+falls below the floor, or when the host stalls on memory: `full avg10` at
+60% or more for 30 seconds, which means every task was blocked on memory
+for most of the time. Those are systemd-oomd's defaults, where it starts
+killing. The guard never kills a session. It saves awake session VMs to
+disk, with every process in them, as an idle sleep does
+([Sessions in VMs](#sessions-in-vms)), in this order:
+
+1. a closed session's VM still paused in memory;
+2. an open session whose agent is idle, the longest idle first;
+3. when none is idle, the session holding the most host memory, even while
+   its agent works. A VM's host memory is what its unit holds, guest page
+   cache included ([vm-guest.md](vm-guest.md)).
+
+While less than twice the floor is free it saves one VM each check; above
+that, one more each time a stall lasts 30 seconds again, and never one
+whose agent works: such a stall may come from outside the VMs. It skips a
+VM whose memory is unknown or would not fit on the data filesystem above
+the disk reserve, and for 5 minutes one whose save failed. It stops once
+twice the floor is free and `full avg10` is below 60%. Then a session it
+saved while its agent worked, or while its guest still used the CPU, wakes
+on its own, one each check, the first saved first among those whose memory
+fits above twice the floor. A wake that admission refuses is tried again at
+the next check; one that fails otherwise is not, and its timeline says
+`Could not wake on its own once memory was free again: <error>`. Its turn
+carries on where it was, as across a server restart; a model call the save
+cut off fails as on a network outage, and the agent retries it. Every other
+saved session wakes on its next use. The timeline of each saved session
+says
+`Saved to disk while it worked: the server was running out of memory.` or
+`Saved to disk early: the server was running out of memory.` The server log
+has `scheduler: memory guard:` lines. `--run-sleep-after 0` does not turn
+the guard off.
+
 To recover, close or kill sessions. A closed session's paused container still
 holds its memory; **Free sandbox…** releases it. An idle Enhanced Claude
 Code session, open or closed, frees its memory on its own after
 `--run-sleep-after` ([Idle sleep](#idle-sleep)), and so does any idle session
-in a VM, which also frees it as soon as it is closed. Running work is never
-stopped to make room.
+in a VM, which also frees it as soon as it is closed. Running work in a
+container is never stopped to make room.
 
 ## Capture an unresponsive host
 
@@ -724,7 +766,7 @@ message to a sleeping Claude Code or Codex session running a dev server and
 a `docker compose` stack was accepted 0.7 to 1.5 seconds after it was sent,
 **Relaunch** of a closed one took 3 seconds, and a start from disk after a
 failed restore 5 seconds. The Chat view and the session's terminal say
-`Cloudfield had saved this idle session to disk and restored it`.
+`Cloudfield had saved this session to disk and restored it`.
 
 When the saved state cannot be restored, because the server now runs
 another Cloud Hypervisor or guest kernel, or the file is gone or damaged,

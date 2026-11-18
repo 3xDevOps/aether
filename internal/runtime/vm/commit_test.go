@@ -24,7 +24,7 @@ func terminalSpec() runtime.Spec {
 func (h *harness) startTerminal() {
 	h.t.Helper()
 	name, opts, ok := vmFor(terminalSpec())
-	if !ok || name != "terminal-m1" || !opts.KeepRoot {
+	if !ok || name != "terminal-m1" {
 		h.t.Fatalf("vmFor(terminal) = %q, %+v, %v", name, opts, ok)
 	}
 	if _, err := h.engine.create(h.t.Context(), name, terminalSpec(), opts); err != nil {

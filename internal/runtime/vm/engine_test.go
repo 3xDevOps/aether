@@ -138,23 +138,40 @@ func TestStartBootsTheVMInItsUnit(t *testing.T) {
 	if err := h.engine.start(t.Context(), "run-a"); err != nil || len(h.units.started) != 1 || len(g.boots) != 2 {
 		t.Errorf("redundant start: %v, %d unit starts, %d boots", err, len(h.units.started), len(g.boots))
 	}
+	if err := h.engine.stop(t.Context(), "run-a", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engine.start(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if last := g.boots[len(g.boots)-1]; last.SetupScript != "" {
+		t.Errorf("a cold start ran setup %q again", last.SetupScript)
+	}
 }
 
 func TestStartReportsSetupFailureMaskedAndKillsTheVM(t *testing.T) {
 	h := newHarness(t)
 	spec := sessionSpec("run-a")
-	spec.SecretEnv = []string{"TOKEN"}
+	spec.SecretEnv, spec.SetupScript = []string{"TOKEN"}, "make deps"
 	if _, err := h.engine.create(t.Context(), spec.CreationKey, spec, options{}); err != nil {
 		t.Fatal(err)
 	}
-	h.guest("run-a").bootErr = &guest.SetupError{ExitCode: 3, Output: "using s3cret\nfailed\n"}
-	err := h.engine.start(t.Context(), "run-a")
+	g := h.guest("run-a")
+	g.bootErr = &guest.SetupError{ExitCode: 3, Output: "using s3cret\nfailed\n"}
+	err := h.engine.startKept(t.Context(), "run-a")
 	var setup *runtime.SetupError
-	if !errors.As(err, &setup) || setup.ExitCode != 3 || strings.Contains(setup.Output, "s3cret") || !strings.Contains(setup.Output, "using ***") {
+	if !errors.As(err, &setup) || setup.ExitCode != 3 || strings.Contains(setup.Output, "s3cret") || !strings.Contains(setup.Output, "using ***") || errors.Is(err, runtime.ErrStartLater) {
 		t.Fatalf("start = %v", err)
 	}
 	if h.units.vmm("run-a") != nil {
 		t.Errorf("a failed start left the VM running")
+	}
+	g.bootErr = nil
+	if err = h.engine.start(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	if last := g.boots[len(g.boots)-1]; last.SetupScript != "make deps" || h.images.roots() != 2 {
+		t.Errorf("the start after a failed setup ran %q on %d root disks; want the script again on a new disk", last.SetupScript, h.images.roots())
 	}
 }
 
@@ -357,8 +374,8 @@ func TestStopEndsMainRecordsItsExitAndPowersOff(t *testing.T) {
 	if err := h.engine.start(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
 	}
-	if h.images.roots() != 2 {
-		t.Errorf("cold start used %d root disks, want a fresh one", h.images.roots())
+	if h.images.roots() != 1 {
+		t.Errorf("cold start used %d root disks, want the VM's own", h.images.roots())
 	}
 	if info, _ := h.engine.inspect(t.Context(), "run-a"); info.Exited {
 		t.Errorf("restarted VM still reports exited")

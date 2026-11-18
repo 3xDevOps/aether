@@ -425,6 +425,7 @@ type sidecar struct {
 	ServerTurn      bool              `json:"server_turn,omitempty"`
 	Paused          bool              `json:"paused"`
 	DiskHeld        bool              `json:"disk_held,omitempty"`
+	MemorySaved     uint64            `json:"memory_saved,omitempty"`
 	KillRequested   bool              `json:"kill_requested"`
 	Retained        bool              `json:"retained,omitempty"`
 	RetainedUntil   *time.Time        `json:"retained_until,omitempty"`
@@ -528,6 +529,7 @@ func (e *supervised) sidecar() sidecar {
 		ServerTurn:          e.serverTurn,
 		Paused:              e.paused,
 		DiskHeld:            e.diskHeld,
+		MemorySaved:         e.memorySaved,
 		KillRequested:       e.killRequested,
 		Retained:            e.retained,
 		RetainedUntil:       e.retainedUntil,

@@ -256,8 +256,10 @@ after the one before succeeded:
 3. The main process, under the ID `main`.
 
 A later `Boot` call, also from a restarted server, returns the first call's
-result. Setup runs once per boot, and the server gives every cold start a new
-root disk.
+result. The server sends the setup script until a boot that ran it started
+the main process; later cold starts boot the root disk it set up, as a
+container keeps its writable layer. A root disk the script never finished
+on starts over from the image.
 
 `Spawn` starts any other process. Its ID is the caller's and cannot be used
 again while the helper keeps the process's record, so a spawn whose reply was
