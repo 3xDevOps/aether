@@ -57,7 +57,7 @@ describe.each([{ mode: 'tui', acp: false }, { mode: 'acp', acp: true }] as const
   it('offers Relaunch inside the retention grace and returns to a live run', async () => {
     vi.mocked(api.runRelaunch).mockResolvedValue(run({ ...kind, id: 'run_1', status: 'running', reason: undefined, finished_at: undefined, status_seq: 99 }))
     mount({ ...kind, ...closed })
-    expect(screen.getByRole('status').textContent).toContain('Relaunch it to continue the chat and files.')
+    expect(screen.getByRole('status').textContent).toMatch(/Relaunch it before .+ to continue the chat and files\./)
 
     fireEvent.click(screen.getByRole('button', { name: 'Relaunch' }))
 

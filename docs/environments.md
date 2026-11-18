@@ -497,9 +497,10 @@ What changes:
   until it next starts from its disk; every such cold start also takes the
   current browser image, so a VM running across an upgrade keeps its older
   browser until then.
-- An idle session's VM is saved to disk with every process, and closing a
-  session saves its VM too
-  ([Sessions in VMs](failure-handling.md#sessions-in-vms)). Closing a
+- An idle session's VM is saved to disk with every process
+  ([Sessions in VMs](failure-handling.md#sessions-in-vms)), and closing a
+  session stops its VM, which keeps its disks
+  ([Relaunching a closed session](failure-handling.md#relaunching-a-closed-session)). Closing a
   session while it is asleep wakes it first, so its final commit has its
   uncommitted changes.
 - Switching to `vm` moves no running session: a session already in a
@@ -516,8 +517,8 @@ An idle Enhanced Claude Code session sleeps, and so does any idle session in a
 VM ([Idle sleep](failure-handling.md#idle-sleep)). A session with no activity
 for 7 days, waiting for you or not, is closed for you as
 **Close** would close it ([What stays after a session
-ends](failure-handling.md#what-stays-after-a-session-ends)). **Close** keeps the session's container for seven days
-(`--run-container-ttl`) so you can **Relaunch** it, unless disk runs low first. The seven days pause
+ends](failure-handling.md#what-stays-after-a-session-ends)). **Close** keeps the session's container, or its VM's disks, for 30 days
+(`--run-container-ttl`; 7 for a Standard or mode-switched session on a Docker host) so you can **Relaunch** it, unless disk runs low first. The days pause
 while the session is relaunched and start over at its next close. Close
 removes the session's browser companion, the Chromium container behind its
 Browser tab; a relaunched session creates a new companion when its Browser

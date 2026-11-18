@@ -107,7 +107,12 @@ const releasedReason = /^retained container (?:expired|unavailable|reclaimed for
 
 export function composerBlock(run: RunRecord, maySteer: boolean, canReopen: boolean): string | null {
   if (isTerminal(run.status)) {
-    if (canReopen) return 'This session has finished. Relaunch it to continue the chat and files.'
+    if (canReopen) {
+      const before = run.container_retained_until
+        ? ` before ${new Date(run.container_retained_until).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
+        : ''
+      return `This session has finished. Relaunch it${before} to continue the chat and files.`
+    }
     return releasedReason.test(run.reason ?? '') ? `This session has finished. ${plainReason(run.reason!)}.` : 'This session has finished.'
   }
   if (run.status === 'queued' || run.status === 'provisioning') return 'The agent is still starting.'

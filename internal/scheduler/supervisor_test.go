@@ -24,7 +24,7 @@ func TestSupervisorSwapsItsChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := startTestPTYProcess(t, supervisorCommand(next, state, []string{testBinary,
+	p := startTestPTYProcess(t, supervisorCommand(next, state, 0, []string{testBinary,
 		"-test.run=^TestSupervisorSignalChild$", "--", "harness"}))
 	defer func() {
 		_ = p.cmd.Process.Kill()
@@ -125,11 +125,38 @@ func TestSupervisorSignalChild(t *testing.T) {
 	}
 }
 
+// A VM that starts from its disk runs the agent's terminal on its
+// conversation as a next-command script, with its exports, under the
+// supervisor, and the new conversation the next-command file holds when the
+// resume fails as it starts.
+func TestSupervisorStartsANewConversationWhenTheResumeFailsAtOnce(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	next, state := filepath.Join(dir, "next-command"), filepath.Join(dir, "state")
+	env := map[string]string{"AGENT_SAYS": "a b"}
+	resume := nextCommand("", []string{"/bin/sh", "-c", `printf 'no-conversation-%s-%s\n' "$1" "$AGENT_SAYS"; exit 1`, "agent", "it's gone"}, env)
+	fresh := nextCommand("n1", []string{"/bin/sh", "-c", `printf 'agent-%s-%s\n' "$1" "$AGENT_SAYS"; read -r line`, "agent", "it's new"}, env)
+	if err := os.WriteFile(next, fresh, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := startTestPTYProcess(t, supervisorCommand(next, state, tuiSettle, []string{"/bin/sh", "-c", string(resume)}))
+	defer func() {
+		_ = p.cmd.Process.Kill()
+		_ = p.master.Close()
+	}()
+	p.waitForOutput(t, "no-conversation-it's gone-a b")
+	p.waitForOutput(t, "so it starts a new one")
+	p.waitForOutput(t, "agent-it's new-a b")
+	if got, _ := os.ReadFile(state); strings.TrimSpace(string(got)) != "n1 started" {
+		t.Fatalf("state after the new conversation started = %q", got)
+	}
+}
+
 func TestSupervisorIgnoresServedSwap(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	next, state, starts := filepath.Join(dir, "next-command"), filepath.Join(dir, "state"), filepath.Join(dir, "starts")
-	p := startTestPTYProcess(t, supervisorCommand(next, state, []string{"/bin/sh", "-c", "printf 'harness-%s\\n' ready; while :; do read -r line; done"}))
+	p := startTestPTYProcess(t, supervisorCommand(next, state, 0, []string{"/bin/sh", "-c", "printf 'harness-%s\\n' ready; while :; do read -r line; done"}))
 	defer func() {
 		_ = p.cmd.Process.Kill()
 		_ = p.master.Close()

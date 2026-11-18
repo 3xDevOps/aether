@@ -91,11 +91,16 @@ type MemoryUseRuntime interface {
 // saved state. Saves reports whether a container can be saved at all, and
 // SavedMemory the memory a Restore loads back, 0 for one not saved, once a
 // save or restore under way has finished; with an error, the most it may.
+// Restore of a container that holds no saved state fails with ErrNotSaved.
+// SetCommand replaces the main command the next Start of a stopped
+// container runs, so one that starts again from its disk does not run its
+// launch command, with the task, again.
 type SaveRuntime interface {
 	Saves(ID) bool
 	Save(context.Context, ID) error
 	Restore(context.Context, ID) error
 	SavedMemory(ID) (uint64, error)
+	SetCommand(context.Context, ID, []string) error
 }
 
 // FreezeRuntime optionally stops a running container where it stands, at
@@ -111,6 +116,8 @@ type FreezeRuntime interface {
 	Frozen() []ID
 	Thaw(ID) error
 }
+
+var ErrNotSaved = errors.New("it has no saved state")
 
 // CaptureRuntime optionally starts a stopped session container with a main
 // process that does nothing in place of its command, and without its setup

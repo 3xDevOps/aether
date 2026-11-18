@@ -243,18 +243,21 @@ then frees what sessions and members would lose, in this order, until it is
 back above, and after them every cache, image and scratch directory nobody
 uses:
 
-1. The saved memory of sleeping Enhanced session VMs whose agent restores
+1. Containers and VM disks of closed sessions, the soonest to expire first.
+   They go first because a closed session's work is already on its branch,
+   while everything below belongs to a session that is still open. The
+   timeline notes `Removed this closed session's container early because
+   disk space was low; the session can no longer be reopened, and its branch
+   and history are kept`.
+2. The saved memory of sleeping Enhanced session VMs whose agent restores
    its conversation, the longest asleep first
    ([Sessions in VMs](#sessions-in-vms)). The timeline notes `Deleted this
    sleeping session's saved memory because disk space was low; it starts
    again from its disk when it next wakes, and restores its conversation`.
-   Sessions that could not start again from their disk, Standard ones
-   among them, keep theirs, and so do sessions the memory guard saved while
-   their agent worked ([Recover from memory
+   Open sessions whose conversation would not come back in a new process,
+   Standard ones among them, keep theirs, and so do sessions the memory
+   guard saved while their agent worked ([Recover from memory
    pressure](#recover-from-memory-pressure)).
-2. Containers of closed sessions, the soonest to expire first. The timeline notes
-   `Removed this closed session's container early because disk space was low; the
-   session can no longer be reopened, and its branch and history are kept`.
 3. Checkouts of every finished session, whatever their age. Skipped when
    `--checkout-ttl` is negative.
 4. Other members' stopped environments. Anything they installed and
@@ -336,9 +339,8 @@ now.
   counting what the VM has not loaded yet, until the VM holds all of it,
   stops, or has held no more for a minute, which the server measures every
   5 seconds. While that measurement fails, nothing changes but the minute.
-  A reopen while a closed session's save is still being written waits for
-  the save, then measures it. A saved size that cannot be read counts as
-  the VM's cap, its memory plus 512 MiB.
+  A saved size that cannot be read counts as the VM's cap, its memory plus
+  512 MiB.
 
 The server's own cgroup must also not be stalling on memory: its `memory.pressure`
 `some avg60` must stay below 10%, which means tasks in the server's cgroup were
@@ -443,8 +445,9 @@ killing. The guard never kills a session. It saves awake session VMs to
 disk, with every process in them, as an idle sleep does
 ([Sessions in VMs](#sessions-in-vms)), in this order:
 
-1. a closed session's VM still paused in memory, and the still running VM
-   of a session recorded asleep, such as one a restart took up frozen;
+1. a closed session's VM that its close could not stop, and the still
+   running VM of a session recorded asleep, such as one a restart took up
+   frozen; a closed session's is stopped rather than saved;
 2. an open session whose agent is idle, the longest idle first;
 3. when none is idle, the session holding the most host memory, even while
    its agent works. A VM's host memory is what its unit holds, guest page
@@ -509,12 +512,12 @@ Inside a VM, the guest's own OOM killer ends session processes at the
 session's memory limit and never the helper
 ([vm-guest.md](vm-guest.md)).
 
-To recover, close or kill sessions. A closed session's paused container still
-holds its memory; **Free sandbox…** releases it. An idle Enhanced Claude
-Code session, open or closed, frees its memory on its own after
+To recover, close or kill sessions. A closed Standard or mode-switched
+session's paused container still holds its memory; **Free sandbox…** releases it. An idle
+Enhanced Claude Code session frees its memory on its own after
 `--run-sleep-after` ([Idle sleep](#idle-sleep)), and so does any idle session
-in a VM, which also frees it as soon as it is closed. Running work in a
-container is never stopped to make room.
+in a VM. A closed session VM or Enhanced session frees it as soon as it is
+closed. Running work in a container is never stopped to make room.
 
 ## Capture an unresponsive host
 
@@ -780,10 +783,10 @@ Two wakes at once start the container once. Waking counts against the same
 memory and disk checks as a launch, and a saved VM must fit its saved memory
 ([Recover from memory pressure](#recover-from-memory-pressure)). A refused or failed wake returns its
 error to the request that caused it, keeps the session asleep and shows the
-error under **Asleep since**. A wake never starts a new conversation: when
-the agent cannot restore its own, every wake fails with the agent's error;
-launch a new session on the session's branch, which is kept with its
-checkout.
+error under **Asleep since**. A container's wake never starts a new
+conversation: when the agent cannot restore its own, every wake fails with
+the agent's error; launch a new session on the session's branch, which is
+kept with its checkout.
 
 A wake takes as long as starting the container and restoring the agent's
 conversation: in the real-agent test, a message to a sleeping Claude Code
@@ -813,11 +816,10 @@ they delete the stopped containers of sleeping sessions. A sleeping session
 whose container was deleted ends on its next use, as a session whose
 container disappears does: its checkout and branch are kept.
 
-A closed Enhanced Claude Code session's paused container is stopped the same
-way once it has been closed for `--run-sleep-after`. **Relaunch** or
-`cloudfield reopen <session-id>` starts it again and restores the conversation.
-`--run-container-ttl` and `--checkout-ttl` work as before for sleeping
-sessions.
+A closed Enhanced session's container, whatever its agent, is stopped the
+same way when the close finishes, unless the session switched modes ([Relaunching a closed
+session](#relaunching-a-closed-session)). `--run-container-ttl` and
+`--checkout-ttl` work as before for sleeping sessions.
 
 To keep every session awake, run
 `sudo cloudfield-server config set run-sleep-after 0`, then
@@ -848,12 +850,11 @@ lost, so more sessions sleep, sooner:
   connection, so keep such a session in use, or set `--run-sleep-after` to
   `0`. A save that fails leaves the session running; Cloudfield tries again
   after another `--run-sleep-after`.
-- A closed session is saved as soon as the close finishes, instead of
-  staying paused in memory, unless `--run-sleep-after` is `0`. It stays
-  paused through the save, so nothing changes its files after the close's
-  commit. **Relaunch** restores and resumes it. Closing or killing a
-  sleeping session wakes it first, so its work is committed as for a
-  running one.
+- A closed session's VM is stopped as soon as the close finishes, whatever
+  `--run-sleep-after` is, and keeps its disks without its memory
+  ([Relaunching a closed session](#relaunching-a-closed-session)). Closing
+  or killing a sleeping session wakes it first, so its work is committed as
+  for a running one.
 
 A sleeping VM keeps everything: its processes, including dev servers,
 nested Docker containers such as a `docker compose` stack and the Browser
@@ -884,21 +885,21 @@ command 0.8 to 1.5 seconds after the wake began, where reading the whole
 file first took 4.5 seconds. Before on-demand restore, on a test host, a
 message to a sleeping Claude Code or Codex session running a dev server and
 a `docker compose` stack was accepted 0.7 to 1.5 seconds after it was sent,
-**Relaunch** of a closed one took 3 seconds, and a start from disk after a
-failed restore 5 seconds. The Chat view and the session's terminal say
+and a start from disk after a failed restore took 5 seconds. The Chat view
+and the session's terminal say
 `Cloudfield had saved this session to disk and restored it`.
 
 When the saved state cannot be restored, because the server now runs
 another Cloud Hypervisor or guest kernel, or the file is gone or damaged,
 an Enhanced session of an agent that restores its conversation starts again
 from its disk: processes that were running end, the conversation is
-restored, and the Chat view gives the restore's error. Any other session,
-a Standard one among them, stays asleep: the wake fails with the restore's
-error, and the VM keeps its disk and saved state. Launch a new session on
-its branch, or wake it again. One whose VM stopped before it was ever
-saved has nothing to wake from: the wake ends it, `failed`, with its work
-committed from its disk. A VM a failed save left running is taken up as it
-is on the next wake.
+restored, and the Chat view gives the restore's error. Any other open
+session, a Standard one among them, stays asleep: the wake fails with the
+restore's error, and the VM keeps its disk and saved state. Wake it again,
+or close it and **Relaunch** it, which starts it from its disk. A sleeping
+VM with no saved memory left starts from its disk whatever its agent, as a
+relaunched one does. A VM a failed save left running is taken up as it is
+on the next wake.
 
 A saved VM takes about as much disk as the memory its processes use, after
 the guest drops its page cache: 137 MiB for an idle test VM of 2 GiB whose
@@ -913,7 +914,7 @@ restart or update leaves sleeping VMs asleep; the next use wakes them.
 
 | Action | Container | Checkout | Reopen |
 | --- | --- | --- | --- |
-| **Close** (`cloudfield close <session-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory, until an Enhanced Claude Code session's container is stopped after `--run-sleep-after` ([Idle sleep](#idle-sleep)). A session VM is saved to disk at once instead. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `cloudfield reopen <session-id>`. The deadline is cleared while the session is live; the next close sets a new 7 days. |
+| **Close** (`cloudfield close <session-id> --outcome merged` or `abandoned`) | Paused for the close's commit, then stopped with only its disks kept, for `--run-container-ttl` (30 days). A Standard or mode-switched session's container on a Docker host stays paused with its memory instead, kept 7 days by default ([Relaunching a closed session](#relaunching-a-closed-session)). | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the session ended: at 30 days with the defaults. | Yes, until the deadline: **Relaunch** or `cloudfield reopen <session-id>` ([Relaunching a closed session](#relaunching-a-closed-session)). The deadline is cleared while the session is live; the next close sets a new one. |
 | No activity for 7 days in a live session, `needs-attention` included | As **Close**, with the outcome `completed`. Its timeline notes `Closed after 7 days without activity`. Only activity counts: a question waiting for an answer, a pause or a turn that made no progress does not keep it open, while an open exec or port forward, a change of mode or account, and a session the memory guard saved while it worked do. A sleeping session's 7 days run from its sleep; an awake one's restart with the server. A sleeping session VM is woken first to commit; while admission refuses the wake, it stays open until the next hourly check. | As **Close**. | As **Close**. Once its container is gone, launch a new session on its branch. |
 | A Background session finishes | Removed at once. | Kept for `--checkout-ttl` (72 hours) after the session ends. | No. |
 | **Kill run** (`cloudfield kill <session-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the session ends. | No. |
@@ -932,8 +933,9 @@ another server on the same Docker daemon started, is left alone.
 
 The session branch is published before a checkout is removed, so cleanup never
 loses committed work. When disk runs low, Cloudfield removes both sooner
-([Recover from disk pressure](#recover-from-disk-pressure)). Relaunching resumes
-the same container and checkout; it restarts no process that had stopped. When
+([Recover from disk pressure](#recover-from-disk-pressure)). Relaunching uses
+the same container or VM disks and checkout
+([Relaunching a closed session](#relaunching-a-closed-session)). When
 retention ends, a closed session's reason reads `retained container expired` or
 `retained container unavailable`; when low disk space removes the container
 early it reads `retained container reclaimed for disk space`.
@@ -998,6 +1000,56 @@ is still retrying counts only while its container exists: Cloudfield asks Docker
 before refusing, and the refusal names it as `session <id> (cleanup pending)`
 and includes any Docker error.
 
+### Relaunching a closed session
+
+**Relaunch**, or `cloudfield reopen <session-id>`, brings a closed session
+back until its deadline, 30 days after the close by default
+(`--run-container-ttl`). The closed session shows the deadline under its
+header and beside the **Relaunch** button. After it, or sooner when disk
+runs low ([Recover from disk pressure](#recover-from-disk-pressure)), the
+session's container or VM disks are deleted: its work is on its branch, and
+its transcript stays readable.
+
+A session VM, or the container of a session launched and closed as Enhanced,
+is stopped when its session closes. It keeps its disks and no memory. Relaunch
+starts it from those disks:
+
+- Files, installed packages and the checkout are as the close left them. The
+  environment's setup script does not run again.
+- Processes that ran at the close are gone, as are the terminals and the
+  Browser tab's pages.
+- The agent reopens its conversation: an Enhanced session through its ACP
+  server, a Standard one with the agent's resume command, such as `claude
+  --resume <id>` or `codex resume <id>`.
+- An agent that cannot reopen its conversation starts a new one in the same
+  files: an Enhanced agent whose ACP server refuses to restore it, or a
+  Standard agent that has no resume command, reported no conversation, or
+  whose resume command fails within 2 to 3 seconds of starting, as it does
+  when the conversation was deleted. The Chat view or the terminal says so, and the
+  earlier transcript stays in the session.
+
+A relaunch that fails returns the server's error, shown above the
+**Relaunch** button, and the session stays closed with its disks. An
+Enhanced agent that fails to start once its sandbox runs shows its error in
+the Chat view of the relaunched session instead, as after a server restart.
+
+On a hosted test runner, a closed VM of the `ubuntu:24.04` image with no
+checkout kept 9 MiB of disk, and 300 MiB after installing `gcc`,
+`libc6-dev` and `make` and building a program: its disks hold only what the
+session wrote over its image. Its command ran 1.0 to 1.3 seconds after the
+relaunch began; the agent's own start comes on top.
+
+A session VM closed by an older server, which saved its memory, is restored
+from that memory instead, with its processes.
+
+Any other closed session's container, a Standard or mode-switched
+session's on a Docker host, stays frozen with its processes in memory until Relaunch
+thaws it, which restarts nothing: Docker starts a container only with the
+command it was created with, which for a Standard session runs the task
+again. Nothing frees that memory for new sessions, so with the default
+`--run-container-ttl` such a container is kept 7 days. A value you set
+applies to it as well. **Free sandbox…** frees one sooner.
+
 ## Tuning
 
 `cloudfield-server serve` reads these from `/etc/aether/server.conf`. Set one by
@@ -1015,8 +1067,8 @@ sudo systemctl restart aether-server
 | `--stream-quiet-grace` | `5m` | How long an Enhanced turn with no tool running may go without agent progress before it parks as stalled. At most `--stall-threshold`. | As above. |
 | `--poll-interval` | `30s` | How often stalls, retention and disk are checked. Values above `1m` act as `1m`. | Keep it at a third of the threshold or less. |
 | `--checkout-ttl` | `72h` | How long a finished session's checkout is kept after the session ends. It also stays while the session's container is kept. Negative keeps every checkout, and disk cleanup leaves them alone. | Lower on a small disk. |
-| `--run-container-ttl` | `168h` | How long a closed session's container is kept for reopening. Negative removes it at once. | Lower when paused containers hold too much memory. |
-| `--run-sleep-after` | `30m`; `5m` for session VMs | How long an idle Enhanced session of an agent that can restore its conversation, open or closed, keeps its container running, and how long any idle session VM runs before it is saved ([Idle sleep](#idle-sleep)). `0` keeps every session awake. | Lower on a host short of memory; `0` when processes in idle sessions must keep running. |
+| `--run-container-ttl` | `720h`; `168h` for a container that stays frozen in memory | How long a closed session's container or VM disks are kept for reopening ([Relaunching a closed session](#relaunching-a-closed-session)). A value you set applies to every closed session. Negative removes them at once. | Lower when paused containers hold too much memory, or closed sessions too much disk. |
+| `--run-sleep-after` | `30m`; `5m` for session VMs | How long an idle Enhanced session of an agent that can restore its conversation keeps its container running, and how long any idle session VM runs before it is saved ([Idle sleep](#idle-sleep)). `0` keeps every session awake. | Lower on a host short of memory; `0` when processes in idle sessions must keep running. |
 | `--min-free-disk` | automatic | The free-space reserve per filesystem, in bytes. Negative turns the disk check off; the memory check stays. | See below. |
 | `--run-cpus` | 8, or the host's CPU count if lower | CPU ceiling per session and environment. | Lower to share a small host. |
 | `--run-memory` | 8 GiB | Memory ceiling per session and environment, in bytes. Swap adds a quarter of it, in a container from the host's swap and in a VM from a swap file on its data disk. | Raise when sessions hit out-of-memory kills. |

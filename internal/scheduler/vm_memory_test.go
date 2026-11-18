@@ -430,52 +430,6 @@ func TestAWakeMakesRoomForStartsInFlightAndSavesNothingThatCannotHelp(t *testing
 	}
 }
 
-// A reopen that comes while a closed VM's save is being written waits for
-// it, so it claims the memory the save wrote rather than a start's.
-func TestAReopenDuringTheSaveOfAClosedVMClaimsWhatItSaved(t *testing.T) {
-	t.Parallel()
-	e, mr := newMemoryEnv(t)
-	cid := e.launchVM(t, mr, "say pong", 6<<30)
-	run := e.runOf(t, cid)
-	if err := e.sched.CloseRun(t.Context(), run, e.member.ID, domain.RunMerged); err != nil {
-		t.Fatal(err)
-	}
-	mr.saveMu.Lock()
-	mr.saving, mr.release = make(chan struct{}), make(chan struct{})
-	mr.saveMu.Unlock()
-	mr.setAvailable(3 << 30)
-	guarded := make(chan struct{})
-	go func() {
-		defer close(guarded)
-		e.sched.guardVMMemory(t.Context())
-	}()
-	<-mr.saving
-	floor := memoryFloor(32 << 30)
-	mr.setAvailable(floor + 1<<30)
-	mr.memMu.Lock()
-	mr.lazy = true
-	mr.memMu.Unlock()
-	reopened := make(chan error, 1)
-	go func() {
-		_, err := e.sched.Relaunch(t.Context(), run, e.member.ID)
-		reopened <- err
-	}()
-	time.Sleep(100 * time.Millisecond)
-	close(mr.release)
-	<-guarded
-	mr.saveMu.Lock()
-	mr.saving = nil
-	mr.saveMu.Unlock()
-	if err := <-reopened; err != nil {
-		t.Fatalf("reopen after the save: %v", err)
-	}
-
-	mr.setAvailable(floor + 1<<30)
-	if _, err := e.sched.reserveCapacity(t.Context()); !errors.Is(err, ErrMemoryPressure) {
-		t.Fatalf("a launch into the 6 GiB the reopened VM has yet to load = %v, want the memory refusal", err)
-	}
-}
-
 // A boot to commit a saved VM's work claims what it loads back as a wake
 // does: wakes count it, and it counts theirs.
 func TestABootToCommitAndAWakeCountEachOthersMemory(t *testing.T) {

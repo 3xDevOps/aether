@@ -270,11 +270,11 @@ func (r *fakeRuntime) Resume(_ context.Context, id runtime.ID) error {
 }
 
 func (r *fakeRuntime) Stop(_ context.Context, id runtime.ID, _ time.Duration) error {
-	if r.stopErr != nil {
-		return r.stopErr
-	}
 	if r.stopHook != nil {
 		r.stopHook()
+	}
+	if r.stopErr != nil {
+		return r.stopErr
 	}
 	c, err := r.get(id)
 	if err != nil {

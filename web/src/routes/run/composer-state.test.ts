@@ -93,6 +93,9 @@ describe('the Enhanced composer gate', () => {
       expect(composerBlock({ ...parked, outcome_unseen: false }, true, false)).toBeNull()
       expect(composerBlock({ ...parked, status: 'abandoned' }, true, true))
         .toBe('This session has finished. Relaunch it to continue the chat and files.')
+      const until = '2026-12-18T12:00:00Z'
+      expect(composerBlock({ ...parked, status: 'abandoned', container_retained_until: until }, true, true))
+        .toBe(`This session has finished. Relaunch it before ${new Date(until).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} to continue the chat and files.`)
     }
   })
 
