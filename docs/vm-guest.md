@@ -473,18 +473,25 @@ were resumed died by their third wake
 (`TestKVMRepeatedSaveAndWakeKeepsMemoryAndProcesses`).
 
 The engine deletes a saved state only once the restored guest's helper
-answers. Until then the record stays saved, so a server that stops between
-the resume and that answer finds the guest running at the next wake and only
-waits for it to answer. A guest that restarts, which Cloud Hypervisor's
-event log reports, or whose unit stops first is not the saved one: the
-restore fails with the tail of `monitor.log` and `console.log`. The saved
-state is then kept only if no disk the guest may write changed since the
-resume, by the modification time of each one in the saved `config.json`;
-otherwise it is dropped and the restore's error also says
-`it has no saved state`, since saved memory restored over newer disks would
-corrupt them. A guest that still runs but does not answer, or whose clock
-cannot be set, keeps running without its saved state, for the caller to
-take up.
+answers. A saved state matches the VM's disks only until the guest writes
+one: saved memory restored over newer disks would corrupt them. So before it
+resumes the guest, a restore records in the VM's record (`resumed`) the
+modification time of every disk the saved `config.json` lets the guest
+write, and the saved state is restored a second time only while none of
+those times has moved:
+
+- A guest that restarts, which Cloud Hypervisor's event log reports, or
+  whose unit stops before the helper answers is not the saved one. The
+  restore pauses it, stops the VM and fails with the tail of `monitor.log`
+  and `console.log`. With the disks unwritten the saved state is kept for
+  the next wake; otherwise it is dropped, and the error also says
+  `it has no saved state`.
+- A server that stops between the resume and the answer finds, at the next
+  wake, either the guest running, which only has to answer, or no monitor.
+  With no monitor it restores the saved state again if the disks are
+  unwritten and drops it if not.
+- A guest that still runs but does not answer, or whose clock cannot be set,
+  keeps running without its saved state, for the caller to take up.
 
 ## Freezing the root disk
 

@@ -105,6 +105,10 @@ type record struct {
 	// Saved means the snapshot directory holds the VM's state; the VM reads
 	// as exited until Restore.
 	Saved bool `json:"saved,omitempty"`
+	// Resumed is when each disk the guest writes was last written before a
+	// restore resumed the saved state, which matches the disks only while
+	// none of those times has moved; unset until a restore resumes it.
+	Resumed map[string]int64 `json:"resumed,omitempty"`
 	// Frozen means Pause froze the session's processes, which stay frozen
 	// through a save and restore until Resume or the next boot.
 	Frozen bool `json:"frozen,omitempty"`

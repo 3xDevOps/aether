@@ -109,7 +109,7 @@ func (e *engine) save(ctx context.Context, key string) error {
 		_ = os.RemoveAll(dir)
 		return resumeAfter(err)
 	}
-	rec.Saved, rec.Exited, rec.ExitCode = true, true, killedExitCode
+	rec.Saved, rec.Resumed, rec.Exited, rec.ExitCode = true, nil, true, killedExitCode
 	rec.CacheSynced = synced
 	if err = e.store(rec); err != nil {
 		return resumeAfter(err)
@@ -241,12 +241,14 @@ func (e *engine) awaitStopped(ctx context.Context, key string) error {
 // restore starts the monitor on the saved state, resumes the guest and sets
 // its clock. Cloud Hypervisor reads all of the saved memory before it
 // answers: loaded on demand, a page something else had touched first kept
-// zeros. The saved state is kept until the guest answers. A guest that dies
-// first, with no disk written, is restored from it again by the next wake.
-// Once a disk is written the saved state no longer matches it, and is
-// dropped: a second restore would pair old memory with newer disks. A guest
-// that still runs is never killed for a later error or the caller's ctx
-// ending. A VM with a virtio-fs share is never saved.
+// zeros. The saved state is kept until the guest answers, and matches the
+// disks only until the guest writes one, so the record holds the disks'
+// times from before the resume. A guest that dies before it answers, or
+// with the server, is restored again while those times stand; once one
+// moved, the saved state is dropped: a second restore would pair old memory
+// with newer disks. A guest that still runs is never killed for a later
+// error or the caller's ctx ending. A VM with a virtio-fs share is never
+// saved.
 func (e *engine) restore(ctx context.Context, key string) error {
 	unlock := e.lock(key)
 	defer unlock()
@@ -263,18 +265,36 @@ func (e *engine) restore(ctx context.Context, key string) error {
 	}
 	api := newCHAPI(e.path(key, apiSocket))
 	dir := e.path(key, snapshotDir)
-	var written map[string]time.Time
-	// A monitor a server left mid-restore or mid-save holds the guest paused
-	// at the saved state, which still matches the disks. One it left after
-	// the resume runs the guest, which only has to answer.
-	if state, _ := api.state(ctx); !up || state != "Running" {
+	// Not ended with ctx: what follows a resume decides what the record
+	// says of a guest that ran.
+	after := context.WithoutCancel(ctx)
+	unwritten := func() bool {
+		now, err := diskTimes(dir)
+		return err == nil && maps.Equal(rec.Resumed, now)
+	}
+	drop := func(cause error) error {
+		rec.Saved, rec.Resumed, rec.Exited, rec.ExitCode = false, nil, true, lostExitCode
+		rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
+		err := e.store(rec)
+		if err == nil {
+			err = os.RemoveAll(dir)
+		}
+		return errors.Join(fmt.Errorf("%w; its guest wrote its disks, so its saved state is dropped: %w", cause, runtime.ErrNotSaved), err)
+	}
+	// A monitor an earlier restore resumed holds the guest, which only has
+	// to answer. Any other holds it paused at the saved state, as a server
+	// that stopped mid-restore or mid-save left it.
+	if !up || rec.Resumed == nil {
+		if rec.Resumed != nil && !unwritten() {
+			return drop(fmt.Errorf("vm runtime: restore VM %s: the guest an earlier wake resumed is gone", key))
+		}
 		if up {
 			e.kill(ctx, key)
 		}
 		// The guest's mounts were made at boot: the shares keep the indexes
 		// they had then, whatever the host holds now.
-		var booted launch
-		if booted, err = readLaunch(e.dir(key)); err != nil {
+		booted, err := readLaunch(e.dir(key))
+		if err != nil {
 			return err
 		}
 		l := launch{Home: booted.Home, Reveal: booted.Reveal, Args: []string{
@@ -292,18 +312,28 @@ func (e *engine) restore(ctx context.Context, key string) error {
 		loadCtx, cancel := context.WithTimeout(ctx, restoreTimeout+time.Duration(unitMemoryMiB(rec)<<20/snapshotRate)*time.Second)
 		err = e.awaitRestored(loadCtx, key, api)
 		cancel()
+		if err == nil {
+			rec.Resumed, err = diskTimes(dir)
+		}
+		if err == nil {
+			err = e.store(rec)
+		}
 		if err != nil {
-			e.kill(context.WithoutCancel(ctx), key)
+			e.kill(after, key)
 			return err
 		}
-		written = diskTimes(dir)
-		// A resume that fails, or whose reply is lost, may have run the
-		// guest: the monitor is left for the caller to resume or stop.
-		if err = api.resume(ctx); err != nil {
+	}
+	if state, _ := api.state(after); state != "Running" {
+		if err = api.resume(after); err != nil {
 			err = fmt.Errorf("vm runtime: resume restored VM %s: %w", key, err)
+			if state, _ = api.state(after); state == "Paused" {
+				e.kill(after, key)
+				rec.Resumed = nil
+				return errors.Join(err, e.store(rec))
+			}
 		}
 	}
-	live, cancel := context.WithTimeout(context.WithoutCancel(ctx), bootTimeout)
+	live, cancel := context.WithTimeout(after, bootTimeout)
 	defer cancel()
 	var h helper
 	if err == nil {
@@ -317,47 +347,56 @@ func (e *engine) restore(ctx context.Context, key string) error {
 			err = fmt.Errorf("vm runtime: set the clock of restored VM %s: %w", key, err)
 		}
 	}
-	rec.Saved, rec.Exited = false, false
-	gone := context.WithoutCancel(ctx)
-	if st, stErr := e.units.State(gone, unitName(key)); err != nil && (e.rebooted(key) || stErr == nil && !st.Active) {
-		// Read before the kill, at which Cloud Hypervisor closes the disks.
-		kept := len(written) > 0 && maps.Equal(written, diskTimes(dir))
-		e.kill(gone, key)
-		if kept {
-			return fmt.Errorf("%w; the guest wrote no disk, so its saved state is kept", err)
+	if st, stErr := e.units.State(after, unitName(key)); err != nil && (e.rebooted(key) || stErr == nil && !st.Active) {
+		// A paused guest writes nothing more; Cloud Hypervisor may write a
+		// disk as it closes it, so the times are read before the kill.
+		kept := api.pause(live) == nil && unwritten()
+		e.kill(after, key)
+		if !kept && !unwritten() {
+			return drop(err)
 		}
-		rec.Exited = true
-		err = fmt.Errorf("%w; the guest wrote its disks first, so its saved state is dropped: %w", err, runtime.ErrNotSaved)
+		rec.Resumed = nil
+		return errors.Join(fmt.Errorf("%w; its guest wrote no disk, so its saved state is kept", err), e.store(rec))
 	}
+	rec.Saved, rec.Resumed, rec.Exited = false, nil, false
 	rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
-	return errors.Join(err, e.store(rec), os.RemoveAll(dir))
+	if storeErr := e.store(rec); storeErr != nil {
+		return errors.Join(err, storeErr)
+	}
+	return errors.Join(err, os.RemoveAll(dir))
 }
 
 // diskTimes is when each disk the saved guest in dir may write was last
-// written, from the VM configuration Cloud Hypervisor saved with it; nil
-// when that cannot be read.
-func diskTimes(dir string) map[string]time.Time {
+// written, from the VM configuration Cloud Hypervisor saved with it.
+func diskTimes(dir string) (map[string]int64, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		return nil, fmt.Errorf("vm runtime: saved VM configuration: %w", err)
+	}
 	var cfg struct {
 		Disks []struct {
 			Path     string `json:"path"`
 			Readonly bool   `json:"readonly"`
 		} `json:"disks"`
 	}
-	if err != nil || json.Unmarshal(data, &cfg) != nil {
-		return nil
+	if err = json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("vm runtime: saved VM configuration: %w", err)
 	}
-	times := map[string]time.Time{}
+	times := map[string]int64{}
 	for _, d := range cfg.Disks {
+		if d.Readonly || d.Path == "" {
+			continue
+		}
 		info, err := os.Stat(d.Path)
 		if err != nil {
-			return nil
+			return nil, fmt.Errorf("vm runtime: saved VM's disk: %w", err)
 		}
-		if !d.Readonly {
-			times[d.Path] = info.ModTime()
-		}
+		times[d.Path] = info.ModTime().UnixNano()
 	}
-	return times
+	if len(times) == 0 {
+		return nil, fmt.Errorf("vm runtime: saved VM configuration in %s names no disk the guest writes", dir)
+	}
+	return times, nil
 }
 
 // awaitRestored waits until Cloud Hypervisor holds the restored, still

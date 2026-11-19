@@ -226,12 +226,13 @@ func TestKVMSessionLifecycle(t *testing.T) {
 // TestKVMRepeatedSaveAndWakeKeepsMemoryAndProcesses saves and wakes one VM
 // six times. Its 5 GiB put memory the guest's kernel uses past 4 GiB, which
 // Cloud Hypervisor maps apart from the first 3 GiB. Every wake must find the
-// boot and processes it left, and 1 GiB of random bytes must read back
-// unchanged; every other save comes with almost nothing touched since the
-// wake. Restored on demand, all 7 such VMs died by their third wake, 6 of
-// them rebooted from their disks: a page a host process had read through
-// /proc/<pid>/mem before Cloud Hypervisor registered its userfaultfd kept
-// zeros, since Cloud Hypervisor takes a page that is already there as loaded.
+// boot and processes it left. After every second one, 1 GiB of random bytes
+// must read back unchanged; the save before it comes with almost nothing
+// touched since the last wake. Restored on demand, all 7 such VMs died by
+// their third wake, 6 of them rebooted from their disks: a page a host
+// process had read through /proc/<pid>/mem before Cloud Hypervisor
+// registered its userfaultfd kept zeros, since Cloud Hypervisor takes a page
+// that is already there as loaded.
 func TestKVMRepeatedSaveAndWakeKeepsMemoryAndProcesses(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-vmtest-b"
@@ -254,6 +255,9 @@ func TestKVMRepeatedSaveAndWakeKeepsMemoryAndProcesses(t *testing.T) {
 		start := time.Now()
 		if err := e.save(t.Context(), key); err != nil {
 			t.Fatalf("save %d: %v", cycle, err)
+		}
+		if up, _ := e.running(t.Context(), key); up {
+			t.Fatal("the VM still runs after save")
 		}
 		saved, _ := e.savedMemory(key)
 		saveTook := time.Since(start)

@@ -311,10 +311,12 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 	exited := context.Cause(up)
 	stop()
 	if err != nil {
-		if ctx.Err() != nil {
-			exited = nil
+		// The exit ended the reattach, not the caller: its error must not
+		// read as a canceled context.
+		if exited != nil && ctx.Err() == nil {
+			err = fmt.Errorf("%w: %v", exited, err)
 		}
-		return woke{}, errors.Join(err, exited, s.stopAsleep(context.WithoutCancel(ctx), entry))
+		return woke{}, errors.Join(err, s.stopAsleep(context.WithoutCancel(ctx), entry))
 	}
 	s.mu.Lock()
 	entry.asleepSince = time.Time{}

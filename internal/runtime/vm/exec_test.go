@@ -331,3 +331,48 @@ func TestRestoreReplacesAMonitorAServerLeftMidRestore(t *testing.T) {
 		t.Error("restore kept the leftover monitor instead of restoring anew")
 	}
 }
+
+// A server that stopped after a restore resumed its guest finds at the next
+// wake the guest running, which only has to answer, or gone, with a saved
+// state older than the disks it wrote.
+func TestRestoreAfterAServerStoppedMidWake(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	if err := h.engine.save(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := h.engine.load("run-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Resumed, err = diskTimes(h.engine.path("run-a", snapshotDir)); err != nil {
+		t.Fatal(err)
+	}
+	resumed := launch{Args: []string{"--api-socket", "path=" + h.engine.path("run-a", apiSocket)}}
+	if err = errors.Join(h.engine.store(rec), h.engine.launch(t.Context(), rec, resumed)); err != nil {
+		t.Fatal(err)
+	}
+	running := h.units.vmm("run-a")
+	if err = h.engine.restore(t.Context(), "run-a"); err != nil {
+		t.Fatalf("restore over the guest an earlier restore resumed: %v", err)
+	}
+	if rec, _ = h.engine.load("run-a"); h.units.vmm("run-a") != running || slices.Contains(running.called(), "vm.resume") || rec.Saved {
+		t.Errorf("restore replaced or resumed again a guest that ran (calls %v), saved=%v", running.called(), rec.Saved)
+	}
+
+	h.createStarted("run-b", sessionSpec("run-b"))
+	if err = h.engine.save(t.Context(), "run-b"); err != nil {
+		t.Fatal(err)
+	}
+	if rec, err = h.engine.load("run-b"); err != nil {
+		t.Fatal(err)
+	}
+	rec.Resumed = map[string]int64{h.engine.path("run-b", "fake-root.img"): 1}
+	if err = h.engine.store(rec); err != nil {
+		t.Fatal(err)
+	}
+	err = h.engine.restore(t.Context(), "run-b")
+	if rec, _ = h.engine.load("run-b"); !errors.Is(err, runtime.ErrNotSaved) || rec.Saved || h.units.vmm("run-b") != nil {
+		t.Errorf("restore after the resumed guest wrote its disks and died = %v, saved=%v; want the stale saved state dropped and nothing started", err, rec.Saved)
+	}
+}
