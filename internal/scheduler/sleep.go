@@ -27,9 +27,14 @@ const (
 )
 
 // wakeTimeout bounds one wake: the container start, its setup gate and the
-// agent's restore. A wake runs for every caller waiting on it, so no
-// caller's context cancels it; a server shutdown does.
-const wakeTimeout = 3 * time.Minute
+// agent's restore. The wake of a saved VM also gets the time to read its
+// saved memory back at restoreRate, the slowest read the VM runtime allows
+// a restore. A wake runs for every caller waiting on it, so no caller's
+// context cancels it; a server shutdown does.
+const (
+	wakeTimeout = 3 * time.Minute
+	restoreRate = 20 << 20
+)
 
 // ErrClosedAsleep refuses waking a closed session's stopped container
 // outside Relaunch.
@@ -218,10 +223,16 @@ func (s *Scheduler) wake(ctx context.Context, entry *supervised) error {
 		}
 		done := make(chan struct{})
 		entry.waking = done
+		cid := entry.containerID
 		s.mu.Unlock()
 		s.publishSleep(entry)
 
-		wakeCtx, cancel := context.WithTimeout(s.superCtx, wakeTimeout)
+		limit := wakeTimeout
+		if saver, ok := s.saver(cid); ok {
+			saved, _ := saver.SavedMemory(cid)
+			limit += time.Duration(saved/restoreRate) * time.Second
+		}
+		wakeCtx, cancel := context.WithTimeout(s.superCtx, limit)
 		how, err := s.wakeLive(wakeCtx, entry)
 		cancel()
 		if err != nil {
@@ -306,7 +317,16 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 		}
 		return woke{}, err
 	}
-	if err = s.reattach(ctx, entry, how.restored); err != nil {
+	up, stop := s.untilExit(ctx, cid)
+	err = s.reattach(up, entry, how.restored)
+	exited := context.Cause(up)
+	stop()
+	if err != nil {
+		// The exit ended the reattach, not the caller: its error must not
+		// read as a canceled context.
+		if exited != nil && ctx.Err() == nil {
+			err = fmt.Errorf("%w: %v", exited, err)
+		}
 		return woke{}, errors.Join(err, s.stopAsleep(context.WithoutCancel(ctx), entry))
 	}
 	s.mu.Lock()
@@ -323,6 +343,18 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 		return woke{}, errors.Join(fmt.Errorf("record the wake: %w", err), s.stopAsleep(context.WithoutCancel(ctx), entry))
 	}
 	return how, nil
+}
+
+// untilExit is ctx ending once cid's container exits, with the exit as its
+// cause: nothing a wake still waits on in that container will answer.
+func (s *Scheduler) untilExit(ctx context.Context, cid runtime.ID) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	go func() {
+		if st, err := s.cfg.Runtime.Wait(ctx, cid); err == nil {
+			cancel(fmt.Errorf("the session's container exited with status %d while the session woke", st.Code))
+		}
+	}()
+	return ctx, func() { cancel(nil) }
 }
 
 // startAsleep starts entry's stopped container, or restores its saved VM,

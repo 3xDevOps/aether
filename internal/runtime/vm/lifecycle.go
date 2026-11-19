@@ -75,22 +75,23 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 	if err != nil {
 		return err
 	}
-	if up && rec.Exited {
+	if up && rec.Exited || !up && !rec.Saved {
 		return nil
 	}
-	if !up {
-		if !rec.Saved {
-			return nil
-		}
+	// Up, a saved VM is a guest a wake resumed, which runs past its saved
+	// state.
+	if rec.Saved {
 		if err = os.RemoveAll(e.path(key, snapshotDir)); err != nil {
 			return fmt.Errorf("vm runtime: discard saved state: %w", err)
 		}
-		rec.Saved = false
+		rec.Saved, rec.Resumed = false, nil
 		if err = e.store(rec); err != nil {
 			return err
 		}
-		e.promoteCache(rec)
-		return nil
+		if !up {
+			e.promoteCache(rec)
+			return nil
+		}
 	}
 	_ = e.thaw(key)
 	api := newCHAPI(e.path(key, apiSocket))
@@ -321,6 +322,7 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool)
 		return rec.ExitCode, true
 	}
 	if gone {
+		slog.Warn("vm runtime: the guest restarted on its own, which ends its VM", "vm", key, "logs", e.logTail(key))
 		e.kill(context.WithoutCancel(ctx), key)
 		rec.Exited, rec.ExitCode = true, lostExitCode
 		return lostExitCode, e.store(rec) == nil

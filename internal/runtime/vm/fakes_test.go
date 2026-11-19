@@ -231,6 +231,12 @@ type fakeUnits struct {
 	failNext   bool
 	stateErr   error
 	failResume bool
+	// Each VMM started refuses its first refuseResumes resumes, staying
+	// paused; as it resumes, with rebootOnResume it reports a guest reboot
+	// and with resumeWrites it writes that disk.
+	refuseResumes  int
+	rebootOnResume bool
+	resumeWrites   string
 	// cgroups is the cgroup root, which holds a memory.current, a
 	// memory.stat and a cgroup.freeze for each running unit.
 	cgroups string
@@ -293,7 +299,7 @@ func (u *fakeUnits) Start(_ context.Context, name string, argv, properties []str
 	}
 	vmm, err := startVMM(socket, l.Args, func() { go func() { _ = u.Stop(context.Background(), name) }() })
 	if vmm != nil {
-		vmm.failResume = u.failResume
+		vmm.failResume, vmm.refuseResumes, vmm.rebootOnResume, vmm.resumeWrites = u.failResume, u.refuseResumes, u.rebootOnResume, u.resumeWrites
 	}
 	if err != nil {
 		return err
@@ -358,14 +364,15 @@ type fakeVMM struct {
 	restored   bool
 	srv        *http.Server
 	listener   net.Listener
-	// restoring counts the snapshots refused while an on-demand restore
-	// still loads memory.
-	restoring int
 	// snapshotFails refuses every snapshot. A snapshot sends on
 	// snapshotHold, when set, as it starts, and finishes once it receives
 	// from it.
-	snapshotFails bool
-	snapshotHold  chan struct{}
+	snapshotFails  bool
+	snapshotHold   chan struct{}
+	refuseResumes  int
+	rebootOnResume bool
+	resumeWrites   string
+	events         string
 }
 
 func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
@@ -375,9 +382,12 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 		return nil, err
 	}
 	v := &fakeVMM{state: "Running", listener: l}
-	for _, arg := range args {
-		if arg == "--restore" {
+	for i, arg := range args {
+		switch arg {
+		case "--restore":
 			v.state, v.restored = "Paused", true
+		case "--event-monitor":
+			v.events = strings.TrimPrefix(args[i+1], "path=")
 		}
 	}
 	mux := http.NewServeMux()
@@ -393,16 +403,23 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 		case "vm.pause":
 			v.state = "Paused"
 		case "vm.resume":
+			if v.refuseResumes > 0 {
+				v.refuseResumes--
+				http.Error(w, "resume refused", http.StatusInternalServerError)
+				return
+			}
 			v.state = "Running"
+			if v.resumeWrites != "" {
+				later := time.Now().Add(time.Minute)
+				_ = os.Chtimes(v.resumeWrites, later, later)
+			}
+			if v.rebootOnResume {
+				_ = os.WriteFile(v.events, []byte(`{"source": "vm", "event": "rebooting"}`), 0o600)
+			}
 			if v.failResume {
 				http.Error(w, "reply lost", http.StatusGatewayTimeout)
 			}
 		case "vm.snapshot":
-			if v.restoring > 0 {
-				v.restoring--
-				http.Error(w, `["Error from API","VM on-demand memory restore is still in progress"]`, http.StatusConflict)
-				return
-			}
 			if v.snapshotFails {
 				http.Error(w, "no space left on device", http.StatusInternalServerError)
 				return
@@ -417,6 +434,9 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 			_ = json.Unmarshal(body, &req)
 			dir := strings.TrimPrefix(req.Destination, "file://")
 			_ = os.WriteFile(filepath.Join(dir, "state.json"), []byte("{}"), 0o600)
+			disk := filepath.Join(filepath.Dir(dir), "fake-root.img")
+			_ = os.WriteFile(disk, nil, 0o600)
+			_ = os.WriteFile(filepath.Join(dir, "config.json"), fmt.Appendf(nil, `{"disks":[{"path":%q}]}`, disk), 0o600)
 		case "vm.counters":
 			_ = json.NewEncoder(w).Encode(map[string]map[string]uint64{
 				"net0": {"rx_bytes": 10, "tx_bytes": 20}, "root": {"read_bytes": 1, "write_bytes": 2}, "data": {"read_bytes": 3, "write_bytes": 4},
@@ -453,8 +473,10 @@ type fakeHelper struct {
 	boots []guest.BootSpec
 	procs map[string]*fakeProc
 	// bootErr and output program the next Boot and Spawn.
-	bootErr  error
-	pingErr  error
+	bootErr error
+	pingErr error
+	// pingHold, when set, holds Ping until it is closed.
+	pingHold chan struct{}
 	output   map[string]string
 	ignoreTE bool
 	clock    time.Time
@@ -483,11 +505,18 @@ type fakeHelper struct {
 
 func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
 	g.mu.Lock()
-	pingErr := g.pingErr
+	pingErr, hold := g.pingErr, g.pingHold
 	g.mu.Unlock()
 	if pingErr != nil {
 		<-ctx.Done()
 		return guest.Info{}, pingErr
+	}
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			return guest.Info{}, ctx.Err()
+		}
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()

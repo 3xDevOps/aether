@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -565,9 +566,8 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	if !restored.restored || !slices.Contains(restored.called(), "vm.resume") || h.guest("run-a").clock.IsZero() {
 		t.Errorf("restore: vmm %+v calls %v", restored, restored.called())
 	}
-	if unit := h.units.last(); !slices.Contains(unit.launch.Args, "source_url=file://"+h.engine.path("run-a", snapshotDir)+",memory_restore_mode=ondemand") ||
-		!slices.Contains(unit.properties, "DeviceAllow=/dev/userfaultfd rw") {
-		t.Errorf("a restore launches %v with properties %v, want an on-demand restore that may open /dev/userfaultfd", unit.launch.Args, unit.properties)
+	if unit := h.units.last(); !slices.Contains(unit.launch.Args, "source_url=file://"+h.engine.path("run-a", snapshotDir)) {
+		t.Errorf("a restore launches %v, want one that reads all of the saved memory before the guest runs", unit.launch.Args)
 	}
 	if _, err := os.Stat(h.engine.path("run-a", snapshotDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("snapshot kept after restore: %v", err)
@@ -629,18 +629,29 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	if err := h.engine.save(t.Context(), "run-d"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.engine.restore(t.Context(), "run-d"); err != nil {
+	disk := filepath.Join(t.TempDir(), "root.img")
+	if err := errors.Join(os.WriteFile(disk, nil, 0o600),
+		os.WriteFile(h.engine.path("run-d", snapshotDir+"/config.json"), fmt.Appendf(nil, `{"disks":[{"path":%q,"readonly":false}]}`, disk), 0o600)); err != nil {
 		t.Fatal(err)
 	}
-	loading := h.units.vmm("run-d")
-	loading.mu.Lock()
-	loading.restoring = 2
-	loading.mu.Unlock()
-	if err := h.engine.save(t.Context(), "run-d"); err != nil {
-		t.Fatalf("save while the restore still loads memory = %v", err)
+	h.units.rebootOnResume = true
+	err := h.engine.restore(t.Context(), "run-d")
+	if rec, _ := h.engine.load("run-d"); err == nil || !strings.Contains(err.Error(), "restarted instead of answering") || !rec.Saved || !rec.Exited || rec.Resumed != nil || h.units.vmm("run-d") != nil {
+		t.Errorf("restore of a guest that restarted on resume = %v, record %+v, running=%v; want its error, the VM stopped and its saved state kept", err, rec, h.units.vmm("run-d") != nil)
 	}
-	if n := slices.Index(loading.called(), "vmm.shutdown") - slices.Index(loading.called(), "vm.snapshot"); n != 3 {
-		t.Errorf("save after a restore calls %v, want three snapshots", loading.called())
+	if _, statErr := os.Stat(h.engine.path("run-d", snapshotDir+"/state.json")); statErr != nil {
+		t.Errorf("the saved state of a guest that wrote no disk: %v", statErr)
+	}
+	h.units.resumeWrites = disk
+	err = h.engine.restore(t.Context(), "run-d")
+	if rec, _ := h.engine.load("run-d"); !errors.Is(err, runtime.ErrNotSaved) || rec.Saved || !rec.Exited || h.units.vmm("run-d") != nil {
+		t.Errorf("restore of a guest that wrote a disk and restarted = %v, record %+v; want its stale saved state dropped and the VM stopped", err, rec)
+	}
+	if _, err := os.Stat(h.engine.path("run-d", snapshotDir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a saved state older than its disks was kept: %v", err)
+	}
+	if err := h.engine.start(t.Context(), "run-d"); err != nil {
+		t.Errorf("start from the disks after the guest restarted = %v; want the last monitor's events forgotten", err)
 	}
 }
 

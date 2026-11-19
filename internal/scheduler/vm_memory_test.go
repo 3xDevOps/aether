@@ -438,6 +438,12 @@ func TestAWakeMustFitTheMemoryItLoadsBackAndALaunchOnlyAStart(t *testing.T) {
 	if err := e.sched.WakeRun(t.Context(), run, ""); err != nil || e.asleep(run) {
 		t.Fatalf("a wake that fits its saved memory = %v, asleep %v", err, e.asleep(run))
 	}
+	mr.saveMu.Lock()
+	left := mr.restoreTime
+	mr.saveMu.Unlock()
+	if want := wakeTimeout + 6<<30/restoreRate*time.Second; left < want-time.Minute || left > want {
+		t.Errorf("the restore of 6 GiB had %s of the wake left, want about %s", left, want)
+	}
 }
 
 func TestAWakeSavesIdleVMsUntilItsMemoryFits(t *testing.T) {

@@ -935,3 +935,23 @@ func TestACPCallsInsideControlAdmissionDoNotWaitForASleep(t *testing.T) {
 	close(entry.sleepDone)
 	e.sched.mu.Unlock()
 }
+
+// A wake stops waiting on a container that exited under it, and says so.
+func TestAWakeStopsWaitingOnAContainerThatExited(t *testing.T) {
+	t.Parallel()
+	e, _ := newSleepEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	c := e.container(t, run.ID)
+	ctx, stop := e.sched.untilExit(t.Context(), c.id)
+	defer stop()
+	c.exitNow(3)
+	select {
+	case <-ctx.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the wait outlived the container")
+	}
+	if cause := context.Cause(ctx); !strings.Contains(cause.Error(), "exited with status 3") {
+		t.Fatalf("cause = %v, want the container's exit", cause)
+	}
+}

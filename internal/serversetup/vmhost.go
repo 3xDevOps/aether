@@ -71,16 +71,6 @@ func CheckKVM(device string) error {
 	return f.Close()
 }
 
-// CheckUserfaultfd opens device read-write, as Cloud Hypervisor does to
-// restore a saved VM.
-func CheckUserfaultfd(device string) error {
-	f, err := os.OpenFile(device, os.O_RDWR, 0)
-	if err != nil {
-		return fmt.Errorf("session VMs need userfaultfd to wake from sleep: %w; run Linux 6.1 or newer built with CONFIG_USERFAULTFD (docs/install.md#hosts-for-vm-sessions)", err)
-	}
-	return f.Close()
-}
-
 // MissingVMTools returns the VMTools this host cannot run.
 func MissingVMTools() []VMTool {
 	var missing []VMTool

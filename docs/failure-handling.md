@@ -888,11 +888,15 @@ sleeping session, Standard or Enhanced: mail, `cloudfield-internal report
 A Standard session's Chat and Terminal views, and an Enhanced session's
 Chat view, show **Asleep since** with a **Wake** button while it sleeps.
 
-A wake loads the saved memory on demand: the VM runs at once, each page read
-from the saved file on its first use and the rest in the background. On a
-hosted test runner, a VM with 1.5 GiB of saved memory on disk ran its first
-command 0.8 to 1.5 seconds after the wake began, where reading the whole
-file first took 4.5 seconds. Before on-demand restore, on a test host, a
+A wake reads all of the saved memory before the VM runs. On a hosted test
+runner, a VM with 1.3 GiB of saved memory woke in 1.9 to 8.5 seconds with
+the file read from disk, and in about 1 second with it still in the host's
+page cache. Cloud Hypervisor can also load the memory on demand, which ran
+the first command 0.8 to 1.5 seconds after the wake began, and Cloudfield
+does not use it: Cloud Hypervisor v54.1 takes a page that is already there
+as loaded, so a page anything on the host had touched first kept zeros, and
+VMs died as they woke
+([vm-guest.md](vm-guest.md#save-and-restore)). On a test host, a
 message to a sleeping Claude Code or Codex session running a dev server and
 a `docker compose` stack was accepted 0.7 to 1.5 seconds after it was sent,
 and a start from disk after a failed restore took 5 seconds. The Chat view
@@ -911,6 +915,22 @@ VM with no saved memory left starts from its disk whatever its agent, as a
 relaunched one does. A VM a failed save left running is taken up as it is
 on the next wake.
 
+The saved state is kept until the woken guest answers. A guest that
+restarts or stops before that fails the restore at once, with the last
+lines of the VM's console, such as a kernel panic, in the error. While that
+guest wrote none of its disks its saved state still matches them, and the
+session is handled as for any failed restore above: one that stays asleep
+restores it again on the next wake. Once the guest wrote a disk, the saved
+state no longer matches the disks: it is dropped, and the session starts
+from its disk. A guest that keeps running but does not answer within 90
+seconds holds the session from then on: its saved state is deleted, and
+the wake takes the guest up as it is, or saves it again when the agent
+cannot be reached. A wake also ends as soon as the VM stops under it, with
+`the session's container exited with status <n> while the session woke`,
+rather than after its time runs out: 3 minutes, plus 1 second per 20 MiB
+of saved memory to read it back
+([vm-guest.md](vm-guest.md#save-and-restore)).
+
 A saved VM takes about as much disk as the memory its processes use, after
 the guest drops its page cache: 137 MiB for an idle test VM of 2 GiB whose
 page cache held 1400 MiB. A save waits up to 40 seconds for the host to get
@@ -920,8 +940,9 @@ memory of the longest-sleeping sessions first
 ([Recover from disk pressure](#recover-from-disk-pressure)). A server
 restart or update leaves sleeping VMs asleep; the next use wakes them. A
 stop cuts short a wake still running and leaves its session asleep: with
-its saved state, or, once the restore is done, with its VM running, which
-the next server saves again, or wakes if the memory guard had saved it.
+its saved state, or, once the restore has resumed the guest, with its VM
+running, which the next server saves again, or wakes if the memory guard
+had saved it.
 The agent keeps running in the VM, and the next wake reattaches to it,
 unless the wake had already started the VM again from its disk: then the
 next wake starts the agent and restores its conversation.

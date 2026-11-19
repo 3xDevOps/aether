@@ -44,6 +44,8 @@ type saveRuntime struct {
 	// state, as a restore that never gets an answer from its VM does.
 	restoreHang bool
 	restores    int
+	// restoreTime is what was left of the last restore's ctx as it began.
+	restoreTime time.Duration
 	// commands holds the command each container starts from its disk with.
 	commands map[runtime.ID][]string
 }
@@ -97,6 +99,9 @@ func (r *saveRuntime) Save(_ context.Context, id runtime.ID) error {
 func (r *saveRuntime) Restore(ctx context.Context, id runtime.ID) error {
 	r.saveMu.Lock()
 	r.restores++
+	if deadline, ok := ctx.Deadline(); ok {
+		r.restoreTime = time.Until(deadline)
+	}
 	if r.restoreHang {
 		r.saveMu.Unlock()
 		<-ctx.Done()
