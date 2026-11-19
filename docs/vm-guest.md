@@ -492,9 +492,10 @@ those times has moved. From the resume on, the record reads running:
   restore pauses it, stops the VM and fails with the tail of `monitor.log`
   and `console.log`. For a guest that restarted it quotes the start of
   `console.log` too: each monitor starts that file again, so its first
-  lines are what the woken guest printed as it died. With the disks unwritten the saved state is kept for
-  the next restore; otherwise it is dropped, and the error says why, such
-  as `its guest wrote its disks`, and `it has no saved state`.
+  lines are what the woken guest printed as it died. With the disks
+  unwritten the saved state is kept for the next restore; otherwise it is
+  dropped, and the error says why, such as `its guest wrote its disks`, and
+  `it has no saved state`.
 - A server that stops between the resume and the answer leaves a running VM.
   The next server saves it again, which replaces the saved state, or its
   next wake takes the guest up, which only has to answer; a stop discards

@@ -640,7 +640,7 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := h.engine.restore(t.Context(), "run-d")
-	if err == nil || !strings.Contains(err.Error(), "fatal error: fault") || !strings.Contains(err.Error(), "Kernel panic") || strings.Count(err.Error(), "goroutine trace") != 40+logTailLines-2 {
+	if err == nil || !strings.Contains(err.Error(), "fatal error: fault") || !strings.Contains(err.Error(), "Kernel panic") || strings.Count(err.Error(), "goroutine trace") != logHeadLines+logTailLines-2 {
 		t.Errorf("restore of a guest that restarted on resume = %v; want what its console said first and last", err)
 	}
 	if rec, _ := h.engine.load("run-d"); err == nil || !strings.Contains(err.Error(), "restarted instead of answering") || !rec.Saved || !rec.Exited || rec.Resumed != nil || h.units.vmm("run-d") != nil {

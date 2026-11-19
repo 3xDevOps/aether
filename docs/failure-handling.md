@@ -919,10 +919,10 @@ The saved state is kept until the woken guest answers. A guest that
 restarts or stops before that fails the restore at once. For a guest that
 restarted, the error quotes the first 40 lines its console printed after
 the wake, which say what died, and the last 15, such as the kernel panic
-that followed. While that
-guest wrote none of its disks its saved state still matches them, and the
-session is handled as for any failed restore above: one that stays asleep
-restores it again on the next wake. Once the guest wrote a disk, the saved
+that followed. While that guest wrote none of its disks its saved state
+still matches them, and the session is handled as for any failed restore
+above: one that stays asleep restores it again on the next wake. Once the
+guest wrote a disk, the saved
 state no longer matches the disks: it is dropped, and the session starts
 from its disk. Every wake that starts a session from its disk because the
 restore failed leaves a note on the session's timeline: that its processes

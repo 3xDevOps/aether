@@ -62,14 +62,16 @@ const (
 	// memory: Cloud Hypervisor, virtiofsd, and the monitor with the file
 	// service, whose requests a guest can fill.
 	unitOverheadMiB = 512
+	// logTailLines is how much of the end of each log an error quotes, and
+	// logHeadLines how much of the start of the console of a guest that
+	// died on a wake.
+	logTailLines, logHeadLines = 15, 40
 	// cmdlineBase boots the read-only helper disk, whose /init is the helper.
 	// Page reporting order 0 lets freed guest page cache back to the host;
 	// at the default order it stalls with most of it still held. Cloud
 	// Hypervisor never exits on a guest panic, so panic=-1 makes a dead
 	// helper reboot the guest, which its event log reports.
-	// logTailLines is how much of the end of each log an error quotes.
-	logTailLines = 15
-	cmdlineBase  = "root=/dev/vda ro rootfstype=ext4 init=/init console=ttyS0 quiet panic=-1 page_reporting.page_reporting_order=0"
+	cmdlineBase = "root=/dev/vda ro rootfstype=ext4 init=/init console=ttyS0 quiet panic=-1 page_reporting.page_reporting_order=0"
 )
 
 type engine struct {
@@ -769,16 +771,17 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 	}
 }
 
-// restartLogs is logTail after what a guest that restarted printed first:
-// each monitor starts console.log again, so a guest that dies on a wake
-// says why at its top, and its kernel's panic then fills the tail.
+// restartLogs is logTail after what a guest that restarted before it
+// answered printed first: each monitor starts console.log again, so a guest
+// that dies on a wake says why at its top, and its kernel's panic then
+// fills the tail.
 func (e *engine) restartLogs(key string) string {
 	data, _ := readNoFollow(e.path(key, consoleLog))
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	if len(lines) <= logTailLines {
 		return e.logTail(key)
 	}
-	return fmt.Sprintf("\n%s from its start:\n%s%s", consoleLog, strings.Join(lines[:min(40, len(lines)-logTailLines)], "\n"), e.logTail(key))
+	return fmt.Sprintf("\n%s from its start:\n%s%s", consoleLog, strings.Join(lines[:min(logHeadLines, len(lines)-logTailLines)], "\n"), e.logTail(key))
 }
 
 func (e *engine) logTail(key string) string {

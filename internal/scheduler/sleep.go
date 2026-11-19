@@ -269,7 +269,7 @@ func (s *Scheduler) noteWake(ctx context.Context, workspace domain.WorkspaceID, 
 	if how.restoreErr != nil {
 		// The error carries the VM's log tail on the lines after its first.
 		note, _, _ := strings.Cut(text, "\n")
-		s.publishTimeline(ctx, workspace, run, "", events.TimelineNote, note)
+		s.publishTimeline(context.WithoutCancel(ctx), workspace, run, "", events.TimelineNote, note)
 	}
 	if err := s.cfg.PTY.Annotate(context.WithoutCancel(ctx), ptyhost.RunSession(run), "Cloudfield", "", text); err != nil {
 		slog.Warn("scheduler: note the wake in the terminal", "run", run, "error", err)
