@@ -953,7 +953,8 @@ back to Docker Hub, so a Docker Hub outage alone does not fail them.
 
 `lint`, `build-and-test`, `store-tests`, `dashboard`, both `integration` jobs,
 `arm64` and `dashboard-e2e` run on [Blacksmith](https://docs.blacksmith.sh/)
-runners (`blacksmith-4vcpu-ubuntu-2604`, and `blacksmith-4vcpu-ubuntu-2404-arm`
+runners (`blacksmith-4vcpu-ubuntu-2604`; `blacksmith-2vcpu-ubuntu-2604` for
+`dashboard`, whose vitest runs two workers, and `blacksmith-2vcpu-ubuntu-2404-arm`
 for `arm64`), declared for actionlint in `.github/actionlint.yaml`. A fork pull
 request's runs of `lint`, `build-and-test`, `store-tests` and `dashboard`
 default to `ubuntu-latest` instead. Outside contributors' runs wait for a

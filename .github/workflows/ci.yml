@@ -298,7 +298,7 @@ jobs:
   dashboard:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.web == 'true') }}
-    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2604' }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'blacksmith-2vcpu-ubuntu-2604' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

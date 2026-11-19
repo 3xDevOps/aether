@@ -175,7 +175,7 @@ jobs:
   # except the images' own base layers and downloads. This
   # job owns the Linux arm64 Go cache.
   arm64:
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
