@@ -207,7 +207,8 @@ func (t *processes) spawn(spec spawnSpec) (*process, error) {
 }
 
 // start forks p. Its ends of the pipes or terminal are the only ones the
-// helper keeps; the child's are closed once it runs.
+// helper keeps; the child's are closed once it runs. A log stays its
+// caller's: the git service's is PID 1's stderr (docs/vm-guest.md#boot).
 func (t *processes) start(p *process, spec spawnSpec, program, dir string, env []string, cred *syscall.Credential) error {
 	attr := &syscall.SysProcAttr{Setsid: true, Credential: cred}
 	if cgroup := cmp.Or(spec.cgroup, t.cgroup); cgroup != nil {
@@ -219,7 +220,9 @@ func (t *processes) start(p *process, spec spawnSpec, program, dir string, env [
 	var child []*os.File
 	defer func() {
 		for _, f := range child {
-			_ = f.Close()
+			if f != spec.log {
+				_ = f.Close()
+			}
 		}
 	}()
 	var stdoutR, stderrR *os.File

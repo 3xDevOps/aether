@@ -813,11 +813,12 @@ the server does.
 `go test ./internal/guest/...` runs the real helper service against the real
 client over a Unix socket that answers Cloud Hypervisor's vsock handshake:
 processes on pipes and terminals, reattaching from a new client, lossless
-output, spawn failures, signals, orphan reaping and `Boot`. What only PID 1
-in a VM does (switching root, mounts, the network, socket forwarding, the
-process limit, an out-of-memory kill) needs a KVM host. `TestKVMHelper`
-([VM tests](#vm-tests)) boots an image from `internal/vmimage` disks with the
-test binary as the helper and drives it through the client.
+output, spawn failures, a start leaving its caller's log open, signals,
+orphan reaping and `Boot`. What only PID 1 in a VM does (switching root,
+mounts, the network, socket forwarding, the process limit, an out-of-memory
+kill) needs a KVM host. `TestKVMHelper` ([VM tests](#vm-tests)) boots an
+image from `internal/vmimage` disks with the test binary as the helper and
+drives it through the client.
 
 ## VM tests
 
@@ -829,7 +830,7 @@ runs every package that has them:
 | --- | --- | --- |
 | `internal/vmimage` | `TestKVMStandardImageRunsDocker` | The standard image from store disks, with Docker inside ([The guest kernel](#the-guest-kernel)) |
 | `internal/guest/helper` | `TestKVMHelper` | The helper as PID 1, driven through its client ([The VM helper](#the-vm-helper)) |
-| `internal/runtime/vm` | `TestKVM...` in each `kvm_*_test.go` | Sessions through the engine, with real systemd units and the server binary as monitor and helper: lifecycle, six saves and wakes of one VM, a guest reboot, the home, the checkout, the network, Save environment, cold memory returning to the host, the memory a wake loads back, a freeze stopping VMs that fill their memory at once, a shutdown letting go of a frozen VM's agent keeper |
+| `internal/runtime/vm` | `TestKVM...` in each `kvm_*_test.go` | Sessions through the engine, with real systemd units and the server binary as monitor and helper: lifecycle, six saves and wakes of one VM, a guest reboot, the home, the checkout, the helper keeping the console and outliving connections hung up at birth, the network, Save environment, cold memory returning to the host, the memory a wake loads back, a freeze stopping VMs that fill their memory at once, a shutdown letting go of a frozen VM's agent keeper |
 
 It needs root on a Linux x86-64 host with `/dev/kvm`, `cloud-hypervisor`,
 `qemu-img`, `mkfs.ext4`, `virtiofsd` at `/usr/libexec/virtiofsd`, systemd,

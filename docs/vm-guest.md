@@ -51,6 +51,15 @@ A step that fails is logged on the serial console and reported by the API's
 `Info` as `boot_error`; the helper still serves, so the server can show the
 error. When it cannot serve at all, it powers the VM off.
 
+Descriptors 1 and 2 of PID 1 stay the console for the life of the VM. A
+Go write to descriptor 1 or 2 that finds a broken pipe raises `SIGPIPE` to
+end the program. The kernel does not deliver that signal to PID 1, so the
+runtime exits with status 2 and no message. Were one of them closed, the
+helper's next open would reuse its number, and a write there that finds a
+broken pipe, such as on a vsock connection whose peer hung up across a save
+and restore, would end the guest with `Attempted to kill init!
+exitcode=0x00000200`.
+
 ## Kernel hardening
 
 A Default-tier session runs the agent as an unprivileged user (uid 1000),
@@ -545,7 +554,9 @@ attributes never consulted. So Changes, the live patch and staging behave as
 for a Docker session. It is `aether-internal guest git-service`, a process of
 its own that PID 1 starts again whenever it ends, waiting up to 30 seconds
 after a start that did not last: PID 1 reaps every child it has, which would
-collect a git's exit before the engine's own wait. Its cgroup,
+collect a git's exit before the engine's own wait. It logs on the serial
+console: its output is the helper's own standard error, which the helper
+keeps open ([Boot](#boot)). The git service's cgroup,
 `/sys/fs/cgroup/git`, sits beside the session, whose cap and pause leave it
 alone, and has a `memory.max` of 256 MiB; an OOM there kills one git, and
 when the service itself ends, the helper kills whatever is left in it and
