@@ -54,19 +54,20 @@ concurrency:
 
 jobs:
   # Lists changed files and decides whether the code jobs run. A merge-queue
-  # entry and the nightly run always run them. A push to main runs them
-  # unless scripts/ci-queue-verdict.sh finds the merge-queue run that passed
-  # on this commit and the push changed no cache key input. On a pull request
-  # scripts/ci-classify-areas.sh sets go and web: a change confined to
-  # docs/ and root-level markdown files skips both, one confined to web/
-  # skips the Go jobs, and one that no dashboard input can see skips
-  # dashboard. A merge-queue entry or a push to main also sets vm from the
-  # files it changes, which decides whether the suite boots VMs.
-  # Each classifier is the base revision's copy: a pull request can edit
-  # its own, and that copy is not what this job runs. A rename is
-  # classified by its old path as well as its new one, so a move into docs/
-  # still runs the code jobs. A failed file list, or a failure of any
-  # classifier alone, fails open and runs them. The checkout carries no
+  # entry and the nightly run always run them. A push to main runs them unless
+  # scripts/ci-queue-verdict.sh finds the merge-queue run that passed on this
+  # commit and the push changed no cache key input. On a pull request
+  # scripts/ci-classify-areas.sh sets go and web: a change confined to docs/
+  # and root-level markdown files skips both, and one confined to web/ skips
+  # the Go jobs; the Go files in those trees and the files there that Go code
+  # embeds or checks, which the script lists, still run them. One that no
+  # dashboard input can see skips dashboard. A merge-queue entry or a push to
+  # main also sets vm from the files it changes, which decides whether the
+  # suite boots VMs. Each classifier is the base revision's copy: a pull
+  # request can edit its own, and that copy is not what this job runs. A
+  # rename is classified by its old path as well as its new one, so a move
+  # into docs/ still runs the code jobs. A failed file list, or a failure of
+  # any classifier alone, fails open and runs them. The checkout carries no
   # credentials.
   changes:
     runs-on: ubuntu-latest
