@@ -40,6 +40,9 @@ type saveRuntime struct {
 	// restoreLate fails a restore only after it deleted the saved state
 	// and started the guest, as a failed clock set does.
 	restoreLate bool
+	// restoreHang holds a restore until its ctx ends, keeping the saved
+	// state, as a restore that never gets an answer from its VM does.
+	restoreHang bool
 	restores    int
 	// commands holds the command each container starts from its disk with.
 	commands map[runtime.ID][]string
@@ -94,6 +97,11 @@ func (r *saveRuntime) Save(_ context.Context, id runtime.ID) error {
 func (r *saveRuntime) Restore(ctx context.Context, id runtime.ID) error {
 	r.saveMu.Lock()
 	r.restores++
+	if r.restoreHang {
+		r.saveMu.Unlock()
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	err, late, saved := r.restoreErr, r.restoreLate, r.saved[id]
 	if err == nil || late {
 		delete(r.saved, id)
@@ -730,6 +738,42 @@ func TestASavedRunWakesWithItsAgentAfterARestart(t *testing.T) {
 	}
 	if sr.restores != 1 || !adopted(rt) {
 		t.Fatalf("the wake after a restart did not reattach to the saved agent: %d restores, %d agents", sr.restores, len(rt.all()))
+	}
+	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 2))
+}
+
+// A stop that cuts a wake short while it reattaches to the agent's keeper
+// leaves the keeper running and recorded, and the next server's wake adopts
+// it instead of starting another agent beside it.
+func TestAStopDuringAWakesReattachKeepsTheAgentForTheNextServer(t *testing.T) {
+	t.Parallel()
+	e, rt, _ := newSaveEnv(t, false)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.sleepRun(t, run.ID)
+	rt.mu.Lock()
+	rt.onAttach = func() error {
+		e.sched.superCancel()
+		return context.Canceled
+	}
+	rt.mu.Unlock()
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "during the stop"}, false, nil); err == nil {
+		t.Fatal("a wake the stop cut short reported success")
+	}
+	rt.mu.Lock()
+	rt.onAttach = nil
+	rt.mu.Unlock()
+	if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.AgentKeeper == nil || len(rt.all()) != 1 || rt.all()[0].exited() {
+		t.Fatalf("the cut wake left the sidecar %+v, %v and %d agents, the first exited %v; want the keeper recorded and running alone",
+			sc, err, len(rt.all()), rt.all()[0].exited())
+	}
+
+	s2 := e.restartACP(t)
+	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after restart"}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !adopted(rt) {
+		t.Fatalf("the next server's wake did not adopt the keeper: %d agents", len(rt.all()))
 	}
 	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 2))
 }

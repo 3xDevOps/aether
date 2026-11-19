@@ -375,7 +375,10 @@ other probes.
 
 A launch or wake that memory refuses first saves idle session VMs to disk,
 the longest idle first, until twice the floor plus what the start and the
-starts in flight take is free, then checks once more. It never saves a VM
+starts in flight take is free, then checks once more. It waits at most 30
+seconds for any one save: a save still running then goes on alone, and the
+check runs at once, so the launch or wake is likely refused until that save
+lands. It never saves a VM
 whose agent is working. It saves none when all idle VMs together hold too
 little to admit the start, or when only the server's own memory pressure
 refused it.
@@ -464,12 +467,17 @@ take memory. A guest the brake froze cannot say whether it is busy, so a
 session saved after the brake froze it always wakes on its own, also when a
 launch or wake saved it to make room. It skips a
 VM whose memory is unknown or would not leave the data filesystem its
-reserve plus 4 GiB, the level below which disk cleanup deletes the saved
+reserve plus 4 GiB once the saves still under way have written theirs,
+the level below which disk cleanup deletes the saved
 memory of other sleeping sessions
 ([Recover from disk pressure](#recover-from-disk-pressure)), and for 5
 minutes one whose save failed. A save waits for Cloud Hypervisor to finish
 writing the snapshot, for as long as writing the VM's memory at 20 MiB/s
-takes plus 2 minutes, and one that fails leaves the VM running; a VM that
+takes plus 2 minutes, but the guard waits for it at most 30 seconds. A
+save still running then goes on alone and ends that check. The next check
+measures memory again without counting what that save will free, so it may
+save another VM meanwhile: a save that hangs holds the guard up no longer.
+A save that fails leaves the VM running; a VM that
 died instead ends its session as any VM that
 died, also when the server is shutting down: `failed`, with its work
 committed from its disks. So does, at its next wake, a session recorded
@@ -477,9 +485,11 @@ asleep whose VM stopped before it was saved, unless it can start again
 from its disk ([Sessions in VMs](#sessions-in-vms)). It stops once
 twice the floor is free and `full avg10` is below 60%. Then a session it
 saved while its agent worked, or while its guest still used the CPU, wakes
-on its own, one each check, the first saved first among those whose memory
+on its own, one at a time, the first saved first among those whose memory
 fits above twice the floor. That wake passes the same check as any wake, so
-the guard never wakes one into memory another is still loading. A wake that
+the guard never wakes one into memory another is still loading. The guard
+does not wait for it: a wake that hangs leaves the guard saving the other
+VMs every check, and holds up only the next wake. A wake that
 admission refuses is tried again at the next check; one that fails otherwise is not, and its timeline says
 `Could not wake on its own once memory was free again: <error>`. Its turn
 carries on where it was, as across a server restart; a model call the save
@@ -908,7 +918,13 @@ that cache back first ([vm-guest.md](vm-guest.md#limits-stats-and-the-clock)),
 and a wake, close or kill that arrives meanwhile waits for the save. When disk runs low, Cloudfield deletes the saved
 memory of the longest-sleeping sessions first
 ([Recover from disk pressure](#recover-from-disk-pressure)). A server
-restart or update leaves sleeping VMs asleep; the next use wakes them.
+restart or update leaves sleeping VMs asleep; the next use wakes them. A
+stop cuts short a wake still running and leaves its session asleep: with
+its saved state, or, once the restore is done, with its VM running, which
+the next server saves again, or wakes if the memory guard had saved it.
+The agent keeps running in the VM, and the next wake reattaches to it,
+unless the wake had already started the VM again from its disk: then the
+next wake starts the agent and restores its conversation.
 
 ## What stays after a session ends
 

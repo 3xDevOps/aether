@@ -132,7 +132,7 @@ func TestTheMemoryBrakeFreezesEveryVMAndEachEndsThawedOrSavedThenWoken(t *testin
 
 	// The guard saves the idle VM as it stands, frozen, and marks it to
 	// wake: its guest could not say whether it was busy.
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !fr.isSaved(idle) || !fr.foundFrozen(idle) || fr.isSaved(working) || e.memorySaved(idleRun) != 1<<30 {
 		t.Fatalf("the guard's save: idle saved %v frozen %v marked %d, working saved %v",
 			fr.isSaved(idle), fr.foundFrozen(idle), e.memorySaved(idleRun), fr.isSaved(working))
@@ -152,7 +152,7 @@ func TestTheMemoryBrakeFreezesEveryVMAndEachEndsThawedOrSavedThenWoken(t *testin
 	}
 
 	fr.setAvailable(2*memoryFloor(32<<30) + 1<<30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if e.asleep(idleRun) || e.memorySaved(idleRun) != 0 {
 		t.Fatal("the guard did not wake the VM it saved frozen once memory was back")
 	}
@@ -241,7 +241,7 @@ func TestAGuardSaveFreezesItsVMAndThawsOneItCouldNotSave(t *testing.T) {
 	fr.saveMu.Unlock()
 	fr.setAvailable(3 << 30)
 
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !fr.foundFrozen(working) {
 		t.Fatal("the guard saved a working VM that was still running")
 	}
@@ -317,12 +317,15 @@ func TestAVMThatDiesWhileTheGuardSavesItEndsItsRun(t *testing.T) {
 		e.container(t, run).endProcess(137)
 		if shutdown {
 			cancel()
+			e.sched.superCancel()
 		}
 		close(fr.release)
 		<-guarded
 		cancel()
-		if sc, err := e.sched.readSidecar(run); err != nil || sc.AsleepSince != nil {
-			t.Fatalf("shutdown %v: a run whose VM died during its save is recorded %+v, %v; want it awake", shutdown, sc, err)
+		if shutdown {
+			e.restartACP(t)
+		} else if sc, err := e.sched.readSidecar(run); err != nil || sc.AsleepSince != nil {
+			t.Fatalf("a run whose VM died during its save is recorded %+v, %v; want it awake", sc, err)
 		}
 		waitStatusEvent(t, sub, run, domain.RunFailed)
 	}
@@ -454,7 +457,7 @@ func TestAVMWhoseGuestTheServerNeedsIsThawedAndNotSaved(t *testing.T) {
 	if frozen := fr.Frozen(); !slices.Equal(frozen, []runtime.ID{other}) {
 		t.Fatalf("frozen = %v, want only the VM nothing needs", frozen)
 	}
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if fr.isSaved(needed) || !fr.isSaved(other) {
 		t.Fatalf("the guard saved the needed VM %v, the other %v; want only the other", fr.isSaved(needed), fr.isSaved(other))
 	}

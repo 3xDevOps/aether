@@ -28,7 +28,7 @@ const (
 
 // wakeTimeout bounds one wake: the container start, its setup gate and the
 // agent's restore. A wake runs for every caller waiting on it, so no
-// caller's context cancels it.
+// caller's context cancels it; a server shutdown does.
 const wakeTimeout = 3 * time.Minute
 
 // ErrClosedAsleep refuses waking a closed session's stopped container
@@ -221,7 +221,7 @@ func (s *Scheduler) wake(ctx context.Context, entry *supervised) error {
 		s.mu.Unlock()
 		s.publishSleep(entry)
 
-		wakeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wakeTimeout)
+		wakeCtx, cancel := context.WithTimeout(s.superCtx, wakeTimeout)
 		how, err := s.wakeLive(wakeCtx, entry)
 		cancel()
 		if err != nil {
@@ -230,6 +230,10 @@ func (s *Scheduler) wake(ctx context.Context, entry *supervised) error {
 		s.mu.Lock()
 		entry.waking = nil
 		entry.wakeErr = err
+		// A wake a shutdown cut short has not failed: the next server wakes it.
+		if s.superCtx.Err() != nil {
+			entry.wakeErr = nil
+		}
 		if err != nil && s.runs[entry.runID] == entry && !entry.finalizing {
 			if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 				err = errors.Join(err, fmt.Errorf("record the failed wake: %w", werr))
@@ -362,8 +366,12 @@ func (s *Scheduler) startAsleep(ctx context.Context, entry *supervised) (woke, e
 
 // stopAsleep puts entry back to sleep after a failed wake: it stops the
 // container or a closed session's VM, or saves an open session's VM again.
-// Caller holds entry.lifecycleMu.
+// A server shutting down leaves it as it is, recorded asleep, for the next
+// server's recovery to take up. Caller holds entry.lifecycleMu.
 func (s *Scheduler) stopAsleep(ctx context.Context, entry *supervised) error {
+	if s.superCtx.Err() != nil {
+		return nil
+	}
 	s.mu.Lock()
 	cid, closed := entry.containerID, entry.retained
 	s.mu.Unlock()

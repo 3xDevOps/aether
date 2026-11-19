@@ -261,6 +261,8 @@ type Scheduler struct {
 	// only the brake's own goroutine touches them.
 	vmMemoryBraked bool
 	vmBrakeTargets []runtime.ID
+	// vmMemoryWaking holds, under mu, while a wake the guard started runs.
+	vmMemoryWaking bool
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised
@@ -601,8 +603,12 @@ type supervised struct {
 	// asleepSaved is set while a sleeping VM holds its saved memory, which
 	// a wake restores with every process. saveFailedAt is the last failed
 	// save, which the sleep sweep waits a full sleep delay after.
+	// memorySaving counts the saves running that sleeping does not mark: one
+	// the memory guard or an admission started, also once heldSave stopped
+	// waiting for it, and the save again after a failed wake.
 	asleepSaved  bool
 	saveFailedAt time.Time
+	memorySaving int
 	// frozenNotedAt is when the timeline last said the memory brake froze
 	// the session's VM. frozenSave is set while the memory guard saves the
 	// VM frozen, and admitting while a wake holding the lifecycle lock

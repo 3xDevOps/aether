@@ -190,6 +190,126 @@ func (e *testEnv) asleep(run domain.RunID) bool {
 	return e.sched.Sleep(run).AsleepSince != nil
 }
 
+// guard is one check of the memory guard and the wake it starts, if any.
+func (e *testEnv) guard(t *testing.T) {
+	t.Helper()
+	e.sched.guardVMMemory(t.Context())
+	waitFor(t, "the guard's wake", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return !e.sched.vmMemoryWaking
+	})
+}
+
+// A save that hangs, here of a VM recorded asleep and still running as a
+// restart takes one up, holds up the guard for memorySaveHold, and then goes
+// on alone: that check saves no other VM, and a later one saves the next
+// once the disk has room for both VMs' memory.
+func TestAHungSaveHoldsUpTheGuardOnlySoLong(t *testing.T) {
+	t.Parallel()
+	e, mr := newMemoryEnv(t)
+	big := e.launchVM(t, mr, acpmock.PromptWait, 3<<30)
+	small := e.launchVM(t, mr, acpmock.PromptWait, 1<<30)
+	bigRun := e.runOf(t, big)
+	e.sched.mu.Lock()
+	asleep := e.sched.runs[bigRun]
+	e.sched.mu.Unlock()
+	if err := e.sched.markAsleep(asleep); err != nil {
+		t.Fatal(err)
+	}
+	// A 100 GiB disk keeps 5 GiB, and below 9 GiB free disk reclaim deletes
+	// other sessions' saved memory: 12 GiB free holds either VM's, not both.
+	var free atomic.Uint64
+	free.Store(12 << 30)
+	setFreeBytes(e, &free)
+	hold := make(chan struct{})
+	unhang := sync.OnceFunc(func() { close(hold) })
+	defer unhang()
+	mr.saveMu.Lock()
+	mr.saving, mr.release = make(chan struct{}), hold
+	mr.saveMu.Unlock()
+	mr.setAvailable(3 << 30)
+
+	start := time.Now()
+	guarded := make(chan struct{})
+	go func() {
+		defer close(guarded)
+		e.sched.guardVMMemory(t.Context())
+	}()
+	<-mr.saving
+	mr.saveMu.Lock()
+	mr.saving, mr.release = nil, nil
+	mr.saveMu.Unlock()
+	select {
+	case <-guarded:
+	case <-time.After(memorySaveHold + 10*time.Second):
+		t.Fatal("the guard waited on the hung save")
+	}
+	if took := time.Since(start); took < memorySaveHold || mr.isSaved(small) || mr.isSaved(big) {
+		t.Fatalf("after %s the guard saved the small VM %v, the hung one %v; want neither, after %s", took, mr.isSaved(small), mr.isSaved(big), memorySaveHold)
+	}
+	e.guard(t)
+	if mr.isSaved(small) {
+		t.Fatal("the guard saved a VM whose memory fits on disk only if the hung save writes nothing")
+	}
+	free.Store(13 << 30)
+	e.guard(t)
+	if !mr.isSaved(small) || mr.isSaved(big) {
+		t.Fatalf("with room on disk the guard saved the small VM %v, the hung one %v; want the small one while the other hangs", mr.isSaved(small), mr.isSaved(big))
+	}
+	unhang()
+	waitFor(t, "the hung save finishing", func() bool { return mr.isSaved(big) && e.sched.Sleep(bigRun).Saved })
+}
+
+// A wake the guard started that hangs holds up neither the guard nor a
+// shutdown: the guard saves another VM meanwhile, and a stop cuts the wake
+// short, leaving the session asleep, saved and marked to wake for the next
+// server.
+func TestAHungWakeHoldsUpNeitherTheGuardNorAShutdown(t *testing.T) {
+	t.Parallel()
+	e, mr := newMemoryEnv(t)
+	hung := e.launchVM(t, mr, acpmock.PromptWait, 3<<30)
+	other := e.launchVM(t, mr, acpmock.PromptWait, 1<<30)
+	run := e.runOf(t, hung)
+	mr.setAvailable(3 << 30)
+	e.guard(t)
+	if !mr.isSaved(hung) || mr.isSaved(other) {
+		t.Fatal("the guard did not save the working VM holding the most memory")
+	}
+	mr.saveMu.Lock()
+	mr.restoreHang = true
+	mr.saveMu.Unlock()
+	mr.setAvailable(16 << 30)
+
+	ctx, stop := context.WithCancel(t.Context())
+	guarded := make(chan struct{})
+	go func() {
+		defer close(guarded)
+		e.sched.watchVMMemory(ctx)
+	}()
+	waitFor(t, "the guard waking the saved VM", func() bool { return e.sched.Sleep(run).Waking })
+	mr.setAvailable(3 << 30)
+	waitFor(t, "the guard saving the other VM while the wake hangs", func() bool { return mr.isSaved(other) })
+
+	stop()
+	closed := make(chan error, 1)
+	go func() {
+		<-guarded
+		closed <- e.sched.Close()
+	}()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the shutdown waited for the hung wake")
+	}
+	if sc, err := e.sched.readSidecar(run); err != nil || sc.AsleepSince == nil || !sc.AsleepSaved || sc.MemorySaved != 3<<30 || sc.WakeError != "" || !mr.isSaved(hung) {
+		t.Fatalf("the cut wake left %+v, %v, saved %v; want the session asleep, saved and marked to wake", sc, err, mr.isSaved(hung))
+	}
+}
+
 func TestTheMemoryGuardSavesTheLongestIdleVMFirst(t *testing.T) {
 	t.Parallel()
 	e, mr := newMemoryEnv(t)
@@ -198,19 +318,19 @@ func TestTheMemoryGuardSavesTheLongestIdleVMFirst(t *testing.T) {
 	sub := e.subscribe(t)
 	mr.setAvailable(3 << 30)
 
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(older) || mr.isSaved(newer) {
 		t.Fatal("the guard did not save the longest idle VM first")
 	}
 	// 4 GiB available: above the floor, but short of the stop level.
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(newer) {
 		t.Fatal("the guard stopped saving before the stop level")
 	}
 	if ev := waitTimelineEvent(t, sub, e.runOf(t, older), events.TimelineNote); ev.Payload.(events.TimelinePayload).Message != memorySavedIdleNote {
 		t.Fatalf("the save's note = %+v", ev.Payload)
 	}
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	for _, cid := range []runtime.ID{older, newer} {
 		if run := e.runOf(t, cid); !e.asleep(run) || e.memorySaved(run) != 0 {
 			t.Fatalf("the guard woke, or marked to wake, an idle VM it saved: %s", run)
@@ -226,7 +346,7 @@ func TestTheMemoryGuardSavesAWorkingVMWhenNoneIsIdleAndWakesEachOnceItsMemoryFit
 	smallRun, bigRun := e.runOf(t, small), e.runOf(t, big)
 	mr.setAvailable(3 << 30)
 
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(big) || mr.isSaved(small) || e.memorySaved(bigRun) != 3<<30 {
 		t.Fatalf("the guard did not save the working VM using the most memory, marked to wake: saved %v %v, mark %d",
 			mr.isSaved(big), mr.isSaved(small), e.memorySaved(bigRun))
@@ -234,24 +354,24 @@ func TestTheMemoryGuardSavesAWorkingVMWhenNoneIsIdleAndWakesEachOnceItsMemoryFit
 	if sc, err := e.sched.readSidecar(bigRun); err != nil || sc.MemorySaved != 3<<30 {
 		t.Fatalf("the mark was not recorded: %+v, %v", sc.MemorySaved, err)
 	}
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(small) {
 		t.Fatal("the guard stopped saving before the stop level")
 	}
 	// 7 GiB available is above the stop level, but leaves room for neither.
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !e.asleep(bigRun) || !e.asleep(smallRun) {
 		t.Fatal("the guard woke a VM with no room for its memory")
 	}
 
 	// Room for the 1 GiB VM saved second, not for the one saved first.
 	mr.setAvailable(2*memoryFloor(32<<30) + 1<<30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if e.asleep(smallRun) || !e.asleep(bigRun) {
 		t.Fatal("the guard did not wake the VM whose memory fits, alone")
 	}
 	mr.setAvailable(2*memoryFloor(32<<30) + 3<<30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if e.asleep(bigRun) || e.memorySaved(bigRun) != 0 {
 		t.Fatal("the guard did not wake the VM it saved first once memory was back")
 	}
@@ -290,7 +410,7 @@ func TestAWakeMustFitTheMemoryItLoadsBackAndALaunchOnlyAStart(t *testing.T) {
 	vm := e.launchVM(t, mr, "say pong", 6<<30)
 	run := e.runOf(t, vm)
 	mr.setAvailable(3 << 30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(vm) {
 		t.Fatal("the guard did not save the idle VM")
 	}
@@ -326,7 +446,7 @@ func TestAWakeSavesIdleVMsUntilItsMemoryFits(t *testing.T) {
 	sleeper := e.launchVM(t, mr, "say pong", 6<<30)
 	run := e.runOf(t, sleeper)
 	mr.setAvailable(3 << 30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(sleeper) {
 		t.Fatal("the guard did not save the idle VM")
 	}
@@ -342,6 +462,47 @@ func TestAWakeSavesIdleVMsUntilItsMemoryFits(t *testing.T) {
 	}
 }
 
+// A wake whose save of an idle VM hangs waits for it memorySaveHold, saves
+// no other VM and is refused; the save goes on, and once it lands the next
+// wake fits.
+func TestAWakeStopsSavingIdleVMsAtASaveThatHangs(t *testing.T) {
+	t.Parallel()
+	e, mr := newMemoryEnv(t)
+	sleeper := e.launchVM(t, mr, "say pong", 6<<30)
+	run := e.runOf(t, sleeper)
+	mr.setAvailable(3 << 30)
+	e.guard(t)
+	if !mr.isSaved(sleeper) {
+		t.Fatal("the guard did not save the idle VM")
+	}
+	older := e.launchVM(t, mr, "say pong", 8<<30)
+	newer := e.launchVM(t, mr, "say pong", 8<<30)
+	hold := make(chan struct{})
+	unhang := sync.OnceFunc(func() { close(hold) })
+	defer unhang()
+	mr.saveMu.Lock()
+	mr.saving, mr.release = make(chan struct{}), hold
+	mr.saveMu.Unlock()
+	mr.setAvailable(memoryFloor(32<<30) + 1<<30)
+
+	start := time.Now()
+	woke := make(chan error, 1)
+	go func() { woke <- e.sched.WakeRun(t.Context(), run, "") }()
+	<-mr.saving
+	mr.saveMu.Lock()
+	mr.saving, mr.release = nil, nil
+	mr.saveMu.Unlock()
+	if err := <-woke; !errors.Is(err, ErrMemoryPressure) || time.Since(start) < memorySaveHold || mr.isSaved(newer) || !e.asleep(run) {
+		t.Fatalf("after %s the wake = %v, asleep %v, the next idle VM saved %v; want it refused after %s with nothing more saved",
+			time.Since(start), err, e.asleep(run), mr.isSaved(newer), memorySaveHold)
+	}
+	unhang()
+	waitFor(t, "the hung save landing", func() bool { return mr.isSaved(older) })
+	if err := e.sched.WakeRun(t.Context(), run, ""); err != nil || e.asleep(run) || mr.isSaved(newer) {
+		t.Fatalf("the wake after the save landed = %v, asleep %v, the other idle VM saved %v", err, e.asleep(run), mr.isSaved(newer))
+	}
+}
+
 func TestAVMStillLoadingItsMemoryCountsAgainstTheNextWake(t *testing.T) {
 	t.Parallel()
 	e, mr := newMemoryEnv(t)
@@ -349,8 +510,8 @@ func TestAVMStillLoadingItsMemoryCountsAgainstTheNextWake(t *testing.T) {
 	second := e.launchVM(t, mr, acpmock.PromptWait, 4<<30)
 	firstRun, secondRun := e.runOf(t, first), e.runOf(t, second)
 	mr.setAvailable(1 << 30)
-	e.sched.guardVMMemory(t.Context())
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
+	e.guard(t)
 	if !mr.isSaved(first) || !mr.isSaved(second) {
 		t.Fatal("the guard did not save both working VMs")
 	}
@@ -365,11 +526,11 @@ func TestAVMStillLoadingItsMemoryCountsAgainstTheNextWake(t *testing.T) {
 	// showing while the first loads.
 	room := 2*memoryFloor(32<<30) + 4<<30
 	mr.setAvailable(room)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if e.asleep(firstRun) || !e.asleep(secondRun) {
 		t.Fatal("the guard did not wake the VM saved first, alone")
 	}
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !e.asleep(secondRun) || e.memorySaved(secondRun) == 0 {
 		t.Fatal("the guard woke the second VM into memory the first has yet to load, or gave up on it")
 	}
@@ -378,12 +539,12 @@ func TestAVMStillLoadingItsMemoryCountsAgainstTheNextWake(t *testing.T) {
 	}
 
 	mr.load(first)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !e.asleep(secondRun) {
 		t.Fatal("the guard woke the second VM with no room left")
 	}
 	mr.setAvailable(room)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if e.asleep(secondRun) {
 		t.Fatal("the guard did not wake the second VM once the first had loaded and memory was back")
 	}
@@ -395,7 +556,7 @@ func TestAWakeMakesRoomForStartsInFlightAndSavesNothingThatCannotHelp(t *testing
 	sleeper := e.launchVM(t, mr, "say pong", 6<<30)
 	run := e.runOf(t, sleeper)
 	mr.setAvailable(3 << 30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(sleeper) {
 		t.Fatal("the guard did not save the idle VM")
 	}
@@ -440,7 +601,7 @@ func TestABootToCommitAndAWakeCountEachOthersMemory(t *testing.T) {
 	woken := e.launchVM(t, mr, "say pong", 6<<30)
 	for _, cid := range []runtime.ID{booted, woken} {
 		mr.setAvailable(3 << 30)
-		e.sched.guardVMMemory(t.Context())
+		e.guard(t)
 		if !mr.isSaved(cid) {
 			t.Fatal("the guard did not save the idle VMs, the longest idle first")
 		}
@@ -552,7 +713,7 @@ func TestTheMemoryGuardStopsClosedVMsWithoutSavingThem(t *testing.T) {
 	setFreeBytes(e, &free)
 	mr.setAvailable(3 << 30)
 	for range 3 {
-		e.sched.guardVMMemory(t.Context())
+		e.guard(t)
 	}
 	for _, cid := range closed {
 		if state := containerState(e.container(t, e.runOf(t, cid))); mr.isSaved(cid) || state != "stopped" {
@@ -574,11 +735,11 @@ func TestTheMemoryGuardSkipsSavesThatFailedOrWouldNotFitOnDisk(t *testing.T) {
 	mr.saveMu.Unlock()
 	mr.setAvailable(3 << 30)
 
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if n := mr.saveCount(); n != 2 {
 		t.Fatalf("the first check made %d saves, want one for each VM", n)
 	}
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if n := mr.saveCount(); n != 2 {
 		t.Fatalf("the guard tried a VM whose save just failed again: %d saves", n)
 	}
@@ -596,12 +757,12 @@ func TestTheMemoryGuardSkipsSavesThatFailedOrWouldNotFitOnDisk(t *testing.T) {
 	var free atomic.Uint64
 	free.Store(19 << 29)
 	setFreeBytes(e, &free)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if mr.isSaved(first) || mr.isSaved(second) || mr.saveCount() != 2 {
 		t.Fatal("the guard saved a VM whose memory does not fit on disk")
 	}
 	free.Store(80 << 30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(first) && !mr.isSaved(second) {
 		t.Fatal("the guard did not save a VM once its memory fit")
 	}
@@ -615,7 +776,7 @@ func TestAVMSavedWhileItWorkedSurvivesLowDiskAndWakesOnceThereIsRoom(t *testing.
 	working := e.launchVM(t, mr, acpmock.PromptWait, 3<<30)
 	run := e.runOf(t, working)
 	mr.setAvailable(3 << 30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(working) || e.memorySaved(run) != 3<<30 {
 		t.Fatal("the guard did not save the working VM")
 	}
@@ -625,13 +786,13 @@ func TestAVMSavedWhileItWorkedSurvivesLowDiskAndWakesOnceThereIsRoom(t *testing.
 	setFreeBytes(e, &free)
 	e.sched.reclaimDisk(t.Context(), "")
 	mr.setAvailable(2*memoryFloor(32<<30) + 4<<30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(working) || !e.asleep(run) || e.memorySaved(run) != 3<<30 {
 		t.Fatalf("with the disk at its reserve: saved %v, asleep %v, mark %d; want the saved turn kept and marked",
 			mr.isSaved(working), e.asleep(run), e.memorySaved(run))
 	}
 	free.Store(80 << 30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if e.asleep(run) || e.memorySaved(run) != 0 {
 		t.Fatal("the guard did not wake the VM once the disk had room")
 	}
@@ -692,24 +853,24 @@ func TestALastingStallSavesOneVMAndWakesItOnlyOnceTheStallEases(t *testing.T) {
 	e.sched.vmMemoryStallSince = time.Now().Add(-memoryStallFor)
 	e.sched.vmMemoryMu.Unlock()
 
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if mr.isSaved(working) {
 		t.Fatal("a stall with twice the floor free saved a working VM")
 	}
 	mr.setAvailable(5 << 30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if !mr.isSaved(working) || e.memorySaved(run) != 3<<30 {
 		t.Fatal("a lasting stall short of twice the floor did not save the working VM")
 	}
 	for range 2 {
-		e.sched.guardVMMemory(t.Context())
+		e.guard(t)
 		if !e.asleep(run) {
 			t.Fatal("the guard woke the VM while the stall went on")
 		}
 	}
 	writeMemoryStall(t, proc, "10.00")
 	mr.setAvailable(20 << 30)
-	e.sched.guardVMMemory(t.Context())
+	e.guard(t)
 	if e.asleep(run) {
 		t.Fatal("the guard did not wake the VM once the stall eased")
 	}
