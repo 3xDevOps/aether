@@ -33,7 +33,7 @@ const codeUnavailable = -32004
 const baseDelayMs = 500
 const maxDelayMs = 30_000
 
-/** Jittered exponential delay, shared with the hydration retry. */
+/** Jittered exponential delay for a retry. */
 export function backoff(attempt: number): number {
   const capped = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt)
   return capped * (0.5 + Math.random() / 2)

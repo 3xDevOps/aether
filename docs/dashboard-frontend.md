@@ -5229,11 +5229,16 @@ whatever opened it. Sections (`details.tsx`):
   A reply to a question nests under it behind an L connector. A teammate
   question nobody has answered also has **Reply**, which scrolls to its
   Needs you card; the owner's own question has none. The thread is
-  chronological and shows the newest five loaded notes with **Show N earlier
-  notes** above them; once every loaded note shows and history remains,
-  **Show older** (also shown when the loaded pages hold no notes) pages
-  `run.room.list` back 100 room messages at a time and expands the thread, and a failed read shows the server's error with
-  **Retry**. The count beside the title is the loaded notes, not a total.
+  chronological and shows the newest five loaded notes with
+  **Show N earlier notes** above them; once every loaded note shows and
+  history remains, **Show older** (also shown when the loaded pages hold no
+  notes) pages `run.room.list` back 100 room messages at a time and expands
+  the thread, and a failed read shows the server's error with **Retry**, as
+  does Chat's "Messages could not be read" callout, which shares the read. The
+  session's first `run.room.list` read that gets no answer at all, as when the
+  browser drops a request because a network interface changed, is retried
+  three times with backoff before its error shows. The count beside the title
+  is the loaded notes, not a total.
   A note that arrives after the thread settled, yours or a teammate's,
   fades in and rises 4px once, its body 100ms behind its header;
   the first page, **Show earlier** and older pages appear at once, and a

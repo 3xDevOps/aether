@@ -65,3 +65,60 @@ describe('resolving a note', () => {
     }
   })
 })
+
+describe('loading the room', () => {
+  const noAnswer = () => new TypeError('Failed to fetch')
+
+  async function load(list: () => Promise<{ messages: ReturnType<typeof roomMessage>[] }>) {
+    useStore.setState({ info: serverInfo })
+    const runRoomList = vi.fn(list)
+    vi.useFakeTimers()
+    try {
+      renderHook(() => useRunRoom(run(), undefined, fakeApi({ runRoomList })))
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    } finally {
+      vi.useRealTimers()
+    }
+    return { runRoomList, error: useStore.getState().roomError.run_1 }
+  }
+
+  it('retries a list that got no answer, without showing an error', async () => {
+    const note = roomMessage({ id: 'n1', kind: 'comment', actor_id: bob.id, body: 'after the blip' })
+    let calls = 0
+    const { runRoomList, error } = await load(async () => {
+      calls += 1
+      if (calls === 1) throw noAnswer()
+      return { messages: [note] }
+    })
+    expect(runRoomList).toHaveBeenCalledTimes(2)
+    expect(error).toBeUndefined()
+    expect(held('n1')).toBeDefined()
+  })
+
+  it('shows a server refusal at once', async () => {
+    const { runRoomList, error } = await load(() => Promise.reject(new ApiError(403, 'not a member of this workspace', -32003)))
+    expect(runRoomList).toHaveBeenCalledTimes(1)
+    expect(error).toContain('not a member')
+  })
+
+  it('stops retrying once the session view closes', async () => {
+    useStore.setState({ info: serverInfo })
+    const runRoomList = vi.fn(() => Promise.reject(noAnswer()))
+    vi.useFakeTimers()
+    try {
+      const { unmount } = renderHook(() => useRunRoom(run(), undefined, fakeApi({ runRoomList })))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      unmount()
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(runRoomList).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the error once its retries also get no answer', async () => {
+    const { runRoomList, error } = await load(() => Promise.reject(noAnswer()))
+    expect(runRoomList).toHaveBeenCalledTimes(4)
+    expect(error).toContain('Failed to fetch')
+  })
+})

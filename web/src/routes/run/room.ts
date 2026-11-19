@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { backoff } from '@/lib/stream'
 import type { RoomMessage, RoomMessageKind, RoomResolution, Run } from '@/lib/types'
 import type { ControlMetadata } from '@/routes/terminal/attach'
 import { sameIdentity, useStore } from '@/store'
@@ -8,6 +9,7 @@ import { isProvisional } from '@/store/collaboration'
 import { optimistic } from '@/store/optimistic'
 
 const presencePollMs = 10_000
+const noAnswerRetries = 3
 const presenceTimeoutMs = 15_000
 
 export interface RoomPost {
@@ -55,22 +57,34 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
 
   useEffect(() => {
     let active = true
+    let wait: ReturnType<typeof setTimeout> | undefined
     const s = useStore.getState()
     s.initializeRoomPagination(runID)
     s.setRoomLoading(runID, true)
-    client.runRoomList({ workspace_id: workspaceID, run_id: runID, limit: pageLimit }).then(
-      (page) => {
-        if (active) useStore.getState().setRoomPage(runID, page.messages, page.next_before)
-      },
-      (cause) => {
-        if (active) useStore.getState().setRoomError(runID, message(cause))
-      },
-    ).finally(() => {
+    // fetch's TypeError means no answer arrived; until the next room event or
+    // stream reconnect nothing reads the list again.
+    const load = (attempt: number): Promise<void> =>
+      client.runRoomList({ workspace_id: workspaceID, run_id: runID, limit: pageLimit }).then(
+        (page) => {
+          if (active) useStore.getState().setRoomPage(runID, page.messages, page.next_before)
+        },
+        (cause) => {
+          if (!active) return
+          if (cause instanceof TypeError && attempt < noAnswerRetries) {
+            return new Promise<void>((resolve) => {
+              wait = setTimeout(resolve, backoff(attempt))
+            }).then(() => (active ? load(attempt + 1) : undefined))
+          }
+          useStore.getState().setRoomError(runID, message(cause))
+        },
+      )
+    void load(0).finally(() => {
       loaded.current = true
       if (active) useStore.getState().setRoomLoading(runID, false)
     })
     return () => {
       active = false
+      clearTimeout(wait)
     }
   }, [runID, workspaceID, client])
 
