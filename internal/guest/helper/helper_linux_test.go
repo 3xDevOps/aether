@@ -22,7 +22,7 @@ import (
 
 // testProcs is the one table of the test binary: its reaper collects every
 // child, so two tables would steal each other's exits. The reaper starts
-// with the first helper a test serves, so TestKVMHelper, run alone, keeps
+// with the first test that needs it, so TestKVMHelper, run alone, keeps
 // os/exec's own waits for the VM monitor and the disk tools.
 var (
 	testProcs   = newProcesses(nil)
@@ -392,6 +392,31 @@ func TestSpawnFailures(t *testing.T) {
 	}
 	if _, err := client.Spawn(ctx, guest.ProcessSpec{ID: guest.MainID, Argv: []string{"true"}}); err == nil {
 		t.Fatal("Spawn must not start the main process")
+	}
+}
+
+// The git service logs to the helper's own stderr: a start that closed its
+// log would hand PID 1's descriptor 2 to whatever the helper opens next.
+func TestSpawnLeavesTheLogOpen(t *testing.T) {
+	startReaper.Do(func() { go reapForever(testProcs) })
+	log, err := os.Create(filepath.Join(t.TempDir(), "log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = log.Close() }()
+	p, err := testProcs.spawn(spawnSpec{
+		ProcessSpec: guest.ProcessSpec{ID: t.Name(), User: self, Argv: []string{"sh", "-c", "echo out; echo err >&2"}, Env: []string{"PATH=" + os.Getenv("PATH")}},
+		log:         log,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-p.done
+	if _, err = log.WriteString("still open\n"); err != nil {
+		t.Fatalf("the start closed its caller's log: %v", err)
+	}
+	if data, err := os.ReadFile(log.Name()); err != nil || string(data) != "out\nerr\nstill open\n" {
+		t.Errorf("log = %q, %v", data, err)
 	}
 }
 
