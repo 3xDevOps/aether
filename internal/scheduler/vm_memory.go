@@ -146,10 +146,10 @@ func (s *Scheduler) memoryStall(now time.Time) (float64, bool) {
 // the bytes the admission must find above the floor. It saves session VMs
 // nobody is using, the longest idle first, until twice the floor and need
 // are free or none is left, and none when all of them together hold too
-// little to admit it. It reports whether it saved any. It holds
+// little to admit it. It reports whether it saved any, or left a save
+// going, which ends the pass as it ends a guard check. It holds
 // vmMemoryMu, so concurrent admissions and the guard each measure what the
-// others' saves freed. A save it stops waiting for ends the pass, as it
-// ends a guard check.
+// others' saves freed.
 func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 	if _, ok := s.cfg.Runtime.(runtime.SaveRuntime); !ok {
 		return false
@@ -176,7 +176,7 @@ func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 		}
 		done, held := s.heldSave(c, false)
 		if held {
-			break
+			return true
 		}
 		saved = saved || done
 	}
@@ -189,14 +189,10 @@ func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 // on it.
 func (s *Scheduler) heldSave(c memoryCandidate, working bool) (saved, held bool) {
 	done := make(chan bool, 1)
-	s.mu.Lock()
-	c.e.memorySaving = true
-	s.mu.Unlock()
+	saving := s.markSaving(c.e)
 	s.goMove(func() {
 		saved := s.saveCandidate(s.superCtx, c, working)
-		s.mu.Lock()
-		c.e.memorySaving = false
-		s.mu.Unlock()
+		saving()
 		done <- saved
 	})
 	select {
@@ -206,6 +202,19 @@ func (s *Scheduler) heldSave(c memoryCandidate, working bool) (saved, held bool)
 	case <-time.After(memorySaveHold):
 	}
 	return false, true
+}
+
+// markSaving counts a save of entry's VM in memoryCandidates' writing until
+// the returned func runs.
+func (s *Scheduler) markSaving(entry *supervised) func() {
+	s.mu.Lock()
+	entry.memorySaving++
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		entry.memorySaving--
+		s.mu.Unlock()
+	}
 }
 
 // memoryCandidate is a running session VM a save under memory pressure may
@@ -253,10 +262,10 @@ func (s *Scheduler) memoryCandidates(ctx context.Context) (out []memoryCandidate
 	for _, e := range s.runs {
 		enhanced := e.acp && e.launchMode == domain.LaunchACP
 		_, saving := s.saver(e.containerID)
-		if saving && !e.retained && (e.sleeping || e.memorySaving) {
+		if saving && !e.retained && (e.sleeping || e.memorySaving > 0) {
 			writing += memory[e.containerID]
 		}
-		if !saving || e.sleeping || e.memorySaving || !enhanced && e.launchMode != domain.LaunchTUI || now.Sub(e.saveFailedAt) < memorySaveRetry {
+		if !saving || e.sleeping || e.memorySaving > 0 || !enhanced && e.launchMode != domain.LaunchTUI || now.Sub(e.saveFailedAt) < memorySaveRetry {
 			continue
 		}
 		switch {

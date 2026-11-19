@@ -250,7 +250,9 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	// which is harmless, and the reattach that follows proves it runs.
 	// One whose state cannot be read is not started over, which would end
 	// any process it runs.
-	info, inspectErr := s.cfg.Runtime.Inspect(context.WithoutCancel(ctx), cid)
+	inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	info, inspectErr := s.cfg.Runtime.Inspect(inspectCtx, cid)
+	cancel()
 	if inspectErr != nil {
 		return woke{}, errors.Join(restoreErr, fmt.Errorf("inspect the session's VM: %w", inspectErr))
 	}
@@ -432,6 +434,7 @@ func (s *Scheduler) resaveAsleep(ctx context.Context, entry *supervised, saver r
 	cid := entry.containerID
 	entry.paused = true
 	s.mu.Unlock()
+	defer s.markSaving(entry)()
 	detachErr := s.detachForSave(ctx, entry)
 	if err := saver.Save(ctx, cid); err != nil {
 		return errors.Join(fmt.Errorf("save the session again: %w", err), detachErr)
