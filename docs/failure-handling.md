@@ -464,14 +464,17 @@ take memory. A guest the brake froze cannot say whether it is busy, so a
 session saved after the brake froze it always wakes on its own, also when a
 launch or wake saved it to make room. It skips a
 VM whose memory is unknown or would not leave the data filesystem its
-reserve plus 4 GiB, the level below which disk cleanup deletes the saved
+reserve plus 4 GiB once the saves still under way have written theirs,
+the level below which disk cleanup deletes the saved
 memory of other sleeping sessions
 ([Recover from disk pressure](#recover-from-disk-pressure)), and for 5
 minutes one whose save failed. A save waits for Cloud Hypervisor to finish
 writing the snapshot, for as long as writing the VM's memory at 20 MiB/s
-takes plus 2 minutes, but the guard waits for it at most 30 seconds before
-it saves the next VM while that one goes on. A save that fails leaves the
-VM running; a VM that
+takes plus 2 minutes, but the guard waits for it at most 30 seconds. A
+save still running then goes on alone and ends that check, so the next
+check measures memory again and may save another VM meanwhile; a launch
+or wake that saves idle VMs to make room moves on to the next. A save
+that fails leaves the VM running; a VM that
 died instead ends its session as any VM that
 died, also when the server is shutting down: `failed`, with its work
 committed from its disks. So does, at its next wake, a session recorded
@@ -916,6 +919,8 @@ restart or update leaves sleeping VMs asleep; the next use wakes them. A
 stop cuts short a wake still running and leaves its session asleep: with
 its saved state, or, once the restore is done, with its VM running, which
 the next server saves again, or wakes if the memory guard had saved it.
+Either way the agent keeps running in the VM, and the next wake reattaches
+to it.
 
 ## What stays after a session ends
 

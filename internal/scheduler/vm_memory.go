@@ -155,7 +155,7 @@ func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 	}
 	s.vmMemoryMu.Lock()
 	defer s.vmMemoryMu.Unlock()
-	candidates := s.memoryCandidates(ctx)
+	candidates, writing := s.memoryCandidates(ctx)
 	var idle uint64
 	for _, c := range candidates {
 		if c.idle {
@@ -170,27 +170,32 @@ func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 		if available, floor, err := s.hostMemory(); err != nil || available >= 2*floor+need || !c.idle || ctx.Err() != nil {
 			break
 		}
-		if s.saveFits(c) && s.heldSave(c, false) {
-			saved = true
+		if !s.saveFits(c, writing) {
+			continue
 		}
+		done, held := s.heldSave(c, false)
+		if held {
+			writing += c.memory
+		}
+		saved = saved || done
 	}
 	return saved
 }
 
 // heldSave is saveCandidate, waited for at most memorySaveHold: a save that
-// takes longer goes on alone, holding its run's lifecycle lock, and counts
-// as not saved, so the caller moves on to the next VM. Only a shutdown ends
-// the save's context, not a caller that gave up on it.
-func (s *Scheduler) heldSave(c memoryCandidate, working bool) bool {
+// takes longer goes on alone, holding its run's lifecycle lock, and reports
+// held. Only a shutdown ends the save's context, not a caller that gave up
+// on it.
+func (s *Scheduler) heldSave(c memoryCandidate, working bool) (saved, held bool) {
 	done := make(chan bool, 1)
 	s.goMove(func() { done <- s.saveCandidate(s.superCtx, c, working) })
 	select {
 	case saved := <-done:
-		return saved
+		return saved, false
 	case <-s.superCtx.Done():
 	case <-time.After(memorySaveHold):
 	}
-	return false
+	return false, true
 }
 
 // memoryCandidate is a running session VM a save under memory pressure may
@@ -222,8 +227,9 @@ func (c memoryCandidate) rank() int {
 // agent is idle, the longest idle first, then the rest, the one holding the
 // most memory first. A run that must stay awake whatever the host is short
 // of, a Background one, and one whose save failed within memorySaveRetry
-// are left out.
-func (s *Scheduler) memoryCandidates(ctx context.Context) []memoryCandidate {
+// are left out. writing is the memory of the open VMs being saved, which
+// their saves have yet to write to disk.
+func (s *Scheduler) memoryCandidates(ctx context.Context) (out []memoryCandidate, writing uint64) {
 	type open struct {
 		e        *supervised
 		cid      runtime.ID
@@ -232,12 +238,14 @@ func (s *Scheduler) memoryCandidates(ctx context.Context) []memoryCandidate {
 	}
 	memory := s.vmMemoryUse(ctx)
 	now := time.Now().UTC()
-	var out []memoryCandidate
 	var opens []open
 	s.mu.Lock()
 	for _, e := range s.runs {
 		enhanced := e.acp && e.launchMode == domain.LaunchACP
 		_, saving := s.saver(e.containerID)
+		if saving && e.sleeping && !e.retained {
+			writing += memory[e.containerID]
+		}
 		if !saving || e.sleeping || !enhanced && e.launchMode != domain.LaunchTUI || now.Sub(e.saveFailedAt) < memorySaveRetry {
 			continue
 		}
@@ -269,20 +277,25 @@ func (s *Scheduler) memoryCandidates(ctx context.Context) []memoryCandidate {
 		}
 		return cmp.Or(cmp.Compare(a.rank(), b.rank()), a.since.Compare(b.since))
 	})
-	return out
+	return out, writing
 }
 
 // saveForMemory saves one awake session VM, the first memoryCandidates
 // gives whose memory fits on the data filesystem above its reserve; with
 // working, one whose agent works too. A guest still busy on its CPU, or a
 // working agent, is marked to wake again once memory is back. It reports
-// whether it saved one.
+// whether it saved one or left its save going on alone, which ends the
+// check: memory is measured again before another save.
 func (s *Scheduler) saveForMemory(ctx context.Context, working bool) bool {
-	for _, c := range s.memoryCandidates(ctx) {
+	candidates, writing := s.memoryCandidates(ctx)
+	for _, c := range candidates {
 		if !working && !c.idle {
 			break
 		}
-		if s.saveFits(c) && s.heldSave(c, working) {
+		if !s.saveFits(c, writing) {
+			continue
+		}
+		if saved, held := s.heldSave(c, working); saved || held {
 			return true
 		}
 	}
@@ -291,10 +304,11 @@ func (s *Scheduler) saveForMemory(ctx context.Context, working bool) bool {
 
 // saveFits reports whether c's saved memory fits on the data filesystem,
 // which holds the VMs' disks, above the level below which disk reclaim
-// deletes the saved memory of other sleeping sessions. A VM whose memory is
-// unknown does not: its save could write anything. A closed one always
-// does, as it is stopped and writes nothing.
-func (s *Scheduler) saveFits(c memoryCandidate) bool {
+// deletes the saved memory of other sleeping sessions, once the saves still
+// writing have written theirs. A VM whose memory is unknown does not: its
+// save could write anything. A closed one always does, as it is stopped and
+// writes nothing.
+func (s *Scheduler) saveFits(c memoryCandidate, writing uint64) bool {
 	if c.closed {
 		return true
 	}
@@ -309,8 +323,8 @@ func (s *Scheduler) saveFits(c memoryCandidate) bool {
 		slog.Warn("scheduler: memory guard: measure the data filesystem", "error", err)
 		return false
 	}
-	if data.FreeBytes < diskReserve(data.TotalBytes, s.cfg.MinFreeBytes)+reclaimHeadroom+c.memory {
-		slog.Warn("scheduler: memory guard: no room on disk to save a session VM", "run", c.e.runID, "memory", c.memory, "free", data.FreeBytes)
+	if data.FreeBytes < diskReserve(data.TotalBytes, s.cfg.MinFreeBytes)+reclaimHeadroom+writing+c.memory {
+		slog.Warn("scheduler: memory guard: no room on disk to save a session VM", "run", c.e.runID, "memory", c.memory, "writing", writing, "free", data.FreeBytes)
 		return false
 	}
 	return true

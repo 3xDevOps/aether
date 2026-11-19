@@ -201,14 +201,22 @@ func (e *testEnv) guard(t *testing.T) {
 	})
 }
 
-// A save that hangs holds up the guard's save of another VM for
-// memorySaveHold, and then goes on alone.
+// A save that hangs holds up the guard for memorySaveHold, and then goes on
+// alone: that check saves no other VM, and a later one saves the next once
+// the disk has room for both VMs' memory.
 func TestAHungSaveHoldsUpTheGuardOnlySoLong(t *testing.T) {
 	t.Parallel()
 	e, mr := newMemoryEnv(t)
 	big := e.launchVM(t, mr, acpmock.PromptWait, 3<<30)
 	small := e.launchVM(t, mr, acpmock.PromptWait, 1<<30)
+	// A 100 GiB disk keeps 5 GiB, and below 9 GiB free disk reclaim deletes
+	// other sessions' saved memory: 12 GiB free holds either VM's, not both.
+	var free atomic.Uint64
+	free.Store(12 << 30)
+	setFreeBytes(e, &free)
 	hold := make(chan struct{})
+	unhang := sync.OnceFunc(func() { close(hold) })
+	defer unhang()
 	mr.saveMu.Lock()
 	mr.saving, mr.release = make(chan struct{}), hold
 	mr.saveMu.Unlock()
@@ -229,10 +237,19 @@ func TestAHungSaveHoldsUpTheGuardOnlySoLong(t *testing.T) {
 	case <-time.After(memorySaveHold + 10*time.Second):
 		t.Fatal("the guard waited on the hung save")
 	}
-	if took := time.Since(start); took < memorySaveHold || !mr.isSaved(small) || mr.isSaved(big) {
-		t.Fatalf("after %s the guard saved the small VM %v, the hung one %v; want the small one after %s", took, mr.isSaved(small), mr.isSaved(big), memorySaveHold)
+	if took := time.Since(start); took < memorySaveHold || mr.isSaved(small) || mr.isSaved(big) {
+		t.Fatalf("after %s the guard saved the small VM %v, the hung one %v; want neither, after %s", took, mr.isSaved(small), mr.isSaved(big), memorySaveHold)
 	}
-	close(hold)
+	e.guard(t)
+	if mr.isSaved(small) {
+		t.Fatal("the guard saved a VM whose memory fits on disk only if the hung save writes nothing")
+	}
+	free.Store(13 << 30)
+	e.guard(t)
+	if !mr.isSaved(small) || mr.isSaved(big) {
+		t.Fatalf("with room on disk the guard saved the small VM %v, the hung one %v; want the small one while the other hangs", mr.isSaved(small), mr.isSaved(big))
+	}
+	unhang()
 	waitFor(t, "the hung save finishing", func() bool { return mr.isSaved(big) && e.asleep(e.runOf(t, big)) })
 }
 
