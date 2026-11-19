@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { AppShell } from '@/components/shell/app-shell'
 import { CheckPills } from '@/components/workflow/git-checks'
+import type * as xtermHostModule from '@/components/xterm-host'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import type { AssistantStatus, ViewContext } from '@/lib/assistant-types'
@@ -12,6 +13,13 @@ import { duplicateSendWindow, promptKey, settlePromptKey } from '@/store/assista
 import { item, resetItems, ScriptedSession, say, state } from '@/test/acp-stream'
 import { alice, run, runRecords, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
+
+// Every xterm in this file is off: the run page is only the context these
+// cases ask about, and none of them read a terminal (docs/testing.md).
+vi.mock('@/components/xterm-host', async (importOriginal) => {
+  const actual = await importOriginal<typeof xtermHostModule>()
+  return { ...actual, useXterm: (options?: Parameters<typeof actual.useXterm>[0]) => actual.useXterm({ ...options, enabled: false }) }
+})
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof apiModule>()
@@ -90,6 +98,12 @@ async function openPanel(extra?: React.ReactNode) {
   return aside
 }
 
+/** Removing a chip moves focus to its neighbour on the next frame, taking it from wherever the member put it before then. */
+async function removeChip(aside: HTMLElement, name: string) {
+  await userEvent.click(within(aside).getByRole('button', { name }))
+  await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+}
+
 const box = (aside: HTMLElement) => within(aside).getByRole('textbox', { name: 'Message the assistant' }) as HTMLTextAreaElement
 const sent = (call = 0) => vi.mocked(api.assistantPrompt).mock.calls[call]![2] as ViewContext | undefined
 
@@ -109,8 +123,7 @@ describe('pinning the page a draft was started on', () => {
     await userEvent.click(within(aside).getByRole('button', { name: /^Send/ }))
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
     expect(sent()?.route).toMatchObject({ name: 'run', run_id: login.id })
-    // Its typed keystrokes take over 5 s when the full suite loads the machine.
-  }, 15_000)
+  })
 
   it('sends the page moved to once the member picks it', async () => {
     const aside = await openPanel()
@@ -169,7 +182,7 @@ describe('attachments', () => {
     })
     const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
     await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
-    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    await removeChip(aside, 'Remove page Fix login test from the message')
     await userEvent.type(box(aside), '{Enter}')
     await waitFor(() => expect(order).toContain('forget'))
     expect(order).not.toContain('prompt')
@@ -184,10 +197,10 @@ describe('attachments', () => {
     vi.mocked(api.assistantView).mockImplementation((context) => context.route ? Promise.resolve({}) : new Promise((resolve) => { land = () => resolve({}) }))
     const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
     await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
-    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    await removeChip(aside, 'Remove page Fix login test from the message')
     await userEvent.type(box(aside), '{Enter}')
     await waitFor(() => expect(land).toBeDefined())
-    await userEvent.click(within(aside).getByRole('button', { name: 'Remove check lint from the message' }))
+    await removeChip(aside, 'Remove check lint from the message')
     act(() => land())
     await waitFor(() => expect(useStore.getState().assistantSending).toBe(false))
     expect(api.assistantPrompt).not.toHaveBeenCalled()
@@ -214,7 +227,7 @@ describe('attachments', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
     await userEvent.type(box(aside), '{Enter}')
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
-    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    await removeChip(aside, 'Remove page Fix login test from the message')
     act(() => reply())
     await waitFor(() => expect(useStore.getState().assistantSending).toBe(false))
     expect(box(aside).value).toBe('')
@@ -239,7 +252,7 @@ describe('attachments', () => {
     })
     const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
     await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
-    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    await removeChip(aside, 'Remove page Fix login test from the message')
     await userEvent.type(box(aside), '{Enter}')
     expect(await within(aside).findByRole('alert')).toHaveProperty('textContent', 'assistant.view: connection reset')
     expect(api.assistantPrompt).not.toHaveBeenCalled()
@@ -251,7 +264,7 @@ describe('attachments', () => {
     await userEvent.type(await within(aside).findByRole('textbox', { name: 'Message the assistant' }), 'my own words')
     await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
     expect(box(aside).value).toBe('my own words')
-    await userEvent.click(within(aside).getByRole('button', { name: 'Remove check lint from the message' }))
+    await removeChip(aside, 'Remove check lint from the message')
     await userEvent.type(box(aside), '{Enter}')
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
     expect(sent()?.attachments).toBeUndefined()
@@ -325,7 +338,7 @@ describe('the composer', () => {
     const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
     await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
     fireEvent.keyDown(box(aside), { key: 'Enter' })
-    await userEvent.click(within(aside).getByRole('button', { name: 'Remove check lint from the message' }))
+    await removeChip(aside, 'Remove check lint from the message')
     await act(async () => keyed())
     expect(api.assistantPrompt).not.toHaveBeenCalled()
 
@@ -442,7 +455,7 @@ describe('one chip per target', () => {
     const aside = await openPanel()
     act(() => useStore.getState().askAssistant({ draft: 'Fix this', attachments: [{ kind: 'run', workspace_id: workspace.id, run_id: login.id, label: login.id }] }))
     const chips = within(aside).getByRole('list', { name: 'Sent with this message' })
-    await userEvent.click(within(chips).getByRole('button', { name: 'Remove session Fix login test from the message' }))
+    await removeChip(aside, 'Remove session Fix login test from the message')
     expect(within(chips).queryByText('Fix login test')).toBeNull()
     expect(within(aside).getByRole('button', { name: 'Add this page' })).toBeDefined()
     await userEvent.type(box(aside), '{Enter}')
