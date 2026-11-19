@@ -94,9 +94,8 @@ func backingPins(dir string, rec *record) []string {
 // the database and every other VM's files are gone, and only the host paths
 // this VM needs are bound back, writable only where it writes. The unit
 // gains no privilege by exec, cannot touch the kernel, control groups, clock
-// or any device but /dev/kvm and /dev/net/tun, plus /dev/userfaultfd for a
-// restore, which loads guest memory on demand through it, and keeps only
-// the capabilities its processes use. Cloud Hypervisor makes the VM's tap, which
+// or any device but /dev/kvm and /dev/net/tun, and keeps only the
+// capabilities its processes use. Cloud Hypervisor makes the VM's tap, which
 // takes CAP_NET_ADMIN; without netlink it cannot touch the host's firewall
 // or routes through it.
 func sandbox(dataDir, monitor string, rec *record, l launch) []string {
@@ -115,9 +114,6 @@ func sandbox(dataDir, monitor string, rec *record, l launch) []string {
 		"RestrictAddressFamilies=AF_UNIX AF_INET",
 		"TemporaryFileSystem=" + dataDir + ":ro",
 		"CapabilityBoundingSet=" + strings.Join(caps, " "),
-	}
-	if slices.Contains(l.Args, "--restore") {
-		props = append(props, "DeviceAllow=/dev/userfaultfd rw")
 	}
 	// ProtectHome hides the host's home directories from a monitor escape,
 	// but it hides them past every bind, so it is left off when the data

@@ -718,6 +718,9 @@ func (e *engine) startKept(ctx context.Context, key string) error {
 	return fmt.Errorf("%w: %w", runtime.ErrStartLater, err)
 }
 
+// waitHelper waits for the guest's helper to answer. A guest that restarted
+// first is not the one awaited, whatever answers after: a restored guest
+// that dies comes back from its disks, with none of its processes.
 func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 	ctx, cancel := context.WithTimeout(ctx, bootTimeout)
 	defer cancel()
@@ -733,6 +736,9 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 	for {
 		select {
 		case err := <-answered:
+			if e.rebooted(key) {
+				return fmt.Errorf("vm runtime: the guest of VM %s restarted instead of answering%s", key, e.logTail(key))
+			}
 			if err != nil {
 				return fmt.Errorf("vm runtime: helper of VM %s did not answer: %w%s", key, err, e.logTail(key))
 			}
@@ -744,6 +750,10 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 			}
 			return nil
 		case <-tick.C:
+			if e.rebooted(key) {
+				cancel()
+				return fmt.Errorf("vm runtime: the guest of VM %s restarted instead of answering%s", key, e.logTail(key))
+			}
 			if st, err := e.units.State(ctx, unitName(key)); err == nil && !st.Active {
 				cancel()
 				return fmt.Errorf("vm runtime: VM %s stopped while booting%s", key, e.logTail(key))

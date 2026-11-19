@@ -87,18 +87,16 @@ The old names keep working, with no end date.
 With `session-runtime vm`, each session runs in its own Cloud Hypervisor
 virtual machine ([environments.md](environments.md#sessions-in-virtual-machines)).
 The host must be x86-64 and expose `/dev/kvm`: bare metal, or a cloud VM with
-nested virtualization. It needs Linux 6.1 or newer built with
-`CONFIG_USERFAULTFD`, whose `/dev/userfaultfd` restores a sleeping session's
-VM. Install a server for it with:
+nested virtualization. Install a server for it with:
 
 ```sh
 sudo cloudfield-server install --session-runtime vm   # a new server
 sudo cloudfield-server vm install                     # a server already installed
 ```
 
-Both first open `/dev/kvm` and `/dev/userfaultfd` and stop with the error
-when they cannot, such as `session VMs need KVM: open /dev/kvm: no such file
-or directory`; `install` then writes nothing. They install `qemu-img`, `mkfs.ext4`,
+Both first open `/dev/kvm` and stop with the error when they cannot, such as
+`session VMs need KVM: open /dev/kvm: no such file or directory`; `install`
+then writes nothing. They install `qemu-img`, `mkfs.ext4`,
 `/usr/libexec/virtiofsd`, `iptables`, `nft` and `ip` with `apt-get` when
 missing (Debian 12 or Ubuntu 24.04 and newer ship `virtiofsd` at that path), Cloud Hypervisor
 v54.1 at `/usr/local/bin/cloud-hypervisor` after checking its SHA-256, the

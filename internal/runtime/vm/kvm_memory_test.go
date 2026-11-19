@@ -162,9 +162,6 @@ func TestKVMWakeLoadsBackWhatWasSaved(t *testing.T) {
 	if err = e.restore(t.Context(), key); err != nil {
 		t.Fatal(err)
 	}
-	guestFields(t, e, key, "cat /dev/shm/fill >/dev/null", 0)
-	// Cloud Hypervisor loads what the guest did not touch in the background.
-	time.Sleep(10 * time.Second)
 	after := held()
 	if after < fill || after > saved+start {
 		t.Errorf("the woken VM holds %d bytes, want the %d it filled and at most the %d saved plus a start", after, uint64(fill), saved)

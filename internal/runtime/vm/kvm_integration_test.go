@@ -223,13 +223,22 @@ func TestKVMSessionLifecycle(t *testing.T) {
 	}
 }
 
-func TestKVMSaveRestoreKeepsProcesses(t *testing.T) {
+// TestKVMRepeatedSaveAndWakeKeepsMemoryAndProcesses saves and wakes one VM
+// six times. Its 5 GiB put memory the guest's kernel uses past 4 GiB, which
+// Cloud Hypervisor maps apart from the first 3 GiB. Every wake must find the
+// boot and processes it left, and 1 GiB of random bytes must read back
+// unchanged; every other save comes with almost nothing touched since the
+// wake. Restored on demand, all 7 such VMs came back rebooted from their
+// disks by their third wake: a page a host process had read through
+// /proc/<pid>/mem before Cloud Hypervisor registered its userfaultfd kept
+// zeros, since Cloud Hypervisor takes a page that is already there as loaded.
+func TestKVMRepeatedSaveAndWakeKeepsMemoryAndProcesses(t *testing.T) {
 	e := kvmEngine(t)
 	key := "run-vmtest-b"
 	t.Cleanup(func() { _ = e.destroy(context.Background(), key) })
 	spec := runtime.Spec{
 		Image: "docker.io/library/ubuntu:24.04", CreationKey: key, Command: []string{"/bin/sh", "-c", "exec sleep infinity"},
-		Env: map[string]string{"AETHER_RUN_ID": key}, CPULimit: 2, MemoryLimitBytes: 2 << 30,
+		Env: map[string]string{"AETHER_RUN_ID": key}, CPULimit: 2, MemoryLimitBytes: 5 << 30,
 	}
 	if _, err := e.create(t.Context(), spec.CreationKey, spec, options{}); err != nil {
 		t.Fatal(err)
@@ -237,19 +246,17 @@ func TestKVMSaveRestoreKeepsProcesses(t *testing.T) {
 	if err := e.start(t.Context(), key); err != nil {
 		t.Fatal(err)
 	}
-	// The file in the tmpfs makes the saved memory over 1.5 GiB.
-	before, _ := vmRun(t, e, key, "mount -o remount,size=1700M /dev/shm; head -c 1536M /dev/urandom >/dev/shm/fill; setsid sleep 4000 </dev/null >/dev/null 2>&1 & sleep 0.5; pgrep -x sleep | sort | tr '\\n' ' '; cat /proc/sys/kernel/random/boot_id")
-	// The second save comes right after a wake, while Cloud Hypervisor still
-	// loads the saved memory.
-	for round := range 2 {
+	const alive = "pgrep -x sleep | sort | tr '\\n' ' '; cat /proc/sys/kernel/random/boot_id"
+	sum, _ := vmRun(t, e, key, "mount -o remount,size=90% /dev/shm; head -c 1024M /dev/urandom >/dev/shm/fill; "+
+		"setsid sleep 4000 </dev/null >/dev/null 2>&1 & cksum </dev/shm/fill")
+	before, _ := vmRun(t, e, key, alive)
+	for cycle := range 6 {
 		start := time.Now()
 		if err := e.save(t.Context(), key); err != nil {
-			t.Fatal(err)
+			t.Fatalf("save %d: %v", cycle, err)
 		}
-		t.Logf("save %d took %s", round, time.Since(start))
-		if up, _ := e.running(t.Context(), key); up {
-			t.Fatal("the VM still runs after save")
-		}
+		saved, _ := e.savedMemory(key)
+		saveTook := time.Since(start)
 		// A VM asleep for minutes on a busy host has its saved memory on
 		// disk, not in the page cache.
 		unix.Sync()
@@ -258,22 +265,22 @@ func TestKVMSaveRestoreKeepsProcesses(t *testing.T) {
 		}
 		start = time.Now()
 		if err := e.restore(t.Context(), key); err != nil {
-			t.Fatal(err)
+			t.Fatalf("restore %d: %v", cycle, err)
 		}
-		t.Logf("restore %d took %s", round, time.Since(start))
-		if round == 0 {
+		t.Logf("cycle %d: the save took %s and wrote %d MiB, the restore %s", cycle, saveTook.Round(time.Millisecond), saved>>20, time.Since(start).Round(time.Millisecond))
+		if _, err := os.Stat(e.path(key, snapshotDir)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("cycle %d: the saved state outlived the wake that used it: %v", cycle, err)
+		}
+		if after, _ := vmRun(t, e, key, alive); after != before {
+			t.Fatalf("cycle %d: after the wake the guest has processes and boot %q, want %q%s", cycle, after, before, e.logTail(key))
+		}
+		if cycle%2 == 0 {
 			continue
 		}
-		vmRun(t, e, key, "true")
-		t.Logf("first exec %s after the restore began", time.Since(start))
-		vmRun(t, e, key, "cat /dev/shm/fill >/dev/null")
-		t.Logf("the guest read all its memory %s after the restore began", time.Since(start))
+		if got, _ := vmRun(t, e, key, "cksum </dev/shm/fill"); got != sum {
+			t.Fatalf("cycle %d: the guest's memory reads back as %q, want %q", cycle, got, sum)
+		}
 	}
-	after, _ := vmRun(t, e, key, "pgrep -x sleep | sort | tr '\\n' ' '; cat /proc/sys/kernel/random/boot_id")
-	if before != after {
-		t.Errorf("processes or boot changed across save and restore:\n%s\nvs\n%s", before, after)
-	}
-	t.Logf("same processes and boot after restore: %s", strings.TrimSpace(after))
 }
 
 func kvmSession(t *testing.T, e *engine, key string, mounts ...runtime.Mount) {
