@@ -37,6 +37,10 @@ expect go false web/package.json web/bun.lock
 expect go false web/e2e/foo.spec.ts docs/testing.md
 expect go false docs/testing.md README.md
 expect go true web/embed.go
+expect go true web/public/cloudfield-favicon.svg
+expect go true web/public/icons/favicon-32.png
+expect go true web/src/components/ui/agent-glyph.tsx
+expect go false web/src/components/ui/button.tsx
 expect go true web/src/app.tsx internal/store/store.go
 expect go true internal/store/store.go
 expect go true Makefile

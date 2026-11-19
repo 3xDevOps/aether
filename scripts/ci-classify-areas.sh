@@ -47,9 +47,12 @@ web() {
 	esac
 }
 
+# web/public and agent-glyph.tsx are read by Go tests (internal/edge/service,
+# internal/connector, internal/harness) that check their copies match.
 go() {
 	case $1 in
-	web/embed.go | go.mod | go.sum | Makefile | scripts/ci-classify-* | \
+	web/embed.go | web/public/* | web/src/components/ui/agent-glyph.tsx | \
+		go.mod | go.sum | Makefile | scripts/ci-classify-* | \
 		.github/actions/* | .github/workflows/ci.yml)
 		return 0
 		;;
