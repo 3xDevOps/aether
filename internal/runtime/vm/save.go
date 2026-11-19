@@ -269,17 +269,17 @@ func (e *engine) restore(ctx context.Context, key string) error {
 	// says of a guest that ran.
 	after := context.WithoutCancel(ctx)
 	unwritten := func() bool {
-		now, err := diskTimes(dir)
-		return err == nil && maps.Equal(rec.Resumed, now)
+		now, timesErr := diskTimes(dir)
+		return timesErr == nil && maps.Equal(rec.Resumed, now)
 	}
 	drop := func(cause error) error {
 		rec.Saved, rec.Resumed, rec.Exited, rec.ExitCode = false, nil, true, lostExitCode
 		rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
-		err := e.store(rec)
-		if err == nil {
-			err = os.RemoveAll(dir)
+		dropErr := e.store(rec)
+		if dropErr == nil {
+			dropErr = os.RemoveAll(dir)
 		}
-		return errors.Join(fmt.Errorf("%w; its guest wrote its disks, so its saved state is dropped: %w", cause, runtime.ErrNotSaved), err)
+		return errors.Join(fmt.Errorf("%w; its guest wrote its disks, so its saved state is dropped: %w", cause, runtime.ErrNotSaved), dropErr)
 	}
 	// A monitor an earlier restore resumed holds the guest, which only has
 	// to answer. Any other holds it paused at the saved state, as a server
@@ -293,8 +293,8 @@ func (e *engine) restore(ctx context.Context, key string) error {
 		}
 		// The guest's mounts were made at boot: the shares keep the indexes
 		// they had then, whatever the host holds now.
-		booted, err := readLaunch(e.dir(key))
-		if err != nil {
+		var booted launch
+		if booted, err = readLaunch(e.dir(key)); err != nil {
 			return err
 		}
 		l := launch{Home: booted.Home, Reveal: booted.Reveal, Args: []string{
