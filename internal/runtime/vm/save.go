@@ -274,7 +274,7 @@ func (e *engine) restore(ctx context.Context, key string) (err error) {
 		return err
 	}
 	if !rec.Saved {
-		return fmt.Errorf("vm runtime: restore VM %s: it has no saved state", key)
+		return fmt.Errorf("vm runtime: restore VM %s: %w", key, runtime.ErrNotSaved)
 	}
 	up, err := e.running(ctx, key)
 	if err != nil {

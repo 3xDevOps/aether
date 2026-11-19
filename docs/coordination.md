@@ -1419,7 +1419,10 @@ What a report does depends on the session:
   input request. A report does not start a retention timer or publish a
   result commit. Use the normal Git workflow to deliver changes, then
   **Close** when finished with the session. Close commits and publishes
-  remaining work and starts the default seven-day container grace.
+  remaining work and keeps the sandbox for **Relaunch**: by default 30
+  days, or 7 for a container that stays frozen in memory
+  (`--run-container-ttl`;
+  [Relaunching a closed session](failure-handling.md#relaunching-a-closed-session)).
 - **Background session** (`headless`). Success or failure still finishes the session
   after its turn ends, or on process exit. For an agent without a status
   reporter, the first `--poll-interval` check two minutes after the report
@@ -1613,8 +1616,9 @@ agent's serialized PTY input path and records the delivery separately.
 
 Active sessions and explicitly closed Standard sessions keep their
 socket, unread mailbox, and timeline entries through a server restart.
-Closed sessions retain their exact paused (or already exited) container,
-checkout, row, and member account for `--run-container-ttl` (default 7 days).
+Closed sessions retain their exact paused (or already exited) container, or
+their stopped VM's disks, with the checkout, row, and member account for `--run-container-ttl` (default
+30 days, or 7 for a container that stays frozen in memory).
 The session's dashboard view, transcript, Changes and Captures remain available;
 retention does not grant live input or wake authority. Explicit Kill, Delete,
 and subsession cancellation still destroy the

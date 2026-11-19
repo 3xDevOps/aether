@@ -411,6 +411,25 @@ func (r *Runtime) Restore(ctx context.Context, id runtime.ID) error {
 	return r.vms.restore(ctx, key)
 }
 
+func (r *Runtime) SetCommand(_ context.Context, id runtime.ID, command []string) error {
+	key, ok := vmKey(id)
+	if !ok {
+		return errors.New("vm runtime: only a session VM takes a new command; Docker containers cannot")
+	}
+	return r.vms.setCommand(key, command)
+}
+
+func (e *engine) setCommand(key string, command []string) error {
+	unlock := e.lock(key)
+	defer unlock()
+	rec, err := e.load(key)
+	if err != nil {
+		return err
+	}
+	rec.Command = command
+	return e.store(rec)
+}
+
 // SessionVMs tells the scheduler that sessions run in VMs, whose host files
 // need no ownership pass.
 func (r *Runtime) SessionVMs() {}

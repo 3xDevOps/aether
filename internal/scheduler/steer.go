@@ -985,7 +985,20 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 				entry.evidenceIdentity = identity
 			}
 			s.mu.Unlock()
+			// A VM, or a container created for Enhanced, whose main process
+			// is a bare shell, stops below and keeps only its disks. Docker
+			// starts any other container only with its launch command, with
+			// the task, so it stays frozen with its memory, which nothing
+			// reclaims, and is kept for frozenTTL.
+			_, saving := s.saver(cid)
+			s.mu.Lock()
+			enhanced := entry.acp && mode == domain.LaunchACP
+			s.mu.Unlock()
+			stops := saving || enhanced && s.launchedEnhanced(ctx, entry)
 			ttl := s.cfg.RunContainerTTL
+			if !stops {
+				ttl = s.frozenTTL
+			}
 			deadline := time.Now().UTC().Add(ttl)
 			retentionReason := closeReason
 			if ttl < 0 {
@@ -1047,11 +1060,12 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 				s.destroyClosedRetained(ctx, entry)
 				return nil
 			}
-			// A closed VM sleeps at once: unlike a frozen container, it gives
-			// its memory back. The sleep sweep tries again if this fails.
-			if _, saving := s.saver(cid); saving && s.cfg.VMSleepAfter > 0 {
+			// Relaunch starts it from its disks. One this could not stop
+			// stays paused, for the sleep sweep, where sleep is on, or for a
+			// VM the memory guard to stop.
+			if stops {
 				if err := s.sleepClosedLocked(ctx, entry); err != nil && !errors.Is(err, errStayAwake) {
-					slog.Warn("scheduler: save a closed session", "run", run, "error", err)
+					slog.Warn("scheduler: stop a closed session's sandbox", "run", run, "error", err)
 				}
 			}
 			return nil

@@ -223,7 +223,7 @@ func (s *Scheduler) memoryCandidates(ctx context.Context) []memoryCandidate {
 		switch {
 		case !e.asleepSince.IsZero():
 			if !e.asleepSaved && memory[e.containerID] > 0 {
-				out = append(out, memoryCandidate{e: e, cid: e.containerID, asleep: true, idle: true, memory: memory[e.containerID]})
+				out = append(out, memoryCandidate{e: e, cid: e.containerID, closed: e.retained, asleep: true, idle: true, memory: memory[e.containerID]})
 			}
 		case e.retained && e.paused && !e.destroyPending && !e.evidencePending && e.retainedUntil != nil:
 			out = append(out, memoryCandidate{e: e, cid: e.containerID, closed: true, idle: true, memory: memory[e.containerID]})
@@ -271,8 +271,12 @@ func (s *Scheduler) saveForMemory(ctx context.Context, working bool) bool {
 // saveFits reports whether c's saved memory fits on the data filesystem,
 // which holds the VMs' disks, above the level below which disk reclaim
 // deletes the saved memory of other sleeping sessions. A VM whose memory is
-// unknown does not: its save could write anything.
+// unknown does not: its save could write anything. A closed one always
+// does, as it is stopped and writes nothing.
 func (s *Scheduler) saveFits(c memoryCandidate) bool {
+	if c.closed {
+		return true
+	}
 	if c.memory == 0 {
 		return false
 	}
@@ -301,17 +305,33 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 		return false
 	}
 	defer c.e.lifecycleMu.Unlock()
-	if c.closed {
-		return s.savedForMemory(ctx, c.e, s.sleepClosedLocked(ctx, c.e), "")
-	}
 	if c.asleep {
 		s.mu.Lock()
+		closed := s.runs[c.e.runID] == c.e && c.e.retained && !c.e.asleepSince.IsZero()
 		note := memorySavedIdleNote
 		if c.e.memorySaved > 0 {
 			note = memorySavedFrozenNote
 		}
 		s.mu.Unlock()
+		// A closed session keeps no memory: its VM is stopped instead. One
+		// already stopped lingers for its checkout until the runtime powers
+		// it off, and a stop frees nothing more.
+		if closed {
+			if info, err := s.cfg.Runtime.Inspect(ctx, c.cid); err == nil && info.Exited {
+				return false
+			}
+			err := s.stopLeftoverAsleep(ctx, c.e)
+			if err != nil {
+				s.mu.Lock()
+				c.e.saveFailedAt = time.Now().UTC()
+				s.mu.Unlock()
+			}
+			return s.savedForMemory(ctx, c.e, err, "")
+		}
 		return s.savedForMemory(ctx, c.e, s.saveAsleepRunning(ctx, c.e), note)
+	}
+	if c.closed {
+		return s.savedForMemory(ctx, c.e, s.sleepClosedLocked(ctx, c.e), "")
 	}
 	s.mu.Lock()
 	cid := c.e.containerID
@@ -371,11 +391,11 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 	return s.savedForMemory(ctx, c.e, s.saveMarked(ctx, c.e, saver, frozen), note)
 }
 
-// savedForMemory logs a save under memory pressure and publishes its
-// timeline note, if any.
+// savedForMemory logs a save under memory pressure, or a closed session's
+// stop, and publishes its timeline note, if any.
 func (s *Scheduler) savedForMemory(ctx context.Context, e *supervised, err error, note string) bool {
 	s.mu.Lock()
-	saved := e.asleepSaved && !e.asleepSince.IsZero()
+	saved := !e.asleepSince.IsZero() && (e.asleepSaved || e.retained && err == nil)
 	wakeAt := e.memorySaved
 	s.mu.Unlock()
 	if err != nil && !errors.Is(err, errStayAwake) {

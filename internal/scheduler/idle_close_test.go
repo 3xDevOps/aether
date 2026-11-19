@@ -38,8 +38,8 @@ func TestASessionIdleForSevenDaysIsClosedAndCanBeRelaunched(t *testing.T) {
 	if ev := waitTimelineEvent(t, sub, asleep.ID, events.TimelineNote); ev.Payload.(events.TimelinePayload).Message != idleClosedNote {
 		t.Fatalf("the close's note = %+v", ev.Payload)
 	}
-	if !sr.isSaved(e.cid(t, asleep.ID)) {
-		t.Fatal("the closed VM was not saved as a closed session's is")
+	if sr.isSaved(e.cid(t, asleep.ID)) || containerState(e.container(t, asleep.ID)) != "stopped" {
+		t.Fatal("the closed VM was not stopped without saved memory, as a closed session is")
 	}
 	if got, _ := e.db.GetRun(t.Context(), stuck.ID); !got.Status.Terminal() {
 		t.Fatal("a session whose turn made no progress for 7 days stayed open")

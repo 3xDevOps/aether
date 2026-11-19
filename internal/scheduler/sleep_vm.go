@@ -1,11 +1,13 @@
 package scheduler
 
 import (
+	"cmp"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
+	"maps"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -21,16 +23,35 @@ type woke struct {
 	// restoreErr is why a VM's saved state could not be restored, so it
 	// started again from its disks.
 	restoreErr error
+	// closed is a closed session's VM or container, which a Relaunch
+	// started.
+	closed bool
+	// newConversation is a Standard agent started from the VM's disks that
+	// could not reopen its conversation.
+	newConversation bool
+	// unproven is an agent started from the disks that is not known to
+	// reopen its conversation: an Enhanced one that may not restore it in a
+	// new process, or a Standard one whose conversation may be gone.
+	unproven bool
 }
 
 func (w woke) notice() string {
+	kept := "the conversation, files and checkout are kept."
+	switch {
+	case w.newConversation:
+		kept = "the files and checkout are kept. The agent could not reopen its conversation, so it starts a new one; the earlier one stays in this terminal's history."
+	case w.unproven:
+		kept = "the files and checkout are kept, and the agent restores its conversation if it can."
+	}
 	switch {
 	case w.restored:
 		return "Cloudfield had saved this session to disk and restored it. Its processes, terminals and conversation carry on where they were; connections to outside the session may have dropped while it slept."
 	case w.restoreErr != nil:
-		return "Cloudfield could not restore this session's saved state, so it started the session again from its disk. Processes and terminals that were running were stopped; the conversation, files and checkout are kept. The restore failed: " + w.restoreErr.Error()
+		return "Cloudfield could not restore this session's saved state, so it started the session again from its disk. Processes and terminals that were running were stopped; " + kept + " The restore failed: " + w.restoreErr.Error()
+	case w.closed:
+		return "Cloudfield started this closed session again from its disk. Processes and terminals that were running when it closed are gone; " + kept
 	}
-	return "Cloudfield had stopped this idle session's container. Processes and terminals that were running were stopped; the conversation, files and checkout are kept."
+	return "Cloudfield had stopped this idle session's container. Processes and terminals that were running were stopped; " + kept
 }
 
 // saver is the runtime's SaveRuntime when it can save cid, which a session
@@ -195,15 +216,15 @@ func (s *Scheduler) reattach(ctx context.Context, entry *supervised, restored bo
 	return s.reopenDevelopment(ctx, entry.runID)
 }
 
-// restoreAsleep restores entry's saved VM under a fresh wait. A saved state
-// that cannot be restored falls back to a cold start from the VM's disks
-// when the agent restores its conversation there; otherwise the wake fails
-// with the restore's error and the VM keeps its disks, and an open session
-// whose VM stopped before it was saved, which can never wake, ends as any
-// whose VM died. Caller holds entry.lifecycleMu and has reserved capacity.
+// restoreAsleep restores entry's saved VM under a fresh wait. A VM with no
+// saved state, as a close, disk reclaim or a VM that stopped before its save
+// leaves it, starts from its disks. So does one whose saved state cannot be
+// restored, unless coldStartRefusal keeps that state: the wake then fails
+// with the restore's error. Caller holds entry.lifecycleMu and has reserved
+// capacity.
 func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) (woke, error) {
 	s.mu.Lock()
-	cid, closed, saved := entry.containerID, entry.retained, entry.asleepSaved
+	cid, closed := entry.containerID, entry.retained
 	s.mu.Unlock()
 	restoreErr := saver.Restore(ctx, cid)
 	if restoreErr == nil {
@@ -223,26 +244,36 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	// restored, left the VM up with every process: it is taken up as it is.
 	// One the restore left paused runs again; resuming a running one fails,
 	// which is harmless, and the reattach that follows proves it runs.
+	// One whose state cannot be read is not started over, which would end
+	// any process it runs.
 	info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
-	if inspectErr == nil && !info.Exited {
+	if inspectErr != nil {
+		return woke{}, errors.Join(restoreErr, fmt.Errorf("inspect the session's VM: %w", inspectErr))
+	}
+	if !info.Exited {
 		_ = s.cfg.Runtime.Resume(ctx, cid)
 		s.superviseWoken(entry)
 		return woke{restored: true}, nil
 	}
-	reason, err := s.coldStartRefusal(ctx, entry)
-	switch {
-	case err != nil:
-		return woke{}, fmt.Errorf("restore the saved session: %w; and whether it can start again from its disk is unknown: %w", restoreErr, err)
-	case reason != "" && inspectErr == nil && !closed && !saved:
-		s.finalizeAsleep(entry, info.ExitCode)
-		return woke{}, fmt.Errorf("the session's VM stopped before it was saved, so the session ends; its checkout and branch are kept: %w", restoreErr)
-	case reason != "":
-		return woke{}, fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason)
+	how := woke{closed: closed}
+	if !errors.Is(restoreErr, runtime.ErrNotSaved) {
+		reason, err := s.coldStartRefusal(ctx, entry)
+		if err != nil {
+			return woke{}, fmt.Errorf("restore the saved session: %w; and whether it can start again from its disk is unknown: %w", restoreErr, err)
+		}
+		if reason != "" {
+			return woke{}, fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason)
+		}
 	}
-	slog.Warn("scheduler: restore a sleeping session; starting it from its disk", "run", entry.runID, "error", restoreErr)
+	// A closed session has no saved state by design; an open one without it
+	// is told why its processes are gone.
+	if !closed || !errors.Is(restoreErr, runtime.ErrNotSaved) {
+		slog.Warn("scheduler: restore a sleeping session; starting it from its disk", "run", entry.runID, "error", restoreErr)
+		how.restoreErr = restoreErr
+	}
 	// Stop discards the saved state and a half-restored VM alike.
 	if err := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); err != nil {
-		return woke{}, errors.Join(restoreErr, fmt.Errorf("discard the saved state: %w", err))
+		return woke{}, errors.Join(how.restoreErr, fmt.Errorf("discard the saved state: %w", err))
 	}
 	if err := s.MarkDevelopmentContainerEnded(ctx, entry.runID); err != nil {
 		return woke{}, fmt.Errorf("record the terminals the cold start ended: %w", err)
@@ -254,8 +285,11 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 		entry.browserLeft = true
 		s.mu.Unlock()
 	}
+	if err := s.setBootCommand(ctx, entry, saver, &how); err != nil {
+		return woke{}, errors.Join(how.restoreErr, fmt.Errorf("set what the session starts from its disk: %w", err))
+	}
 	if err := s.cfg.Runtime.Start(ctx, cid); err != nil {
-		return woke{}, errors.Join(restoreErr, err)
+		return woke{}, errors.Join(how.restoreErr, err)
 	}
 	s.mu.Lock()
 	// The agent and its keeper did not survive, so the open restores the
@@ -263,32 +297,88 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	entry.agentExec, entry.agentKeeper = nil, nil
 	s.mu.Unlock()
 	s.superviseWoken(entry)
-	return woke{restoreErr: restoreErr}, nil
+	return how, nil
 }
 
-// coldStartRefusal is why entry cannot start again from its disk, empty
-// when it can: only an Enhanced session of an agent that restores its
-// conversation, in a VM created for Enhanced, whose main process is a bare
-// shell. A Standard session's would run its launch command, with the task,
-// again. It fails when it cannot tell.
+// setBootCommand replaces the command entry's VM runs when it next starts
+// from its disk, which was its launch command with the task: a bare shell
+// for an Enhanced session, whose agent the server starts, and for a Standard
+// one the agent's terminal on the conversation it reported, or on a new one
+// when it reported none, has no command that reopens one, or that command
+// fails as it starts, as it does when the conversation is gone. It notes in
+// how what becomes of the conversation.
+func (s *Scheduler) setBootCommand(ctx context.Context, entry *supervised, saver runtime.SaveRuntime, how *woke) error {
+	s.mu.Lock()
+	cid, mode, session := entry.containerID, entry.launchMode, entry.agentSessionID
+	s.mu.Unlock()
+	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
+	if err != nil {
+		return err
+	}
+	if mode != domain.LaunchTUI {
+		how.unproven = !s.resumes(run.Harness)
+		return saver.SetCommand(ctx, cid, wrapTUICommand(nil))
+	}
+	argv, profile, _, err := s.command(ctx, run.WorkspaceID, run.MemberID, run.AccountMember(), run.Harness, domain.LaunchTUI, "", run.Model, run.Effort)
+	if err != nil {
+		return err
+	}
+	c := s.coordinationSeam()
+	files := map[string][]byte{}
+	script := func(nonce string, argv []string) (out []byte, scriptErr error) {
+		// As a launch without coordination, which adds nothing to the command.
+		if c == nil {
+			return nextCommand(nonce, argv, nil), nil
+		}
+		sw := modeSwitch{s: s, c: c, entry: entry, run: run, profile: profile, cid: cid}
+		var launch map[string][]byte
+		out, launch, _, scriptErr = sw.terminalScript(ctx, nonce, argv, run.Model)
+		maps.Copy(files, launch)
+		return out, scriptErr
+	}
+	wrap := wrapTUICommand
+	session = cmp.Or(session, run.HarnessSessionID)
+	how.newConversation = len(profile.ResumeArgs) == 0 || !domain.ValidAgentSessionID(session)
+	if !how.newConversation {
+		how.unproven = true
+		if c != nil {
+			var fresh []byte
+			if fresh, err = script(rand.Text(), argv); err != nil {
+				return err
+			}
+			files[coordtransport.NextCommandName], wrap = fresh, wrapResumeCommand
+		}
+		argv = profile.ResumeCommand(session, run.Model, run.Effort)
+	}
+	boot, err := script("", argv)
+	if err != nil {
+		return err
+	}
+	if c != nil {
+		if err = c.svc.WriteFiles(entry.runID, files); err != nil {
+			return fmt.Errorf("write the agent's launch files: %w", err)
+		}
+	}
+	return saver.SetCommand(ctx, cid, wrap([]string{"/bin/sh", "-c", string(boot)}))
+}
+
+// coldStartRefusal is why an open session keeps the saved memory a restore
+// could not load instead of starting again from its disk, empty when it
+// starts: only an Enhanced session of an agent that restores its
+// conversation in a new process does. Any other would come back with a new
+// conversation while its saved memory may restore on a later try. A closed
+// session starts from its disk whatever its agent. It fails when it cannot
+// tell.
 func (s *Scheduler) coldStartRefusal(ctx context.Context, entry *supervised) (string, error) {
 	s.mu.Lock()
-	enhanced, saved, cid := entry.acp && entry.launchMode == domain.LaunchACP, entry.asleepSaved, entry.containerID
+	enhanced, closed := entry.acp && entry.launchMode == domain.LaunchACP, entry.retained
 	s.mu.Unlock()
-	keep := "it cannot be restored, and its disk is kept: launch a new session on its branch"
-	if saved {
-		keep = "its saved state and disk are kept: try waking it again, or launch a new session on its branch"
+	if closed {
+		return "", nil
 	}
-	standard := "a Standard session cannot start again from its disk without running its task again; " + keep
+	const keep = "its saved state and disk are kept: try waking it again, or close it and relaunch it, which starts it from its disk"
 	if !enhanced {
-		return standard, nil
-	}
-	info, err := s.cfg.Runtime.Inspect(ctx, cid)
-	if err != nil {
-		return "", fmt.Errorf("inspect the session's VM: %w", err)
-	}
-	if !slices.Contains(info.Env, coordtransport.EnhancedEnv+"=1") {
-		return standard, nil
+		return "a Standard session may not find its conversation again in a new process; " + keep, nil
 	}
 	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
 	if err != nil {
@@ -325,44 +415,19 @@ func (s *Scheduler) recordSaved(entry *supervised, saved bool) error {
 	return nil
 }
 
-// resaveAsleep saves entry's VM again after a failed wake reattached part of
-// it. A closed session is paused first, as saveClosed saves it, for the
-// next reopen's restore to resume. A VM that cannot be saved stays up, for
-// the next wake to take up. Caller holds entry.lifecycleMu.
+// resaveAsleep saves an open session's VM again after a failed wake
+// reattached part of it. A VM that cannot be saved stays up, for the next
+// wake to take up. Caller holds entry.lifecycleMu.
 func (s *Scheduler) resaveAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
 	s.mu.Lock()
-	cid, closed := entry.containerID, entry.retained
+	cid := entry.containerID
 	entry.paused = true
 	s.mu.Unlock()
 	detachErr := s.detachForSave(ctx, entry)
-	if closed {
-		if err := s.cfg.Runtime.Pause(ctx, cid); err != nil {
-			return errors.Join(fmt.Errorf("pause the closed session to save it again: %w", err), detachErr)
-		}
-	}
 	if err := saver.Save(ctx, cid); err != nil {
 		return errors.Join(fmt.Errorf("save the session again: %w", err), detachErr)
 	}
 	return errors.Join(detachErr, s.recordSaved(entry, true))
-}
-
-// saveClosed saves a closed session's VM as the close's pause left it, so no
-// process writes between the close's commit and the save; the reopen's
-// restore resumes it. A save that fails leaves it paused. Caller holds
-// entry.lifecycleMu, set sleeping and marked the run asleep.
-func (s *Scheduler) saveClosed(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) error {
-	s.mu.Lock()
-	cid := entry.containerID
-	s.mu.Unlock()
-	if err := saver.Save(ctx, cid); err != nil {
-		s.mu.Lock()
-		entry.saveFailedAt = time.Now().UTC()
-		s.mu.Unlock()
-		return errors.Join(fmt.Errorf("save the closed session: %w", err), s.unmarkAsleep(entry))
-	}
-	recordErr := s.recordSaved(entry, true)
-	s.endSleep(entry, true)
-	return recordErr
 }
 
 // saveRecoveredAsleep finishes the save of the VM of a run recorded asleep

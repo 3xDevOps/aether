@@ -187,12 +187,19 @@ func (d *acpDriver) Resume(ctx context.Context, entry *supervised, att runtime.A
 		return err
 	}
 	d.s.mu.Lock()
-	waking, reopening, cid := entry.waking != nil, entry.retained, entry.containerID
+	waking, reopening := entry.waking != nil, entry.retained
+	cold := entry.agentExec == nil && entry.agentKeeper == nil
 	d.s.mu.Unlock()
-	// A closed VM's close stopped its agent, so its Relaunch opens the
-	// conversation as one from a frozen container does.
-	if _, saved := d.s.saver(cid); waking && (!reopening || !saved) {
-		return d.openRestored(ctx, entry, openWake)
+	// A close stopped the agent, so a Relaunch opens the conversation as one
+	// from a frozen container does, whatever the close did with the sandbox.
+	if waking && !reopening {
+		how := openWake
+		// A VM started from its disk has no saved memory to go back to, so
+		// an agent that cannot restore its conversation starts a new one.
+		if run, err := d.s.cfg.Store.GetRun(ctx, entry.runID); cold && err == nil && !d.s.resumes(run.Harness) {
+			how = openRestore
+		}
+		return d.openRestored(ctx, entry, how)
 	}
 	if !d.continuationOwed(entry) {
 		d.connect(ctx, entry, openRestore)

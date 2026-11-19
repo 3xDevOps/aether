@@ -109,10 +109,19 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, fmt.Errorf("%w: session %s predates the narrowed account share, and its container still mounts the account owner's whole home; it stays closed, so launch a new session",
 			ErrInvalidTransition, run)
 	}
-	// Outside lifecycleMu: the disk reclaim a reservation may run can pick
-	// this closed run and take its lock. A save under way finishes first, so
-	// the wake is measured on the memory it wrote. A sleep that finishes
-	// before the lock is taken makes the run reserve and take it again.
+	// Outside lifecycleMu: the disk reclaim a reservation may run takes the
+	// lock of each closed run it looks at, and leaves one being relaunched.
+	// A save under way finishes first, so the wake is measured on the memory
+	// it wrote. A sleep that finishes before the lock is taken makes the run
+	// reserve and take it again.
+	s.mu.Lock()
+	entry.relaunching++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		entry.relaunching--
+		s.mu.Unlock()
+	}()
 	reserved := false
 	for {
 		s.mu.Lock()
@@ -475,7 +484,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	if asleep {
 		s.publishSleep(entry)
 	}
-	if woken.restoreErr != nil {
+	if woken.closed {
 		s.noteWake(ctx, run, woken)
 	}
 	return &runningRow, nil

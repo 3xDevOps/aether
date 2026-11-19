@@ -233,7 +233,7 @@ func TestAVMThatDiedIsBootedToCommitItsWork(t *testing.T) {
 }
 
 // A close whose commit failed leaves no record of what the checkout holds,
-// so a capture after the closed VM was saved boots it to commit the work.
+// so a capture after the closed VM's linger boots it to commit the work.
 func TestAFailedCloseCommitIsMadeByBootingTheVM(t *testing.T) {
 	t.Parallel()
 	e, vr, vg, capture := newVMEnv(t, nil)
@@ -246,7 +246,8 @@ func TestAFailedCloseCommitIsMadeByBootingTheVM(t *testing.T) {
 	if got := e.git.commitsFor(run.ID); len(got) != 0 {
 		t.Fatalf("the close committed %q, want its commit to fail", got)
 	}
-	waitFor(t, "the closed VM saved", func() bool { return vr.isSaved(e.cid(t, run.ID)) })
+	waitFor(t, "the closed VM stopped", func() bool { return containerState(e.container(t, run.ID)) == "stopped" })
+	vr.setDown(e.cid(t, run.ID), true)
 	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatal(err)
 	}

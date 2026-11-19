@@ -462,10 +462,11 @@ When you are done, close the session: **Close session…** in its **More** menu,
 what the close affects, such as an open pull request or a session waiting on
 this one, and ask ([failure-handling.md](failure-handling.md#before-a-close)).
 Closing commits the
-agent's latest work to the session's branch and keeps the container 7 days
-(`--run-container-ttl`). Until then the **Relaunch** button where the message
+agent's latest work to the session's branch and keeps the sandbox 30 days
+(`--run-container-ttl`; 7 for a Standard or mode-switched session on a Docker host). Until then the **Relaunch** button where the message
 box sat, **Relaunch** in the **More** menu, or `cloudfield reopen <session-id>` brings
-the session back with its chat and files. The 7 days stop counting while the session is
+the session back with its chat and files
+([Relaunching a closed session](failure-handling.md#relaunching-a-closed-session)). The days stop counting while the session is
 live again and start over when you close it.
 
 `cloudfield pull <session-id>` fetches the branch, `cloudfield/run-<task>-<id>`

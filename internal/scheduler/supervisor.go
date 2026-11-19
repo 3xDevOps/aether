@@ -19,12 +19,23 @@ const supervisorStateFile = "/tmp/aether-supervisor"
 // Harness arguments stay positional parameters so argv can never become
 // shell source.
 func wrapTUICommand(argv []string) []string {
-	return supervisorCommand(path.Join(coordtransport.MountDir, coordtransport.NextCommandName), supervisorStateFile, argv)
+	return supervisorCommand(path.Join(coordtransport.MountDir, coordtransport.NextCommandName), supervisorStateFile, 0, argv)
 }
 
-func supervisorCommand(nextFile, stateFile string, argv []string) []string {
-	script := "next_file=" + shellquote.Quote(nextFile) + "\nstate_file=" + shellquote.Quote(stateFile) + "\n" + supervisorScript
-	return append([]string{"/bin/sh", "-c", script, "aether-run-supervisor"}, argv...)
+// wrapResumeCommand is wrapTUICommand for argv that reopens the agent's
+// conversation, with the next-command file holding a new one: an argv that
+// fails within tuiSettle, as it does when the conversation is gone, makes
+// the supervisor run that instead.
+func wrapResumeCommand(argv []string) []string {
+	return supervisorCommand(path.Join(coordtransport.MountDir, coordtransport.NextCommandName), supervisorStateFile, tuiSettle, argv)
+}
+
+func supervisorCommand(nextFile, stateFile string, resumeSettle time.Duration, argv []string) []string {
+	script := "next_file=" + shellquote.Quote(nextFile) + "\nstate_file=" + shellquote.Quote(stateFile) + "\n"
+	if resumeSettle > 0 {
+		script += "resume_settle=" + strconv.Itoa(int(resumeSettle/time.Second)) + "\n"
+	}
+	return append([]string{"/bin/sh", "-c", script + supervisorScript, "aether-run-supervisor"}, argv...)
 }
 
 // supervisorScript contract: SIGUSR1 and SIGUSR2 end the container with 0
@@ -33,7 +44,9 @@ func supervisorCommand(nextFile, stateFile string, argv []string) []string {
 // empty; a second SIGALRM while the first is pending kills the child, and one
 // after the file's nonce was consumed is ignored. The file's first line is
 // "# <nonce>"; the state file reads "<nonce> started" once the old child is
-// gone and "<nonce> exited <status>" when the new one exits.
+// gone and "<nonce> exited <status>" when the new one exits. With
+// resume_settle set, an argv that fails within that many seconds runs the
+// file's body as SIGALRM would.
 const supervisorScript = `exec 3<&0
 nl='
 '
@@ -116,10 +129,15 @@ run_child() {
 }
 
 if [ "$#" -gt 0 ]; then
+	[ -z "$resume_settle" ] || started=$(date +%s)
 	run_child TERM "$@"
 	status=$?
 	if [ -z "$swap" ]; then
 		printf '\n[aether] harness exited with code %s\n' "$status"
+		if [ -n "$resume_settle" ] && [ "$status" -ne 0 ] && [ $(($(date +%s) - started)) -lt "$resume_settle" ]; then
+			printf '[aether] the agent could not reopen its conversation, so it starts a new one\n'
+			swap=1
+		fi
 	fi
 fi
 while :

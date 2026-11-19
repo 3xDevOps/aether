@@ -327,9 +327,9 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	o.checkoutTTL = fs.Duration("checkout-ttl", 0,
 		"how long a finished session's checkout is kept before it is garbage-collected (0 = 72h, negative = never)")
 	o.runContainerTTL = fs.Duration("run-container-ttl", 0,
-		"how long explicitly closed Standard and Enhanced session containers are retained (0 = 168h, negative = no retention)")
+		"how long explicitly closed Standard and Enhanced session containers are retained (0 = 720h, or 168h for a container that stays frozen in memory; negative = no retention)")
 	o.runSleepAfter = fs.Duration("run-sleep-after", scheduler.DefaultRunSleepAfter,
-		"how long an idle Enhanced session of an agent that can resume its conversation, open or closed, keeps its container running before it is stopped until its next use (0 = never); "+
+		"how long an idle Enhanced session of an agent that can resume its conversation keeps its container running before it is stopped until its next use (0 = never); "+
 			"unset, an idle session VM is saved to disk after "+scheduler.DefaultVMSleepAfter.String()+" instead")
 	o.minFreeDisk = fs.Int64("min-free-disk", 0,
 		"free-byte reserve on data/runtime filesystems (0 = automatic 5-20GiB, negative = disable disk admission)")

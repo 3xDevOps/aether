@@ -78,25 +78,11 @@ func (s *Scheduler) reclaimDiskLocked(ctx context.Context, keep domain.MemberID)
 	floor("scratch")
 }
 
-// reclaimSessions frees, in order, sleeping VMs' saved memory, closed
-// sessions' containers, finished checkouts and members' stopped terminals,
-// and reports whether recovered said that was enough.
+// reclaimSessions frees, in order, closed sessions' containers, sleeping
+// VMs' saved memory, finished checkouts and members' stopped terminals, and
+// reports whether recovered said that was enough. A closed session's work is
+// on its branch, so its container goes before anything an open one holds.
 func (s *Scheduler) reclaimSessions(ctx context.Context, keep domain.MemberID, recovered func(step string) bool) bool {
-	for _, entry := range s.savedByAge() {
-		note, err := s.dropSavedState(ctx, entry)
-		if err != nil {
-			slog.Warn("scheduler: disk reclaim: drop a saved session state", "run", entry.runID, "error", err)
-			continue
-		}
-		if note == "" {
-			continue
-		}
-		s.publishTimeline(ctx, entry.workspaceID, entry.runID, "", events.TimelineNote, note)
-		if recovered("saved session state") {
-			return true
-		}
-	}
-
 	for _, entry := range s.closedRetainedByAge() {
 		removed, err := s.reclaimRetained(ctx, entry)
 		if err != nil {
@@ -109,6 +95,21 @@ func (s *Scheduler) reclaimSessions(ctx context.Context, keep domain.MemberID, r
 		s.publishTimeline(ctx, entry.workspaceID, entry.runID, "", events.TimelineNote,
 			"Removed this closed session's container early because disk space was low; the session can no longer be reopened, and its branch and history are kept")
 		if recovered("closed session container") {
+			return true
+		}
+	}
+
+	for _, entry := range s.savedByAge() {
+		note, err := s.dropSavedState(ctx, entry)
+		if err != nil {
+			slog.Warn("scheduler: disk reclaim: drop a saved session state", "run", entry.runID, "error", err)
+			continue
+		}
+		if note == "" {
+			continue
+		}
+		s.publishTimeline(ctx, entry.workspaceID, entry.runID, "", events.TimelineNote, note)
+		if recovered("saved session state") {
 			return true
 		}
 	}
@@ -220,14 +221,14 @@ func (s *Scheduler) dropSavedState(ctx context.Context, entry *supervised) (stri
 	return "Deleted this sleeping session's saved memory because disk space was low; it starts again from its disk when it next wakes, and restores its conversation", nil
 }
 
-// closedRetainedByAge returns closed runs that still hold a paused container,
-// the one expiring soonest first.
+// closedRetainedByAge returns closed runs that still hold a container and
+// are not being relaunched, the one expiring soonest first.
 func (s *Scheduler) closedRetainedByAge() []*supervised {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var entries []*supervised
 	for _, entry := range s.runs {
-		if entry.retained && entry.status.Terminal() {
+		if entry.retained && entry.status.Terminal() && entry.relaunching == 0 {
 			entries = append(entries, entry)
 		}
 	}
@@ -248,7 +249,7 @@ func (s *Scheduler) reclaimRetained(ctx context.Context, entry *supervised) (boo
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
-	closed := s.runs[entry.runID] == entry && entry.retained && entry.status.Terminal()
+	closed := s.runs[entry.runID] == entry && entry.retained && entry.status.Terminal() && entry.relaunching == 0
 	entry.reclaimed = closed
 	s.mu.Unlock()
 	if !closed {

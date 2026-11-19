@@ -121,9 +121,9 @@ type Config struct {
 	PollInterval         time.Duration
 	StopGrace            time.Duration // default 10s
 	CheckoutTTL          time.Duration // default 72h; negative disables GC
-	RunContainerTTL      time.Duration // default 1h; negative destroys on close/completion
+	RunContainerTTL      time.Duration // default 720h, 168h for a container kept frozen; negative destroys on close/completion
 	// RunSleepAfter is how long an Enhanced session of an agent with
-	// harness.Capabilities.Sleep stays idle, open or closed, before its
+	// harness.Capabilities.Sleep stays idle before its
 	// container is stopped; zero keeps every session awake. VMSleepAfter is
 	// the same for any Standard or Enhanced session VM, which a sleep saves
 	// with every process.
@@ -173,7 +173,10 @@ type Config struct {
 	hostMemory           func() (total, available uint64, err error)
 }
 
-const DefaultRunContainerTTL = 7 * 24 * time.Hour
+const (
+	DefaultRunContainerTTL = 30 * 24 * time.Hour
+	defaultFrozenTTL       = 7 * 24 * time.Hour
+)
 
 // DefaultServerBinary is the running server binary, /proc/self/exe rather
 // than os.Args[0].
@@ -204,7 +207,10 @@ func defaultHarnesses() map[string]HarnessSpec {
 
 // Scheduler is the run lifecycle engine behind the sshd.RunController seam.
 type Scheduler struct {
-	cfg       Config
+	cfg Config
+	// frozenTTL is RunContainerTTL for a closed session's container that
+	// stays frozen with its memory.
+	frozenTTL time.Duration
 	harnesses map[string]HarnessSpec
 	// ompFront serves session VMs' omp logins; nil without session VMs.
 	ompFront *ompbroker.Front
@@ -573,6 +579,10 @@ type supervised struct {
 	// reclaimed is set once disk reclaim picks the retained container, and
 	// stays through a failed removal so the retry says why.
 	reclaimed bool
+	// relaunching counts the Relaunch calls under way, whose capacity
+	// reservation may run a disk reclaim that must leave this run's
+	// container.
+	relaunching int
 	// waitYielded is set when the wait for the container's exit returned
 	// because a move held the claim: nothing waits on the container until
 	// the move finalizes it or restarts supervision.
@@ -740,8 +750,9 @@ func New(cfg Config) (*Scheduler, error) {
 	if cfg.CheckoutTTL == 0 {
 		cfg.CheckoutTTL = 72 * time.Hour
 	}
+	frozenTTL := cfg.RunContainerTTL
 	if cfg.RunContainerTTL == 0 {
-		cfg.RunContainerTTL = DefaultRunContainerTTL
+		cfg.RunContainerTTL, frozenTTL = DefaultRunContainerTTL, defaultFrozenTTL
 	}
 	if cfg.ExitProbeTimeout <= 0 {
 		cfg.ExitProbeTimeout = defaultExitProbeTimeout
@@ -777,6 +788,7 @@ func New(cfg Config) (*Scheduler, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Scheduler{
 		cfg:                  cfg,
+		frozenTTL:            frozenTTL,
 		harnesses:            harnesses,
 		capacityGate:         make(chan struct{}, 1),
 		checkoutSweepGate:    make(chan struct{}, 1),

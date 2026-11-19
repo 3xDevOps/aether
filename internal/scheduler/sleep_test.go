@@ -74,6 +74,21 @@ func (e *testEnv) sleepRun(t *testing.T, run domain.RunID) {
 	})
 }
 
+// closeFrozen closes run with the close's stop failing: its container stays
+// frozen, and the run stays awake for the sleep sweep to stop.
+func (e *testEnv) closeFrozen(t *testing.T, run domain.RunID) {
+	t.Helper()
+	e.rt.stopErr = errors.New("docker: stop timed out")
+	err := e.sched.CloseRun(t.Context(), run, e.member.ID, domain.RunMerged)
+	e.rt.stopErr = nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := e.sched.Sleep(run); state.AsleepSince != nil || containerState(e.container(t, run)) != "paused" {
+		t.Fatalf("a closed session whose stop failed is %+v in a %s container, want awake and frozen", state, containerState(e.container(t, run)))
+	}
+}
+
 // restartACP closes the scheduler and starts another over the same state,
 // store and runtime, as a server restart does.
 func (e *testEnv) restartACP(t *testing.T) *Scheduler {
@@ -252,6 +267,82 @@ func TestSleepingRunSurvivesARestart(t *testing.T) {
 	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 2))
 }
 
+// A closed session's container created for Enhanced stops at the close,
+// whatever its agent, and is kept 30 days; Relaunch starts it, and an agent
+// that cannot restore its conversation starts a new one. A Standard one,
+// or one created for Standard and switched to Enhanced since, would run its
+// task again on a start, so it stays frozen with its memory and is kept 7
+// days.
+func TestAClosedContainerStopsUnlessOnlyItsTaskCouldStartIt(t *testing.T) {
+	t.Parallel()
+	e := newSwitchEnv(t)
+	rt := e.rt
+	enhanced, switched := e.launchACP(t, "say pong"), e.launchACP(t, "say pong")
+	for _, run := range []*domain.Run{enhanced, switched} {
+		waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	}
+	sc := e.container(t, switched.ID)
+	sc.mu.Lock()
+	delete(sc.spec.Env, coordtransport.EnhancedEnv)
+	sc.mu.Unlock()
+	standard := e.launch(t, "fix the flaky test", domain.LaunchTUI)
+	c := e.container(t, standard.ID)
+	waitFor(t, "the Standard container running", func() bool { return containerState(c) == "running" })
+	forgetConversations(rt)
+	for _, run := range []*domain.Run{enhanced, switched, standard} {
+		if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+			t.Fatal(err)
+		}
+	}
+	kept := func(run domain.RunID) time.Duration {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return time.Until(*e.sched.runs[run].retainedUntil).Round(time.Hour)
+	}
+	if state, days := containerState(e.container(t, enhanced.ID)), kept(enhanced.ID); state != "stopped" || days != DefaultRunContainerTTL {
+		t.Fatalf("a closed Enhanced container is %s and kept %v, want stopped and kept 30 days", state, days)
+	}
+	for _, run := range []*domain.Run{switched, standard} {
+		if state, days := containerState(e.container(t, run.ID)), kept(run.ID); state != "paused" || days != defaultFrozenTTL {
+			t.Fatalf("a closed container created for Standard is %s and kept %v, want frozen and kept 7 days", state, days)
+		}
+	}
+	if _, err := e.sched.Relaunch(t.Context(), enhanced.ID, e.member.ID); err != nil {
+		t.Fatalf("Relaunch: %v", err)
+	}
+	execs := rt.all()
+	if methods := execs[len(execs)-1].agent.Methods(); containerState(e.container(t, enhanced.ID)) != "running" || !slices.Contains(methods, acp.AgentMethodSessionNew) {
+		t.Fatalf("the relaunched container is %s and its agent called %v, want running on session/new", containerState(e.container(t, enhanced.ID)), methods)
+	}
+	waitItems(t, e.sched, enhanced.ID, "the new conversation's notice", noticed("Started a new agent conversation", "could not be restored"))
+	waitItems(t, e.sched, enhanced.ID, "the relaunch's notice", noticed("Relaunched", "restores its conversation if it can"))
+}
+
+// A close whose stop reports an error after the container stopped anyway,
+// as one dockerd finishes after the request gave up, leaves the session
+// asleep and relaunchable rather than taking the exit for the session's
+// end.
+func TestAClosedContainerThatStoppedDespiteAnErrorStaysRelaunchable(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	c := e.container(t, run.ID)
+	e.rt.stopErr, e.rt.stopHook = errors.New("docker: context canceled"), func() { c.endProcess(137) }
+	err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged)
+	e.rt.stopErr, e.rt.stopHook = nil, nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if state := e.sched.Sleep(run.ID); state.AsleepSince == nil || e.rt.byName(string(run.ID)) == nil {
+		t.Fatalf("the closed session is %+v, container kept %v; want it asleep with its container", state, e.rt.byName(string(run.ID)) != nil)
+	}
+	if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("Relaunch: %v", err)
+	}
+}
+
 func TestClosedRunSleepsWithoutLosingItsContainer(t *testing.T) {
 	t.Parallel()
 	e, rt := newSleepEnv(t)
@@ -363,9 +454,7 @@ func TestARestartFinishesAnInterruptedClosedSleep(t *testing.T) {
 	e, _ := newSleepEnv(t)
 	run := e.launchACP(t, "say pong")
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
-	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
-		t.Fatal(err)
-	}
+	e.closeFrozen(t, run.ID)
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
 	e.sched.mu.Unlock()
@@ -624,9 +713,7 @@ func TestRecoveryStopsAFrozenSleeperAFailedRelaunchAdopted(t *testing.T) {
 	e, _ := newSleepEnv(t)
 	run := e.launchACP(t, "say pong")
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
-	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
-		t.Fatal(err)
-	}
+	e.closeFrozen(t, run.ID)
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
 	e.sched.mu.Unlock()
@@ -682,9 +769,7 @@ func TestRelaunchFinishesAnInterruptedClosedSleep(t *testing.T) {
 	e, rt := newSleepEnv(t)
 	run := e.launchACP(t, "say pong")
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
-	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
-		t.Fatal(err)
-	}
+	e.closeFrozen(t, run.ID)
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
 	e.sched.mu.Unlock()

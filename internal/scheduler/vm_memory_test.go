@@ -70,10 +70,11 @@ func (r *memoryRuntime) MemoryUse(context.Context) (map[runtime.ID]uint64, error
 	defer r.memMu.Unlock()
 	out := map[runtime.ID]uint64{}
 	for id, n := range r.vm {
+		c, err := r.get(id)
 		switch {
 		case r.loading[id]:
 			out[id] = 0
-		case !r.isSaved(id):
+		case !r.isSaved(id) && (err != nil || containerState(c) != "stopped"):
 			out[id] = n
 		}
 	}
@@ -430,52 +431,6 @@ func TestAWakeMakesRoomForStartsInFlightAndSavesNothingThatCannotHelp(t *testing
 	}
 }
 
-// A reopen that comes while a closed VM's save is being written waits for
-// it, so it claims the memory the save wrote rather than a start's.
-func TestAReopenDuringTheSaveOfAClosedVMClaimsWhatItSaved(t *testing.T) {
-	t.Parallel()
-	e, mr := newMemoryEnv(t)
-	cid := e.launchVM(t, mr, "say pong", 6<<30)
-	run := e.runOf(t, cid)
-	if err := e.sched.CloseRun(t.Context(), run, e.member.ID, domain.RunMerged); err != nil {
-		t.Fatal(err)
-	}
-	mr.saveMu.Lock()
-	mr.saving, mr.release = make(chan struct{}), make(chan struct{})
-	mr.saveMu.Unlock()
-	mr.setAvailable(3 << 30)
-	guarded := make(chan struct{})
-	go func() {
-		defer close(guarded)
-		e.sched.guardVMMemory(t.Context())
-	}()
-	<-mr.saving
-	floor := memoryFloor(32 << 30)
-	mr.setAvailable(floor + 1<<30)
-	mr.memMu.Lock()
-	mr.lazy = true
-	mr.memMu.Unlock()
-	reopened := make(chan error, 1)
-	go func() {
-		_, err := e.sched.Relaunch(t.Context(), run, e.member.ID)
-		reopened <- err
-	}()
-	time.Sleep(100 * time.Millisecond)
-	close(mr.release)
-	<-guarded
-	mr.saveMu.Lock()
-	mr.saving = nil
-	mr.saveMu.Unlock()
-	if err := <-reopened; err != nil {
-		t.Fatalf("reopen after the save: %v", err)
-	}
-
-	mr.setAvailable(floor + 1<<30)
-	if _, err := e.sched.reserveCapacity(t.Context()); !errors.Is(err, ErrMemoryPressure) {
-		t.Fatalf("a launch into the 6 GiB the reopened VM has yet to load = %v, want the memory refusal", err)
-	}
-}
-
 // A boot to commit a saved VM's work claims what it loads back as a wake
 // does: wakes count it, and it counts theirs.
 func TestABootToCommitAndAWakeCountEachOthersMemory(t *testing.T) {
@@ -568,6 +523,44 @@ func TestAWokenVMsClaimEndsOnlyOnceItsMemoryStopsGrowing(t *testing.T) {
 		if got := claims(use, nil); got != 0 || len(s.memoryClaims) != 0 {
 			t.Fatalf("a %s VM still claims %d", name, got)
 		}
+	}
+}
+
+// A closed VM still in memory, one its close could not stop or one a
+// restart left up asleep, is stopped, not saved, and needs no disk room
+// for that.
+func TestTheMemoryGuardStopsClosedVMsWithoutSavingThem(t *testing.T) {
+	t.Parallel()
+	e, mr := newMemoryEnv(t)
+	open := e.launchVM(t, mr, "say pong", 1<<30)
+	closed := []runtime.ID{e.launchVM(t, mr, "say pong", 1<<30), e.launchVM(t, mr, "say pong", 1<<30)}
+	for _, cid := range closed {
+		e.closeFrozen(t, e.runOf(t, cid))
+	}
+	run := e.runOf(t, closed[1])
+	e.sched.mu.Lock()
+	for _, entry := range e.sched.runs {
+		entry.saveFailedAt = time.Time{}
+	}
+	asleep := e.sched.runs[run]
+	e.sched.mu.Unlock()
+	if err := e.sched.markAsleep(asleep); err != nil {
+		t.Fatal(err)
+	}
+	var free atomic.Uint64
+	free.Store(19 << 29)
+	setFreeBytes(e, &free)
+	mr.setAvailable(3 << 30)
+	for range 3 {
+		e.sched.guardVMMemory(t.Context())
+	}
+	for _, cid := range closed {
+		if state := containerState(e.container(t, e.runOf(t, cid))); mr.isSaved(cid) || state != "stopped" {
+			t.Fatalf("the guard left closed VM %s %s, saved %v; want it stopped", cid, state, mr.isSaved(cid))
+		}
+	}
+	if mr.isSaved(open) {
+		t.Fatal("the guard saved an open VM whose memory does not fit on disk")
 	}
 }
 

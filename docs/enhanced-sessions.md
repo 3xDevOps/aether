@@ -130,8 +130,9 @@ An Enhanced session opens on **Chat**: one timeline, newest at the bottom.
 
 A success or failure report from the agent does not close the session: the
 timeline shows **Done** or **Failed**, and you can keep sending messages.
-**Close** ends the session and starts the container retention period (default
-seven days).
+**Close** ends the session and keeps its sandbox for **Relaunch**, 30 days by
+default (`--run-container-ttl`)
+([Relaunching a closed session](failure-handling.md#relaunching-a-closed-session)).
 
 The **Multiplayer** strip under the view switch shows who controls the session and
 who watches, with **Take control** and **Release**. Control works as in a

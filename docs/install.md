@@ -541,7 +541,7 @@ after the key and value of `config set`.
 | `run-cpus`, `run-memory`, `run-pids` | 8 CPUs (at most the host's), 8 GiB, 4096 | Ceilings per session and member environment, not reservations. |
 | `min-free-disk` | `0` (5% of the filesystem, 5 to 20 GiB) | Free-space reserve below which new sessions are refused. Negative turns the check off. |
 | `checkout-ttl` | `72h` | How long a finished session's checkout is kept after the session ends. It also stays while the session's container is kept. Negative keeps it forever. |
-| `run-container-ttl` | `168h` | How long a closed session's container is kept so the session can be relaunched. A relaunched session's clock restarts at its next close. |
+| `run-container-ttl` | `720h`; `168h` for a container that stays frozen in memory | How long a closed session's container or VM disks are kept so the session can be relaunched ([Relaunching a closed session](failure-handling.md#relaunching-a-closed-session)). A relaunched session's clock restarts at its next close. |
 | `run-sleep-after` | `30m`; `5m` for session VMs | How long an idle Enhanced Claude Code session keeps its container running before Cloudfield stops it until its next use, and how long an idle session VM runs before Cloudfield saves it to disk ([Idle sleep](failure-handling.md#idle-sleep)). A value you set applies to both. `0` keeps every session awake. |
 | `browser-image` | `ghcr.io/3xdevops/aether-browser:<release>` | The image a session's **Browser** tab starts from. Set it and updates stop moving it. |
 | `conflict-coordination` | on | Let overlapping sessions message each other ([coordination.md](coordination.md)). |

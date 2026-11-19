@@ -896,8 +896,11 @@ Standard or Enhanced session that retained its container and whose
 after `run.close` (`reason` is `closed; retained container`). Older
 agent-finished retained sessions remain eligible. Interactive outcome reports
 now leave the session open and do not require reopening. `run.relaunch` resumes the
-same session row in the same container and checkout; it does not create a new session
-or container and does not perform a new launch or disk-floor admission.
+same session row in the same container, or in its VM started from the disks it
+kept, and the same checkout; it does not create a new session
+or container and does not perform a new launch. Thawing a paused container
+passes no admission; starting a stopped container or VM passes the memory
+and disk checks of a wake.
 The response's `container_retained_until` is absent: the deadline is cleared
 while the session is live, `finished_at` is null, `started_at` is the relaunch, and
 the next close starts a new `--run-container-ttl` period.
@@ -907,7 +910,8 @@ boot. Once expiry destroys the retained container, the call returns `-32002`
 (invalid state, retained container unavailable), and the session cannot be
 reopened. An expired or otherwise unavailable retained session cannot be
 reopened; a row removed by `run.delete` instead returns not found. The
-default `--run-container-ttl` is `168h` (7 days); negative values disable
+default `--run-container-ttl` is `720h` (30 days), and `168h` for a container
+that stays frozen in memory; negative values disable
 retention, so a closed interactive session is unavailable to `run.relaunch` immediately.
 
 ### `GET /api/v1/capabilities`
