@@ -19,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -450,8 +451,9 @@ func TestAVMWhoseStateCannotBeRestoredStartsFromItsDisk(t *testing.T) {
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
 	e.sleepRun(t, run.ID)
 	sr.saveMu.Lock()
-	sr.restoreErr = errors.New("restore: the saved state was written by another kernel")
+	sr.restoreErr = errors.New("restore: the saved state was written by another kernel\nconsole.log:\nKernel panic")
 	sr.saveMu.Unlock()
+	sub := e.subscribe(t)
 
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after sleep"}, false, nil); err != nil {
 		t.Fatalf("a prompt to a session whose state is lost: %v", err)
@@ -465,6 +467,40 @@ func TestAVMWhoseStateCannotBeRestoredStartsFromItsDisk(t *testing.T) {
 	}
 	waitItems(t, e.sched, run.ID, "a turn after the fallback", turnEnded("end_turn", 2))
 	waitItems(t, e.sched, run.ID, "the fallback's notice", noticed("Woke from sleep", "another kernel"))
+	note := waitTimelineEvent(t, sub, run.ID, events.TimelineNote).Payload.(events.TimelinePayload).Message
+	if !strings.Contains(note, "Processes and terminals that were running were stopped") || !strings.HasSuffix(note, "another kernel") {
+		t.Fatalf("the timeline says %q of a wake that lost the session's processes", note)
+	}
+}
+
+// A wake that started a session from its disk and then could not reattach
+// to it saves it again with no processes: the timeline and the wake's error
+// still say what was lost.
+func TestAColdStartWhoseReattachFailsNotesTheLostProcesses(t *testing.T) {
+	t.Parallel()
+	e, rt, sr := newSaveEnv(t, true)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.sleepRun(t, run.ID)
+	sr.saveMu.Lock()
+	sr.restoreErr = errors.New("restore: the saved state was written by another kernel\nconsole.log:\nKernel panic")
+	sr.saveMu.Unlock()
+	rt.mu.Lock()
+	rt.startErr = errors.New("the agent did not start")
+	rt.mu.Unlock()
+	sub := e.subscribe(t)
+
+	err := e.sched.WakeRun(t.Context(), run.ID, e.member.ID)
+	if err == nil || !strings.Contains(err.Error(), "the agent did not start") || !strings.Contains(err.Error(), "without its processes, as its restore failed: restore: the saved state was written by another kernel") || strings.Contains(err.Error(), "Kernel panic") {
+		t.Fatalf("WakeRun = %v; want the reattach's error and the first line of the restore's", err)
+	}
+	if !sr.isSaved(e.cid(t, run.ID)) {
+		t.Fatal("the cold-started VM was not saved again")
+	}
+	note := waitTimelineEvent(t, sub, run.ID, events.TimelineNote).Payload.(events.TimelinePayload).Message
+	if !strings.Contains(note, "Processes and terminals that were running were stopped") || !strings.HasSuffix(note, "another kernel") {
+		t.Fatalf("the timeline says %q of a wake that lost the session's processes", note)
+	}
 }
 
 // An agent that cannot restore its conversation in a new process keeps its
