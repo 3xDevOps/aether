@@ -968,7 +968,7 @@ func (s *Scheduler) Close() error {
 	s.acp.shutdown()
 	s.appServer.shutdown()
 	s.flushPendingRunTitles()
-	return s.DetachDevelopmentTerminals(context.Background())
+	return s.DetachDevelopmentTerminals()
 }
 
 func (s *Scheduler) ContainerAddr(ctx context.Context, run domain.RunID) (string, error) {

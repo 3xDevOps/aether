@@ -407,7 +407,8 @@ func (d *appServerDriver) report(entry *supervised, r *appServerRun, report agen
 }
 
 // shutdown closes every client without reporting, as the end of the server
-// process would; each bridge exits with its stdin.
+// process would; each bridge exits with its stdin. It closes them all at
+// once, so guests that do not answer hold it up for one bound.
 func (d *appServerDriver) shutdown() {
 	d.mu.Lock()
 	d.closed = true
@@ -418,12 +419,14 @@ func (d *appServerDriver) shutdown() {
 		runs = append(runs, r)
 	}
 	d.mu.Unlock()
+	var wg sync.WaitGroup
 	for _, r := range runs {
 		d.mu.Lock()
 		client := r.client
 		d.mu.Unlock()
 		if client != nil {
-			_ = client.Close()
+			wg.Go(func() { _ = client.Close() })
 		}
 	}
+	wg.Wait()
 }

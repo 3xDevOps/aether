@@ -381,7 +381,9 @@ connection a save and restore cut.
 
 `Write` takes the caller's deadline as the deadline of the write itself and
 reports how many bytes the process took; it never closes the input.
-`CloseStdin` closes a pipe process's input.
+`CloseStdin` closes a pipe process's input. On the server, closing an
+attachment's input ends its `Write` in flight at once, without the helper's
+answer, which a frozen guest never gives.
 
 ## Limits, stats and the clock
 

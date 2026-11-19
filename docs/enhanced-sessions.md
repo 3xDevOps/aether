@@ -328,8 +328,13 @@ agent; one queued for a paused session waits until the session resumes. An
 answer, cancel or message sent while the new server is still recovering
 sessions waits for recovery, up to 30 seconds, instead of failing with `the
 Enhanced agent is not running`. The log records no notice for an adoption.
-A stopped server detaches cleanly. A killed one can, rarely, record twice the
-agent output it logged in the instant before it died. A server killed
+A stopped server detaches cleanly unless the agent's VM stops answering, as
+one the memory brake froze does: the server waits 3 seconds for the keeper
+to confirm the detach and 1 second for it to take the ack of the last output
+recorded, then lets go as a killed server would
+([failure-handling.md](failure-handling.md#recover-from-memory-pressure)).
+A killed one can, rarely, record twice the agent output it logged in the
+instant before it died. A server killed
 after it recorded a new turn but before the turn's prompt reached the keeper
 ends that turn with **Turn interrupted**: `Cloudfield's server restarted before
 this turn's prompt reached the agent. Send it again.`

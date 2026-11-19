@@ -290,12 +290,12 @@ func (m *managedExec) Detach() error {
 // unread stderr never stalls the lossless stdout.
 type pipeAttachment struct {
 	runtime.Attachment
-	stdin  pipeInput
+	stdin  *pipeInput
 	stderr io.Reader
 }
 
 func newPipeAttachment(p process, att runtime.Attachment, lossless bool) *pipeAttachment {
-	a := &pipeAttachment{Attachment: att, stdin: pipeInput{WriteCloser: att.Stdin(), proc: p}, stderr: att.Stderr()}
+	a := &pipeAttachment{Attachment: att, stdin: &pipeInput{WriteCloser: att.Stdin(), proc: p}, stderr: att.Stderr()}
 	if !lossless {
 		drained := runtime.NewStreamBuffer()
 		go func() {
@@ -312,19 +312,26 @@ func (a *pipeAttachment) Stderr() io.Reader     { return a.stderr }
 
 type pipeInput struct {
 	io.WriteCloser
-	proc process
+	proc   process
+	closed sync.Once
 }
 
-func (in pipeInput) WriteContext(ctx context.Context, b []byte) (int, error) {
+func (in *pipeInput) WriteContext(ctx context.Context, b []byte) (int, error) {
 	if w, ok := in.WriteCloser.(runtime.ContextWriter); ok {
 		return w.WriteContext(ctx, b)
 	}
 	return in.Write(b)
 }
 
-func (in pipeInput) Close() error {
+// Close ends the command's stdin once: in a guest that does not answer,
+// each further try would wait out stdinCloseTimeout again.
+func (in *pipeInput) Close() error {
 	_ = in.WriteCloser.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), stdinCloseTimeout)
-	defer cancel()
-	return in.proc.CloseStdin(ctx)
+	var err error
+	in.closed.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), stdinCloseTimeout)
+		defer cancel()
+		err = in.proc.CloseStdin(ctx)
+	})
+	return err
 }

@@ -1816,6 +1816,41 @@ func TestHostCloseStopsSessions(t *testing.T) {
 		t.Fatal("StartSession on closed host succeeded")
 	}
 }
+
+// Host close stops every session at once: an attachment whose close waits
+// for a guest that does not answer holds up only its own.
+func TestHostCloseStopsSessionsAtOnce(t *testing.T) {
+	h, _ := newTestHost(t)
+	closing, release := make(chan struct{}, 2), make(chan struct{})
+	for _, run := range []domain.RunID{"run-a", "run-b"} {
+		att := &heldCloseAtt{fakeAtt: newFakeAtt(), closing: closing, release: release}
+		if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+	}
+	go func() { _ = h.Close() }()
+	for range 2 {
+		select {
+		case <-closing:
+		case <-time.After(5 * time.Second):
+			close(release)
+			t.Fatal("host close waited for one attachment's close before it closed the next")
+		}
+	}
+	close(release)
+}
+
+type heldCloseAtt struct {
+	*fakeAtt
+	closing chan<- struct{}
+	release <-chan struct{}
+}
+
+func (a *heldCloseAtt) Close() error {
+	a.closing <- struct{}{}
+	<-a.release
+	return a.fakeAtt.Close()
+}
 func TestStopSessionsWithPrefix(t *testing.T) {
 	h, _ := newTestHost(t)
 	shell1 := newFakeAtt()

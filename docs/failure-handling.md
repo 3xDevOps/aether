@@ -410,7 +410,17 @@ set aside for as long as it stays frozen. Every frozen VM so ends either
 thawed or saved to disk and woken later.
 
 A server that stops with less than twice the floor free leaves the VMs
-frozen: thawed at once, they would run with nothing watching them. The
+frozen: thawed at once, they would run with nothing watching them. The stop
+waits for a frozen guest only within fixed bounds. It lets go of what runs
+in the VMs in steps, one after another, each step for every session at
+once: kept terminals, 5 seconds to close their input; `cloudfield ssh`
+commands, up to 22 seconds to stop them; Enhanced agents, 9 seconds, as
+measured in a real frozen VM: 3 for the keeper to confirm a detach, 1 for
+the ack of the last output the server recorded, and 5 to close the input;
+Codex app-servers, 5 seconds to close their input. Frozen guests so add at
+most about 41 seconds to a stop, within the `TimeoutStopSec=90` of
+`aether-server.service`. The next server adopts each agent as after a kill
+([enhanced-sessions.md](enhanced-sessions.md#restarts-and-failures)). The
 server that starts, after a stop or a crash, never lets a frozen VM run to
 take its session up. It takes the session up asleep, marked to wake, and
 thaws nothing until it has taken every session up. Then the memory guard
