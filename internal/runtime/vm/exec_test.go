@@ -320,8 +320,8 @@ func TestARestoredVMReadsRunningBeforeItsGuestAnswers(t *testing.T) {
 	}
 	info, err := h.engine.inspect(t.Context(), "run-a")
 	rec, _ := h.engine.load("run-a")
-	if err != nil || info.Exited || !rec.Saved || rec.Resumed == nil {
-		t.Errorf("a resumed VM whose guest has yet to answer inspects as exited=%v, %v, saved=%v resumed=%v; want it running, its saved state kept", info.Exited, err, rec.Saved, rec.Resumed != nil)
+	if err != nil || info.Exited || !rec.Saved || rec.Resumed == nil || rec.CacheSynced {
+		t.Errorf("a resumed VM whose guest has yet to answer inspects as exited=%v, %v, saved=%v resumed=%v cache synced=%v; want it running, its saved state kept and its cache unsynced", info.Exited, err, rec.Saved, rec.Resumed != nil, rec.CacheSynced)
 	}
 	close(hold)
 	if err = <-done; err != nil {

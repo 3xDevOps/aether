@@ -284,7 +284,6 @@ func (e *engine) restore(ctx context.Context, key string) error {
 	}
 	drop := func(cause, why error) error {
 		rec.Saved, rec.Resumed, rec.Exited, rec.ExitCode = false, nil, true, lostExitCode
-		rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
 		dropErr := e.store(rec)
 		if dropErr == nil {
 			dropErr = os.RemoveAll(dir)
@@ -333,6 +332,7 @@ func (e *engine) restore(ctx context.Context, key string) error {
 		}
 		if err == nil {
 			rec.Exited = false
+			rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
 			err = e.store(rec)
 		}
 		if err != nil {
@@ -380,7 +380,6 @@ func (e *engine) restore(ctx context.Context, key string) error {
 		}
 	}
 	rec.Saved, rec.Resumed, rec.Exited = false, nil, false
-	rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
 	if storeErr := e.store(rec); storeErr != nil {
 		return errors.Join(err, storeErr)
 	}
