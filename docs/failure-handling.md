@@ -1011,8 +1011,10 @@ session's container or VM disks are deleted: its work is on its branch, and
 its transcript stays readable.
 
 A session VM, or the container of a session launched and closed as Enhanced,
-is stopped when its session closes. It keeps its disks and no memory. Relaunch
-starts it from those disks:
+is stopped when its session closes. It keeps its disks and no memory; a VM
+with a checkout stays up with only its helper for the 10-minute linger
+first, which the memory guard leaves to end. Relaunch starts it from those
+disks:
 
 - Files, installed packages and the checkout are as the close left them. The
   environment's setup script does not run again.

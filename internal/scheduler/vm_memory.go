@@ -313,9 +313,20 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 			note = memorySavedFrozenNote
 		}
 		s.mu.Unlock()
-		// A closed session keeps no memory: its VM is stopped instead.
+		// A closed session keeps no memory: its VM is stopped instead. One
+		// already stopped lingers for its checkout until the runtime powers
+		// it off, and a stop frees nothing more.
 		if closed {
-			return s.savedForMemory(ctx, c.e, s.stopLeftoverAsleep(ctx, c.e), "")
+			if info, err := s.cfg.Runtime.Inspect(ctx, c.cid); err == nil && info.Exited {
+				return false
+			}
+			err := s.stopLeftoverAsleep(ctx, c.e)
+			if err != nil {
+				s.mu.Lock()
+				c.e.saveFailedAt = time.Now().UTC()
+				s.mu.Unlock()
+			}
+			return s.savedForMemory(ctx, c.e, err, "")
 		}
 		return s.savedForMemory(ctx, c.e, s.saveAsleepRunning(ctx, c.e), note)
 	}

@@ -224,7 +224,7 @@ func (s *Scheduler) reattach(ctx context.Context, entry *supervised, restored bo
 // capacity.
 func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) (woke, error) {
 	s.mu.Lock()
-	cid, closed, saved := entry.containerID, entry.retained, entry.asleepSaved
+	cid, closed := entry.containerID, entry.retained
 	s.mu.Unlock()
 	restoreErr := saver.Restore(ctx, cid)
 	if restoreErr == nil {
@@ -244,23 +244,30 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	// restored, left the VM up with every process: it is taken up as it is.
 	// One the restore left paused runs again; resuming a running one fails,
 	// which is harmless, and the reattach that follows proves it runs.
+	// One whose state cannot be read is not started over, which would end
+	// any process it runs.
 	info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
-	if inspectErr == nil && !info.Exited {
+	if inspectErr != nil {
+		return woke{}, errors.Join(restoreErr, fmt.Errorf("inspect the session's VM: %w", inspectErr))
+	}
+	if !info.Exited {
 		_ = s.cfg.Runtime.Resume(ctx, cid)
 		s.superviseWoken(entry)
 		return woke{restored: true}, nil
 	}
 	how := woke{closed: closed}
 	if !errors.Is(restoreErr, runtime.ErrNotSaved) {
-		if saved {
-			reason, err := s.coldStartRefusal(ctx, entry)
-			if err != nil {
-				return woke{}, fmt.Errorf("restore the saved session: %w; and whether it can start again from its disk is unknown: %w", restoreErr, err)
-			}
-			if reason != "" {
-				return woke{}, fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason)
-			}
+		reason, err := s.coldStartRefusal(ctx, entry)
+		if err != nil {
+			return woke{}, fmt.Errorf("restore the saved session: %w; and whether it can start again from its disk is unknown: %w", restoreErr, err)
 		}
+		if reason != "" {
+			return woke{}, fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason)
+		}
+	}
+	// A closed session has no saved state by design; an open one without it
+	// is told why its processes are gone.
+	if !closed || !errors.Is(restoreErr, runtime.ErrNotSaved) {
 		slog.Warn("scheduler: restore a sleeping session; starting it from its disk", "run", entry.runID, "error", restoreErr)
 		how.restoreErr = restoreErr
 	}
