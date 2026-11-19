@@ -230,7 +230,10 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	s.mu.Lock()
 	cid, closed := entry.containerID, entry.retained
 	s.mu.Unlock()
-	restoreErr := saver.Restore(ctx, cid)
+	// Only a shutdown cuts the restore short: it has its own time limits,
+	// which grow with the memory it loads, where the wake's, partly spent on
+	// admission, could end a long load.
+	restoreErr := saver.Restore(s.superCtx, cid)
 	if restoreErr == nil {
 		// A closed session was saved paused, and comes back paused.
 		if closed {

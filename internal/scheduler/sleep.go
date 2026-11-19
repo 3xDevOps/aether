@@ -27,8 +27,9 @@ const (
 )
 
 // wakeTimeout bounds one wake: the container start, its setup gate and the
-// agent's restore. A wake runs for every caller waiting on it, so no
-// caller's context cancels it; a server shutdown does.
+// agent's restore, but not a saved VM's restore, which has its own. A wake
+// runs for every caller waiting on it, so no caller's context cancels it; a
+// server shutdown does.
 const wakeTimeout = 3 * time.Minute
 
 // ErrClosedAsleep refuses waking a closed session's stopped container
