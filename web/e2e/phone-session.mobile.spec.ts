@@ -23,7 +23,15 @@ test('an Enhanced session opens on Chat and takes a message from the pinned comp
   await seedWorkspace(alice, aether.server.addr, repo)
   await aether.installACPMock(alice, await memberID(alice))
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
-  await alice.api.rpc('run.launch', { workspace_id: workspaces[0].id, harness: 'mock', mode: 'acp', task: 'demo' })
+  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', { workspace_id: workspaces[0].id, harness: 'mock', mode: 'acp', task: 'demo' })
+  // Starting the container adds a network interface, and Chromium fails any
+  // request in flight then with net::ERR_NETWORK_CHANGED. A failed message
+  // read puts its error above the transcript, so load the page once the
+  // agent has answered from inside the running container.
+  await expect.poll(async () => {
+    const history = await alice.api.rpc<{ frames: unknown[] }>('run.acp.history', { run_id: run.id })
+    return JSON.stringify(history.frames)
+  }, { timeout: 180_000 }).toContain('pong')
 
   const log = page.getByRole('log', { name: 'Chat' })
   const views = page.getByRole('tablist', { name: 'Session views' })
