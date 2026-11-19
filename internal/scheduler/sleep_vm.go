@@ -217,11 +217,11 @@ func (s *Scheduler) reattach(ctx context.Context, entry *supervised, restored bo
 }
 
 // restoreAsleep restores entry's saved VM under a fresh wait. A VM with no
-// saved state, as a close or disk reclaim leaves it, starts from its disks.
-// So does one whose saved state cannot be restored, unless coldStartRefusal
-// keeps that state: the wake then fails with the restore's error, and an
-// open session whose VM stopped before it was saved ends as any whose VM
-// died. Caller holds entry.lifecycleMu and has reserved capacity.
+// saved state, as a close, disk reclaim or a VM that stopped before its save
+// leaves it, starts from its disks. So does one whose saved state cannot be
+// restored, unless coldStartRefusal keeps that state: the wake then fails
+// with the restore's error. Caller holds entry.lifecycleMu and has reserved
+// capacity.
 func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver runtime.SaveRuntime) (woke, error) {
 	s.mu.Lock()
 	cid, closed, saved := entry.containerID, entry.retained, entry.asleepSaved
@@ -252,15 +252,14 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	}
 	how := woke{closed: closed}
 	if !errors.Is(restoreErr, runtime.ErrNotSaved) {
-		reason, err := s.coldStartRefusal(ctx, entry)
-		switch {
-		case err != nil:
-			return woke{}, fmt.Errorf("restore the saved session: %w; and whether it can start again from its disk is unknown: %w", restoreErr, err)
-		case reason != "" && inspectErr == nil && !closed && !saved:
-			s.finalizeAsleep(entry, info.ExitCode)
-			return woke{}, fmt.Errorf("the session's VM stopped before it was saved, so the session ends; its checkout and branch are kept: %w", restoreErr)
-		case reason != "":
-			return woke{}, fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason)
+		if saved {
+			reason, err := s.coldStartRefusal(ctx, entry)
+			if err != nil {
+				return woke{}, fmt.Errorf("restore the saved session: %w; and whether it can start again from its disk is unknown: %w", restoreErr, err)
+			}
+			if reason != "" {
+				return woke{}, fmt.Errorf("restore the saved session: %w; %s", restoreErr, reason)
+			}
 		}
 		slog.Warn("scheduler: restore a sleeping session; starting it from its disk", "run", entry.runID, "error", restoreErr)
 		how.restoreErr = restoreErr

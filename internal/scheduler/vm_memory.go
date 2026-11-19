@@ -223,7 +223,7 @@ func (s *Scheduler) memoryCandidates(ctx context.Context) []memoryCandidate {
 		switch {
 		case !e.asleepSince.IsZero():
 			if !e.asleepSaved && memory[e.containerID] > 0 {
-				out = append(out, memoryCandidate{e: e, cid: e.containerID, asleep: true, idle: true, memory: memory[e.containerID]})
+				out = append(out, memoryCandidate{e: e, cid: e.containerID, closed: e.retained, asleep: true, idle: true, memory: memory[e.containerID]})
 			}
 		case e.retained && e.paused && !e.destroyPending && !e.evidencePending && e.retainedUntil != nil:
 			out = append(out, memoryCandidate{e: e, cid: e.containerID, closed: true, idle: true, memory: memory[e.containerID]})
@@ -305,9 +305,6 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 		return false
 	}
 	defer c.e.lifecycleMu.Unlock()
-	if c.closed {
-		return s.savedForMemory(ctx, c.e, s.sleepClosedLocked(ctx, c.e), "")
-	}
 	if c.asleep {
 		s.mu.Lock()
 		closed := s.runs[c.e.runID] == c.e && c.e.retained && !c.e.asleepSince.IsZero()
@@ -321,6 +318,9 @@ func (s *Scheduler) saveCandidate(ctx context.Context, c memoryCandidate, workin
 			return s.savedForMemory(ctx, c.e, s.stopLeftoverAsleep(ctx, c.e), "")
 		}
 		return s.savedForMemory(ctx, c.e, s.saveAsleepRunning(ctx, c.e), note)
+	}
+	if c.closed {
+		return s.savedForMemory(ctx, c.e, s.sleepClosedLocked(ctx, c.e), "")
 	}
 	s.mu.Lock()
 	cid := c.e.containerID

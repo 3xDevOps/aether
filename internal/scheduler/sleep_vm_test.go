@@ -485,10 +485,9 @@ func TestAFailedRestoreOfAnAgentThatCannotResumeKeepsItsState(t *testing.T) {
 }
 
 // A VM that stopped while asleep before it was saved, as one the kernel
-// killed while a server restart had it waiting for its save, has nothing to
-// wake from: an agent that cannot start again from its disk ends the
-// session, as for any VM that died.
-func TestAWakeEndsASessionWhoseVMStoppedBeforeItWasSaved(t *testing.T) {
+// killed while a server restart had it waiting for its save, starts again
+// from its disk on the next wake, whatever its agent.
+func TestAWakeStartsAVMThatStoppedBeforeItWasSavedFromItsDisk(t *testing.T) {
 	t.Parallel()
 	e, _, sr := newSaveEnv(t, false)
 	run := e.launchACP(t, "say pong")
@@ -500,11 +499,12 @@ func TestAWakeEndsASessionWhoseVMStoppedBeforeItWasSaved(t *testing.T) {
 	e.sched.mu.Lock()
 	e.sched.runs[run.ID].asleepSaved = false
 	e.sched.mu.Unlock()
-	_, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "wake"}, false, nil)
-	if err == nil || !strings.Contains(err.Error(), "stopped before it was saved") {
-		t.Fatalf("Inject = %v, want the wake to end the session", err)
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "wake"}, false, nil); err != nil {
+		t.Fatalf("Inject = %v, want the VM started from its disk", err)
 	}
-	e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	if got, _ := e.db.GetRun(t.Context(), run.ID); got.Status.Terminal() || containerState(e.container(t, run.ID)) != "running" {
+		t.Fatalf("the session is %s in a %s VM, want it open and running", got.Status, containerState(e.container(t, run.ID)))
+	}
 }
 
 // A restore that failed once the guest ran left the VM running with every
