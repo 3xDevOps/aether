@@ -188,12 +188,10 @@ func TestIntegrationEnhancedRunSurvivesServerRestarts(t *testing.T) {
 	if err = s.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun: %v", err)
 	}
-	// Close leaves the container paused, which docker exec cannot enter.
-	top, err := exec.CommandContext(ctx, "docker", "top", container, "-o", "pid,args").CombinedOutput()
-	if err != nil {
-		t.Fatalf("docker top: %v\n%s", err, top)
-	}
-	if strings.Contains(string(top), "acp-mock") || strings.Contains(string(top), "acp-keeper") {
-		t.Fatalf("Close left the agent or its keeper running:\n%s", top)
+	// Close stops a container created for Enhanced, its agent and keeper
+	// with it.
+	state, err := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Status}}", container).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(state)) != "exited" {
+		t.Fatalf("after Close the container is %q, %v; want it exited", state, err)
 	}
 }
