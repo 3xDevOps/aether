@@ -259,18 +259,73 @@ func TestExecResolvesNamedUsersInTheGuest(t *testing.T) {
 	}
 }
 
-func TestRestoreKeepsTheGuestWhenTheResumeReplyIsLost(t *testing.T) {
+// A resume whose reply is lost ran the guest, whose helper answering proves
+// it; one refused leaves the guest paused, as saved, and is tried again.
+func TestRestoreGetsPastAFailedResume(t *testing.T) {
 	h := newHarness(t)
 	h.createStarted("run-a", sessionSpec("run-a"))
 	if err := h.engine.save(t.Context(), "run-a"); err != nil {
 		t.Fatal(err)
 	}
 	h.units.failResume = true
-	if err := h.engine.restore(t.Context(), "run-a"); err == nil {
-		t.Fatal("restore with a lost resume reply succeeded")
+	if err := h.engine.restore(t.Context(), "run-a"); err != nil || h.units.vmm("run-a") == nil {
+		t.Errorf("restore with a lost resume reply = %v, running=%v; want the guest taken up", err, h.units.vmm("run-a") != nil)
 	}
-	if h.units.vmm("run-a") == nil {
-		t.Error("a restore whose resume reply was lost killed the only copy of the guest")
+
+	h.createStarted("run-b", sessionSpec("run-b"))
+	if err := h.engine.save(t.Context(), "run-b"); err != nil {
+		t.Fatal(err)
+	}
+	h.units.failResume, h.units.refuseResumes = false, 2
+	if err := h.engine.restore(t.Context(), "run-b"); err != nil {
+		t.Errorf("restore through two refused resumes = %v", err)
+	}
+	if err := h.engine.save(t.Context(), "run-b"); err != nil {
+		t.Fatal(err)
+	}
+	h.units.refuseResumes = 3
+	err := h.engine.restore(t.Context(), "run-b")
+	if rec, _ := h.engine.load("run-b"); err == nil || !strings.Contains(err.Error(), "resume refused") || !rec.Saved || !rec.Exited || h.units.vmm("run-b") != nil {
+		t.Errorf("restore through three refused resumes = %v, record %+v; want the error, the VM stopped and its saved state kept", err, rec)
+	}
+	h.units.refuseResumes = 0
+	if err = h.engine.restore(t.Context(), "run-b"); err != nil {
+		t.Errorf("restore of the saved state a refused resume kept = %v", err)
+	}
+}
+
+// From its resume until its guest answers, a restored VM reads running and
+// keeps its saved state: a server that stops in between leaves the next one
+// a running VM to save again.
+func TestARestoredVMReadsRunningBeforeItsGuestAnswers(t *testing.T) {
+	h := newHarness(t)
+	h.createStarted("run-a", sessionSpec("run-a"))
+	if err := h.engine.save(t.Context(), "run-a"); err != nil {
+		t.Fatal(err)
+	}
+	g := h.guest("run-a")
+	hold := make(chan struct{})
+	g.mu.Lock()
+	g.pingHold = hold
+	g.mu.Unlock()
+	done := make(chan error, 1)
+	go func() { done <- h.engine.restore(t.Context(), "run-a") }()
+	deadline := time.After(10 * time.Second)
+	for vmm := h.units.vmm("run-a"); vmm == nil || !slices.Contains(vmm.called(), "vm.resume"); vmm = h.units.vmm("run-a") {
+		select {
+		case <-deadline:
+			t.Fatal("the restore did not resume the guest")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	info, err := h.engine.inspect(t.Context(), "run-a")
+	rec, _ := h.engine.load("run-a")
+	if err != nil || info.Exited || !rec.Saved || rec.Resumed == nil {
+		t.Errorf("a resumed VM whose guest has yet to answer inspects as exited=%v, %v, saved=%v resumed=%v; want it running, its saved state kept", info.Exited, err, rec.Saved, rec.Resumed != nil)
+	}
+	close(hold)
+	if err = <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -332,32 +387,53 @@ func TestRestoreReplacesAMonitorAServerLeftMidRestore(t *testing.T) {
 	}
 }
 
-// A server that stopped after a restore resumed its guest finds at the next
-// wake the guest running, which only has to answer, or gone, with a saved
-// state older than the disks it wrote.
+// A server that stopped after a restore resumed its guest leaves the next
+// one the guest running, which it saves again or which only has to answer
+// the next wake, or gone, with a saved state older than the disks it wrote.
 func TestRestoreAfterAServerStoppedMidWake(t *testing.T) {
 	h := newHarness(t)
-	h.createStarted("run-a", sessionSpec("run-a"))
-	if err := h.engine.save(t.Context(), "run-a"); err != nil {
-		t.Fatal(err)
+	resumeMidWake := func(key string) *fakeVMM {
+		t.Helper()
+		h.createStarted(key, sessionSpec(key))
+		if err := h.engine.save(t.Context(), key); err != nil {
+			t.Fatal(err)
+		}
+		rec, err := h.engine.load(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec.Resumed, err = diskTimes(h.engine.path(key, snapshotDir)); err != nil {
+			t.Fatal(err)
+		}
+		rec.Exited = false
+		resumed := launch{Args: []string{"--api-socket", "path=" + h.engine.path(key, apiSocket)}}
+		if err = errors.Join(h.engine.store(rec), h.engine.launch(t.Context(), rec, resumed)); err != nil {
+			t.Fatal(err)
+		}
+		return h.units.vmm(key)
 	}
-	rec, err := h.engine.load("run-a")
-	if err != nil {
-		t.Fatal(err)
+	next := h.newEngine(h.engine.cfg.DataDir)
+	running := resumeMidWake("run-a")
+	if info, err := next.inspect(t.Context(), "run-a"); err != nil || info.Exited {
+		t.Errorf("the next server inspects a guest resumed mid-wake as %+v, %v; want it running", info, err)
 	}
-	if rec.Resumed, err = diskTimes(h.engine.path("run-a", snapshotDir)); err != nil {
-		t.Fatal(err)
-	}
-	resumed := launch{Args: []string{"--api-socket", "path=" + h.engine.path("run-a", apiSocket)}}
-	if err = errors.Join(h.engine.store(rec), h.engine.launch(t.Context(), rec, resumed)); err != nil {
-		t.Fatal(err)
-	}
-	running := h.units.vmm("run-a")
-	if err = h.engine.restore(t.Context(), "run-a"); err != nil {
+	if err := next.restore(t.Context(), "run-a"); err != nil {
 		t.Fatalf("restore over the guest an earlier restore resumed: %v", err)
 	}
-	if rec, _ = h.engine.load("run-a"); h.units.vmm("run-a") != running || slices.Contains(running.called(), "vm.resume") || rec.Saved {
-		t.Errorf("restore replaced or resumed again a guest that ran (calls %v), saved=%v", running.called(), rec.Saved)
+	rec, err := next.load("run-a")
+	if h.units.vmm("run-a") != running || slices.Contains(running.called(), "vm.resume") || rec.Saved {
+		t.Errorf("restore replaced or resumed again a guest that ran (calls %v), saved=%v, %v", running.called(), rec.Saved, err)
+	}
+
+	resumeMidWake("run-c")
+	if err = next.save(t.Context(), "run-c"); err != nil {
+		t.Fatalf("the next server's save of a guest resumed mid-wake = %v", err)
+	}
+	if rec, err = next.load("run-c"); !rec.Saved || rec.Resumed != nil || h.units.vmm("run-c") != nil {
+		t.Errorf("a guest resumed mid-wake and saved again left %+v, %v, running=%v", rec, err, h.units.vmm("run-c") != nil)
+	}
+	if err = next.restore(t.Context(), "run-c"); err != nil {
+		t.Errorf("restore of the guest saved again = %v", err)
 	}
 
 	h.createStarted("run-b", sessionSpec("run-b"))
@@ -367,7 +443,7 @@ func TestRestoreAfterAServerStoppedMidWake(t *testing.T) {
 	if rec, err = h.engine.load("run-b"); err != nil {
 		t.Fatal(err)
 	}
-	rec.Resumed = map[string]int64{h.engine.path("run-b", "fake-root.img"): 1}
+	rec.Resumed, rec.Exited = map[string]int64{h.engine.path("run-b", "fake-root.img"): 1}, false
 	if err = h.engine.store(rec); err != nil {
 		t.Fatal(err)
 	}

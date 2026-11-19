@@ -631,13 +631,13 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	}
 	disk := filepath.Join(t.TempDir(), "root.img")
 	if err := errors.Join(os.WriteFile(disk, nil, 0o600),
-		os.WriteFile(h.engine.path("run-d", snapshotDir+"/config.json"), fmt.Appendf(nil, `{"disks":[{"path":%q,"readonly":false}]}`, disk), 0o600),
-		os.WriteFile(h.engine.path("run-d", eventsFile), []byte(`{"source": "vm", "event": "rebooting"}`), 0o600)); err != nil {
+		os.WriteFile(h.engine.path("run-d", snapshotDir+"/config.json"), fmt.Appendf(nil, `{"disks":[{"path":%q,"readonly":false}]}`, disk), 0o600)); err != nil {
 		t.Fatal(err)
 	}
+	h.units.rebootOnResume = true
 	err := h.engine.restore(t.Context(), "run-d")
-	if rec, _ := h.engine.load("run-d"); err == nil || !strings.Contains(err.Error(), "restarted instead of answering") || !rec.Saved || h.units.vmm("run-d") != nil {
-		t.Errorf("restore of a guest that restarted on resume = %v, saved=%v, running=%v; want its error, the VM stopped and its saved state kept", err, rec.Saved, h.units.vmm("run-d") != nil)
+	if rec, _ := h.engine.load("run-d"); err == nil || !strings.Contains(err.Error(), "restarted instead of answering") || !rec.Saved || !rec.Exited || rec.Resumed != nil || h.units.vmm("run-d") != nil {
+		t.Errorf("restore of a guest that restarted on resume = %v, record %+v, running=%v; want its error, the VM stopped and its saved state kept", err, rec, h.units.vmm("run-d") != nil)
 	}
 	if _, statErr := os.Stat(h.engine.path("run-d", snapshotDir+"/state.json")); statErr != nil {
 		t.Errorf("the saved state of a guest that wrote no disk: %v", statErr)
@@ -661,6 +661,9 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	}
 	if _, err := os.Stat(h.engine.path("run-d", snapshotDir)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a saved state older than its disks was kept: %v", err)
+	}
+	if err := h.engine.start(t.Context(), "run-d"); err != nil {
+		t.Errorf("start from the disks after the guest restarted = %v; want the last monitor's events forgotten", err)
 	}
 }
 

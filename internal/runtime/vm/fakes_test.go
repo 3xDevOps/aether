@@ -231,6 +231,10 @@ type fakeUnits struct {
 	failNext   bool
 	stateErr   error
 	failResume bool
+	// Each VMM started refuses its first refuseResumes resumes, staying
+	// paused, and with rebootOnResume reports a guest reboot as it resumes.
+	refuseResumes  int
+	rebootOnResume bool
 	// cgroups is the cgroup root, which holds a memory.current, a
 	// memory.stat and a cgroup.freeze for each running unit.
 	cgroups string
@@ -293,7 +297,7 @@ func (u *fakeUnits) Start(_ context.Context, name string, argv, properties []str
 	}
 	vmm, err := startVMM(socket, l.Args, func() { go func() { _ = u.Stop(context.Background(), name) }() })
 	if vmm != nil {
-		vmm.failResume = u.failResume
+		vmm.failResume, vmm.refuseResumes, vmm.rebootOnResume = u.failResume, u.refuseResumes, u.rebootOnResume
 	}
 	if err != nil {
 		return err
@@ -361,8 +365,11 @@ type fakeVMM struct {
 	// snapshotFails refuses every snapshot. A snapshot sends on
 	// snapshotHold, when set, as it starts, and finishes once it receives
 	// from it.
-	snapshotFails bool
-	snapshotHold  chan struct{}
+	snapshotFails  bool
+	snapshotHold   chan struct{}
+	refuseResumes  int
+	rebootOnResume bool
+	events         string
 }
 
 func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
@@ -372,9 +379,12 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 		return nil, err
 	}
 	v := &fakeVMM{state: "Running", listener: l}
-	for _, arg := range args {
-		if arg == "--restore" {
+	for i, arg := range args {
+		switch arg {
+		case "--restore":
 			v.state, v.restored = "Paused", true
+		case "--event-monitor":
+			v.events = strings.TrimPrefix(args[i+1], "path=")
 		}
 	}
 	mux := http.NewServeMux()
@@ -390,7 +400,15 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 		case "vm.pause":
 			v.state = "Paused"
 		case "vm.resume":
+			if v.refuseResumes > 0 {
+				v.refuseResumes--
+				http.Error(w, "resume refused", http.StatusInternalServerError)
+				return
+			}
 			v.state = "Running"
+			if v.rebootOnResume {
+				_ = os.WriteFile(v.events, []byte(`{"source": "vm", "event": "rebooting"}`), 0o600)
+			}
 			if v.failResume {
 				http.Error(w, "reply lost", http.StatusGatewayTimeout)
 			}
@@ -448,8 +466,10 @@ type fakeHelper struct {
 	boots []guest.BootSpec
 	procs map[string]*fakeProc
 	// bootErr and output program the next Boot and Spawn.
-	bootErr  error
-	pingErr  error
+	bootErr error
+	pingErr error
+	// pingHold, when set, holds Ping until it is closed.
+	pingHold chan struct{}
 	output   map[string]string
 	ignoreTE bool
 	clock    time.Time
@@ -478,11 +498,18 @@ type fakeHelper struct {
 
 func (g *fakeHelper) Ping(ctx context.Context) (guest.Info, error) {
 	g.mu.Lock()
-	pingErr := g.pingErr
+	pingErr, hold := g.pingErr, g.pingHold
 	g.mu.Unlock()
 	if pingErr != nil {
 		<-ctx.Done()
 		return guest.Info{}, pingErr
+	}
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			return guest.Info{}, ctx.Err()
+		}
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()

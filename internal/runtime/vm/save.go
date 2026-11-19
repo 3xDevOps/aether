@@ -243,12 +243,13 @@ func (e *engine) awaitStopped(ctx context.Context, key string) error {
 // answers: loaded on demand, a page something else had touched first kept
 // zeros. The saved state is kept until the guest answers, and matches the
 // disks only until the guest writes one, so the record holds the disks'
-// times from before the resume. A guest that dies before it answers, or
-// with the server, is restored again while those times stand; once one
-// moved, the saved state is dropped: a second restore would pair old memory
-// with newer disks. A guest that still runs is never killed for a later
-// error or the caller's ctx ending. A VM with a virtio-fs share is never
-// saved.
+// times from before the resume, and reads running from then on: a server
+// that stops before the answer leaves a running VM, which the next one saves
+// again. A guest that dies before it answers, or with the server, is
+// restored again while those times stand; once one moved, the saved state
+// is dropped: a second restore would pair old memory with newer disks. A
+// guest that still runs is never killed for a later error or the caller's
+// ctx ending. A VM with a virtio-fs share is never saved.
 func (e *engine) restore(ctx context.Context, key string) error {
 	unlock := e.lock(key)
 	defer unlock()
@@ -280,6 +281,10 @@ func (e *engine) restore(ctx context.Context, key string) error {
 			dropErr = os.RemoveAll(dir)
 		}
 		return errors.Join(fmt.Errorf("%w; its guest wrote its disks, so its saved state is dropped: %w", cause, runtime.ErrNotSaved), dropErr)
+	}
+	keep := func(cause error) error {
+		rec.Resumed, rec.Exited = nil, true
+		return errors.Join(cause, e.store(rec))
 	}
 	// A monitor an earlier restore resumed holds the guest, which only has
 	// to answer. Any other holds it paused at the saved state, as a server
@@ -316,6 +321,7 @@ func (e *engine) restore(ctx context.Context, key string) error {
 			rec.Resumed, err = diskTimes(dir)
 		}
 		if err == nil {
+			rec.Exited = false
 			err = e.store(rec)
 		}
 		if err != nil {
@@ -323,23 +329,22 @@ func (e *engine) restore(ctx context.Context, key string) error {
 			return err
 		}
 	}
-	if state, _ := api.state(after); state != "Running" {
-		if err = api.resume(after); err != nil {
-			err = fmt.Errorf("vm runtime: resume restored VM %s: %w", key, err)
-			if state, _ = api.state(after); state == "Paused" {
-				e.kill(after, key)
-				rec.Resumed = nil
-				return errors.Join(err, e.store(rec))
-			}
-		}
-	}
 	live, cancel := context.WithTimeout(after, bootTimeout)
 	defer cancel()
-	var h helper
-	if err == nil {
-		h, err = e.helper(key)
+	paused := func() bool {
+		state, _ := api.state(live)
+		return state == "Paused"
 	}
-	if err == nil {
+	// A guest still paused has not run, so a refused resume is tried again.
+	var resumeErr error
+	for try := 0; try < 3 && paused(); try++ {
+		resumeErr = api.resume(live)
+	}
+	stuck := paused()
+	var h helper
+	if stuck {
+		err = fmt.Errorf("vm runtime: resume restored VM %s: %w", key, resumeErr)
+	} else if h, err = e.helper(key); err == nil {
 		err = e.waitHelper(live, key, h)
 	}
 	if err == nil {
@@ -347,16 +352,17 @@ func (e *engine) restore(ctx context.Context, key string) error {
 			err = fmt.Errorf("vm runtime: set the clock of restored VM %s: %w", key, err)
 		}
 	}
-	if st, stErr := e.units.State(after, unitName(key)); err != nil && (e.rebooted(key) || stErr == nil && !st.Active) {
-		// A paused guest writes nothing more; Cloud Hypervisor may write a
-		// disk as it closes it, so the times are read before the kill.
-		kept := api.pause(live) == nil && unwritten()
-		e.kill(after, key)
-		if !kept && !unwritten() {
-			return drop(err)
+	if err != nil {
+		if alive, aliveErr := e.running(after, key); stuck || e.rebooted(key) || aliveErr == nil && !alive {
+			// A paused guest writes nothing more; Cloud Hypervisor may write
+			// a disk as it closes it, so the times are read before the kill.
+			kept := (stuck || api.pause(live) == nil) && unwritten()
+			e.kill(after, key)
+			if !kept && !unwritten() {
+				return drop(err)
+			}
+			return keep(err)
 		}
-		rec.Resumed = nil
-		return errors.Join(fmt.Errorf("%w; its guest wrote no disk, so its saved state is kept", err), e.store(rec))
 	}
 	rec.Saved, rec.Resumed, rec.Exited = false, nil, false
 	rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
