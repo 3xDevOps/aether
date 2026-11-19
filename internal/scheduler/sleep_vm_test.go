@@ -44,8 +44,8 @@ type saveRuntime struct {
 	// state, as a restore that never gets an answer from its VM does.
 	restoreHang bool
 	restores    int
-	// restoreDeadline is whether the last restore's ctx had a deadline.
-	restoreDeadline bool
+	// restoreTime is what was left of the last restore's ctx as it began.
+	restoreTime time.Duration
 	// commands holds the command each container starts from its disk with.
 	commands map[runtime.ID][]string
 }
@@ -99,7 +99,9 @@ func (r *saveRuntime) Save(_ context.Context, id runtime.ID) error {
 func (r *saveRuntime) Restore(ctx context.Context, id runtime.ID) error {
 	r.saveMu.Lock()
 	r.restores++
-	_, r.restoreDeadline = ctx.Deadline()
+	if deadline, ok := ctx.Deadline(); ok {
+		r.restoreTime = time.Until(deadline)
+	}
 	if r.restoreHang {
 		r.saveMu.Unlock()
 		<-ctx.Done()
@@ -219,9 +221,6 @@ func TestAVMSleepsBySavingAndWakesWithItsAgentRunning(t *testing.T) {
 	}
 	if state := e.sched.Sleep(run.ID); state.AsleepSince != nil || sr.restores != 1 {
 		t.Fatalf("the prompt did not restore the session: %+v, %d restores", state, sr.restores)
-	}
-	if sr.restoreDeadline {
-		t.Error("the restore ran under the wake's deadline, which could end a long memory load")
 	}
 	if !adopted(rt) {
 		t.Fatal("the wake started another agent or reopened the conversation instead of reattaching")

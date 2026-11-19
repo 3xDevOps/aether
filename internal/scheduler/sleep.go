@@ -27,10 +27,14 @@ const (
 )
 
 // wakeTimeout bounds one wake: the container start, its setup gate and the
-// agent's restore, but not a saved VM's restore, which has its own. A wake
-// runs for every caller waiting on it, so no caller's context cancels it; a
-// server shutdown does.
-const wakeTimeout = 3 * time.Minute
+// agent's restore. The wake of a saved VM also gets the time to read its
+// saved memory back at restoreRate, the slowest read the VM runtime allows
+// a restore. A wake runs for every caller waiting on it, so no caller's
+// context cancels it; a server shutdown does.
+const (
+	wakeTimeout = 3 * time.Minute
+	restoreRate = 20 << 20
+)
 
 // ErrClosedAsleep refuses waking a closed session's stopped container
 // outside Relaunch.
@@ -219,10 +223,16 @@ func (s *Scheduler) wake(ctx context.Context, entry *supervised) error {
 		}
 		done := make(chan struct{})
 		entry.waking = done
+		cid := entry.containerID
 		s.mu.Unlock()
 		s.publishSleep(entry)
 
-		wakeCtx, cancel := context.WithTimeout(s.superCtx, wakeTimeout)
+		limit := wakeTimeout
+		if saver, ok := s.saver(cid); ok {
+			saved, _ := saver.SavedMemory(cid)
+			limit += time.Duration(saved/restoreRate) * time.Second
+		}
+		wakeCtx, cancel := context.WithTimeout(s.superCtx, limit)
 		how, err := s.wakeLive(wakeCtx, entry)
 		cancel()
 		if err != nil {
