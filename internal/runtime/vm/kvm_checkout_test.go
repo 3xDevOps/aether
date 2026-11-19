@@ -3,10 +3,12 @@
 package vm
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -465,6 +467,59 @@ func TestKVMGitServiceBesideAFullSession(t *testing.T) {
 	}
 	if commit, err = h.git.CommitAll(t.Context(), run, "aether: after", member, nil); err != nil || commit == "" {
 		t.Errorf("commit after the git service was killed mid-commit = %q, %v", commit, err)
+	}
+}
+
+// TestKVMHelperOutlivesConnectionsHungUpAtBirth checks that PID 1 keeps
+// the console as descriptors 1 and 2 (docs/vm-guest.md#boot). Then it
+// hangs connections to the helper up as soon as they open, as a wake
+// resets a new connection that reuses a saved one's ports, and requires
+// the guest to survive them. The engine's own connection is closed first,
+// so a hung-up one can take its descriptor.
+func TestKVMHelperOutlivesConnectionsHungUpAtBirth(t *testing.T) {
+	h := newCheckoutHost(t)
+	ws := domain.WorkspaceID("wshangup")
+	key := fmt.Sprintf("run-vmhangup-%x", time.Now().Unix())
+	h.session(t, ws, key, h.workspace(t, ws, 1))
+	api, err := h.e.helper(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := h.e.load(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only root may read PID 1's descriptors.
+	code, fds, err := h.e.runAsRoot(t.Context(), api, rec, []string{"/bin/sh", "-c", "readlink -v /proc/1/fd/1; readlink -v /proc/1/fd/2"})
+	if err != nil || code != 0 || fds != "/dev/console\n/dev/console\n" {
+		t.Fatalf("PID 1's descriptors 1 and 2: %d %v %q", code, err, fds)
+	}
+	h.e.forgetHelper(key)
+	socket := h.e.path(key, vsockSocket)
+	// An OK shows the helper is listening before the hang-ups below.
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	_, _ = fmt.Fprintf(conn, "CONNECT %d\n", guest.APIPort)
+	reply, err := bufio.NewReader(conn).ReadString('\n')
+	_ = conn.Close()
+	if !strings.HasPrefix(reply, "OK ") {
+		t.Fatalf("CONNECT %d: %q, %v%s", guest.APIPort, reply, err, h.e.logTail(key))
+	}
+	for range 10 {
+		// A failed dial is left to the checks below.
+		if conn, err = net.Dial("unix", socket); err == nil {
+			_, _ = fmt.Fprintf(conn, "CONNECT %d\n", guest.APIPort)
+			_ = conn.Close()
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// After an exec, so a death at the last hang-up has shown.
+	code, _, errOut, err := h.e.exec(t.Context(), key, []string{"/bin/sh", "-c", "true"}, "/workspace")
+	if rebooted := h.e.rebooted(key); rebooted || err != nil || code != 0 {
+		t.Fatalf("after the hang-ups: rebooted %t, exec %d %v %s%s", rebooted, code, err, errOut, h.e.logTail(key))
 	}
 }
 
