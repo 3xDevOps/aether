@@ -1,10 +1,12 @@
 package vm
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -635,13 +637,17 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.units.rebootOnResume = true
-	console := "fatal error: fault\n" + strings.Repeat("goroutine trace\n", 80) + "Kernel panic - not syncing: Attempted to kill init!\n"
+	console := "fatal error: fault\n" + strings.Repeat("goroutine trace\n", 200) + "Kernel panic - not syncing: Attempted to kill init!\n"
 	if err := os.WriteFile(h.engine.path("run-d", consoleLog), []byte(console), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	err := h.engine.restore(t.Context(), "run-d")
-	if err == nil || !strings.Contains(err.Error(), "fatal error: fault") || !strings.Contains(err.Error(), "Kernel panic") || strings.Count(err.Error(), "goroutine trace") != logHeadLines+logTailLines-2 {
-		t.Errorf("restore of a guest that restarted on resume = %v; want what its console said first and last", err)
+	slog.SetDefault(previous)
+	if err == nil || !strings.Contains(logs.String(), "fatal error: fault") || strings.Count(logs.String(), "goroutine trace") != consoleStartLines-1 || strings.Contains(err.Error(), "fatal error") || !strings.Contains(err.Error(), "Kernel panic") {
+		t.Errorf("a guest that restarted on resume logged %q and failed with %v; want the start of its console in the log and its tail in the error", logs.String(), err)
 	}
 	if rec, _ := h.engine.load("run-d"); err == nil || !strings.Contains(err.Error(), "restarted instead of answering") || !rec.Saved || !rec.Exited || rec.Resumed != nil || h.units.vmm("run-d") != nil {
 		t.Errorf("restore of a guest that restarted on resume = %v, record %+v, running=%v; want its error, the VM stopped and its saved state kept", err, rec, h.units.vmm("run-d") != nil)

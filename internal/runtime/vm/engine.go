@@ -62,10 +62,9 @@ const (
 	// memory: Cloud Hypervisor, virtiofsd, and the monitor with the file
 	// service, whose requests a guest can fill.
 	unitOverheadMiB = 512
-	// logTailLines is how much of the end of each log an error quotes, and
-	// logHeadLines how much of the start of the console of a guest that
-	// died on a wake.
-	logTailLines, logHeadLines = 15, 40
+	// consoleStartLines is how much of the start of its console the server
+	// log keeps for a guest that restarted instead of answering.
+	consoleStartLines = 100
 	// cmdlineBase boots the read-only helper disk, whose /init is the helper.
 	// Page reporting order 0 lets freed guest page cache back to the host;
 	// at the default order it stalls with most of it still held. Cloud
@@ -746,7 +745,7 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 		select {
 		case err := <-answered:
 			if e.rebooted(key) {
-				return fmt.Errorf("vm runtime: the guest of VM %s restarted instead of answering%s", key, e.restartLogs(key))
+				return e.restarted(key)
 			}
 			if err != nil {
 				return fmt.Errorf("vm runtime: helper of VM %s did not answer: %w%s", key, err, e.logTail(key))
@@ -761,7 +760,7 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 		case <-tick.C:
 			if e.rebooted(key) {
 				cancel()
-				return fmt.Errorf("vm runtime: the guest of VM %s restarted instead of answering%s", key, e.restartLogs(key))
+				return e.restarted(key)
 			}
 			if st, err := e.units.State(ctx, unitName(key)); err == nil && !st.Active {
 				cancel()
@@ -771,17 +770,15 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 	}
 }
 
-// restartLogs is logTail after what a guest that restarted before it
-// answered printed first: each monitor starts console.log again, so a guest
-// that dies on a wake says why at its top, and its kernel's panic then
-// fills the tail.
-func (e *engine) restartLogs(key string) string {
+// restarted is the error of a guest that restarted before it answered.
+// Each monitor starts console.log again, so its first lines are what the
+// guest printed as it died, and its kernel's panic fills the tail the error
+// quotes: the server log keeps them.
+func (e *engine) restarted(key string) error {
 	data, _ := readNoFollow(e.path(key, consoleLog))
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if len(lines) <= logTailLines {
-		return e.logTail(key)
-	}
-	return fmt.Sprintf("\n%s from its start:\n%s%s", consoleLog, strings.Join(lines[:min(logHeadLines, len(lines)-logTailLines)], "\n"), e.logTail(key))
+	lines := strings.SplitN(string(data), "\n", consoleStartLines+1)
+	slog.Warn("vm runtime: the guest restarted instead of answering", "vm", key, "console_start", strings.Join(lines[:min(consoleStartLines, len(lines))], "\n"))
+	return fmt.Errorf("vm runtime: the guest of VM %s restarted instead of answering%s", key, e.logTail(key))
 }
 
 func (e *engine) logTail(key string) string {
@@ -794,7 +791,7 @@ func (e *engine) logTail(key string) string {
 			continue
 		}
 		lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-		fmt.Fprintf(&out, "\n%s:\n%s", name, strings.Join(lines[max(0, len(lines)-logTailLines):], "\n"))
+		fmt.Fprintf(&out, "\n%s:\n%s", name, strings.Join(lines[max(0, len(lines)-15):], "\n"))
 	}
 	return out.String()
 }

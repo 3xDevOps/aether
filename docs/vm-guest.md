@@ -490,9 +490,9 @@ those times has moved. From the resume on, the record reads running:
 - A guest that restarts, which Cloud Hypervisor's event log reports, or
   whose unit stops before the helper answers is not the saved one. The
   restore pauses it, stops the VM and fails with the tail of `monitor.log`
-  and `console.log`. For a guest that restarted it quotes the start of
-  `console.log` too: each monitor starts that file again, so its first
-  lines are what the woken guest printed as it died. With the disks
+  and `console.log`. For a guest that restarted the server log gets the
+  first 100 lines of `console.log` as well: each monitor starts that file
+  again, so they are what the woken guest printed as it died. With the disks
   unwritten the saved state is kept for the next restore; otherwise it is
   dropped, and the error says why, such as `its guest wrote its disks`, and
   `it has no saved state`.
