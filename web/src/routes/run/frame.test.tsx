@@ -4,6 +4,7 @@ import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import type { Run } from '@/lib/types'
 import { ShortcutsDialog } from '@/components/shortcuts'
+import type * as xtermHostModule from '@/components/xterm-host'
 import { openRunLink } from '@/routes/browser/open'
 import { openInFiles } from '@/routes/files/open'
 import { lookupRoute } from '@/routes/registry'
@@ -16,6 +17,14 @@ import { agentInfo, alice, bob, fakeApi, roomMessage, run, serverInfo, workspace
 import { ApiError } from '@/lib/api'
 import { StubSocket } from '@/test/stub-socket'
 import { atViewport } from '@/test/viewport'
+
+// A real xterm costs each mount of a run view most of its jsdom time; a case
+// that never reads the agent terminal turns it off.
+const xterm = vi.hoisted(() => ({ enabled: true }))
+vi.mock('@/components/xterm-host', async (importOriginal) => {
+  const actual = await importOriginal<typeof xtermHostModule>()
+  return { ...actual, useXterm: (options: Parameters<typeof actual.useXterm>[0] = {}) => actual.useXterm({ ...options, enabled: xterm.enabled && options.enabled !== false }) }
+})
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof apiModule>()
@@ -47,6 +56,7 @@ function rerouted(view: string) {
 }
 
 beforeEach(() => {
+  xterm.enabled = true
   StubSocket.install()
   useStore.setState({
     hydrated: true,
@@ -689,6 +699,7 @@ describe('run details', () => {
   })
 
   it('drops a note\'s refusal that arrives after another member signed in', async () => {
+    xterm.enabled = false
     const post = heldPost()
     useStore.setState({ identityKey: 'alice' })
     open()
@@ -961,6 +972,7 @@ describe('the session composer', () => {
   })
 
   it('waits for a send that outlives it, and sends a failed one again under the same key', async () => {
+    xterm.enabled = false
     const View = lookupRoute('run')!
     let settle = { resolve: (_: { message: ReturnType<typeof roomMessage> }) => {}, reject: (_: Error) => {} }
     const pending = () => new Promise<{ message: ReturnType<typeof roomMessage> }>((resolve, reject) => { settle = { resolve, reject } })

@@ -654,6 +654,13 @@ with `false` and a component renders its widest layout. `atViewport`
 hit testing and focus outlines belong to the
 [dashboard end-to-end suite](#the-dashboard-end-to-end-suite).
 
+A real xterm takes most of a run page's jsdom time: its DOM renderer adds a
+stylesheet of several hundred rules, and every `getComputedStyle` call, which
+testing-library makes for each role query and user-event for each pointer
+event, has to cascade it. A case that never reads the terminal passes `enabled: false` through a mock of `useXterm`, as
+`web/src/components/assistant/context.test.tsx` does for the whole file and
+`web/src/routes/run/frame.test.tsx` does per case.
+
 ## The dashboard end-to-end suite
 
 `web/e2e/` drives Chromium against the dashboard embedded in `dist/aether`,
