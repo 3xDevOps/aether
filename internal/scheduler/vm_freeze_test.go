@@ -317,12 +317,15 @@ func TestAVMThatDiesWhileTheGuardSavesItEndsItsRun(t *testing.T) {
 		e.container(t, run).endProcess(137)
 		if shutdown {
 			cancel()
+			e.sched.superCancel()
 		}
 		close(fr.release)
 		<-guarded
 		cancel()
-		if sc, err := e.sched.readSidecar(run); err != nil || sc.AsleepSince != nil {
-			t.Fatalf("shutdown %v: a run whose VM died during its save is recorded %+v, %v; want it awake", shutdown, sc, err)
+		if shutdown {
+			e.restartACP(t)
+		} else if sc, err := e.sched.readSidecar(run); err != nil || sc.AsleepSince != nil {
+			t.Fatalf("a run whose VM died during its save is recorded %+v, %v; want it awake", sc, err)
 		}
 		waitStatusEvent(t, sub, run, domain.RunFailed)
 	}
