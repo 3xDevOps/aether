@@ -241,7 +241,9 @@ func New(cfg Config) (*Host, error) {
 	return h, nil
 }
 
-// Close stops all sessions and flushes their transcripts.
+// Close stops all sessions at once, so attachments that wait for a guest
+// that does not answer hold it up for one bound, and flushes their
+// transcripts.
 func (h *Host) Close() error {
 	h.mu.Lock()
 	if h.closed {
@@ -254,11 +256,13 @@ func (h *Host) Close() error {
 		all = append(all, s)
 	}
 	h.mu.Unlock()
-	var stopErr error
-	for _, s := range all {
-		stopErr = errors.Join(stopErr, s.stop())
+	errs := make([]error, len(all))
+	var wg sync.WaitGroup
+	for i, s := range all {
+		wg.Go(func() { errs[i] = s.stop() })
 	}
-	return stopErr
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 // StartSession takes ownership of att and starts the persistent session for

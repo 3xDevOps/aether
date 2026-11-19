@@ -66,7 +66,8 @@ func TestKVMKeeperStartsTheAgentFromTheHome(t *testing.T) {
 // TestKVMShutdownLetsGoOfAFrozenVMsKeeper lets go of an agent's keeper as a
 // server shutdown does, in a VM the memory brake froze: the detach waits 3
 // seconds for an answer that never comes, then the close ends the attachment
-// without waiting for the guest to take the detach.
+// without waiting for the guest to take the detach. It closes the client a
+// second time, as a shutdown closes a terminal's, which must not wait again.
 func TestKVMShutdownLetsGoOfAFrozenVMsKeeper(t *testing.T) {
 	e := kvmEngine(t)
 	const key = "run-keeper-frozen"
@@ -108,6 +109,7 @@ func TestKVMShutdownLetsGoOfAFrozenVMsKeeper(t *testing.T) {
 		defer cancel()
 		err := client.Detach(ctx)
 		_ = client.Close()
+		_ = client.Close()
 		_ = bridge.Detach()
 		detached <- err
 	}()
@@ -116,8 +118,8 @@ func TestKVMShutdownLetsGoOfAFrozenVMsKeeper(t *testing.T) {
 		if err == nil {
 			t.Fatal("the frozen guest confirmed the detach")
 		}
-	case <-time.After(15 * time.Second):
-		t.Fatal("letting go of the frozen VM's keeper still waits after 15 seconds")
+	case <-time.After(12 * time.Second):
+		t.Fatal("letting go of the frozen VM's keeper still waits after 12 seconds")
 	}
 	t.Logf("let go of the frozen VM's keeper in %s", time.Since(start).Round(time.Millisecond))
 }
