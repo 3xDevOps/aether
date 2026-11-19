@@ -473,27 +473,26 @@ were resumed died by their third wake
 (`TestKVMRepeatedSaveAndWakeKeepsMemoryAndProcesses`).
 
 The load gets 60 seconds plus 1 second per 20 MiB of the VM unit's memory
-cap. A wake's 3 minutes do not cut it short; a server shutdown does. The
-resume and the answer of the guest's helper then get 90 seconds.
+cap, and the wake around it 1 second per 20 MiB of saved memory beyond its
+3 minutes. The resume and the answer of the guest's helper then get 90
+seconds.
 
-The engine deletes a saved state only once the restored guest's helper
-answers. A saved state matches the VM's disks only until the guest writes
-one: saved memory restored over newer disks would corrupt them. So before it
+The engine keeps a saved state until the restored guest's helper answers.
+A saved state matches the VM's disks only until the guest writes one:
+saved memory restored over newer disks would corrupt them. So before it
 resumes the guest, a restore records in the VM's record (`resumed`) the
 modification time of every disk the saved `config.json` lets the guest
 write, and the saved state is restored a second time only while none of
-those times has moved. From then on the record reads running, with the
-saved state kept until the answer:
+those times has moved. From the resume on, the record reads running:
 
 - A resume that Cloud Hypervisor refuses leaves the guest paused, as saved.
-  It is tried 3 times; then the VM is stopped and the restore fails with
-  the error, its saved state kept.
+  The restore resumes it up to 3 times, then stops it as in the next case.
 - A guest that restarts, which Cloud Hypervisor's event log reports, or
   whose unit stops before the helper answers is not the saved one. The
   restore pauses it, stops the VM and fails with the tail of `monitor.log`
   and `console.log`. With the disks unwritten the saved state is kept for
-  the next restore; otherwise it is dropped, and the error also says
-  `it has no saved state`.
+  the next restore; otherwise it is dropped, and the error says why, such
+  as `its guest wrote its disks`, and `it has no saved state`.
 - A server that stops between the resume and the answer leaves a running VM.
   The next server saves it again, which replaces the saved state, or its
   next wake takes the guest up, which only has to answer. With no monitor

@@ -915,17 +915,20 @@ VM with no saved memory left starts from its disk whatever its agent, as a
 relaunched one does. A VM a failed save left running is taken up as it is
 on the next wake.
 
-The saved state is deleted only once the woken guest answers. A guest that
+The saved state is kept until the woken guest answers. A guest that
 restarts or stops before that fails the restore at once, with the last
 lines of the VM's console, such as a kernel panic, in the error. While that
 guest wrote none of its disks its saved state still matches them, and the
 session is handled as for any failed restore above: one that stays asleep
 restores it again on the next wake. Once the guest wrote a disk, the saved
 state no longer matches the disks: it is dropped, and the session starts
-from its disk. A wake also ends as soon as the VM stops under it, with
+from its disk. A guest that keeps running but does not answer within 90
+seconds holds the session from then on: its saved state is deleted, and
+the wake takes the guest up as it is, or saves it again when the agent
+cannot be reached. A wake also ends as soon as the VM stops under it, with
 `the session's container exited with status <n> while the session woke`,
-rather than after its 3 minutes. Those 3 minutes do not cut short the
-restore itself, whose time grows with the VM's memory
+rather than after its time runs out: 3 minutes, plus 1 second per 20 MiB
+of saved memory to read it back
 ([vm-guest.md](vm-guest.md#save-and-restore)).
 
 A saved VM takes about as much disk as the memory its processes use, after
