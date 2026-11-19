@@ -97,7 +97,8 @@ func TestKVMShutdownLetsGoOfAFrozenVMsKeeper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if froze, err := e.freeze(key); !froze || err != nil {
+	froze, err := e.freeze(key)
+	if !froze || err != nil {
 		t.Fatalf("freeze = %v, %v", froze, err)
 	}
 	t.Cleanup(func() { _ = e.thaw(key) })
@@ -107,11 +108,11 @@ func TestKVMShutdownLetsGoOfAFrozenVMsKeeper(t *testing.T) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		err := client.Detach(ctx)
+		detachErr := client.Detach(ctx)
 		_ = client.Close()
 		_ = client.Close()
 		_ = bridge.Detach()
-		detached <- err
+		detached <- detachErr
 	}()
 	select {
 	case err = <-detached:
