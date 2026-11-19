@@ -989,8 +989,8 @@ standard images without one.
 | `kvm` | [VM tests](#vm-tests) on a hosted runner, which has `/dev/kvm` (`.github/workflows/kvm.yml`) | `make kernel`, then `make test-kvm` as root |
 
 A pull request that changes only `docs/**` or root-level `*.md` files runs
-`audit` and nothing else, unless it changes `docs/embed.go`, `docs/agents.md`
-or `docs/harnesses.md`, which Go code embeds or checks. A Markdown file anywhere else counts as code.
+`audit` and nothing else, unless it changes a Go file there,
+`docs/agents.md` or `docs/harnesses.md`, which Go tests check. A Markdown file anywhere else counts as code.
 `scripts/ci-classify-areas.sh` narrows the rest by area:
 
 | Mode | Jobs | True for |
