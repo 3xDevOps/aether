@@ -105,3 +105,26 @@ func TestRenameWhileBusyReturnsTheErrorOfAnAppStillOpen(t *testing.T) {
 		t.Fatalf("the app moved anyway: %v", statErr)
 	}
 }
+
+// The old app's folder stays held for a moment after it quits, so the
+// renamed app's start waits for it instead of leaving it to the next start.
+func TestRetireLegacyDesktopWaitsForAJustQuitOldApp(t *testing.T) {
+	f := newRetireFixture(t, "windows")
+	held, err := os.Open(DesktopAppExe("windows", f.legacy[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(f.legacy[0], f.legacy[0]+".probe"); !renameBusy(err) {
+		t.Fatalf("rename of a held app folder = %v, want a busy error", err)
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_ = held.Close()
+	}()
+	if err := retireLegacyDesktop("windows", f.lookup, f.renamedExe); err != nil {
+		t.Fatal(err)
+	}
+	mustBeGone(t, f.legacy[0])
+	mustBeGone(t, f.shortcut)
+	mustExist(t, f.renamedShortcut)
+}

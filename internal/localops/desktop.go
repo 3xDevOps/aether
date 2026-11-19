@@ -530,7 +530,7 @@ func swapInstalled(goos, staged, target string) error {
 // renameAsideTimeout bounds the wait for Windows to release an app that has
 // just exited: process teardown, Defender and the search indexer hold its
 // directory for a moment, and the user may have closed the window only
-// seconds before running the build.
+// seconds before running the build or starting the renamed app.
 const renameAsideTimeout = 10 * time.Second
 
 // renameWhileBusy renames from to to, retrying with backoff while

@@ -435,11 +435,14 @@ function Get-ReleaseAsset([string]$Tag, [string]$Name, [string]$OutFile) {
 function Wait-Retired([string]$App, [int]$TimeoutSec) {
     $retired = Join-Path (Split-Path -Parent $App) ('.aether-retired-' + (Split-Path -Leaf $App))
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
-    while ((Test-Path -LiteralPath $App) -or (Test-Path -LiteralPath $retired) -or (Test-Path -LiteralPath $legacyShortcut)) {
-        if ([DateTime]::UtcNow -gt $deadline) { return $false }
+    while ($true) {
+        $left = @($App, $retired, $legacyShortcut | Where-Object { Test-Path -LiteralPath $_ })
+        if ($left.Count -eq 0) { return $true }
+        if ([DateTime]::UtcNow -gt $deadline) { break }
         Start-Sleep -Milliseconds 500
     }
-    return $true
+    Write-Host "still there after ${TimeoutSec}s: $($left -join '; ')"
+    return $false
 }
 
 # An Electron app's helper processes run its own executable and can outlive

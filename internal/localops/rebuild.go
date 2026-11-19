@@ -314,7 +314,7 @@ func retireLegacyDesktop(goos string, lookup func() (RealUser, error), shellExe 
 			if !oldApp(goos, app, current, shellApp) {
 				continue
 			}
-			if err := os.Rename(app, retired); err != nil {
+			if err := renameWhileBusy(os.Rename, app, retired, renameAsideTimeout); err != nil {
 				errs = append(errs, removeErr(app, err))
 				continue
 			}
