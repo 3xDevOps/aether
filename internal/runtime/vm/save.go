@@ -48,6 +48,11 @@ func (e *engine) save(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
+	// A guest back from a restart holds none of the session's processes;
+	// a restore of it takes the event log as the proof.
+	if e.rebooted(key) {
+		return fmt.Errorf("vm runtime: save VM %s: its guest restarted, so it no longer holds the session%s", key, e.logTail(key))
+	}
 	booted, err := readLaunch(e.dir(key))
 	if err != nil {
 		return err
@@ -349,7 +354,7 @@ func (e *engine) restore(ctx context.Context, key string) error {
 	stuck := state() == "Paused"
 	var h helper
 	if stuck {
-		err = errors.Join(fmt.Errorf("vm runtime: resume restored VM %s: it stays paused", key), resumeErr)
+		err = errors.Join(fmt.Errorf("vm runtime: resume restored VM %s: it stays paused%s", key, e.logTail(key)), resumeErr)
 	} else if h, err = e.helper(key); err == nil {
 		err = e.waitHelper(live, key, h)
 	}

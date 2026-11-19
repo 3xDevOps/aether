@@ -436,6 +436,29 @@ func TestRestoreAfterAServerStoppedMidWake(t *testing.T) {
 		t.Errorf("restore of the guest saved again = %v", err)
 	}
 
+	resumeMidWake("run-f")
+	if err = os.WriteFile(h.engine.path("run-f", eventsFile), []byte(`{"source": "vm", "event": "rebooting"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = next.save(t.Context(), "run-f"); err == nil || !strings.Contains(err.Error(), "its guest restarted") {
+		t.Errorf("the next server's save of a guest that restarted mid-wake = %v; want it refused", err)
+	}
+	err = next.restore(t.Context(), "run-f")
+	if rec, _ = next.load("run-f"); err == nil || !strings.Contains(err.Error(), "restarted instead of answering") || !rec.Saved || h.units.vmm("run-f") != nil {
+		t.Errorf("restore of a guest that restarted mid-wake = %v, saved=%v, running=%v; want its error, the VM stopped and its saved state kept", err, rec.Saved, h.units.vmm("run-f") != nil)
+	}
+
+	resumeMidWake("run-g")
+	if err = next.stop(t.Context(), "run-g", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ = next.load("run-g"); rec.Saved || rec.Resumed != nil {
+		t.Errorf("stop of a guest resumed mid-wake left saved=%v resumed=%v; want its saved state discarded", rec.Saved, rec.Resumed != nil)
+	}
+	if _, err = os.Stat(h.engine.path("run-g", snapshotDir)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("stop of a guest resumed mid-wake kept its saved state: %v", err)
+	}
+
 	h.createStarted("run-b", sessionSpec("run-b"))
 	if err = h.engine.save(t.Context(), "run-b"); err != nil {
 		t.Fatal(err)
