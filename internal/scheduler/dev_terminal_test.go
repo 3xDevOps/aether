@@ -39,6 +39,9 @@ type terminalTestRuntime struct {
 	failAttach int
 	loseReady  bool
 	resumes    atomic.Int32
+	// recoverHold, once set, holds every RecoverExec until it closes or the
+	// caller's context ends, as a frozen guest does.
+	recoverHold chan struct{}
 }
 
 func (r *terminalTestRuntime) Resume(ctx context.Context, id runtime.ID) error {
@@ -116,9 +119,19 @@ func (r *terminalTestRuntime) StartExecPipe(ctx context.Context, container runti
 	return r.StartExecTTY(ctx, container, spec)
 }
 
-func (r *terminalTestRuntime) RecoverExec(_ context.Context, identity runtime.ExecIdentity) (runtime.ManagedExec, error) {
+func (r *terminalTestRuntime) RecoverExec(ctx context.Context, identity runtime.ExecIdentity) (runtime.ManagedExec, error) {
 	if err := r.refusePaused(identity.ContainerID); err != nil {
 		return nil, err
+	}
+	r.mu.Lock()
+	hold := r.recoverHold
+	r.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+		}
+		return nil, runtime.ErrExecUnavailable
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -482,7 +495,7 @@ func TestDevelopmentTerminalRecoveryDoesNotRerunAndCanStop(t *testing.T) {
 	run, primary := e.launchFake(t, "recovery")
 	terminal := startTestTerminal(t, e, run.ID, "server")
 	execution := terminalTestProcess(t, e, run.ID, terminal)
-	if err := e.sched.DetachDevelopmentTerminals(t.Context()); err != nil {
+	if err := e.sched.DetachDevelopmentTerminals(); err != nil {
 		t.Fatal(err)
 	}
 	if execution.process.currentState() != "running" {

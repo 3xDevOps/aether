@@ -29,6 +29,7 @@ func (p *Process) Attach(fromStart bool) *Attachment {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Attachment{p: p, ctx: ctx, cancel: cancel}
 	a.stdin = &attachInput{a: a}
+	a.stdin.ctx, a.stdin.cancel = context.WithCancel(ctx)
 	offset := int64(-1)
 	if fromStart {
 		offset = 0
@@ -106,32 +107,34 @@ func (a *Attachment) Close() error {
 }
 
 type attachInput struct {
-	a      *Attachment
+	a *Attachment
+	// ctx ends with Close or with the attachment.
+	ctx    context.Context
+	cancel context.CancelFunc
 	mu     sync.Mutex
-	closed bool
 }
 
 func (in *attachInput) Write(b []byte) (int, error) {
-	return in.WriteContext(in.a.ctx, b)
+	return in.WriteContext(in.ctx, b)
 }
 
-// WriteContext bounds one write by ctx as well as the attachment's life.
+// WriteContext bounds one write by ctx as well as the input's life.
 func (in *attachInput) WriteContext(ctx context.Context, b []byte) (int, error) {
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	if in.closed {
+	if in.ctx.Err() != nil {
 		return 0, io.ErrClosedPipe
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stop := context.AfterFunc(in.a.ctx, cancel)
+	stop := context.AfterFunc(in.ctx, cancel)
 	defer stop()
 	return in.a.p.Write(ctx, b)
 }
 
+// Close ends a write in flight without waiting for the helper's answer,
+// which a frozen guest never gives.
 func (in *attachInput) Close() error {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	in.closed = true
+	in.cancel()
 	return nil
 }

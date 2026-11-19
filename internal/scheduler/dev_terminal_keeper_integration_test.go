@@ -114,7 +114,7 @@ func TestIntegrationDevelopmentTerminalSurvivesSchedulerRestart(t *testing.T) {
 
 	// The scheduler stops as a server process does; the command writes
 	// while no server is attached.
-	if err = e.sched.DetachDevelopmentTerminals(ctx); err != nil {
+	if err = e.sched.DetachDevelopmentTerminals(); err != nil {
 		t.Fatal(err)
 	}
 	cfg := e.sched.cfg

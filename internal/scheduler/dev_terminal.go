@@ -710,29 +710,44 @@ func (s *Scheduler) ReopenDevelopmentTerminals(ctx context.Context, run domain.R
 	return s.persistRunTerminalsLocked(run, set)
 }
 
-func (s *Scheduler) DetachDevelopmentTerminals(ctx context.Context) error {
+// DetachDevelopmentTerminals lets go of every terminal at a shutdown, all at
+// once, and takes up none a wake left for later: a guest that does not
+// answer holds the shutdown up for one bound, not one per terminal.
+func (s *Scheduler) DetachDevelopmentTerminals() error {
 	s.mu.Lock()
-	runs := make([]domain.RunID, 0, len(s.runShellTerminals))
-	for run := range s.runShellTerminals {
-		runs = append(runs, run)
-	}
+	runs := slices.Collect(maps.Keys(s.runShellTerminals))
 	s.mu.Unlock()
-	var errs []error
-	for _, run := range runs {
-		lock := s.lockForShell(run)
-		lock.Lock()
-		set, err := s.loadRunTerminalsLocked(ctx, run)
-		if err == nil {
-			for _, terminal := range set.Terminals {
-				errs = append(errs, releaseTerminal(terminal))
-				terminal.Generation = 0
-				terminal.Unavailable = "PTY detached on server shutdown; command was not stopped"
-			}
-			err = s.persistRunTerminalsLocked(run, set)
-		}
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
+	fail := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
 		errs = append(errs, err)
-		lock.Unlock()
 	}
+	for _, run := range runs {
+		wg.Go(func() {
+			lock := s.lockForShell(run)
+			lock.Lock()
+			defer lock.Unlock()
+			s.mu.Lock()
+			set := s.runShellTerminals[run]
+			s.mu.Unlock()
+			var released sync.WaitGroup
+			for _, terminal := range set.Terminals {
+				released.Go(func() {
+					fail(releaseTerminal(terminal))
+					terminal.Generation = 0
+					terminal.Unavailable = "PTY detached on server shutdown; command was not stopped"
+				})
+			}
+			released.Wait()
+			fail(s.persistRunTerminalsLocked(run, set))
+		})
+	}
+	wg.Wait()
 	return errors.Join(errs...)
 }
 

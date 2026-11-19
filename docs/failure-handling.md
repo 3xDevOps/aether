@@ -410,7 +410,12 @@ set aside for as long as it stays frozen. Every frozen VM so ends either
 thawed or saved to disk and woken later.
 
 A server that stops with less than twice the floor free leaves the VMs
-frozen: thawed at once, they would run with nothing watching them. The
+frozen: thawed at once, they would run with nothing watching them. The stop
+does not wait for a frozen guest. It gives each agent's keeper 3 seconds to
+confirm a detach and each input it closes 5 seconds, every session at once,
+then lets go, so frozen VMs hold it up about 9 seconds however many there
+are. The next server adopts such an agent as after a kill
+([enhanced-sessions.md](enhanced-sessions.md#restarts-and-failures)). The
 server that starts, after a stop or a crash, never lets a frozen VM run to
 take its session up. It takes the session up asleep, marked to wake, and
 thaws nothing until it has taken every session up. Then the memory guard

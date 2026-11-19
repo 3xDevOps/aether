@@ -62,3 +62,70 @@ func TestKVMKeeperStartsTheAgentFromTheHome(t *testing.T) {
 		}
 	}
 }
+
+// TestKVMShutdownLetsGoOfAFrozenVMsKeeper lets go of an agent's keeper as a
+// server shutdown does, in a VM the memory brake froze: the detach waits 3
+// seconds for an answer that never comes, then the close ends the attachment
+// without waiting for the guest to take the detach.
+func TestKVMShutdownLetsGoOfAFrozenVMsKeeper(t *testing.T) {
+	e := kvmEngine(t)
+	const key = "run-keeper-frozen"
+	kvmUserSession(t, e, key, runtime.Mount{HostPath: e.cfg.Helper, ContainerPath: coordtransport.CLIPath, ReadOnly: true, Kind: runtime.MountServerBinary})
+	socket := path.Join(acpkeeper.SocketRoot, "frozen", "keeper.sock")
+	keeper, err := e.startManagedExec(t.Context(), key, runtime.ExecSpec{
+		Argv: acpkeeper.ServeArgv(coordtransport.CLIPath, socket, sessionUser, []string{"sleep", "infinity"}),
+		User: "0", CreationKey: "acp-frozen",
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = io.WriteString(keeper.Attachment().Stdin(), "token\n"); err != nil {
+		t.Fatal(err)
+	}
+	if line, _ := bufio.NewReader(keeper.Attachment().Stdout()).ReadString('\n'); line != "ready\n" {
+		t.Fatalf("the keeper answered %q", line)
+	}
+	_ = keeper.Detach()
+	bridge, err := e.startManagedExec(t.Context(), key, runtime.ExecSpec{
+		Argv: acpkeeper.AttachArgv(coordtransport.CLIPath, socket), User: "0", CreationKey: "acp-attach-frozen",
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := acpkeeper.Attach(t.Context(), execConn{bridge.Attachment()}, acpkeeper.Hello{Gen: 1, Token: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if froze, err := e.freeze(key); !froze || err != nil {
+		t.Fatalf("freeze = %v, %v", froze, err)
+	}
+	t.Cleanup(func() { _ = e.thaw(key) })
+
+	start := time.Now()
+	detached := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		err := client.Detach(ctx)
+		_ = client.Close()
+		_ = bridge.Detach()
+		detached <- err
+	}()
+	select {
+	case err = <-detached:
+		if err == nil {
+			t.Fatal("the frozen guest confirmed the detach")
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("letting go of the frozen VM's keeper still waits after 15 seconds")
+	}
+	t.Logf("let go of the frozen VM's keeper in %s", time.Since(start).Round(time.Millisecond))
+}
+
+// execConn is an exec's stdio as one stream, as the scheduler's bridge to a
+// keeper is.
+type execConn struct{ att runtime.Attachment }
+
+func (c execConn) Read(p []byte) (int, error)  { return c.att.Stdout().Read(p) }
+func (c execConn) Write(p []byte) (int, error) { return c.att.Stdin().Write(p) }
+func (c execConn) Close() error                { return c.att.Stdin().Close() }

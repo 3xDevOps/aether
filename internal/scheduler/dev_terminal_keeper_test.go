@@ -170,7 +170,7 @@ func newKeptTerminalEnv(t *testing.T) *testEnv {
 // returns a new one over the same state and runtime.
 func restartScheduler(t *testing.T, e *testEnv) *Scheduler {
 	t.Helper()
-	if err := e.sched.DetachDevelopmentTerminals(t.Context()); err != nil {
+	if err := e.sched.DetachDevelopmentTerminals(); err != nil {
 		t.Fatal(err)
 	}
 	cfg := e.sched.cfg
@@ -186,6 +186,34 @@ func restartScheduler(t *testing.T, e *testEnv) *Scheduler {
 	}
 	t.Cleanup(func() { _ = recovered.Close() })
 	return recovered
+}
+
+// A shutdown takes up no terminal a VM's save let go of: the memory brake
+// may have frozen the guest since its wake, and a frozen guest answers
+// nothing.
+func TestShutdownTakesUpNoTerminalASaveLetGoOf(t *testing.T) {
+	e := newKeptTerminalEnv(t)
+	rt := e.sched.cfg.Runtime.(*terminalTestRuntime)
+	run, _ := e.launchFake(t, "saved")
+	startTestTerminal(t, e, run.ID, "server")
+	if err := e.sched.detachDevelopmentTerminals(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	hold := make(chan struct{})
+	rt.mu.Lock()
+	rt.recoverHold = hold
+	rt.mu.Unlock()
+	t.Cleanup(func() { close(hold) })
+	detached := make(chan error, 1)
+	go func() { detached <- e.sched.DetachDevelopmentTerminals() }()
+	select {
+	case err := <-detached:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the shutdown waited to take up a terminal the save let go of")
+	}
 }
 
 func TestDevelopmentTerminalSurvivesSchedulerRestart(t *testing.T) {
@@ -426,7 +454,7 @@ func TestDevelopmentTerminalLeaseSurvivesSchedulerRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err = e.sched.DetachDevelopmentTerminals(t.Context()); err != nil {
+	if err = e.sched.DetachDevelopmentTerminals(); err != nil {
 		t.Fatal(err)
 	}
 	endedKeeper.exec.process.exitNow(0)
@@ -483,7 +511,7 @@ func TestDevelopmentTerminalLeaseSurvivesAFailedReattachAtRestart(t *testing.T) 
 	terminal := startTestTerminal(t, e, run.ID, "kept")
 	agent := control.Principal{Kind: control.PrincipalRunAgent, RunID: run.ID}
 	fence := terminalTestFence(t, e, run.ID, terminal, agent, "agent", false)
-	if err := e.sched.DetachDevelopmentTerminals(t.Context()); err != nil {
+	if err := e.sched.DetachDevelopmentTerminals(); err != nil {
 		t.Fatal(err)
 	}
 	cfg := e.sched.cfg
@@ -595,7 +623,7 @@ func TestDevelopmentTerminalOfAPausedSessionReconnectsOnResume(t *testing.T) {
 	}
 	// The server restarts while the session is paused: it forgets the
 	// terminal and recovers it from the registry.
-	if err := e.sched.DetachDevelopmentTerminals(t.Context()); err != nil {
+	if err := e.sched.DetachDevelopmentTerminals(); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.mu.Lock()

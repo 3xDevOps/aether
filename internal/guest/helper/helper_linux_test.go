@@ -418,6 +418,41 @@ func TestSignalAndInput(t *testing.T) {
 	}
 }
 
+// Closing an attachment's input ends a write the helper never answers, as a
+// frozen guest never does.
+func TestCloseInputEndsAWriteInFlight(t *testing.T) {
+	_, client := startHelper(t)
+	ctx := testContext(t)
+	p := spawn(t, client, guest.ProcessSpec{ID: "sleep", Argv: []string{"sleep", "60"}})
+	defer func() { _ = p.Signal(ctx, syscall.SIGKILL) }()
+	a := p.Attach(false)
+	defer func() { _ = a.Close() }()
+	wrote := make(chan error, 1)
+	go func() {
+		_, err := a.Stdin().Write(make([]byte, 4<<20))
+		wrote <- err
+	}()
+	time.Sleep(200 * time.Millisecond)
+	closed := make(chan struct{})
+	go func() {
+		_ = a.Stdin().Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("closing the input waited for the write in flight")
+	}
+	select {
+	case err := <-wrote:
+		if err == nil {
+			t.Fatal("a write the close ended reported success")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the close did not end the write in flight")
+	}
+}
+
 // The helper reaps every orphan, as PID 1 must, so none stays a zombie.
 func TestOrphansAreReaped(t *testing.T) {
 	_, client := startHelper(t)
