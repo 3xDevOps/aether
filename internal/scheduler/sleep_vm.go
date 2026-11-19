@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -39,7 +41,7 @@ func (w woke) notice() string {
 	kept := "the conversation, files and checkout are kept."
 	switch {
 	case w.newConversation:
-		kept = "the files and checkout are kept. The agent could not reopen its conversation, so it starts a new one; the earlier one stays in this terminal's history."
+		kept = "the files and checkout are kept. The agent could not reopen its conversation, so it starts a new one; the earlier one stays in the agent terminal's history."
 	case w.unproven:
 		kept = "the files and checkout are kept, and the agent restores its conversation if it can."
 	}
@@ -298,6 +300,11 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	}
 	if err := s.setBootCommand(ctx, entry, saver, &how); err != nil {
 		return woke{}, errors.Join(how.restoreErr, fmt.Errorf("set what the session starts from its disk: %w", err))
+	}
+	if how.restoreErr != nil {
+		// The error carries the VM's log tail on the lines after its first.
+		note, _, _ := strings.Cut(how.notice(), "\n")
+		s.publishTimeline(context.WithoutCancel(ctx), entry.workspaceID, entry.runID, "", events.TimelineNote, note)
 	}
 	if err := s.cfg.Runtime.Start(ctx, cid); err != nil {
 		return woke{}, errors.Join(how.restoreErr, err)

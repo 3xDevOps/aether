@@ -473,6 +473,36 @@ func TestAVMWhoseStateCannotBeRestoredStartsFromItsDisk(t *testing.T) {
 	}
 }
 
+// A wake that started a session from its disk and then could not reattach
+// to it saves it again with no processes: the timeline and the wake's error
+// still say what was lost.
+func TestAColdStartWhoseReattachFailsNotesTheLostProcesses(t *testing.T) {
+	t.Parallel()
+	e, rt, sr := newSaveEnv(t, true)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.sleepRun(t, run.ID)
+	sr.saveMu.Lock()
+	sr.restoreErr = errors.New("restore: the saved state was written by another kernel")
+	sr.saveMu.Unlock()
+	rt.mu.Lock()
+	rt.startErr = errors.New("the agent did not start")
+	rt.mu.Unlock()
+	sub := e.subscribe(t)
+
+	err := e.sched.WakeRun(t.Context(), run.ID, e.member.ID)
+	if err == nil || !strings.Contains(err.Error(), "the agent did not start") || !strings.Contains(err.Error(), "another kernel") {
+		t.Fatalf("WakeRun = %v; want the reattach's error and the restore's", err)
+	}
+	if !sr.isSaved(e.cid(t, run.ID)) {
+		t.Fatal("the cold-started VM was not saved again")
+	}
+	note := waitTimelineEvent(t, sub, run.ID, events.TimelineNote).Payload.(events.TimelinePayload).Message
+	if !strings.Contains(note, "Processes and terminals that were running were stopped") || !strings.HasSuffix(note, "another kernel") {
+		t.Fatalf("the timeline says %q of a wake that lost the session's processes", note)
+	}
+}
+
 // An agent that cannot restore its conversation in a new process keeps its
 // saved state through a failed restore, for the next wake to try again.
 func TestAFailedRestoreOfAnAgentThatCannotResumeKeepsItsState(t *testing.T) {

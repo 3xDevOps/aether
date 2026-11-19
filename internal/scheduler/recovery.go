@@ -485,7 +485,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		s.publishSleep(entry)
 	}
 	if woken.closed {
-		s.noteWake(ctx, fresh.WorkspaceID, run, woken)
+		s.noteWake(ctx, run, woken)
 	}
 	return &runningRow, nil
 }
