@@ -495,9 +495,11 @@ those times has moved. From the resume on, the record reads running:
   as `its guest wrote its disks`, and `it has no saved state`.
 - A server that stops between the resume and the answer leaves a running VM.
   The next server saves it again, which replaces the saved state, or its
-  next wake takes the guest up, which only has to answer. With no monitor
-  left, the next restore restores the saved state again if the disks are
-  unwritten and drops it if not.
+  next wake takes the guest up, which only has to answer; a stop discards
+  the saved state. A save refuses a guest whose event log reports a
+  restart, which leaves the restart for the next wake to find, as above.
+  With no monitor left, the next restore restores the saved state again if
+  the disks are unwritten and drops it if not.
 - A guest that still runs but does not answer, or whose clock cannot be set,
   keeps running without its saved state, for the caller to take up.
 
