@@ -232,9 +232,11 @@ type fakeUnits struct {
 	stateErr   error
 	failResume bool
 	// Each VMM started refuses its first refuseResumes resumes, staying
-	// paused, and with rebootOnResume reports a guest reboot as it resumes.
+	// paused; as it resumes, with rebootOnResume it reports a guest reboot
+	// and with resumeWrites it writes that disk.
 	refuseResumes  int
 	rebootOnResume bool
+	resumeWrites   string
 	// cgroups is the cgroup root, which holds a memory.current, a
 	// memory.stat and a cgroup.freeze for each running unit.
 	cgroups string
@@ -297,7 +299,7 @@ func (u *fakeUnits) Start(_ context.Context, name string, argv, properties []str
 	}
 	vmm, err := startVMM(socket, l.Args, func() { go func() { _ = u.Stop(context.Background(), name) }() })
 	if vmm != nil {
-		vmm.failResume, vmm.refuseResumes, vmm.rebootOnResume = u.failResume, u.refuseResumes, u.rebootOnResume
+		vmm.failResume, vmm.refuseResumes, vmm.rebootOnResume, vmm.resumeWrites = u.failResume, u.refuseResumes, u.rebootOnResume, u.resumeWrites
 	}
 	if err != nil {
 		return err
@@ -369,6 +371,7 @@ type fakeVMM struct {
 	snapshotHold   chan struct{}
 	refuseResumes  int
 	rebootOnResume bool
+	resumeWrites   string
 	events         string
 }
 
@@ -406,6 +409,10 @@ func startVMM(socket string, args []string, exit func()) (*fakeVMM, error) {
 				return
 			}
 			v.state = "Running"
+			if v.resumeWrites != "" {
+				later := time.Now().Add(time.Minute)
+				_ = os.Chtimes(v.resumeWrites, later, later)
+			}
 			if v.rebootOnResume {
 				_ = os.WriteFile(v.events, []byte(`{"source": "vm", "event": "rebooting"}`), 0o600)
 			}

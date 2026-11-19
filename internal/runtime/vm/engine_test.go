@@ -642,20 +642,8 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 	if _, statErr := os.Stat(h.engine.path("run-d", snapshotDir+"/state.json")); statErr != nil {
 		t.Errorf("the saved state of a guest that wrote no disk: %v", statErr)
 	}
-	written := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-written:
-				return
-			default:
-				now := time.Now()
-				_ = os.Chtimes(disk, now, now)
-			}
-		}
-	}()
+	h.units.resumeWrites = disk
 	err = h.engine.restore(t.Context(), "run-d")
-	close(written)
 	if rec, _ := h.engine.load("run-d"); !errors.Is(err, runtime.ErrNotSaved) || rec.Saved || !rec.Exited || h.units.vmm("run-d") != nil {
 		t.Errorf("restore of a guest that wrote a disk and restarted = %v, record %+v; want its stale saved state dropped and the VM stopped", err, rec)
 	}
