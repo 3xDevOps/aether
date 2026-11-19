@@ -14,6 +14,8 @@ on:
 
 permissions:
   contents: read
+  # .github/actions/cancel-failed-queue-run
+  actions: write
 
 jobs:
   kvm:
@@ -59,3 +61,5 @@ jobs:
         env:
           GOFLAGS: -v
         run: sudo env "PATH=$PATH" "HOME=$HOME" "GOFLAGS=$GOFLAGS" make test-kvm
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}

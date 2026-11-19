@@ -22,6 +22,9 @@ permissions:
   # Explicit permissions replace the default token scope. The changes job
   # lists pull request files, which needs this in addition to contents.
   pull-requests: read
+  # A failed job in a merge queue run cancels the rest of the run
+  # (.github/actions/cancel-failed-queue-run).
+  actions: write
 
 # A newer push to a pull request cancels that pull request's run in flight.
 # Pushes to main and merge queue entries group by commit, so none cancels or
@@ -161,6 +164,8 @@ jobs:
           persist-credentials: false
       - name: Public boundary
         run: sh scripts/public-audit.sh
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   lint:
     needs: changes
@@ -214,6 +219,8 @@ jobs:
         run: make test-scripts
       - name: Native hook lifecycle tests
         run: make test-native-hooks
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   build-and-test:
     needs: changes
@@ -272,6 +279,8 @@ jobs:
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         with:
           mode: save
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   # internal/store under -race, on every event, pull requests included.
   store-tests:
@@ -292,6 +301,8 @@ jobs:
           mode: restore
       - name: Store tests
         run: make test-store
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   dashboard:
     needs: changes
@@ -321,6 +332,8 @@ jobs:
       - name: SPA tests
         run: bun run test
         working-directory: web
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   # Everything else, in a workflow of its own so a run that skips it shows
   # one skipped check.

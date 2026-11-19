@@ -947,7 +947,13 @@ ready pull request whose `CI gate` passed; the queue batches up to five
 entries, runs the full suite on each batch's merge result, and moves `main`
 only when that run's `CI gate` passes. Each queue run's `changes` job first
 cancels the runs of groups the queue has discarded, so they stop holding
-runners. In the Docker-heavy jobs, the runner's Docker daemon and
+runners. In a queue run, a job that fails cancels the rest of the run from
+its last step (`.github/actions/cancel-failed-queue-run`, which needs
+`actions: write`): the failed job reports every failure of its own, the
+others stop where they are, and `CI gate` reports the failure, so a failed
+queue run shows as cancelled. A job that hits its timeout is cancelled, not
+failed, and does not do this. Pull request runs do not use it. In the
+Docker-heavy jobs, the runner's Docker daemon and
 the buildx builders pull Docker Hub images through `mirror.gcr.io` and fall
 back to Docker Hub, so a Docker Hub outage alone does not fail them.
 

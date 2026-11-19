@@ -17,6 +17,8 @@ on:
 
 permissions:
   contents: read
+  # .github/actions/cancel-failed-queue-run
+  actions: write
 
 jobs:
   # The upgrade qualification rides on the amd64 leg, which has already
@@ -81,3 +83,5 @@ jobs:
       - name: Qualify an edge upgrade
         if: ${{ !cancelled() && matrix.upgrade }}
         run: sudo env "PATH=$PATH" "HOME=$HOME" make test-edge-upgrade
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}

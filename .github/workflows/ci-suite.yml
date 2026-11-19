@@ -14,6 +14,8 @@ on:
 
 permissions:
   contents: read
+  # .github/actions/cancel-failed-queue-run
+  actions: write
 
 jobs:
   # Two jobs hold every amd64 Docker suite, one per image they test on. Each
@@ -75,6 +77,8 @@ jobs:
       - name: Exercise the real browser runtime
         if: ${{ !cancelled() }}
         run: sudo env "PATH=$PATH" "HOME=$HOME" "TMPDIR=$TMPDIR" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   # Everything that runs on the standard image: the server's long flows, the
   # scheduler and every other integration package, the agent CLIs at today's
@@ -169,6 +173,8 @@ jobs:
       - name: Real agents against a mock model (real Docker, real git)
         if: ${{ !cancelled() }}
         run: sudo env "PATH=$PATH" "HOME=$HOME" "TMPDIR=$TMPDIR" make test-agents
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   # Native arm64 builds and runs of the standard and browser images. Only
   # the full suite pays for it: nothing here depends on the architecture
@@ -240,6 +246,8 @@ jobs:
         with:
           mode: save
           save-modules: 'true'
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   # The tests that boot real VMs, only for a change that can affect them
   # (ci-classify-areas.sh vm) or in the nightly run. A workflow of its own
@@ -248,12 +256,14 @@ jobs:
     if: ${{ inputs.vm }}
     permissions:
       contents: read
+      actions: write
     uses: ./.github/workflows/kvm.yml
 
   # A workflow of its own so it can be started by hand on any branch.
   edge-image:
     permissions:
       contents: read
+      actions: write
     uses: ./.github/workflows/edge-image.yml
 
   # The dashboard driven the way a person drives it: a real browser against a
@@ -377,6 +387,8 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.environment }}-${{ steps.playwright.outputs.version }}
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   # The client ships for Windows, so it gets a real Windows runner. Only the
   # client's package closure is built and tested: the server is Linux-only by
@@ -440,6 +452,8 @@ jobs:
         if: ${{ !cancelled() && needs.release-build.outputs.windows-binaries == 'success' }}
         shell: powershell
         run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist -Artifacts aether-windows-amd64.exe, aether-windows-arm64.exe
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   # Reuse the installer lanes so their verdict is part of CI and therefore
   # the exact-commit CI success required by release authorization.
@@ -631,3 +645,5 @@ jobs:
             dist/aether-android-unsigned.aab
           if-no-files-found: error
           retention-days: 7
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}

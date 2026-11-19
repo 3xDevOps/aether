@@ -1,0 +1,20 @@
+name: Cancel a failed merge queue run
+description: >
+  A job's last step: in a merge queue run whose job failed, cancel the
+  rest of the run. The failure already fails the run's CI gate, so the jobs
+  still running only hold runners. CI gate runs on always() and reports
+  it. A job that hits its timeout is cancelled, not failed, so it does not
+  reach this step. The job needs actions: write.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        if curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+          "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel" >/dev/null; then
+          echo "::notice::$GITHUB_JOB failed; cancelled the rest of this merge queue run"
+        else
+          echo '::warning::cancelling this merge queue run failed'
+        fi

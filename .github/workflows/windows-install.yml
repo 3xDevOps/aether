@@ -5,6 +5,8 @@ on:
 
 permissions:
   contents: read
+  # .github/actions/cancel-failed-queue-run
+  actions: write
 
 jobs:
   install:
@@ -102,6 +104,8 @@ jobs:
           path: ${{ runner.temp }}/windows-desktop.png
           if-no-files-found: ignore
           retention-days: 7
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
 
   # What Linux cannot show: replacing aether.exe while it runs, and the
   # desktop app's helper swapping the app directory the running app holds,
@@ -231,3 +235,5 @@ jobs:
             -Playwright "$env:RUNNER_TEMP\pw\node_modules\playwright-core" `
             -PublishedCli "$env:PUBLISHED_DIR\aether-windows-${{ matrix.arch }}.exe" `
             -PublishedTag $env:PUBLISHED_TAG
+      - uses: ./.github/actions/cancel-failed-queue-run
+        if: ${{ failure() && github.event_name == 'merge_group' }}
