@@ -261,6 +261,8 @@ type Scheduler struct {
 	// only the brake's own goroutine touches them.
 	vmMemoryBraked bool
 	vmBrakeTargets []runtime.ID
+	// vmMemoryWaking holds, under mu, while a wake the guard started runs.
+	vmMemoryWaking bool
 
 	mu   sync.Mutex
 	runs map[domain.RunID]*supervised

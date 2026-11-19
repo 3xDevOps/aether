@@ -40,6 +40,9 @@ type saveRuntime struct {
 	// restoreLate fails a restore only after it deleted the saved state
 	// and started the guest, as a failed clock set does.
 	restoreLate bool
+	// restoreHang holds a restore until its ctx ends, keeping the saved
+	// state, as a restore that never gets an answer from its VM does.
+	restoreHang bool
 	restores    int
 	// commands holds the command each container starts from its disk with.
 	commands map[runtime.ID][]string
@@ -94,6 +97,11 @@ func (r *saveRuntime) Save(_ context.Context, id runtime.ID) error {
 func (r *saveRuntime) Restore(ctx context.Context, id runtime.ID) error {
 	r.saveMu.Lock()
 	r.restores++
+	if r.restoreHang {
+		r.saveMu.Unlock()
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	err, late, saved := r.restoreErr, r.restoreLate, r.saved[id]
 	if err == nil || late {
 		delete(r.saved, id)

@@ -241,7 +241,9 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 		s.superviseWoken(entry)
 		return woke{restored: true}, nil
 	}
-	if errors.Is(restoreErr, runtime.ErrNotFound) {
+	// A shutdown cut the restore short: the next server takes up what it
+	// left, a VM saved or one restored.
+	if errors.Is(restoreErr, runtime.ErrNotFound) || s.superCtx.Err() != nil {
 		return woke{}, restoreErr
 	}
 	// A save that failed, or a restore that failed once the guest was
