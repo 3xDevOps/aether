@@ -257,14 +257,20 @@ func (s *Scheduler) wake(ctx context.Context, entry *supervised) error {
 			slog.Warn("scheduler: wake a sleeping session", "run", entry.runID, "error", err)
 			return err
 		}
-		s.noteWake(ctx, entry.runID, how)
+		s.noteWake(ctx, entry.workspaceID, entry.runID, how)
 		return nil
 	}
 }
 
-// noteWake tells the session's terminal and conversation how it woke.
-func (s *Scheduler) noteWake(ctx context.Context, run domain.RunID, how woke) {
+// noteWake tells the session's terminal and conversation how it woke, and
+// its timeline when the wake lost its processes.
+func (s *Scheduler) noteWake(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, how woke) {
 	text := how.notice()
+	if how.restoreErr != nil {
+		// The error carries the VM's log tail on the lines after its first.
+		note, _, _ := strings.Cut(text, "\n")
+		s.publishTimeline(ctx, workspace, run, "", events.TimelineNote, note)
+	}
 	if err := s.cfg.PTY.Annotate(context.WithoutCancel(ctx), ptyhost.RunSession(run), "Cloudfield", "", text); err != nil {
 		slog.Warn("scheduler: note the wake in the terminal", "run", run, "error", err)
 	}

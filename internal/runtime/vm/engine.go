@@ -67,7 +67,9 @@ const (
 	// at the default order it stalls with most of it still held. Cloud
 	// Hypervisor never exits on a guest panic, so panic=-1 makes a dead
 	// helper reboot the guest, which its event log reports.
-	cmdlineBase = "root=/dev/vda ro rootfstype=ext4 init=/init console=ttyS0 quiet panic=-1 page_reporting.page_reporting_order=0"
+	// logTailLines is how much of the end of each log an error quotes.
+	logTailLines = 15
+	cmdlineBase  = "root=/dev/vda ro rootfstype=ext4 init=/init console=ttyS0 quiet panic=-1 page_reporting.page_reporting_order=0"
 )
 
 type engine struct {
@@ -742,7 +744,7 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 		select {
 		case err := <-answered:
 			if e.rebooted(key) {
-				return fmt.Errorf("vm runtime: the guest of VM %s restarted instead of answering%s", key, e.logTail(key))
+				return fmt.Errorf("vm runtime: the guest of VM %s restarted instead of answering%s", key, e.restartLogs(key))
 			}
 			if err != nil {
 				return fmt.Errorf("vm runtime: helper of VM %s did not answer: %w%s", key, err, e.logTail(key))
@@ -757,7 +759,7 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 		case <-tick.C:
 			if e.rebooted(key) {
 				cancel()
-				return fmt.Errorf("vm runtime: the guest of VM %s restarted instead of answering%s", key, e.logTail(key))
+				return fmt.Errorf("vm runtime: the guest of VM %s restarted instead of answering%s", key, e.restartLogs(key))
 			}
 			if st, err := e.units.State(ctx, unitName(key)); err == nil && !st.Active {
 				cancel()
@@ -765,6 +767,18 @@ func (e *engine) waitHelper(ctx context.Context, key string, h helper) error {
 			}
 		}
 	}
+}
+
+// restartLogs is logTail after what a guest that restarted printed first:
+// each monitor starts console.log again, so a guest that dies on a wake
+// says why at its top, and its kernel's panic then fills the tail.
+func (e *engine) restartLogs(key string) string {
+	data, _ := readNoFollow(e.path(key, consoleLog))
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) <= logTailLines {
+		return e.logTail(key)
+	}
+	return fmt.Sprintf("\n%s from its start:\n%s%s", consoleLog, strings.Join(lines[:min(40, len(lines)-logTailLines)], "\n"), e.logTail(key))
 }
 
 func (e *engine) logTail(key string) string {
@@ -777,7 +791,7 @@ func (e *engine) logTail(key string) string {
 			continue
 		}
 		lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-		fmt.Fprintf(&out, "\n%s:\n%s", name, strings.Join(lines[max(0, len(lines)-15):], "\n"))
+		fmt.Fprintf(&out, "\n%s:\n%s", name, strings.Join(lines[max(0, len(lines)-logTailLines):], "\n"))
 	}
 	return out.String()
 }

@@ -635,7 +635,14 @@ func TestSaveRefusesSharesAndRestoresAVMWithout(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.units.rebootOnResume = true
+	console := "fatal error: fault\n" + strings.Repeat("goroutine trace\n", 80) + "Kernel panic - not syncing: Attempted to kill init!\n"
+	if err := os.WriteFile(h.engine.path("run-d", consoleLog), []byte(console), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	err := h.engine.restore(t.Context(), "run-d")
+	if err == nil || !strings.Contains(err.Error(), "fatal error: fault") || !strings.Contains(err.Error(), "Kernel panic") || strings.Count(err.Error(), "goroutine trace") != 40+logTailLines-2 {
+		t.Errorf("restore of a guest that restarted on resume = %v; want what its console said first and last", err)
+	}
 	if rec, _ := h.engine.load("run-d"); err == nil || !strings.Contains(err.Error(), "restarted instead of answering") || !rec.Saved || !rec.Exited || rec.Resumed != nil || h.units.vmm("run-d") != nil {
 		t.Errorf("restore of a guest that restarted on resume = %v, record %+v, running=%v; want its error, the VM stopped and its saved state kept", err, rec, h.units.vmm("run-d") != nil)
 	}

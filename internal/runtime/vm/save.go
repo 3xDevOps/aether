@@ -51,7 +51,7 @@ func (e *engine) save(ctx context.Context, key string) error {
 	// A guest back from a restart holds none of the session's processes;
 	// a restore of it takes the event log as the proof.
 	if e.rebooted(key) {
-		return fmt.Errorf("vm runtime: save VM %s: its guest restarted, so it no longer holds the session%s", key, e.logTail(key))
+		return fmt.Errorf("vm runtime: save VM %s: its guest restarted, so it no longer holds the session%s", key, e.restartLogs(key))
 	}
 	booted, err := readLaunch(e.dir(key))
 	if err != nil {

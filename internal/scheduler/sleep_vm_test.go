@@ -19,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -450,8 +451,9 @@ func TestAVMWhoseStateCannotBeRestoredStartsFromItsDisk(t *testing.T) {
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
 	e.sleepRun(t, run.ID)
 	sr.saveMu.Lock()
-	sr.restoreErr = errors.New("restore: the saved state was written by another kernel")
+	sr.restoreErr = errors.New("restore: the saved state was written by another kernel\nconsole.log:\nKernel panic")
 	sr.saveMu.Unlock()
+	sub := e.subscribe(t)
 
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after sleep"}, false, nil); err != nil {
 		t.Fatalf("a prompt to a session whose state is lost: %v", err)
@@ -465,6 +467,10 @@ func TestAVMWhoseStateCannotBeRestoredStartsFromItsDisk(t *testing.T) {
 	}
 	waitItems(t, e.sched, run.ID, "a turn after the fallback", turnEnded("end_turn", 2))
 	waitItems(t, e.sched, run.ID, "the fallback's notice", noticed("Woke from sleep", "another kernel"))
+	note := waitTimelineEvent(t, sub, run.ID, events.TimelineNote).Payload.(events.TimelinePayload).Message
+	if !strings.Contains(note, "Processes and terminals that were running were stopped") || !strings.HasSuffix(note, "another kernel") {
+		t.Fatalf("the timeline says %q of a wake that lost the session's processes", note)
+	}
 }
 
 // An agent that cannot restore its conversation in a new process keeps its

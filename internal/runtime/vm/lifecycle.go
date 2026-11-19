@@ -322,7 +322,7 @@ func (e *engine) waitMain(ctx context.Context, key string, boot int) (int, bool)
 		return rec.ExitCode, true
 	}
 	if gone {
-		slog.Warn("vm runtime: the guest restarted on its own, which ends its VM", "vm", key, "logs", e.logTail(key))
+		slog.Warn("vm runtime: the guest restarted on its own, which ends its VM", "vm", key, "logs", e.restartLogs(key))
 		e.kill(context.WithoutCancel(ctx), key)
 		rec.Exited, rec.ExitCode = true, lostExitCode
 		return lostExitCode, e.store(rec) == nil
