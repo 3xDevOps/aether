@@ -929,7 +929,8 @@ and the session starts from its disk. Every wake that starts a session from
 its disk because the restore failed leaves a note on the session's
 timeline as it starts it: that its processes and terminals were stopped,
 what is kept, and the first line of the restore's error. A wake that then
-cannot reattach to the session fails with the restore's error too. A guest
+cannot reattach to the session says in its error that the session started
+from its disk without its processes, with that first line. A guest
 that keeps running but does not answer within 90 seconds holds the session
 from then on: its saved state is deleted, and the wake takes the guest up
 as it is, or saves it again when the agent cannot be reached. A wake also

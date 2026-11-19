@@ -301,13 +301,13 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	if err := s.setBootCommand(ctx, entry, saver, &how); err != nil {
 		return woke{}, errors.Join(how.restoreErr, fmt.Errorf("set what the session starts from its disk: %w", err))
 	}
+	if err := s.cfg.Runtime.Start(ctx, cid); err != nil {
+		return woke{}, errors.Join(how.restoreErr, err)
+	}
 	if how.restoreErr != nil {
 		// The error carries the VM's log tail on the lines after its first.
 		note, _, _ := strings.Cut(how.notice(), "\n")
 		s.publishTimeline(context.WithoutCancel(ctx), entry.workspaceID, entry.runID, "", events.TimelineNote, note)
-	}
-	if err := s.cfg.Runtime.Start(ctx, cid); err != nil {
-		return woke{}, errors.Join(how.restoreErr, err)
 	}
 	s.mu.Lock()
 	// The agent and its keeper did not survive, so the open restores the

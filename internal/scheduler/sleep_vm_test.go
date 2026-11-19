@@ -483,7 +483,7 @@ func TestAColdStartWhoseReattachFailsNotesTheLostProcesses(t *testing.T) {
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
 	e.sleepRun(t, run.ID)
 	sr.saveMu.Lock()
-	sr.restoreErr = errors.New("restore: the saved state was written by another kernel")
+	sr.restoreErr = errors.New("restore: the saved state was written by another kernel\nconsole.log:\nKernel panic")
 	sr.saveMu.Unlock()
 	rt.mu.Lock()
 	rt.startErr = errors.New("the agent did not start")
@@ -491,8 +491,8 @@ func TestAColdStartWhoseReattachFailsNotesTheLostProcesses(t *testing.T) {
 	sub := e.subscribe(t)
 
 	err := e.sched.WakeRun(t.Context(), run.ID, e.member.ID)
-	if err == nil || !strings.Contains(err.Error(), "the agent did not start") || !strings.Contains(err.Error(), "another kernel") {
-		t.Fatalf("WakeRun = %v; want the reattach's error and the restore's", err)
+	if err == nil || !strings.Contains(err.Error(), "the agent did not start") || !strings.Contains(err.Error(), "without its processes, as its restore failed: restore: the saved state was written by another kernel") || strings.Contains(err.Error(), "Kernel panic") {
+		t.Fatalf("WakeRun = %v; want the reattach's error and the first line of the restore's", err)
 	}
 	if !sr.isSaved(e.cid(t, run.ID)) {
 		t.Fatal("the cold-started VM was not saved again")

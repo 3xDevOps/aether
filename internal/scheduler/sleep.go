@@ -327,7 +327,12 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 		if exited != nil && ctx.Err() == nil {
 			err = fmt.Errorf("%w: %v", exited, err)
 		}
-		return woke{}, errors.Join(err, how.restoreErr, s.stopAsleep(context.WithoutCancel(ctx), entry))
+		if how.restoreErr != nil {
+			// The restore's error carries the VM's log tail on the lines after its first.
+			restore, _, _ := strings.Cut(how.restoreErr.Error(), "\n")
+			err = fmt.Errorf("%w; it had started again from its disk without its processes, as its restore failed: %s", err, restore)
+		}
+		return woke{}, errors.Join(err, s.stopAsleep(context.WithoutCancel(ctx), entry))
 	}
 	s.mu.Lock()
 	entry.asleepSince = time.Time{}
