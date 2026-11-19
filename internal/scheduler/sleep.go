@@ -230,6 +230,10 @@ func (s *Scheduler) wake(ctx context.Context, entry *supervised) error {
 		s.mu.Lock()
 		entry.waking = nil
 		entry.wakeErr = err
+		// A wake a shutdown cut short has not failed: the next server wakes it.
+		if s.superCtx.Err() != nil {
+			entry.wakeErr = nil
+		}
 		if err != nil && s.runs[entry.runID] == entry && !entry.finalizing {
 			if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 				err = errors.Join(err, fmt.Errorf("record the failed wake: %w", werr))

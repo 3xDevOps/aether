@@ -170,7 +170,7 @@ func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 		if available, floor, err := s.hostMemory(); err != nil || available >= 2*floor+need || !c.idle || ctx.Err() != nil {
 			break
 		}
-		if s.saveFits(c) && s.heldSave(ctx, c, false) {
+		if s.saveFits(c) && s.heldSave(c, false) {
 			saved = true
 		}
 	}
@@ -179,10 +179,11 @@ func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 
 // heldSave is saveCandidate, waited for at most memorySaveHold: a save that
 // takes longer goes on alone, holding its run's lifecycle lock, and counts
-// as not saved, so the caller moves on to the next VM.
-func (s *Scheduler) heldSave(ctx context.Context, c memoryCandidate, working bool) bool {
+// as not saved, so the caller moves on to the next VM. Only a shutdown ends
+// the save's context, not a caller that gave up on it.
+func (s *Scheduler) heldSave(c memoryCandidate, working bool) bool {
 	done := make(chan bool, 1)
-	s.goMove(func() { done <- s.saveCandidate(ctx, c, working) })
+	s.goMove(func() { done <- s.saveCandidate(s.superCtx, c, working) })
 	select {
 	case saved := <-done:
 		return saved
@@ -281,7 +282,7 @@ func (s *Scheduler) saveForMemory(ctx context.Context, working bool) bool {
 		if !working && !c.idle {
 			break
 		}
-		if s.saveFits(c) && s.heldSave(ctx, c, working) {
+		if s.saveFits(c) && s.heldSave(c, working) {
 			return true
 		}
 	}

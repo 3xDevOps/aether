@@ -201,6 +201,41 @@ func (e *testEnv) guard(t *testing.T) {
 	})
 }
 
+// A save that hangs holds up the guard's save of another VM for
+// memorySaveHold, and then goes on alone.
+func TestAHungSaveHoldsUpTheGuardOnlySoLong(t *testing.T) {
+	t.Parallel()
+	e, mr := newMemoryEnv(t)
+	big := e.launchVM(t, mr, acpmock.PromptWait, 3<<30)
+	small := e.launchVM(t, mr, acpmock.PromptWait, 1<<30)
+	hold := make(chan struct{})
+	mr.saveMu.Lock()
+	mr.saving, mr.release = make(chan struct{}), hold
+	mr.saveMu.Unlock()
+	mr.setAvailable(3 << 30)
+
+	start := time.Now()
+	guarded := make(chan struct{})
+	go func() {
+		defer close(guarded)
+		e.sched.guardVMMemory(t.Context())
+	}()
+	<-mr.saving
+	mr.saveMu.Lock()
+	mr.saving, mr.release = nil, nil
+	mr.saveMu.Unlock()
+	select {
+	case <-guarded:
+	case <-time.After(memorySaveHold + 10*time.Second):
+		t.Fatal("the guard waited on the hung save")
+	}
+	if took := time.Since(start); took < memorySaveHold || !mr.isSaved(small) || mr.isSaved(big) {
+		t.Fatalf("after %s the guard saved the small VM %v, the hung one %v; want the small one after %s", took, mr.isSaved(small), mr.isSaved(big), memorySaveHold)
+	}
+	close(hold)
+	waitFor(t, "the hung save finishing", func() bool { return mr.isSaved(big) && e.asleep(e.runOf(t, big)) })
+}
+
 // A wake the guard started that hangs holds up neither the guard nor a
 // shutdown: the guard saves another VM meanwhile, and a stop cuts the wake
 // short, leaving the session asleep, saved and marked to wake for the next
@@ -245,7 +280,7 @@ func TestAHungWakeHoldsUpNeitherTheGuardNorAShutdown(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the shutdown waited for the hung wake")
 	}
-	if sc, err := e.sched.readSidecar(run); err != nil || sc.AsleepSince == nil || !sc.AsleepSaved || sc.MemorySaved != 3<<30 || !mr.isSaved(hung) {
+	if sc, err := e.sched.readSidecar(run); err != nil || sc.AsleepSince == nil || !sc.AsleepSaved || sc.MemorySaved != 3<<30 || sc.WakeError != "" || !mr.isSaved(hung) {
 		t.Fatalf("the cut wake left %+v, %v, saved %v; want the session asleep, saved and marked to wake", sc, err, mr.isSaved(hung))
 	}
 }

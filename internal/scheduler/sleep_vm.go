@@ -241,9 +241,7 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 		s.superviseWoken(entry)
 		return woke{restored: true}, nil
 	}
-	// A shutdown cut the restore short: the next server takes up what it
-	// left, a VM saved or one restored.
-	if errors.Is(restoreErr, runtime.ErrNotFound) || s.superCtx.Err() != nil {
+	if errors.Is(restoreErr, runtime.ErrNotFound) {
 		return woke{}, restoreErr
 	}
 	// A save that failed, or a restore that failed once the guest was
@@ -252,7 +250,7 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 	// which is harmless, and the reattach that follows proves it runs.
 	// One whose state cannot be read is not started over, which would end
 	// any process it runs.
-	info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
+	info, inspectErr := s.cfg.Runtime.Inspect(context.WithoutCancel(ctx), cid)
 	if inspectErr != nil {
 		return woke{}, errors.Join(restoreErr, fmt.Errorf("inspect the session's VM: %w", inspectErr))
 	}
@@ -260,6 +258,11 @@ func (s *Scheduler) restoreAsleep(ctx context.Context, entry *supervised, saver 
 		_ = s.cfg.Runtime.Resume(ctx, cid)
 		s.superviseWoken(entry)
 		return woke{restored: true}, nil
+	}
+	// A shutdown cut the restore short before the guest ran: its saved state
+	// stays for the next server's wake.
+	if s.superCtx.Err() != nil {
+		return woke{}, restoreErr
 	}
 	how := woke{closed: closed}
 	if !errors.Is(restoreErr, runtime.ErrNotSaved) {
