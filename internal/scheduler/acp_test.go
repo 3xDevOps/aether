@@ -43,6 +43,7 @@ type acpRuntime struct {
 	execs    []*acpExec
 	specs    []runtime.ExecSpec
 	bridges  []runtime.ExecSpec
+	attached []*bridgeExec
 	keepers  map[string]*acpkeeper.Keeper
 	startErr error
 	// noKeeper fails keeper execs, as a container staged before keepers
@@ -178,6 +179,9 @@ func (r *acpRuntime) attach(id runtime.ID, spec runtime.ExecSpec) (runtime.Manag
 	}
 	host, keeper := net.Pipe()
 	b := &bridgeExec{identity: runtime.ExecIdentity{ContainerID: id, ExecID: rand.Text(), CreationKey: spec.CreationKey, ClaimToken: "claim"}, conn: host, done: make(chan struct{})}
+	r.mu.Lock()
+	r.attached = append(r.attached, b)
+	r.mu.Unlock()
 	go func() {
 		k.ServeConn(keeper)
 		close(b.done)

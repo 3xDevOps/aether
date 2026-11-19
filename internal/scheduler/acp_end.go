@@ -326,20 +326,13 @@ func (d *acpDriver) stopAdapterLocked(ctx context.Context, run domain.RunID) err
 // whose stdio this server holds, cannot outlive that and is stopped.
 func (d *acpDriver) detach(ctx context.Context, run domain.RunID) error {
 	defer d.lockOp(run)()
-	d.mu.Lock()
-	r := d.runs[run]
-	if r != nil && r.session != nil && r.keeper != nil {
-		delete(d.runs, run)
-		r.stopping = true
-	}
-	d.mu.Unlock()
-	if r == nil || r.session == nil {
+	r := d.letGo(run)
+	if r == nil {
+		if d.session(run) != nil {
+			return d.stopAdapterLocked(ctx, run)
+		}
 		return nil
 	}
-	if r.keeper == nil {
-		return d.stopAdapterLocked(ctx, run)
-	}
-	r.session.Detach()
 	err := r.keeper.Detach(ctx)
 	select {
 	case <-r.session.Done():
@@ -350,6 +343,25 @@ func (d *acpDriver) detach(ctx context.Context, run domain.RunID) error {
 		return fmt.Errorf("detach from the agent's keeper: %w", err)
 	}
 	return nil
+}
+
+// letGo is detach without the keeper's answer, for a guest that gives none:
+// the session's connection may end from then on without anything recording
+// that end, and the next open reattaches to the keeper. It returns the run
+// to release once that connection is no longer needed, nil for one with no
+// session under a keeper.
+func (d *acpDriver) letGo(run domain.RunID) *acpRun {
+	d.mu.Lock()
+	r := d.runs[run]
+	if r == nil || r.session == nil || r.keeper == nil {
+		d.mu.Unlock()
+		return nil
+	}
+	delete(d.runs, run)
+	r.stopping = true
+	d.mu.Unlock()
+	r.session.Detach()
+	return r
 }
 
 // shutdown detaches every session from its keeper without recording or

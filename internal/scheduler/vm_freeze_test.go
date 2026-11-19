@@ -58,6 +58,14 @@ func (r *freezeRuntime) Save(ctx context.Context, id runtime.ID) error {
 	if err := r.memoryRuntime.Save(ctx, id); err != nil {
 		return err
 	}
+	// The saved VM ends, and every connection into it, its keeper's too.
+	r.mu.Lock()
+	for _, b := range r.attached {
+		if b.identity.ContainerID == id {
+			_ = b.conn.Close()
+		}
+	}
+	r.mu.Unlock()
 	return r.Thaw(id)
 }
 
@@ -242,6 +250,44 @@ func TestAGuardSaveFreezesItsVMAndThawsOneItCouldNotSave(t *testing.T) {
 	}
 	if sess := e.sched.acp.session(run); sess == nil || !sess.State().TurnInFlight {
 		t.Fatal("the session's turn did not carry on after the failed save")
+	}
+}
+
+// A save of a VM the brake froze lets go of its agent as an idle save does.
+// The frozen guest answers nothing, so the save ends the connection to the
+// agent's keeper while the server still waits on the guest, here for the
+// last diff snapshot. That end is not the agent's: the wake reattaches to
+// it, and its turn carries on.
+func TestASaveOfAFrozenVMKeepsItsAgent(t *testing.T) {
+	t.Parallel()
+	e, fr := newFreezeEnv(t)
+	vm := e.launchVM(t, fr.memoryRuntime, acpmock.PromptWait, 3<<30)
+	run := e.runOf(t, vm)
+	e.git.mu.Lock()
+	e.git.stopWatchHook = func(domain.RunID) {
+		for deadline := time.Now().Add(5 * time.Second); e.sched.acp.session(run) != nil && time.Now().Before(deadline); {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	e.git.mu.Unlock()
+	e.brake(fr, 4<<30)
+	e.brake(fr, 3<<30)
+
+	e.sched.guardVMMemory(t.Context())
+	if !fr.isSaved(vm) || !fr.foundFrozen(vm) {
+		t.Fatalf("the guard saved the VM %v, frozen %v; want it saved as it stood", fr.isSaved(vm), fr.foundFrozen(vm))
+	}
+	fr.setAvailable(16 << 30)
+	waitFor(t, "the session awake with its turn running", func() bool {
+		e.sched.guardVMMemory(t.Context())
+		sess := e.sched.acp.session(run)
+		return !e.asleep(run) && sess != nil && sess.State().TurnInFlight
+	})
+	if !adopted(fr.acpRuntime) {
+		t.Fatal("the wake restarted the agent instead of reattaching to it")
+	}
+	if page, err := e.sched.ACPHistory(run, 0, 0); err != nil || noticed("Enhanced agent exited", "")(page.Items) {
+		t.Fatalf("the session recorded its agent's end across the save: %v", err)
 	}
 }
 
