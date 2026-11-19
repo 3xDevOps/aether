@@ -60,7 +60,7 @@ describe('header brand', () => {
     const banner = screen.getByRole('banner')
     const [logo, light] = within(banner).getAllByRole('img', { name: 'Cloudfield' })
     expect(logo!.getAttribute('src')).toBe(brand === 'tile' ? '/cloudfield-favicon.svg' : '/cloudfield-logo-small.svg')
-    expect(light?.getAttribute('src')).toBe(brand === 'tile' ? undefined : '/cloudfield-logo-small-for-light-backgrounds.svg')
+    expect(light?.getAttribute('src')).toBe(brand === 'tile' ? '/cloudfield-favicon-white-tile.svg' : '/cloudfield-logo-small-for-light-backgrounds.svg')
     const navigation = within(banner).getByRole('navigation', { name: 'Main navigation' })
     expect(within(navigation).queryByRole('button', { name: 'Templates' }) !== null).toBe(templates)
     expect(within(navigation).queryByRole('button', { name: 'More navigation' }) === null).toBe(templates)
