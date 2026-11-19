@@ -457,8 +457,9 @@ func (d *acpDriver) openRestored(ctx context.Context, entry *supervised, how acp
 // open runs under the run's op lock. openRestore and openWake with no live
 // session first reattach to the keeper an earlier server process, or the
 // VM a wake restored, left running and adopt its session; every other open,
-// or a failed reattach, stops that keeper and starts the adapter under a new
-// one.
+// or a reattach that failed while ctx was live, stops that keeper and starts
+// the adapter under a new one. One that ctx's end cut short proves nothing
+// about the keeper, which stays recorded for the next open.
 func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) error {
 	if err := d.stopAdapterLocked(ctx, entry.runID); err != nil {
 		slog.Warn("scheduler: stop the previous ACP server", "run", entry.runID, "error", err)
@@ -528,6 +529,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			}
 			d.record(entry, func() { entry.keeperDelivered, entry.keeperAdopted = state.Delivered, true })
 		} else {
+			if ctx.Err() != nil {
+				return fmt.Errorf("reattach to the agent's keeper: %w", err)
+			}
 			slog.Warn("scheduler: reattach to the agent's keeper", "run", entry.runID, "error", err)
 			after := "the server restarted"
 			if how == openWake {

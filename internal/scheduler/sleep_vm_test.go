@@ -742,6 +742,42 @@ func TestASavedRunWakesWithItsAgentAfterARestart(t *testing.T) {
 	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 2))
 }
 
+// A stop that cuts a wake short while it reattaches to the agent's keeper
+// leaves the keeper running and recorded, and the next server's wake adopts
+// it instead of starting another agent beside it.
+func TestAStopDuringAWakesReattachKeepsTheAgentForTheNextServer(t *testing.T) {
+	t.Parallel()
+	e, rt, _ := newSaveEnv(t, false)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	e.sleepRun(t, run.ID)
+	rt.mu.Lock()
+	rt.onAttach = func() error {
+		e.sched.superCancel()
+		return context.Canceled
+	}
+	rt.mu.Unlock()
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "during the stop"}, false, nil); err == nil {
+		t.Fatal("a wake the stop cut short reported success")
+	}
+	rt.mu.Lock()
+	rt.onAttach = nil
+	rt.mu.Unlock()
+	if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.AgentKeeper == nil || len(rt.all()) != 1 || rt.all()[0].exited() {
+		t.Fatalf("the cut wake left the sidecar %+v, %v and %d agents, the first exited %v; want the keeper recorded and running alone",
+			sc, err, len(rt.all()), rt.all()[0].exited())
+	}
+
+	s2 := e.restartACP(t)
+	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after restart"}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !adopted(rt) {
+		t.Fatalf("the next server's wake did not adopt the keeper: %d agents", len(rt.all()))
+	}
+	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 2))
+}
+
 // Low disk takes a closed session's VM, whose work is on its branch, before
 // the saved memory of an open one, and leaves one a Relaunch is starting:
 // its capacity reservation is what runs the reclaim.
