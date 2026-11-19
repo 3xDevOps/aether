@@ -615,6 +615,11 @@ func (e *engine) launch(ctx context.Context, rec *record, l launch) error {
 	if err := os.Rename(logPath, logPath+".1"); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("vm runtime: keep the last monitor log of VM %s: %w", rec.Key, err)
 	}
+	// Removed before the unit starts: the last monitor's events would read
+	// as a reboot of this guest.
+	if err := os.Remove(e.path(rec.Key, eventsFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("vm runtime: remove the last monitor's events of VM %s: %w", rec.Key, err)
+	}
 	if err := e.units.Start(ctx, unitName(rec.Key), argv, properties); err != nil {
 		return err
 	}
