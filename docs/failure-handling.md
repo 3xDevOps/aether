@@ -889,7 +889,7 @@ A Standard session's Chat and Terminal views, and an Enhanced session's
 Chat view, show **Asleep since** with a **Wake** button while it sleeps.
 
 A wake reads all of the saved memory before the VM runs. On a hosted test
-runner, a VM with 1.3 GiB of saved memory woke in 3.5 to 4.7 seconds with
+runner, a VM with 1.3 GiB of saved memory woke in 3.5 to 7.1 seconds with
 the file read from disk, and in about 1 second with it still in the host's
 page cache. Cloud Hypervisor can also load the memory on demand, which ran
 the first command 0.8 to 1.5 seconds after the wake began, and Cloudfield
