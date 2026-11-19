@@ -306,8 +306,15 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 		}
 		return woke{}, err
 	}
-	if err = s.reattach(ctx, entry, how.restored); err != nil {
-		return woke{}, errors.Join(err, s.stopAsleep(context.WithoutCancel(ctx), entry))
+	up, stop := s.untilExit(ctx, cid)
+	err = s.reattach(up, entry, how.restored)
+	exited := context.Cause(up)
+	stop()
+	if err != nil {
+		if ctx.Err() != nil {
+			exited = nil
+		}
+		return woke{}, errors.Join(err, exited, s.stopAsleep(context.WithoutCancel(ctx), entry))
 	}
 	s.mu.Lock()
 	entry.asleepSince = time.Time{}
@@ -323,6 +330,18 @@ func (s *Scheduler) wakeLive(ctx context.Context, entry *supervised) (woke, erro
 		return woke{}, errors.Join(fmt.Errorf("record the wake: %w", err), s.stopAsleep(context.WithoutCancel(ctx), entry))
 	}
 	return how, nil
+}
+
+// untilExit is ctx ending once cid's container exits, with the exit as its
+// cause: nothing a wake still waits on in that container will answer.
+func (s *Scheduler) untilExit(ctx context.Context, cid runtime.ID) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	go func() {
+		if st, err := s.cfg.Runtime.Wait(ctx, cid); err == nil {
+			cancel(fmt.Errorf("the session's container exited with status %d while the session woke", st.Code))
+		}
+	}()
+	return ctx, func() { cancel(nil) }
 }
 
 // startAsleep starts entry's stopped container, or restores its saved VM,

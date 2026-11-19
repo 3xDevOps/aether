@@ -228,8 +228,8 @@ func TestKVMSessionLifecycle(t *testing.T) {
 // Cloud Hypervisor maps apart from the first 3 GiB. Every wake must find the
 // boot and processes it left, and 1 GiB of random bytes must read back
 // unchanged; every other save comes with almost nothing touched since the
-// wake. Restored on demand, all 7 such VMs came back rebooted from their
-// disks by their third wake: a page a host process had read through
+// wake. Restored on demand, all 7 such VMs died by their third wake, 6 of
+// them rebooted from their disks: a page a host process had read through
 // /proc/<pid>/mem before Cloud Hypervisor registered its userfaultfd kept
 // zeros, since Cloud Hypervisor takes a page that is already there as loaded.
 func TestKVMRepeatedSaveAndWakeKeepsMemoryAndProcesses(t *testing.T) {

@@ -451,6 +451,41 @@ was running out of memory
 is saved with neither `Sync` nor the wait, which would let its guest run:
 its saved state holds its page cache too.
 
+## Save and restore
+
+A save is Cloud Hypervisor's `vm.snapshot` of the paused VM: its
+configuration, its device state and a sparse file of the memory the host
+holds for it. A restore starts Cloud Hypervisor with `--restore` in its
+default mode, which writes every saved page into the guest's memory before
+the VM can be resumed.
+
+Cloud Hypervisor v54.1 can load that memory on demand instead
+(`memory_restore_mode=ondemand`): it resumes at once and copies each page in
+through `userfaultfd` on its first use. That mode is not used. It takes a
+page that is already in the guest's memory as loaded
+(`UFFDIO_COPY` answers `EEXIST`), so a page anything read before the
+`userfaultfd` was registered keeps the zeros of that read instead of its
+saved bytes. On a hosted runner a host process reads each new process's
+memory through `/proc/<pid>/mem`: of 31 restores of one saved 5 GiB VM
+whose memory file was read from disk, 12 came back with 11 to 419 saved
+pages zeroed at the start of the RAM past 4 GiB, and all 7 such VMs that
+were resumed died by their third wake
+(`TestKVMRepeatedSaveAndWakeKeepsMemoryAndProcesses`).
+
+The engine deletes a saved state only once the restored guest's helper
+answers. Until then the record stays saved, so a server that stops between
+the resume and that answer finds the guest running at the next wake and only
+waits for it to answer. A guest that restarts, which Cloud Hypervisor's
+event log reports, or whose unit stops first is not the saved one: the
+restore fails with the tail of `monitor.log` and `console.log`. The saved
+state is then kept only if no disk the guest may write changed since the
+resume, by the modification time of each one in the saved `config.json`;
+otherwise it is dropped and the restore's error also says
+`it has no saved state`, since saved memory restored over newer disks would
+corrupt them. A guest that still runs but does not answer, or whose clock
+cannot be set, keeps running without its saved state, for the caller to
+take up.
+
 ## Freezing the root disk
 
 `Freeze` flushes the root filesystem and holds every write to it, as
