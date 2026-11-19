@@ -9,7 +9,6 @@ import { isProvisional } from '@/store/collaboration'
 import { optimistic } from '@/store/optimistic'
 
 const presencePollMs = 10_000
-/** A load that got no answer is retried this many times before it is shown. */
 const noAnswerRetries = 3
 const presenceTimeoutMs = 15_000
 
@@ -62,10 +61,8 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
     const s = useStore.getState()
     s.initializeRoomPagination(runID)
     s.setRoomLoading(runID, true)
-    // fetch's TypeError means no answer arrived, as when the browser drops a
-    // request because a network interface changed; the event stream stays up
-    // through that, so nothing else would reload the list. A server's
-    // refusal is shown at once.
+    // fetch's TypeError means no answer arrived; until the next room event or
+    // stream reconnect nothing reads the list again.
     const load = (attempt: number): Promise<void> =>
       client.runRoomList({ workspace_id: workspaceID, run_id: runID, limit: pageLimit }).then(
         (page) => {

@@ -101,6 +101,21 @@ describe('loading the room', () => {
     expect(error).toContain('not a member')
   })
 
+  it('stops retrying once the session view closes', async () => {
+    useStore.setState({ info: serverInfo })
+    const runRoomList = vi.fn(() => Promise.reject(noAnswer()))
+    vi.useFakeTimers()
+    try {
+      const { unmount } = renderHook(() => useRunRoom(run(), undefined, fakeApi({ runRoomList })))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      unmount()
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(runRoomList).toHaveBeenCalledTimes(1)
+  })
+
   it('shows the error once its retries also get no answer', async () => {
     const { runRoomList, error } = await load(() => Promise.reject(noAnswer()))
     expect(runRoomList).toHaveBeenCalledTimes(4)
