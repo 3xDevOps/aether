@@ -7,8 +7,9 @@
 # stdin: newline-separated repo paths. Prints true or false.
 # web covers the dashboard checks: the dashboard source and everything that
 # builds or serves it. go covers the Go unit and lint jobs: everything
-# except the dashboard source (web/ other than web/embed.go) and docs-only
-# changes. caches covers every file a cache key in .github/ hashes, every
+# except the dashboard source and docs-only changes, but not the files Go
+# code embeds or its tests read there (web/embed.go, web/public,
+# agent-glyph.tsx, docs/harnesses.md). caches covers every file a cache key in .github/ hashes, every
 # file the cached browser and standard image builds copy in, and .github/
 # itself, which names the keys; any other path is outside it. vm covers what
 # make test-kvm builds, boots or runs: the VM packages, every package the
@@ -47,11 +48,9 @@ web() {
 	esac
 }
 
-# web/public and agent-glyph.tsx are read by Go tests (internal/edge/service,
-# internal/connector, internal/harness) that check their copies match.
 go() {
 	case $1 in
-	web/embed.go | web/public/* | web/src/components/ui/agent-glyph.tsx | \
+	web/embed.go | web/public/* | web/src/components/ui/agent-glyph.tsx | docs/harnesses.md | \
 		go.mod | go.sum | Makefile | scripts/ci-classify-* | \
 		.github/actions/* | .github/workflows/ci.yml)
 		return 0

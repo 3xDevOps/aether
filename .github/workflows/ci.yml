@@ -57,7 +57,8 @@ jobs:
   # on this commit and the push changed no cache key input. On a pull request
   # scripts/ci-classify-areas.sh sets go and web: a change confined to
   # docs/ and root-level markdown files skips both, one confined to web/
-  # skips the Go jobs, and one that no dashboard input can see skips
+  # skips the Go jobs (except for the files Go reads there, which the
+  # script lists), and one that no dashboard input can see skips
   # dashboard. A merge-queue entry or a push to main also sets vm from the
   # files it changes, which decides whether the suite boots VMs.
   # Each classifier is the base revision's copy: a pull request can edit
