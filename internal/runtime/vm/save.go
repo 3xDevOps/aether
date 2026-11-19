@@ -269,18 +269,22 @@ func (e *engine) restore(ctx context.Context, key string) error {
 	// Not ended with ctx: what follows a resume decides what the record
 	// says of a guest that ran.
 	after := context.WithoutCancel(ctx)
-	unwritten := func() bool {
+	// moved is why the saved state no longer matches the disks, if it does not.
+	moved := func() error {
 		now, timesErr := diskTimes(dir)
-		return timesErr == nil && maps.Equal(rec.Resumed, now)
+		if timesErr == nil && !maps.Equal(rec.Resumed, now) {
+			timesErr = errors.New("its guest wrote its disks")
+		}
+		return timesErr
 	}
-	drop := func(cause error) error {
+	drop := func(cause, why error) error {
 		rec.Saved, rec.Resumed, rec.Exited, rec.ExitCode = false, nil, true, lostExitCode
 		rec.CacheRan, rec.CacheSynced = rec.Cache.Path != "", false
 		dropErr := e.store(rec)
 		if dropErr == nil {
 			dropErr = os.RemoveAll(dir)
 		}
-		return errors.Join(fmt.Errorf("%w; its guest wrote its disks, so its saved state is dropped: %w", cause, runtime.ErrNotSaved), dropErr)
+		return errors.Join(fmt.Errorf("%w; %w, so its saved state is dropped: %w", cause, why, runtime.ErrNotSaved), dropErr)
 	}
 	keep := func(cause error) error {
 		rec.Resumed, rec.Exited = nil, true
@@ -290,8 +294,10 @@ func (e *engine) restore(ctx context.Context, key string) error {
 	// to answer. Any other holds it paused at the saved state, as a server
 	// that stopped mid-restore or mid-save left it.
 	if !up || rec.Resumed == nil {
-		if rec.Resumed != nil && !unwritten() {
-			return drop(fmt.Errorf("vm runtime: restore VM %s: the guest an earlier wake resumed is gone", key))
+		if rec.Resumed != nil {
+			if why := moved(); why != nil {
+				return drop(fmt.Errorf("vm runtime: restore VM %s: the guest an earlier wake resumed is gone", key), why)
+			}
 		}
 		if up {
 			e.kill(ctx, key)
@@ -331,19 +337,19 @@ func (e *engine) restore(ctx context.Context, key string) error {
 	}
 	live, cancel := context.WithTimeout(after, bootTimeout)
 	defer cancel()
-	paused := func() bool {
-		state, _ := api.state(live)
-		return state == "Paused"
+	state := func() string {
+		s, _ := api.state(live)
+		return s
 	}
 	// A guest still paused has not run, so a refused resume is tried again.
 	var resumeErr error
-	for try := 0; try < 3 && paused(); try++ {
+	for try := 0; try < 3 && state() != "Running"; try++ {
 		resumeErr = api.resume(live)
 	}
-	stuck := paused()
+	stuck := state() == "Paused"
 	var h helper
 	if stuck {
-		err = fmt.Errorf("vm runtime: resume restored VM %s: %w", key, resumeErr)
+		err = errors.Join(fmt.Errorf("vm runtime: resume restored VM %s: it stays paused", key), resumeErr)
 	} else if h, err = e.helper(key); err == nil {
 		err = e.waitHelper(live, key, h)
 	}
@@ -356,10 +362,14 @@ func (e *engine) restore(ctx context.Context, key string) error {
 		if alive, aliveErr := e.running(after, key); stuck || e.rebooted(key) || aliveErr == nil && !alive {
 			// A paused guest writes nothing more; Cloud Hypervisor may write
 			// a disk as it closes it, so the times are read before the kill.
-			kept := (stuck || api.pause(live) == nil) && unwritten()
+			held := stuck || api.pause(live) == nil
+			why := moved()
 			e.kill(after, key)
-			if !kept && !unwritten() {
-				return drop(err)
+			if !held {
+				why = moved()
+			}
+			if why != nil {
+				return drop(err, why)
 			}
 			return keep(err)
 		}

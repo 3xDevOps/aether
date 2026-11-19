@@ -448,7 +448,17 @@ func TestRestoreAfterAServerStoppedMidWake(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = h.engine.restore(t.Context(), "run-b")
-	if rec, _ = h.engine.load("run-b"); !errors.Is(err, runtime.ErrNotSaved) || rec.Saved || h.units.vmm("run-b") != nil {
+	if rec, _ = h.engine.load("run-b"); !errors.Is(err, runtime.ErrNotSaved) || !strings.Contains(err.Error(), "its guest wrote its disks") || rec.Saved || h.units.vmm("run-b") != nil {
 		t.Errorf("restore after the resumed guest wrote its disks and died = %v, saved=%v; want the stale saved state dropped and nothing started", err, rec.Saved)
+	}
+
+	resumeMidWake("run-e")
+	h.units.stopAll()
+	if err = os.Remove(h.engine.path("run-e", snapshotDir+"/config.json")); err != nil {
+		t.Fatal(err)
+	}
+	err = next.restore(t.Context(), "run-e")
+	if !errors.Is(err, runtime.ErrNotSaved) || !strings.Contains(err.Error(), "config.json: no such file") {
+		t.Errorf("restore of a saved state whose configuration is gone = %v; want the real error", err)
 	}
 }
