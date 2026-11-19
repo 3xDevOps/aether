@@ -148,7 +148,8 @@ func (s *Scheduler) memoryStall(now time.Time) (float64, bool) {
 // are free or none is left, and none when all of them together hold too
 // little to admit it. It reports whether it saved any. It holds
 // vmMemoryMu, so concurrent admissions and the guard each measure what the
-// others' saves freed.
+// others' saves freed. A save it stops waiting for ends the pass, as it
+// ends a guard check.
 func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 	if _, ok := s.cfg.Runtime.(runtime.SaveRuntime); !ok {
 		return false
@@ -175,7 +176,7 @@ func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 		}
 		done, held := s.heldSave(c, false)
 		if held {
-			writing += c.memory
+			break
 		}
 		saved = saved || done
 	}
@@ -188,7 +189,16 @@ func (s *Scheduler) saveIdleVMs(ctx context.Context, need uint64) bool {
 // on it.
 func (s *Scheduler) heldSave(c memoryCandidate, working bool) (saved, held bool) {
 	done := make(chan bool, 1)
-	s.goMove(func() { done <- s.saveCandidate(s.superCtx, c, working) })
+	s.mu.Lock()
+	c.e.memorySaving = true
+	s.mu.Unlock()
+	s.goMove(func() {
+		saved := s.saveCandidate(s.superCtx, c, working)
+		s.mu.Lock()
+		c.e.memorySaving = false
+		s.mu.Unlock()
+		done <- saved
+	})
 	select {
 	case saved := <-done:
 		return saved, false
@@ -227,7 +237,7 @@ func (c memoryCandidate) rank() int {
 // agent is idle, the longest idle first, then the rest, the one holding the
 // most memory first. A run that must stay awake whatever the host is short
 // of, a Background one, and one whose save failed within memorySaveRetry
-// are left out. writing is the memory of the open VMs being saved, which
+// are left out, as is one being saved: writing is the memory of those, which
 // their saves have yet to write to disk.
 func (s *Scheduler) memoryCandidates(ctx context.Context) (out []memoryCandidate, writing uint64) {
 	type open struct {
@@ -243,10 +253,10 @@ func (s *Scheduler) memoryCandidates(ctx context.Context) (out []memoryCandidate
 	for _, e := range s.runs {
 		enhanced := e.acp && e.launchMode == domain.LaunchACP
 		_, saving := s.saver(e.containerID)
-		if saving && e.sleeping && !e.retained {
+		if saving && !e.retained && (e.sleeping || e.memorySaving) {
 			writing += memory[e.containerID]
 		}
-		if !saving || e.sleeping || !enhanced && e.launchMode != domain.LaunchTUI || now.Sub(e.saveFailedAt) < memorySaveRetry {
+		if !saving || e.sleeping || e.memorySaving || !enhanced && e.launchMode != domain.LaunchTUI || now.Sub(e.saveFailedAt) < memorySaveRetry {
 			continue
 		}
 		switch {

@@ -603,8 +603,11 @@ type supervised struct {
 	// asleepSaved is set while a sleeping VM holds its saved memory, which
 	// a wake restores with every process. saveFailedAt is the last failed
 	// save, which the sleep sweep waits a full sleep delay after.
+	// memorySaving is set while a save the memory guard or an admission
+	// started runs, also once heldSave stopped waiting for it.
 	asleepSaved  bool
 	saveFailedAt time.Time
+	memorySaving bool
 	// frozenNotedAt is when the timeline last said the memory brake froze
 	// the session's VM. frozenSave is set while the memory guard saves the
 	// VM frozen, and admitting while a wake holding the lifecycle lock

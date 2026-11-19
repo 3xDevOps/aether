@@ -201,14 +201,22 @@ func (e *testEnv) guard(t *testing.T) {
 	})
 }
 
-// A save that hangs holds up the guard for memorySaveHold, and then goes on
-// alone: that check saves no other VM, and a later one saves the next once
-// the disk has room for both VMs' memory.
+// A save that hangs, here of a VM recorded asleep and still running as a
+// restart takes one up, holds up the guard for memorySaveHold, and then goes
+// on alone: that check saves no other VM, and a later one saves the next
+// once the disk has room for both VMs' memory.
 func TestAHungSaveHoldsUpTheGuardOnlySoLong(t *testing.T) {
 	t.Parallel()
 	e, mr := newMemoryEnv(t)
 	big := e.launchVM(t, mr, acpmock.PromptWait, 3<<30)
 	small := e.launchVM(t, mr, acpmock.PromptWait, 1<<30)
+	bigRun := e.runOf(t, big)
+	e.sched.mu.Lock()
+	asleep := e.sched.runs[bigRun]
+	e.sched.mu.Unlock()
+	if err := e.sched.markAsleep(asleep); err != nil {
+		t.Fatal(err)
+	}
 	// A 100 GiB disk keeps 5 GiB, and below 9 GiB free disk reclaim deletes
 	// other sessions' saved memory: 12 GiB free holds either VM's, not both.
 	var free atomic.Uint64
@@ -250,7 +258,7 @@ func TestAHungSaveHoldsUpTheGuardOnlySoLong(t *testing.T) {
 		t.Fatalf("with room on disk the guard saved the small VM %v, the hung one %v; want the small one while the other hangs", mr.isSaved(small), mr.isSaved(big))
 	}
 	unhang()
-	waitFor(t, "the hung save finishing", func() bool { return mr.isSaved(big) && e.asleep(e.runOf(t, big)) })
+	waitFor(t, "the hung save finishing", func() bool { return mr.isSaved(big) && e.sched.Sleep(bigRun).Saved })
 }
 
 // A wake the guard started that hangs holds up neither the guard nor a
@@ -451,6 +459,47 @@ func TestAWakeSavesIdleVMsUntilItsMemoryFits(t *testing.T) {
 	}
 	if !mr.isSaved(idle) || mr.isSaved(working) {
 		t.Fatalf("the wake saved idle %v, working %v; want only the idle VM", mr.isSaved(idle), mr.isSaved(working))
+	}
+}
+
+// A wake whose save of an idle VM hangs waits for it memorySaveHold, saves
+// no other VM and is refused; the save goes on, and once it lands the next
+// wake fits.
+func TestAWakeStopsSavingIdleVMsAtASaveThatHangs(t *testing.T) {
+	t.Parallel()
+	e, mr := newMemoryEnv(t)
+	sleeper := e.launchVM(t, mr, "say pong", 6<<30)
+	run := e.runOf(t, sleeper)
+	mr.setAvailable(3 << 30)
+	e.guard(t)
+	if !mr.isSaved(sleeper) {
+		t.Fatal("the guard did not save the idle VM")
+	}
+	older := e.launchVM(t, mr, "say pong", 8<<30)
+	newer := e.launchVM(t, mr, "say pong", 8<<30)
+	hold := make(chan struct{})
+	unhang := sync.OnceFunc(func() { close(hold) })
+	defer unhang()
+	mr.saveMu.Lock()
+	mr.saving, mr.release = make(chan struct{}), hold
+	mr.saveMu.Unlock()
+	mr.setAvailable(memoryFloor(32<<30) + 1<<30)
+
+	start := time.Now()
+	woke := make(chan error, 1)
+	go func() { woke <- e.sched.WakeRun(t.Context(), run, "") }()
+	<-mr.saving
+	mr.saveMu.Lock()
+	mr.saving, mr.release = nil, nil
+	mr.saveMu.Unlock()
+	if err := <-woke; !errors.Is(err, ErrMemoryPressure) || time.Since(start) < memorySaveHold || mr.isSaved(newer) || !e.asleep(run) {
+		t.Fatalf("after %s the wake = %v, asleep %v, the next idle VM saved %v; want it refused after %s with nothing more saved",
+			time.Since(start), err, e.asleep(run), mr.isSaved(newer), memorySaveHold)
+	}
+	unhang()
+	waitFor(t, "the hung save landing", func() bool { return mr.isSaved(older) })
+	if err := e.sched.WakeRun(t.Context(), run, ""); err != nil || e.asleep(run) || mr.isSaved(newer) {
+		t.Fatalf("the wake after the save landed = %v, asleep %v, the other idle VM saved %v", err, e.asleep(run), mr.isSaved(newer))
 	}
 }
 

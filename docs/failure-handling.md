@@ -375,7 +375,10 @@ other probes.
 
 A launch or wake that memory refuses first saves idle session VMs to disk,
 the longest idle first, until twice the floor plus what the start and the
-starts in flight take is free, then checks once more. It never saves a VM
+starts in flight take is free, then checks once more. It waits at most 30
+seconds for any one save: a save still running then goes on alone, and the
+check runs at once, so the launch or wake is likely refused until that save
+lands. It never saves a VM
 whose agent is working. It saves none when all idle VMs together hold too
 little to admit the start, or when only the server's own memory pressure
 refused it.
@@ -471,10 +474,10 @@ memory of other sleeping sessions
 minutes one whose save failed. A save waits for Cloud Hypervisor to finish
 writing the snapshot, for as long as writing the VM's memory at 20 MiB/s
 takes plus 2 minutes, but the guard waits for it at most 30 seconds. A
-save still running then goes on alone and ends that check, so the next
-check measures memory again and may save another VM meanwhile; a launch
-or wake that saves idle VMs to make room moves on to the next. A save
-that fails leaves the VM running; a VM that
+save still running then goes on alone and ends that check. The next check
+measures memory again without counting what that save will free, so it may
+save another VM meanwhile: a save that hangs holds the guard up no longer.
+A save that fails leaves the VM running; a VM that
 died instead ends its session as any VM that
 died, also when the server is shutting down: `failed`, with its work
 committed from its disks. So does, at its next wake, a session recorded
@@ -919,8 +922,9 @@ restart or update leaves sleeping VMs asleep; the next use wakes them. A
 stop cuts short a wake still running and leaves its session asleep: with
 its saved state, or, once the restore is done, with its VM running, which
 the next server saves again, or wakes if the memory guard had saved it.
-Either way the agent keeps running in the VM, and the next wake reattaches
-to it.
+The agent keeps running in the VM, and the next wake reattaches to it,
+unless the wake had already started the VM again from its disk: then the
+next wake starts the agent and restores its conversation.
 
 ## What stays after a session ends
 
