@@ -42,16 +42,22 @@ expect go true web/public/icons/favicon-32.png
 expect go true web/src/components/ui/agent-glyph.tsx
 expect go false web/src/components/ui/button.tsx
 expect go true docs/harnesses.md
+expect go true docs/agents.md
+expect go true docs/embed.go
 expect go false docs/install.md
 
-# Every web, docs or android file Go code names by a relative path is a Go
-# input. node_modules is not a tracked path.
-read_by_go=$(grep -rhoE --include='*.go' '"(\.\./)+(web|docs|android)/[^"]+"' "$script_dir/../cmd" "$script_dir/../internal" |
+# Every Go file under web, docs or android, and every file there Go code
+# names by a relative path, is a Go input. The node_modules comparison skips
+# without bun install, which build-and-test runs after its tests.
+repo=$script_dir/..
+read_by_go=$(git -C "$repo" grep -hoE '"(\.\./)+(web|docs|android)/[^"]+"' -- '*.go' |
 	sed -E 's|^"(\.\./)+||; s|"$||' | grep -v '/node_modules/' | sort -u)
 [ -n "$read_by_go" ] || { echo "ci-classify-areas-test: found no web, docs or android file read by Go code" >&2; exit 1; }
-for path in $read_by_go; do
+set -f
+for path in $read_by_go $(git -C "$repo" ls-files 'web/*.go' 'docs/*.go' 'android/*.go'); do
 	expect go true "$path"
 done
+set +f
 expect go true web/src/app.tsx internal/store/store.go
 expect go true internal/store/store.go
 expect go true Makefile
