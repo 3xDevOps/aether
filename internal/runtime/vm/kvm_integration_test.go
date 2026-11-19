@@ -203,6 +203,9 @@ func TestKVMSessionLifecycle(t *testing.T) {
 		t.Errorf("stopped VM inspects as %+v", info)
 	}
 	monitor := after.path(key, monitorLog)
+	if out, _ := os.ReadFile(monitor); strings.Contains(string(out), "unknown command") {
+		t.Errorf("the monitor of a VM that powered off logged %q", out)
+	}
 	if err := os.WriteFile(monitor, []byte("the first launch\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
