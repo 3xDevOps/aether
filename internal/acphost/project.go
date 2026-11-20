@@ -48,8 +48,9 @@ type projector struct {
 	usage  Usage
 	title  string
 	// framed takes thinking text from claudeFrame, not thought chunks.
-	// Until then, chunked holds the message of the last thought taken from
-	// chunks, by subagent, so its frame does not log it again.
+	// chunked holds, by subagent, the message of a thought taken from
+	// chunks whose frame has not come: its chunks keep coming and its frame
+	// does not log it again.
 	framed  bool
 	chunked map[string]string
 }
@@ -117,16 +118,16 @@ func (p *projector) project(kind, parent string, raw json.RawMessage) bool {
 		}
 		k := KindMessage
 		claude, _ := claudeMeta(u.Meta)
-		owner := cmp.Or(parent, claude)
+		owner, id := cmp.Or(parent, claude), deref(u.MessageId)
 		if kind == "agent_thought_chunk" {
 			k = KindThought
 			p.activity("think", "")
-			if p.framed {
+			if p.framed && (id == "" || p.chunked[owner] != id) {
 				return true
 			}
-			p.chunked[owner] = deref(u.MessageId)
+			p.chunked[owner] = id
 		}
-		p.chunk(k, "assistant", deref(u.MessageId), owner, u.Content)
+		p.chunk(k, "assistant", id, owner, u.Content)
 	case "tool_call":
 		var u acp.SessionUpdateToolCall
 		if json.Unmarshal(raw, &u) != nil {
@@ -351,6 +352,7 @@ func (p *projector) claudeFrame(raw json.RawMessage) {
 		f.Parent = ""
 	}
 	if f.Message.ID != "" && f.Message.ID == p.chunked[f.Parent] {
+		delete(p.chunked, f.Parent)
 		return
 	}
 	for i, b := range f.Message.Content {

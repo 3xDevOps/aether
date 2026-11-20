@@ -305,8 +305,8 @@ func TestClaudeNarrationIsTheAgentsMessage(t *testing.T) {
 }
 
 // An adopted session's adapter may come from an earlier server that never
-// asked for assistant messages; once one arrives, a thought already logged
-// from chunks is not logged again, whichever agent the frames come from first.
+// asked for assistant messages. Once one arrives, a thought being logged
+// from chunks is finished from them and not logged again.
 func TestAdoptedClaudeSessionLogsEachThoughtOnce(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	s, _ := startMock(t, m, Config{ClaudeCode: true, Adopt: &Adoption{
@@ -315,9 +315,10 @@ func TestAdoptedClaudeSessionLogsEachThoughtOnce(t *testing.T) {
 	m.thought("msg_a", "", "Reading the logs.")
 	m.openTool("toolu_1")
 	m.thought("msg_m", "", "I checked the config.")
-	m.thought("msg_s", "toolu_1", "The subagent reads it.")
-	m.frame("msg_s", "toolu_1", "The subagent reads it.")
+	m.thought("msg_s", "toolu_1", "The subagent ")
 	m.frame("msg_m", "", "I checked the config.", 0)
+	m.thought("msg_s", "toolu_1", "reads it.")
+	m.frame("msg_s", "toolu_1", "The subagent reads it.")
 	m.thought("msg_c", "", "It reads the config.")
 	m.frame("msg_c", "", "It reads the config.", 0)
 	m.openTool("toolu_2")
