@@ -24,12 +24,13 @@ import (
 
 const (
 	// privateDir holds the helper's own mounts and sockets.
-	privateDir = "/run/aether-guest"
-	shareRoot  = privateDir + "/share"
-	dataRoot   = privateDir + "/data"
-	homeRoot   = privateDir + "/home"
-	cacheRoot  = privateDir + "/cache"
-	stateRoot  = privateDir + "/state"
+	privateDir   = "/run/aether-guest"
+	shareRoot    = privateDir + "/share"
+	dataRoot     = privateDir + "/data"
+	homeRoot     = privateDir + "/home"
+	cacheRoot    = privateDir + "/cache"
+	stateRoot    = privateDir + "/state"
+	programsRoot = privateDir + "/programs"
 	// selfExe is the helper's executable, on the helper disk, which stays
 	// mounted beneath the root the helper switched to.
 	selfExe = "/proc/self/exe"
@@ -281,6 +282,55 @@ func bind(root string, m guest.Mount) error {
 		return nil
 	}
 	return unix.Mount("", m.Target, "", unix.MS_BIND|unix.MS_REMOUNT|flags, "")
+}
+
+// bindPrograms binds each agent program from its disk over the home's copy.
+// The home's copy must still be there, and of the same type: a program
+// disk is never the only copy, so a mount it cannot make is skipped.
+func bindPrograms(mounts []guest.Mount) error {
+	var errs []error
+	for _, m := range mounts {
+		if m.Volume != guest.VolumeProgram {
+			continue
+		}
+		if err := bindProgram(m); err != nil {
+			errs = append(errs, fmt.Errorf("program disk %s at %s: %w", m.Source, m.Target, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// bindProgram mounts onto the target it opened without following a
+// symlink: the session can replace any directory on the way with one, and
+// a bind it steered elsewhere could cover a system file. The bind keeps
+// the disk mount's ro, nosuid and nodev.
+func bindProgram(m guest.Mount) error {
+	device, _, err := diskBySerial("program-" + m.Source)
+	if err != nil {
+		return err
+	}
+	root := filepath.Join(programsRoot, m.Source)
+	if err = mountOnce(mountSpec{device, root, "ext4", unix.MS_RDONLY | unix.MS_NOSUID | unix.MS_NODEV, ""}); err != nil {
+		return err
+	}
+	program := filepath.Join(root, guest.ProgramEntry)
+	var want unix.Stat_t
+	if err = unix.Lstat(program, &want); err != nil {
+		return err
+	}
+	fd, err := unix.Openat2(unix.AT_FDCWD, m.Target, &unix.OpenHow{Flags: unix.O_PATH | unix.O_CLOEXEC, Resolve: unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(fd) }()
+	var have unix.Stat_t
+	if err = unix.Fstat(fd, &have); err != nil {
+		return err
+	}
+	if have.Mode&unix.S_IFMT != want.Mode&unix.S_IFMT {
+		return fmt.Errorf("the home holds file type %#o there, the disk %#o", have.Mode&unix.S_IFMT, want.Mode&unix.S_IFMT)
+	}
+	return unix.Mount(program, "/proc/self/fd/"+strconv.Itoa(fd), "", unix.MS_BIND, "")
 }
 
 // createLike creates a missing data-disk directory with the mode and owner

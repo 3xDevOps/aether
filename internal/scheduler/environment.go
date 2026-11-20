@@ -61,6 +61,9 @@ type EnvironmentPlan struct {
 	SecretEnv []string
 	Egress    bool
 	Sudo      bool
+	// Programs are the agent programs a session VM may load from disks of
+	// their own.
+	Programs []runtime.Program
 }
 
 // unprivilegedUser runs an image whose own user is root. A server that is not
@@ -242,6 +245,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 				return nil, stateErr
 			}
 			plan.Mounts = append(plan.Mounts, state...)
+			plan.Programs = vmPrograms(homePath, home, profile, run.ACP)
 		}
 		if s.ompFront != nil {
 			broker, brokerErr := s.ompBrokerMount(member.ID, run, profile, home, env)

@@ -51,6 +51,8 @@ type Store struct {
 
 	mu     sync.Mutex
 	builds singleflight.Group
+	// programs runs one program build at a time.
+	programs sync.Mutex
 }
 
 // DockerImages streams `docker save` of a local image. It supplies the
@@ -412,12 +414,14 @@ func (s *Store) sweepLocked() error {
 			}
 		}
 	}
-	pools, poolsErr := os.ReadDir(s.cachesDir())
-	if poolsErr != nil && !errors.Is(poolsErr, fs.ErrNotExist) {
-		errs = append(errs, poolsErr)
-	}
-	for _, pool := range pools {
-		errs = append(errs, s.sweepCachesLocked(filepath.Join(s.cachesDir(), pool.Name())))
+	for _, dir := range []string{s.cachesDir(), s.programsDir()} {
+		pools, poolsErr := os.ReadDir(dir)
+		if poolsErr != nil && !errors.Is(poolsErr, fs.ErrNotExist) {
+			errs = append(errs, poolsErr)
+		}
+		for _, pool := range pools {
+			errs = append(errs, s.sweepCachesLocked(filepath.Join(dir, pool.Name())))
+		}
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("vmimage: sweep: %w", err)

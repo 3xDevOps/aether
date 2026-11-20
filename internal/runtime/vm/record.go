@@ -78,6 +78,10 @@ type record struct {
 	PidsLimit    int64           `json:"pids_limit,omitempty"`
 	Checkouts    []runtime.Mount `json:"checkouts,omitempty"`
 	Mounts       []runtime.Mount `json:"mounts,omitempty"`
+	// Programs are the agent programs the VM may load from disks of their
+	// own; ProgramDisks those it booted with.
+	Programs     []runtime.Program `json:"programs,omitempty"`
+	ProgramDisks []programDisk     `json:"program_disks,omitempty"`
 	// CheckoutDisks are the Mounts whose checkouts live on disks of their
 	// own.
 	CheckoutDisks []checkoutDisk `json:"checkout_disks,omitempty"`

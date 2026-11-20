@@ -30,8 +30,9 @@ In order, as PID 1:
    every process it starts begins at 1024 soft under that hard limit, as
    in a Docker container.
 4. Reads its configuration from `/proc/cmdline` (below), mounts the volumes
-   it names and binds what it names from them, then mounts each checkout
-   disk ([Checkouts](#checkouts)).
+   it names and binds what it names from them, binds each agent program's
+   disk over the program in the home ([Agent programs](#agent-programs)),
+   then mounts each checkout disk ([Checkouts](#checkouts)).
 5. Brings up `lo` and the VM's network device, sets the hostname, and writes
    `/etc/hostname`, `/etc/hosts` and, when DNS servers are given,
    `/etc/resolv.conf`.
@@ -241,6 +242,51 @@ mounted. It is package `internal/guest/home`, API
   databases are kept apart.
 - A VM can hold at most 128 requests in flight, each no larger than one
   1 MiB write, and the unit's `MemoryMax` bounds the rest.
+
+## Agent programs
+
+A session VM reads its agent's program from a read-only disk of its own,
+once the server has built one, instead of through the file service. The
+program is the agent's CLI, `~/.local/bin/<cli>` followed through its
+links (for Claude Code, `~/.local/share/claude/versions/<version>`), and,
+when the server drives the agent over ACP, its ACP server; when that file
+is in an npm package in `~/.local/lib/node_modules`, the program is the
+whole package.
+
+- A disk holds one version of one program of one member's home: an ext4
+  image in `<data dir>/vm/images/programs/`, named by a digest of the name,
+  inode, size, mode and times of every file in it. Its files belong to
+  root, are readable by every user and keep no set-ID bits.
+- Each cold boot attaches the disk that matches what the home holds then,
+  and a VM lets go of its disks once it powers off. A program without one
+  loads through the file service, and the server builds its disk in the
+  background from a copy of the program, one build at a time at the lowest
+  CPU priority and in the idle I/O class; it also builds one when the agent
+  updater installs a new version. A program over 2 GiB, 100,000 files or
+  128 directories deep, or one that changes while it is copied, gets no
+  disk.
+- The helper mounts each disk read-only and binds the program over its path
+  in the home, after the home and its overlay, so no agent path changes. It
+  opens that path without following a symlink. A path the home no longer
+  holds, or holds as another type, is left to the file service, and a disk
+  the helper cannot mount is logged on the console, not reported as
+  `boot_error`. Program mounts that do not fit the kernel command line are
+  dropped with a warning.
+- A process keeps reading the program from the disk it started from, even
+  after a sleep, so an update that replaces the program in the home never
+  changes it under a running agent. Once the home's copy changes, the guest
+  drops the program's mount: a process started after that reads the new
+  version through the file service until the next cold boot attaches its
+  disk.
+- While the mount is in place, the program's path is read-only: a write
+  fails with `EROFS` and a rename over it with `EBUSY`, so an agent's own
+  updater, such as `omp update`, cannot replace it in the session; the
+  server's updater does, from outside. Claude Code's disk covers only
+  `versions/<version>`, so `claude update` can still add a version beside it.
+- An Isolated session's disk is built from the member's home, not from its
+  overlay, so it hides a version the session installed in its overlay.
+- A session that borrows the account owner's installation reads it through
+  the file service.
 
 ## Forwarded sockets
 

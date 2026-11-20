@@ -100,17 +100,21 @@ func (s *Store) publishCacheLocked(dir, disk string, seq int64) (Base, error) {
 	if err = os.Rename(disk, filepath.Join(dir, name)); err != nil {
 		return Base{}, fmt.Errorf("vmimage: cache: %w", err)
 	}
-	link := filepath.Join(dir, currentCache)
-	if err = removeIfExists(link + ".tmp"); err != nil {
-		return Base{}, err
-	}
-	if err = os.Symlink(name, link+".tmp"); err != nil {
-		return Base{}, fmt.Errorf("vmimage: cache: %w", err)
-	}
-	if err = os.Rename(link+".tmp", link); err != nil {
+	if err = linkNewest(dir, name); err != nil {
 		return Base{}, fmt.Errorf("vmimage: cache: %w", err)
 	}
 	return Base{ID: "cache:" + strings.TrimSuffix(name, ".raw"), Path: filepath.Join(dir, name)}, nil
+}
+
+func linkNewest(dir, name string) error {
+	link := filepath.Join(dir, currentCache)
+	if err := removeIfExists(link + ".tmp"); err != nil {
+		return err
+	}
+	if err := os.Symlink(name, link+".tmp"); err != nil {
+		return err
+	}
+	return os.Rename(link+".tmp", link)
 }
 
 // SnapshotCache links a stopped VM's cache disk, and a qcow2 one's base,

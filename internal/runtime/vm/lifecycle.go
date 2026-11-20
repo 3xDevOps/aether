@@ -90,7 +90,7 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 		}
 		if !up {
 			e.promoteCache(rec)
-			return nil
+			return errors.Join(e.releasePrograms(rec), e.store(rec))
 		}
 	}
 	_ = e.thaw(key)
@@ -169,12 +169,15 @@ func (e *engine) finish(ctx context.Context, rec *record, code int) error {
 	return nil
 }
 
-// shutDown powers the VM off and, when it went down clean and promote is
-// set, makes its cache its pool's newest.
+// shutDown powers the VM off, lets go of its program disks and, when it
+// went down clean and promote is set, makes its cache its pool's newest.
 func (e *engine) shutDown(ctx context.Context, rec *record, promote bool) error {
 	clean, err := e.powerOff(ctx, rec)
-	if err != nil || !clean {
+	if err != nil {
 		return err
+	}
+	if err = e.releasePrograms(rec); err != nil || !clean {
+		return errors.Join(err, e.store(rec))
 	}
 	rec.CacheSynced = true
 	if err = e.store(rec); err != nil {

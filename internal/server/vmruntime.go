@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/runtime/vm"
 	"github.com/3xDevOps/Aether/internal/vmimage"
@@ -35,6 +36,7 @@ func newVMRuntime(ctx context.Context, dataDir, kernel, browserImage string, mem
 	rt, err := vm.New(vm.Config{
 		Docker: docker, DataDir: dataDir, Images: images,
 		Monitor: []string{exe, vm.MonitorCommand}, Helper: exe, CheckoutDisks: checkouts, BrowserImage: browserImage,
+		ProgramUnit: memberhome.ProgramUnit,
 	})
 	if err != nil {
 		return nil, nil, err

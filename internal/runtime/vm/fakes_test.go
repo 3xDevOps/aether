@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/netip"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -52,7 +54,7 @@ func newHarness(t *testing.T) *harness {
 
 // newEngine is a second engine process over the same data directory.
 func (h *harness) newEngine(dir string) *engine {
-	cfg := Config{DataDir: dir, Images: h.images, Monitor: []string{"/srv/aether-server", MonitorCommand}, Helper: "/srv/aether-server"}
+	cfg := Config{DataDir: dir, Images: h.images, Monitor: []string{"/srv/aether-server", MonitorCommand}, Helper: "/srv/aether-server", ProgramUnit: localBinProgram}
 	e := newEngine(cfg, h.units, func(vsock string) (helper, error) {
 		return h.guest(filepath.Base(filepath.Dir(vsock))), nil
 	})
@@ -79,6 +81,18 @@ func (h *harness) guest(key string) *fakeHelper {
 	return g
 }
 
+// localBinProgram stands in for memberhome.ProgramUnit, which has tests of
+// its own: a program is its plain file in ~/.local/bin.
+func localBinProgram(home, executable string) (string, error) {
+	unit := path.Join(".local/bin", executable)
+	if _, err := os.Stat(filepath.Join(home, unit)); errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	return unit, nil
+}
+
 func sessionSpec(key string) runtime.Spec {
 	return runtime.Spec{
 		Image: "aether/standard:1", Command: []string{"/bin/sh", "-c", "agent"}, TTY: true,
@@ -94,6 +108,7 @@ type fakeImages struct {
 	tags      map[string]vmimage.Base
 	saves     []fakeSave
 	saveErr   error
+	programs  map[string]bool
 }
 
 type fakeSave struct {
@@ -210,6 +225,25 @@ func (f *fakeImages) PromoteCache(pool, snapshot string) error {
 	if promoted != nil {
 		promoted <- pool + " " + filepath.Base(snapshot)
 	}
+	return nil
+}
+
+func (f *fakeImages) ProgramDisk(_, _, unit, path string) (vmimage.Disk, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.programs[unit] {
+		return vmimage.Disk{}, false, nil
+	}
+	return vmimage.Disk{Path: path, Format: vmimage.FormatRaw}, true, os.WriteFile(path, nil, 0o444)
+}
+
+func (f *fakeImages) BuildProgram(_, _, unit string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.programs == nil {
+		f.programs = map[string]bool{}
+	}
+	f.programs[unit] = true
 	return nil
 }
 

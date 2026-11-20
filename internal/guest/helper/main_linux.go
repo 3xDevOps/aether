@@ -204,6 +204,9 @@ func serve() error {
 	cfg, err := guest.ParseCmdline(string(cmdline))
 	record("read the configuration", err)
 	record("mount volumes", mountVolumes(cfg.Mounts))
+	if programsErr := bindPrograms(cfg.Mounts); programsErr != nil {
+		slog.Warn("guest: load the agent programs from their disks; the home serves them", "error", programsErr)
+	}
 	record("mount checkouts", mountCheckouts(cfg.Checkouts))
 	record("configure the network", configureNetwork(cfg))
 	// A session runs without swap, as a container on a host without it,

@@ -1180,6 +1180,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		Command:           argv,
 		TTY:               true,
 		Mounts:            plan.Mounts,
+		Programs:          plan.Programs,
 		ExtraWorktrees:    plan.Worktrees,
 		User:              plan.User,
 		CPULimit:          limits.CPUs,
