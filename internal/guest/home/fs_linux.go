@@ -69,6 +69,9 @@ func Mount(dir string, dial func(context.Context) (net.Conn, error)) error {
 			DirectMount: true, DirectMountStrict: true,
 			Options:  []string{"default_permissions"},
 			MaxWrite: maxIO, MaxBackground: 64, DisableReadDirPlus: true,
+			// Read returns bytes, which go-fuse cannot splice; each try
+			// costs a pipe write.
+			DisableSplice: true,
 			// Requests in flight live in PID 1, outside the session's
 			// memory cap; the kernel queues the rest.
 			MaxInflightRequestBytes: 8 << 20,
