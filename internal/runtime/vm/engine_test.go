@@ -283,6 +283,52 @@ func TestACacheIsPromotedOnlyWhenItsVMStopsForGood(t *testing.T) {
 	if got := promoted(); got != "" {
 		t.Errorf("promoted %q from an unsynced, killed or Isolated cache", got)
 	}
+
+	// A lingering VM, up after Main exited, that starts again stays on its
+	// cache disk until it stops for good.
+	session("run-l", cache)
+	rec, err := h.engine.load("run-l")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Exited = true
+	if err = h.engine.store(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.engine.start(t.Context(), "run-l"); err != nil {
+		t.Fatal(err)
+	}
+	if got := promoted(); got != "" {
+		t.Errorf("a lingering VM that started again promoted %q", got)
+	}
+	if err = h.engine.stop(t.Context(), "run-l", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := promoted(); got != want {
+		t.Errorf("promoted %q when the started VM stopped, want %q", got, want)
+	}
+
+	h.createWithCheckoutDisk("run-x", cache)
+	if err = h.engine.stop(t.Context(), "run-x", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.engine.destroy(t.Context(), "run-x"); err != nil {
+		t.Fatal(err)
+	}
+	if got := promoted(); got != want {
+		t.Errorf("promoted %q when a lingering VM was deleted, want %q", got, want)
+	}
+	h.createWithCheckoutDisk("run-y", cache)
+	if err = h.engine.stop(t.Context(), "run-y", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	h.guest("run-y").unresponsive = true
+	if err = h.engine.destroy(t.Context(), "run-y"); err != nil {
+		t.Fatal(err)
+	}
+	if got := promoted(); got != "" {
+		t.Errorf("promoted %q when a lingering VM that no longer answered was deleted", got)
+	}
 }
 
 // An account move destroys a session's VM and makes another under the same
@@ -722,9 +768,11 @@ func TestMemoryUseIsWhatTheUnitHolds(t *testing.T) {
 
 // createWithCheckoutDisk starts session VM key with its checkout on a disk
 // of its own.
-func (h *harness) createWithCheckoutDisk(key string) *record {
+func (h *harness) createWithCheckoutDisk(key string, mounts ...runtime.Mount) *record {
 	h.t.Helper()
-	h.createStarted(key, sessionSpec(key))
+	spec := sessionSpec(key)
+	spec.Mounts = mounts
+	h.createStarted(key, spec)
 	unlock := h.engine.lock(key)
 	defer unlock()
 	rec, err := h.engine.load(key)

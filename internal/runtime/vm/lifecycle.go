@@ -117,7 +117,7 @@ func (e *engine) stop(ctx context.Context, key string, grace time.Duration) erro
 		return err
 	}
 	// A guest that never confirmed Main's end serves no git work either.
-	return e.shutDown(ctx, rec)
+	return e.shutDown(ctx, rec, true)
 }
 
 // endMain ends Main and reports its exit code, and whether the helper
@@ -163,15 +163,15 @@ func (e *engine) finish(ctx context.Context, rec *record, code int) error {
 		return err
 	}
 	if len(rec.CheckoutDisks) == 0 {
-		return e.shutDown(ctx, rec)
+		return e.shutDown(ctx, rec, true)
 	}
 	e.endLinger(rec.Key, rec.Boots, lingerTimeout)
 	return nil
 }
 
-// shutDown powers the VM off and, when it went down clean, makes its cache
-// its pool's newest.
-func (e *engine) shutDown(ctx context.Context, rec *record) error {
+// shutDown powers the VM off and, when it went down clean and promote is
+// set, makes its cache its pool's newest.
+func (e *engine) shutDown(ctx context.Context, rec *record, promote bool) error {
 	clean, err := e.powerOff(ctx, rec)
 	if err != nil || !clean {
 		return err
@@ -180,7 +180,9 @@ func (e *engine) shutDown(ctx context.Context, rec *record) error {
 	if err = e.store(rec); err != nil {
 		return err
 	}
-	e.promoteCache(rec)
+	if promote {
+		e.promoteCache(rec)
+	}
 	return nil
 }
 
@@ -193,7 +195,7 @@ func (e *engine) endLinger(key string, boot int, d time.Duration) {
 		if err != nil || !rec.Exited || rec.Boots != boot {
 			return
 		}
-		if err = e.shutDown(context.Background(), rec); err != nil {
+		if err = e.shutDown(context.Background(), rec, true); err != nil {
 			slog.Warn("vm runtime: power off a VM whose session ended", "vm", key, "error", err)
 		}
 	})
@@ -412,6 +414,14 @@ func (e *engine) destroy(ctx context.Context, key string) error {
 	}
 	rec, loadErr := e.load(key)
 	_ = e.thaw(key)
+	// A lingering VM stops for good here: if it powers off clean, its cache
+	// is promoted below as a stopped VM's is.
+	if up && loadErr == nil && rec.Exited {
+		if err = e.shutDown(ctx, rec, false); err != nil {
+			return err
+		}
+		up = false
+	}
 	// The session's database disk outlives this VM, as when an account move
 	// replaces it: the guest's unwritten data goes to it first. A paused VM
 	// cannot sync, and is destroyed only with its session, and the disk; a

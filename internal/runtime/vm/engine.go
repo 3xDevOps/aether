@@ -373,7 +373,9 @@ func (e *engine) startLocked(ctx context.Context, key string) (err error) {
 		return err
 	}
 	if st.Active && rec.Exited {
-		if err = e.shutDown(ctx, rec); err != nil {
+		// A lingering VM powers off only to boot again on the same cache
+		// disk, which becomes its pool's newest when the VM stops for good.
+		if err = e.shutDown(ctx, rec, false); err != nil {
 			return err
 		}
 	} else if st.Active {
