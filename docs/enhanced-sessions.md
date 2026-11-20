@@ -113,6 +113,9 @@ An Enhanced session opens on **Chat**: one timeline, newest at the bottom.
   1 command and edited 1 file"). Click it for one step per call, and click a
   call for its command, output, diff, or input and result. Files the agent
   read are chips that open in **Files**.
+- Claude Code can replace what the agent writes between tool calls with
+  Claude's short summary of it. The summary shows as the agent's message, not
+  as a thought. Claude Code's thoughts appear once each one is complete.
 - While the agent works, the newest header stays open and says what it is
   doing, with the seconds since it began. While it waits on you it reads
   "Waiting for your approval: <command>" or "Waiting for your answer". Once

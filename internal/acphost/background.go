@@ -31,15 +31,17 @@ var followUpGrace = 2 * time.Second
 // have not arrived yet.
 const endedTaskMemory = 32
 
-// claudeTaskFrames are the raw Claude Code SDK messages Claude's adapter
+// claudeFrames are the raw Claude Code SDK messages Claude's adapter
 // forwards as _claude/sdkMessage when session meta lists them in
 // claudeCode.emitRawSDKMessages. task_progress changes no state; it arrives
 // on every tool use of a task, which keeps a long task's run active.
-var claudeTaskFrames = []map[string]string{
+// assistant messages say which thinking blocks are narration (claudeFrame).
+var claudeFrames = []map[string]string{
 	{"type": "system", "subtype": "task_notification"},
 	{"type": "system", "subtype": "task_updated"},
 	{"type": "system", "subtype": "background_tasks_changed"},
 	{"type": "system", "subtype": "task_progress"},
+	{"type": "assistant"},
 }
 
 // Task is one live Claude Code background task.
@@ -123,11 +125,18 @@ func (h updateHead) progress() bool {
 
 func (s *Session) sdkMessage(raw json.RawMessage) {
 	var m sdkMessage
-	if json.Unmarshal(raw, &m) != nil || m.Type != "system" {
+	if json.Unmarshal(raw, &m) != nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if m.Type == "assistant" {
+		s.proj.claudeFrame(raw)
+		return
+	}
+	if m.Type != "system" {
+		return
+	}
 	if strings.HasPrefix(m.Subtype, "task_") {
 		// A background task reports its tool use, not the work between.
 		s.progressAt = time.Now()

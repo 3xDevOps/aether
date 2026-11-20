@@ -285,6 +285,15 @@ func (a *Agent) update(ctx context.Context, u json.RawMessage) {
 	session := a.session
 	a.mu.Unlock()
 	_ = a.conn.SendNotification(ctx, acp.ClientMethodSessionUpdate, map[string]any{"sessionId": session, "update": u})
+	var c struct {
+		Kind    string `json:"sessionUpdate"`
+		Content struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(u, &c) == nil && c.Kind == "agent_thought_chunk" {
+		a.sdk(ctx, map[string]any{"type": "assistant", "message": map[string]any{"content": []any{map[string]any{"type": "thinking", "thinking": c.Content.Text}}}})
+	}
 }
 
 func (a *Agent) text(ctx context.Context, s string) {

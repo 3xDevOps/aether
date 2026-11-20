@@ -47,6 +47,8 @@ type projector struct {
 	labels map[string]subagentLabels
 	usage  Usage
 	title  string
+	// claude takes thinking text from claudeFrame, not thought chunks.
+	claude bool
 }
 
 type subagentLabels struct{ title, description, prompt, status string }
@@ -114,6 +116,9 @@ func (p *projector) project(kind, parent string, raw json.RawMessage) bool {
 		if kind == "agent_thought_chunk" {
 			k = KindThought
 			p.activity("think", "")
+			if p.claude {
+				return true
+			}
 		}
 		claude, _ := claudeMeta(u.Meta)
 		p.chunk(k, "assistant", deref(u.MessageId), cmp.Or(parent, claude), u.Content)
@@ -313,6 +318,41 @@ func launchedTask(meta map[string]any) string {
 func (p *projector) setTask(id string, task *ToolTask) {
 	if st, ok := p.tools[id]; ok {
 		st.call.Task = task
+	}
+}
+
+// claudeFrame projects the thinking blocks of an assistant message from
+// Claude Code, which arrives once its block ends. Claude's adapter streams
+// every thinking block as a thought, but the blocks narration_block_indexes
+// lists are Claude's summary of what the agent wrote between tool calls, so
+// they are its messages.
+func (p *projector) claudeFrame(raw json.RawMessage) {
+	var f struct {
+		Parent    string `json:"parent_tool_use_id"`
+		Narration []int  `json:"narration_block_indexes"`
+		Message   struct {
+			ID      string `json:"id"`
+			Content []struct {
+				Type     string `json:"type"`
+				Thinking string `json:"thinking"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(raw, &f) != nil {
+		return
+	}
+	if len(f.Parent) > maxLinkBytes {
+		f.Parent = ""
+	}
+	for i, b := range f.Message.Content {
+		if b.Type != "thinking" || b.Thinking == "" {
+			continue
+		}
+		k := KindThought
+		if slices.Contains(f.Narration, i) {
+			k = KindMessage
+		}
+		p.chunk(k, "assistant", f.Message.ID, f.Parent, acp.TextBlock(b.Thinking))
 	}
 }
 

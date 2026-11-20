@@ -888,7 +888,7 @@ func TestRestoreStopsATaskWhoseCallIDALaterTurnReused(t *testing.T) {
 
 func TestSessionMetaCarriesTheSystemPromptAndTaskFrames(t *testing.T) {
 	failed := &acp.RequestError{Code: -32603, Message: "Internal error"}
-	frames, err := json.Marshal(claudeTaskFrames)
+	frames, err := json.Marshal(claudeFrames)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -283,6 +283,7 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 	s.turnEnded = sync.NewCond(&s.mu)
 	s.ctx, s.stop = context.WithCancel(context.Background())
 	s.proj = newProjector(s.projectLocked, s.armFlush, s.activityLocked)
+	s.proj.claude = cfg.ClaudeCode
 	go s.notify.run()
 
 	last, _, openTurn := log.state()
@@ -346,7 +347,7 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 	if cfg.ClaudeCode {
 		// Claude's adapter forwards a subagent's text and thinking only when
 		// asked; they arrive stamped with the subagent's parent link.
-		s.conn.sessionMeta["claudeCode"] = map[string]any{"emitRawSDKMessages": claudeTaskFrames, "options": map[string]any{"forwardSubagentText": true}}
+		s.conn.sessionMeta["claudeCode"] = map[string]any{"emitRawSDKMessages": claudeFrames, "options": map[string]any{"forwardSubagentText": true}}
 	}
 	open := s.open
 	if adopt != nil {
