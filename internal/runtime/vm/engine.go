@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -42,6 +43,8 @@ type Images interface {
 	SnapshotCache(disk vmimage.Disk) (string, error)
 	UnshareCache(ctx context.Context, disk vmimage.Disk) error
 	PromoteCache(pool, snapshot string) error
+	ProgramDisk(home, executable, unit, path string) (vmimage.Disk, bool, error)
+	BuildProgram(home, executable, unit string) error
 	Sweep() error
 }
 
@@ -101,6 +104,7 @@ type engine struct {
 	listenDNS func() (*dnsRelay, error)
 
 	promotions sync.WaitGroup
+	builds     sync.WaitGroup
 }
 
 func newEngine(cfg Config, u units, dial func(string) (helper, error)) *engine {
@@ -284,7 +288,7 @@ func (e *engine) create(ctx context.Context, key string, spec runtime.Spec, opts
 		Env:        overrideEnv(base.Config.Env, runtime.EnvList(runtime.TrustCheckouts(spec.Env, spec.WorktreeMountPath, spec.ExtraWorktrees))),
 		WorkingDir: cmp.Or(spec.WorkingDir, base.Config.WorkingDir, "/"), Command: spec.Command, TTY: spec.TTY,
 		SetupScript: spec.SetupScript, SecretEnv: spec.SecretEnv, NestedDocker: spec.NestedDocker, Sudo: spec.Sudo,
-		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: shared, CheckoutDisks: disks, Mounts: spec.Mounts, Net: index, Egress: spec.Egress,
+		CPUs: cpus, CPULimit: limit, MemoryMiB: memMiB, PidsLimit: spec.PidsLimit, Checkouts: shared, CheckoutDisks: disks, Mounts: spec.Mounts, Programs: spec.Programs, Net: index, Egress: spec.Egress,
 		NoSwap: opts.NoSwap, Lifetime: opts.Lifetime, OwnedDirs: opts.OwnedDirs, Serves: opts.Serves,
 	}
 	if opts.Browser {
@@ -407,6 +411,9 @@ func (e *engine) startLocked(ctx context.Context, key string) (err error) {
 			return err
 		}
 	}
+	if err = e.attachPrograms(rec); err != nil {
+		return err
+	}
 	l, err := e.bootLaunch(ctx, rec)
 	if err != nil {
 		return err
@@ -475,12 +482,12 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	if rec.Browser.Path != "" {
 		disks = append(disks, attached{rec.Browser, "browser", true})
 	}
-	diskArgs, err := diskArgs(disks)
-	if err != nil {
-		return launch{}, err
+	programs := make([]guest.Mount, len(rec.ProgramDisks))
+	for i, d := range rec.ProgramDisks {
+		programs[i] = guest.Mount{Volume: guest.VolumeProgram, Source: strconv.Itoa(i), Target: d.Target, ReadOnly: true}
 	}
 	cfg := guest.Config{
-		Hostname: rec.Key, Mounts: p.mounts, Checkouts: checkouts, Sockets: p.sockets, Serves: rec.Serves, Loopbacks: p.loopbacks,
+		Hostname: rec.Key, Mounts: slices.Concat(p.mounts, programs), Checkouts: checkouts, Sockets: p.sockets, Serves: rec.Serves, Loopbacks: p.loopbacks,
 		MemoryLimit: uint64(rec.MemoryMiB) << 20,
 	}
 	if !rec.NoSwap {
@@ -498,6 +505,14 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 		}
 	}
 	cmdline, err := cfg.KernelArgs(cmdlineBase)
+	if errors.Is(err, guest.ErrCmdlineTooLong) && len(programs) > 0 {
+		slog.Warn("vm runtime: boot without the agent programs' disks, whose mounts do not fit the kernel command line", "vm", rec.Key)
+		if err = e.releasePrograms(rec); err != nil {
+			return launch{}, err
+		}
+		cfg.Mounts = p.mounts
+		cmdline, err = cfg.KernelArgs(cmdlineBase)
+	}
 	if errors.Is(err, guest.ErrCmdlineTooLong) && cfg.Network != nil && len(cfg.Network.Search) > 0 {
 		slog.Warn("vm runtime: boot without the host's search domains, which do not fit the kernel command line", "vm", rec.Key, "search", cfg.Network.Search)
 		cfg.Network.Search = nil
@@ -505,6 +520,13 @@ func (e *engine) bootLaunch(ctx context.Context, rec *record) (launch, error) {
 	}
 	if err != nil {
 		return launch{}, fmt.Errorf("vm runtime: kernel command line: %w", err)
+	}
+	for i, d := range rec.ProgramDisks {
+		disks = append(disks, attached{d.Disk, programSerial(i), true})
+	}
+	diskArgs, err := diskArgs(disks)
+	if err != nil {
+		return launch{}, err
 	}
 	args := []string{
 		"--api-socket", "path=" + e.path(rec.Key, apiSocket),

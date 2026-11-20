@@ -6,7 +6,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -16,6 +18,9 @@ import (
 // vmSessionRuntime runs each session in its own VM (runtime/vm), whose file
 // service serves every host file it mounts as the session user's.
 type vmSessionRuntime interface{ SessionVMs() }
+
+// programBuilder builds the disks session VMs load agent programs from.
+type programBuilder interface{ BuildPrograms([]runtime.Program) }
 
 func (s *Scheduler) sessionVMs() bool {
 	_, ok := s.cfg.Runtime.(vmSessionRuntime)
@@ -70,4 +75,26 @@ func (s *Scheduler) vmStateMounts(run domain.RunID, member domain.MemberID, prof
 		}
 	}
 	return mounts, nil
+}
+
+// vmPrograms are the programs a session VM may load from disks of their
+// own: the agent's CLI and, when the server drives the agent over ACP, its
+// ACP server. Only the member's own ~/.local/bin is looked in, so a session
+// that borrows the account owner's installation reads it through the file
+// service.
+func vmPrograms(homePath, home string, profile harness.Profile, acp bool) []runtime.Program {
+	var names []string
+	if len(profile.TUIArgs) > 0 {
+		names = append(names, profile.TUIArgs[0])
+	}
+	if acp && len(profile.ACPArgs) > 0 && !slices.Contains(names, profile.ACPArgs[0]) {
+		names = append(names, profile.ACPArgs[0])
+	}
+	var programs []runtime.Program
+	for _, name := range names {
+		if !strings.Contains(name, "/") {
+			programs = append(programs, runtime.Program{Home: homePath, Target: home, Executable: name})
+		}
+	}
+	return programs
 }

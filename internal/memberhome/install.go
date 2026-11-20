@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -96,6 +97,50 @@ func (m *Manager) executableInstalled(member domain.MemberID, executable string)
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
+	_, hops, err := resolveExecutable(root, executable)
+	if err != nil {
+		return nil, fmt.Errorf("memberhome: find %s in %q: %w", executable, member, err)
+	}
+	return hops, nil
+}
+
+// ProgramUnit is what a session VM can load ~/.local/bin/<executable> of the
+// home at home from: the home-relative file it resolves to, or the npm
+// package in ~/.local/lib/node_modules holding that file. It is "" when the
+// home has no such executable or the file is outside ~/.local.
+func ProgramUnit(home, executable string) (string, error) {
+	root, err := os.OpenRoot(home)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("memberhome: find %s in %s: %w", executable, home, err)
+	}
+	defer func() { _ = root.Close() }()
+	file, _, err := resolveExecutable(root, executable)
+	if err != nil {
+		return "", fmt.Errorf("memberhome: find %s in %s: %w", executable, home, err)
+	}
+	if rest, ok := strings.CutPrefix(file, ".local/lib/node_modules/"); ok {
+		name := strings.SplitN(rest, "/", 3)
+		if strings.HasPrefix(name[0], "@") && len(name) > 2 {
+			return ".local/lib/node_modules/" + name[0] + "/" + name[1], nil
+		}
+		if len(name) > 1 {
+			return ".local/lib/node_modules/" + name[0], nil
+		}
+	}
+	if !strings.HasPrefix(file, ".local/") {
+		return "", nil
+	}
+	return file, nil
+}
+
+// resolveExecutable resolves ~/.local/bin/<executable> in root to an
+// executable regular file, its home-relative path, and the symlinks met on
+// the way, an empty but non-nil list for a plain file. Both are empty when
+// there is no such installation.
+func resolveExecutable(root *os.Root, executable string) (string, []hop, error) {
 	hops := []hop{}
 
 	// Vendor installers use absolute container-home symlinks. Resolve each
@@ -112,7 +157,7 @@ func (m *Manager) executableInstalled(member domain.MemberID, executable string)
 			continue
 		case "..":
 			if len(resolved) == 0 {
-				return nil, nil
+				return "", nil, nil
 			}
 			resolved = resolved[:len(resolved)-1]
 			continue
@@ -120,19 +165,19 @@ func (m *Manager) executableInstalled(member domain.MemberID, executable string)
 		candidate := filepath.Join(append(resolved, part)...)
 		info, err := root.Lstat(candidate)
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
+			return "", nil, nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("memberhome: find %s in %q: %w", executable, member, err)
+			return "", nil, err
 		}
 		if info.Mode()&fs.ModeSymlink != 0 {
 			links++
 			if links > 40 {
-				return nil, nil
+				return "", nil, nil
 			}
 			target, err := root.Readlink(candidate)
 			if err != nil {
-				return nil, fmt.Errorf("memberhome: find %s in %q: %w", executable, member, err)
+				return "", nil, err
 			}
 			if path.IsAbs(target) {
 				hops = append(hops, hop{target: harness.HomeRelative(target), absolute: true})
@@ -148,7 +193,7 @@ func (m *Manager) executableInstalled(member domain.MemberID, executable string)
 				case strings.HasPrefix(target, harness.HomeDir("1000")+"/"):
 					target = strings.TrimPrefix(target, harness.HomeDir("1000")+"/")
 				default:
-					return nil, nil
+					return "", nil, nil
 				}
 				resolved = nil
 			}
@@ -157,14 +202,14 @@ func (m *Manager) executableInstalled(member domain.MemberID, executable string)
 		}
 		if len(pending) == 0 {
 			if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-				return nil, nil
+				return "", nil, nil
 			}
-			return hops, nil
+			return filepath.ToSlash(candidate), hops, nil
 		}
 		if !info.IsDir() {
-			return nil, nil
+			return "", nil, nil
 		}
 		resolved = append(resolved, part)
 	}
-	return nil, nil
+	return "", nil, nil
 }

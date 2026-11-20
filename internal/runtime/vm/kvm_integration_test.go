@@ -49,7 +49,7 @@ func kvmEngine(t *testing.T) *engine {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newEngine(Config{DataDir: dir, Images: images, Monitor: []string{server, MonitorCommand}, Helper: server}, SystemdUnits{}, dialHelper)
+	return newEngine(Config{DataDir: dir, Images: images, Monitor: []string{server, MonitorCommand}, Helper: server, ProgramUnit: localBinProgram}, SystemdUnits{}, dialHelper)
 }
 
 func vmRun(t *testing.T, e *engine, key, script string) (string, int) {

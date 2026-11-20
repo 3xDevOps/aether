@@ -68,8 +68,9 @@ func revealPaths(dir, kernel string, rec *record, p plan) map[string]bool {
 }
 
 // backingPins are the read-only files in a VM's directory and its checkouts'
-// directories that are hard links to the image store - the helper disk and
-// every base a qcow2 disk is built over - which a disk shares its bytes with.
+// directories that are hard links to the image store - the helper disk, the
+// agent programs' disks and every base a qcow2 disk is built over - which
+// other VMs share.
 func backingPins(dir string, rec *record) []string {
 	pins := []string{filepath.Join(dir, helperImage)}
 	roots := []string{dir}
@@ -82,7 +83,7 @@ func backingPins(dir string, rec *record) []string {
 			continue
 		}
 		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".base") {
+			if strings.HasSuffix(e.Name(), ".base") || root == dir && strings.HasPrefix(e.Name(), "program-") {
 				pins = append(pins, filepath.Join(root, e.Name()))
 			}
 		}

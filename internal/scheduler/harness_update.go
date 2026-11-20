@@ -193,6 +193,9 @@ func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessU
 	if err != nil || after != before {
 		s.expireAgentModels(domain.MemberID(filepath.Base(spec.Mounts[0].HostPath)), profile.Name)
 	}
+	if builder, ok := s.cfg.Runtime.(programBuilder); ok && err == nil && after != before {
+		builder.BuildPrograms(vmPrograms(spec.Mounts[0].HostPath, spec.WorkingDir, profile, true))
+	}
 	s.mu.Lock()
 	state.next = s.cfg.Now().Add(next)
 	state.running = nil

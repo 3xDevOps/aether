@@ -530,6 +530,10 @@ background. A new version shows on the timeline of the session that started it:
 updated <agent> from <old> to <new> for the next launch
 ```
 
+In session VMs the server then builds the new version's program disk, so
+the next launch loads it from that disk
+([vm-guest.md](vm-guest.md#agent-programs)).
+
 A failed update never stops a launch. The timeline shows the real cause:
 
 ```text
@@ -638,6 +642,13 @@ file service. SQLite databases in WAL mode work only among processes of one
 kernel, so a database two VMs open at once can be corrupted. In Docker
 sessions nothing below applies: every container of a member shares the home's
 databases as before.
+
+The agent's program loads from a read-only disk of the VM's once the
+server has built one for the installed version, so an update never
+replaces the program under a running agent, even across a sleep
+([vm-guest.md](vm-guest.md#agent-programs)). Inside a session the
+program's path is read-only, so the agent's own updater cannot replace it
+there; the server's updates do.
 
 Agents whose shared databases can move get a copy of their own in each
 session, mounted over the one in the home. The copy is on a 1 GiB disk of the

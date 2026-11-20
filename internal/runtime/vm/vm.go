@@ -60,6 +60,10 @@ type Config struct {
 	// CheckoutDisks, when set, puts the session checkouts it knows on disks
 	// of their own instead of sharing them from the server.
 	CheckoutDisks CheckoutDisks
+	// ProgramUnit, when set, finds the file or directory in home that
+	// ~/.local/bin/<executable> runs from, which a session VM may load from a
+	// disk of its own (memberhome.ProgramUnit).
+	ProgramUnit func(home, executable string) (string, error)
 }
 
 // New returns a Runtime that keeps its VMs under DataDir/vm, and starts

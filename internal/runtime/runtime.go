@@ -177,6 +177,14 @@ const (
 	MountSeed MountKind = "seed"
 )
 
+// Program is ~/.local/bin/<Executable> in the home at Home on the host,
+// which the session sees at Target.
+type Program struct {
+	Home       string
+	Target     string
+	Executable string
+}
+
 // ContainerInfo is immutable metadata captured from a live or stopped
 // container. Env contains the container's configured environment in
 // KEY=value form; it is intentionally metadata-only and does not execute
@@ -263,6 +271,10 @@ type Spec struct {
 	// profiles, coordination assets), applied after the worktree mount.
 	// Callers must pass them through ValidateMounts first.
 	Mounts []Mount
+	// Programs are the agent programs the session starts from the member's
+	// home. A session VM reads each from a read-only disk once one is built
+	// for the version the home holds; Docker ignores them.
+	Programs []Program
 	// User is the numeric "uid:gid" the main process (and setup script)
 	// runs as; empty means the image default.
 	User string

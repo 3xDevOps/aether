@@ -392,6 +392,12 @@ What changes:
   and so are a member's newest caches once no VM has used them for 7 days;
   the next session then starts empty. An Isolated session's caches never go
   back.
+- The agent's program loads from a read-only disk the server builds for
+  each version the home holds ([vm-guest.md](vm-guest.md#agent-programs)).
+  omp (296 MB), Claude Code (377 MB) and its ACP adapter (299 MB) take
+  about 1 GB per member. A version's disk is deleted once a newer one
+  exists and no VM uses it, and the newest once no VM has used it for 7
+  days.
 - No ownership pass runs over the home: every file in it shows as the
   session user's.
 - Agents' SQLite databases cannot be shared between VMs, so each session gets

@@ -65,7 +65,15 @@ const (
 	// the session keeps across its VMs. Like VolumeData, a missing Source
 	// directory is created with the mode and owner of its Target.
 	VolumeState Volume = "state"
+	// VolumeProgram is the read-only block device whose virtio serial is
+	// "program-<Source>", an agent program's disk, which holds the program
+	// as ProgramEntry. The helper binds it over the one at Target, and
+	// leaves a Target that is missing, or of another type, to the home.
+	VolumeProgram Volume = "program"
 )
+
+// ProgramEntry names the program on its disk.
+const ProgramEntry = "program"
 
 // Config is what the helper needs before it can serve: everything on it is
 // readable by any process in the VM through /proc/cmdline, so it must not
@@ -376,9 +384,9 @@ func (c Config) Validate() error {
 	for i, m := range c.Mounts {
 		switch m.Volume {
 		case VolumeShare, VolumeData, VolumeState:
-		case VolumeHome:
+		case VolumeHome, VolumeProgram:
 			if n, err := strconv.Atoi(m.Source); err != nil || n < 0 || strconv.Itoa(n) != m.Source {
-				errs = append(errs, fmt.Errorf("mount %d: home source %q must be an entry index", i, m.Source))
+				errs = append(errs, fmt.Errorf("mount %d: %s source %q must be an index", i, m.Volume, m.Source))
 			}
 		case VolumeCache, VolumeHelper:
 			if m.Source != "." {
