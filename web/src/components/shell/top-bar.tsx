@@ -65,14 +65,10 @@ export function TopBar({ navigation = true }: { navigation?: boolean }) {
             desktop?.platform === 'darwin' && 'pl-20',
           )}
         >
-          {compact ? (
-            <img src="/cloudfield-favicon.svg" alt="Cloudfield" width={TILE_WIDTH} height={TILE_WIDTH} className="shrink-0" />
-          ) : (
-            <div className="flex shrink-0 items-center">
-              <img src="/cloudfield-logo-small.svg" alt="Cloudfield" width={LOGO_WIDTH} height={32} className="hidden dark:block" />
-              <img src="/cloudfield-logo-small-for-light-backgrounds.svg" alt="Cloudfield" width={LOGO_WIDTH} height={32} className="dark:hidden" />
-            </div>
-          )}
+          <div className="flex shrink-0 items-center">
+            <img src={compact ? '/cloudfield-favicon.svg' : '/cloudfield-logo-small.svg'} alt="Cloudfield" width={compact ? TILE_WIDTH : LOGO_WIDTH} height={32} className="hidden dark:block" />
+            <img src={compact ? '/cloudfield-favicon-white-tile.svg' : '/cloudfield-logo-small-for-light-backgrounds.svg'} alt="Cloudfield" width={compact ? TILE_WIDTH : LOGO_WIDTH} height={32} className="dark:hidden" />
+          </div>
           {navigation && <HeaderNavigation compact={compact} onCompact={setCompact} />}
           {navigation && collapsed && <AssistantButton />}
           <WindowControls />

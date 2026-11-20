@@ -97,14 +97,14 @@ function buildLockup(source: string): { svg: SVGSVGElement; dot: SVGCircleElemen
   const paths = [...svg.querySelectorAll('path')]
   const word = paths.find((path) => path.getAttribute('d')!.split('M').length > 2)!
   const dashes = paths.filter((path) => path !== word)
-  const radius = (path: SVGPathElement) => Number(/A([\d.]+)/.exec(path.getAttribute('d')!)![1])
-  const outer = Math.max(...dashes.map(radius))
-  const arrived = [0, 0]
-  for (const dash of dashes) {
-    const ring = radius(dash) < outer ? 1 : 0
+  // The source draws nine outer segments, then seven inner ones. Hollow
+  // segments trace both edges, so their arc radius cannot identify the ring.
+  const outerCount = 9
+  for (const [index, dash] of dashes.entries()) {
+    const delay = index < outerCount ? T.ring + index * T.ringStep : T.inner + (index - outerCount) * T.ringStep
     dash.classList.add('launch-splash__dash')
     dash.setAttribute('pathLength', '1')
-    dash.style.animationDelay = `${(ring ? T.inner : T.ring) + arrived[ring]++ * T.ringStep}ms`
+    dash.style.animationDelay = `${delay}ms`
   }
 
   const [dot, ...letterDots] = [...svg.querySelectorAll('circle')]

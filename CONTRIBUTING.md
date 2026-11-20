@@ -390,8 +390,8 @@ graphic still shows the Aether mark and name: `python3 scripts/make-icons.py`
 The dashboard's icons, favicons and logo are the Cloudfield logo set's files,
 copied unchanged from `public/cloudfield/` of `3xDevOps/aether-web`:
 `web/public/cloudfield-mark.svg`, `cloudfield-logo-small.svg`,
-`cloudfield-logo-small-for-light-backgrounds.svg` and `cloudfield-favicon.svg`
-from the folder itself, and
+`cloudfield-logo-small-for-light-backgrounds.svg`, `cloudfield-favicon.svg`
+and `cloudfield-favicon-white-tile.svg` from the folder itself, and
 `web/public/icons/` from its `png/` folder (`icon-192.png`, `icon-512.png`,
 `maskable-*.png` as `icon-maskable-*.png`, `apple-icon-180.png` as
 `apple-touch-icon.png`, and `favicon-16.png`, `favicon-32.png`,
@@ -400,7 +400,8 @@ The Edge's pages embed their own copies of `cloudfield-logo-small.svg`,
 `cloudfield-favicon.svg`, `icons/favicon-32.png` and
 `icons/apple-touch-icon.png` in `internal/edge/service/templates/images/`;
 copy those again too. `TestAssetCopiesMatchTheirSources` fails until they
-match.
+match. The connector consent page embeds `internal/connector/cloudfield-logo-small.svg`;
+copy the dashboard's dark-theme logo there for `TestConsentLogoIsTheDashboardsFile`.
 
 The Android app's launcher and notification icons are VectorDrawables in
 `android/app/src/main/res/drawable/`, generated from the Cloudfield logo set in

@@ -5,4 +5,4 @@ export const themeColor = {
 } as const
 
 /** The Cloudfield icons' tile colour, so an installed app's splash does not show the tile as a square. */
-export const iconBackground = '#070b11'
+export const iconBackground = '#000000'

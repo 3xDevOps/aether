@@ -8,7 +8,7 @@ Converts cloudfield-android-foreground.svg and cloudfield-android-monochrome.svg
 to VectorDrawables in android/app/src/main/res/drawable/. Path data is copied
 verbatim, a nested <svg> becomes a <group> with the same translate and scale,
 and a circle becomes the two-arc path through the same points. The
-notification icon is the monochrome file's inner 32 x 32 drawing at 24 dp,
+notification icon is the monochrome file's inner drawing at 24 dp,
 moved by a translate only so that the bounding box of its stroked shapes is
 centred in the box. The drawing's rings are open on the right, so that box is
 not centred on the rings.
@@ -27,7 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DRAWABLE = ROOT / "android" / "app" / "src" / "main" / "res" / "drawable"
 SVG = "{http://www.w3.org/2000/svg}"
-PATH_ATTRS = {"d", "fill", "stroke", "stroke-width"}
+PATH_ATTRS = {"d", "fill", "stroke", "stroke-width", "stroke-linejoin"}
 CIRCLE_ATTRS = {"cx", "cy", "r", "fill"}
 NESTED_ATTRS = {"x", "y", "width", "height", "viewBox"}
 
@@ -64,6 +64,8 @@ def shape(element: ET.Element, indent: str) -> list:
         if stroke:
             lines.append(f'{indent}    android:strokeColor="{stroke}"')
             lines.append(f'{indent}    android:strokeWidth="{element.get("stroke-width", "1")}"')
+            if join := element.get("stroke-linejoin"):
+                lines.append(f'{indent}    android:strokeLineJoin="{join}"')
         lines.append(f'{indent}    android:pathData="{element.get("d")}" />')
         return lines
     if tag == "circle":

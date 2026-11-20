@@ -3,9 +3,9 @@
 ## Workbench language
 
 The dashboard is a dense developer workbench on neutral surfaces. The dark
-theme, the default, follows the Cloudfield website: blue-black surfaces at
-the logo blue's hue, Cream `#f7f0e4` text, the logo's teal `#54e0d0` as the
-accent, and one warm colour, gold `#f5c542`, for the primary button and for
+theme, the default, follows the Cloudfield website: blue-black surfaces,
+Cream `#f7f0e4` text, teal `#54e0d0` as the accent, and one warm colour,
+gold `#f5c542`, for the primary button and for
 what needs a person. The light theme is white and grey with a teal accent.
 Adjoining panes are flat and quiet. Elevation is restrained: cards and
 secondary buttons carry a light shadow, floating surfaces a deeper one, panes
@@ -55,13 +55,12 @@ appears; xterm keeps its own full-font family and cell metrics.
 The header shows the Cloudfield logo at 32px tall:
 `web/public/cloudfield-logo-small.svg` in the dark theme and
 `cloudfield-logo-small-for-light-backgrounds.svg` in the light one. Both draw
-the c as two flat colours alternating dash by dash, teal `#54e0d0` and blue
-`#4a8dff` on dark and each darkened on light, and every letter stroke as two
-thin parallel lines.
+the c with nine outer and seven inner segments, alternating solid and hollow.
+The c, centre dot and split-line letters are white on dark and black on light.
 Where the navigation's destinations do not all fit beside the 162px logo, the
-32px `cloudfield-favicon.svg` tile replaces it, and the navigation still counts
-90px, the old brand's width, when it decides what fits, so it collapses at the
-same widths as before and the spare space falls at the row's empty right end.
+32px favicon tile replaces it: white on black in the dark theme, black on
+white in the light theme. The navigation counts 90px, the old brand's width,
+so it collapses at the same widths as before.
 The launch splash draws `cloudfield-logo-small.svg` itself, at
 `clamp(260px, 38vw, 520px)` wide; see
 [Session state and motion](#session-state-and-motion).
@@ -778,8 +777,8 @@ the splash's first paint:
 | 820ms | The field wakes outward from the c's centre over 620ms |
 
 The field is the website's slope field: one stroke per 12px lattice point,
-turned along four drifting vortices and coloured in the logo's teal and blue
-family, the website's field run: `#8fbaff` at the top left through `#266ce1`,
+turned along four drifting vortices and coloured in the website's teal and
+blue field palette: `#8fbaff` at the top left through `#266ce1`,
 `#4a8dff`, `#4bb9ea` and `#54e0d0` to `#aaf5ea` at the bottom right, the run
 stretched about its middle so the pale ends reach the corners. On a window
 large enough for more than 15,000 strokes the lattice widens to stay under

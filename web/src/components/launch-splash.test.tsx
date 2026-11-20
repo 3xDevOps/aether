@@ -140,22 +140,25 @@ describe('LaunchSplash', () => {
     expect(container.firstElementChild).toBeNull()
   })
 
-  it('draws the opening from the logo file, each dash in its own colour', () => {
+  it('draws the checker paths unchanged, staggering each ring from its own start', () => {
     const { getByTestId } = render(<LaunchSplash />)
     const lockup = getByTestId('launch-splash-lockup')
     const source = new DOMParser().parseFromString(logoSource, 'image/svg+xml')
     const sourceDashes = [...source.querySelectorAll('path')].filter((path) => path.getAttribute('d')!.split('M').length === 2)
 
     const dashes = [...lockup.querySelectorAll<SVGPathElement>('.launch-splash__dash')]
-    expect(dashes.map((dash) => dash.getAttribute('stroke'))).toEqual(sourceDashes.map((dash) => dash.getAttribute('stroke')))
-    expect(dashes[0].style.animationDelay).toBe('30ms')
+    for (const attr of ['d', 'stroke', 'stroke-width', 'stroke-linejoin', 'fill']) {
+      expect(dashes.map((dash) => dash.getAttribute(attr))).toEqual(sourceDashes.map((dash) => dash.getAttribute(attr)))
+    }
+    expect(dashes.map((dash) => dash.style.animationDelay)).toEqual([
+      '30ms', '60ms', '90ms', '120ms', '150ms', '180ms', '210ms', '240ms', '270ms',
+      '170ms', '200ms', '230ms', '260ms', '290ms', '320ms', '350ms',
+    ])
     expect(lockup.querySelectorAll('.launch-splash__dot')).toHaveLength(1)
 
     const letters = [...lockup.querySelectorAll<SVGGElement>('.launch-splash__letter')]
     expect(letters).toHaveLength('loudfield'.length)
     expect(letters.map((letter) => letter.style.animationDelay)).toEqual(letters.map((_, n) => `${450 + n * 40}ms`))
-    // l, o, u, d, f, i, e, l, d: every stroke is two lines.
-    expect(letters.map((letter) => letter.querySelectorAll('path').length)).toEqual([2, 2, 6, 4, 6, 2, 4, 2, 4])
     expect(letters[5].querySelector('circle')).not.toBeNull()
   })
 
