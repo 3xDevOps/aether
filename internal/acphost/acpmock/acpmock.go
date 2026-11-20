@@ -285,6 +285,16 @@ func (a *Agent) update(ctx context.Context, u json.RawMessage) {
 	session := a.session
 	a.mu.Unlock()
 	_ = a.conn.SendNotification(ctx, acp.ClientMethodSessionUpdate, map[string]any{"sessionId": session, "update": u})
+	var c struct {
+		Kind      string `json:"sessionUpdate"`
+		MessageID string `json:"messageId"`
+		Content   struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(u, &c) == nil && c.Kind == "agent_thought_chunk" {
+		a.sdk(ctx, map[string]any{"type": "assistant", "message": map[string]any{"id": c.MessageID, "content": []any{map[string]any{"type": "thinking", "thinking": c.Content.Text}}}})
+	}
 }
 
 func (a *Agent) text(ctx context.Context, s string) {
@@ -541,7 +551,7 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	case PromptChatter, PromptThink:
 		usage, _ := json.Marshal(map[string]any{"sessionUpdate": "usage_update", "used": 1, "size": 100})
 		commands, _ := json.Marshal(map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []any{}})
-		thought, _ := json.Marshal(map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "."}})
+		thought, _ := json.Marshal(map[string]any{"sessionUpdate": "agent_thought_chunk", "messageId": "msg_think", "content": map[string]any{"type": "text", "text": "."}})
 		tick := time.NewTicker(ChatterInterval)
 		defer tick.Stop()
 		for {
@@ -561,7 +571,7 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		}
 	case PromptLongTool, PromptGoQuiet:
 		if text == PromptGoQuiet {
-			thought, _ := json.Marshal(map[string]any{"sessionUpdate": "agent_thought_chunk", "content": map[string]any{"type": "text", "text": "hm"}})
+			thought, _ := json.Marshal(map[string]any{"sessionUpdate": "agent_thought_chunk", "messageId": "msg_quiet", "content": map[string]any{"type": "text", "text": "hm"}})
 			a.update(ctx, thought)
 		} else {
 			a.update(ctx, demoTool("long-tool", "execute", "make build", "in_progress", nil))
@@ -665,6 +675,7 @@ func demoTool(id, kind, title, status string, extra map[string]any) json.RawMess
 func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}, write bool) any {
 	thought, _ := json.Marshal(map[string]any{
 		"sessionUpdate": "agent_thought_chunk",
+		"messageId":     "msg_demo",
 		"content":       map[string]any{"type": "text", "text": "The billing total should round to cents; read the module and its tests first."},
 	})
 	read := func(id, path string) []json.RawMessage {

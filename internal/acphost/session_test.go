@@ -268,6 +268,86 @@ func TestChunksCoalesce(t *testing.T) {
 	}
 }
 
+// Claude's adapter streams Claude's summary of what the agent wrote between
+// tool calls as thought chunks; the assistant message that follows lists it
+// in narration_block_indexes.
+func TestClaudeNarrationIsTheAgentsMessage(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		m.thought("msg_a", "", "Borrowing is when a session runs ")
+		m.thought("msg_a", "", "someone else's agent.\n\n")
+		m.frame("msg_a", "", "Borrowing is when a session runs someone else's agent.\n\n", 0)
+		m.openTool("toolu_1")
+		m.thought("msg_b", "", "Weighing the options.")
+		m.frame("msg_b", "", "Weighing the options.")
+		m.thought("msg_c", "toolu_1", "The subagent reads the logs.")
+		m.frame("msg_c", "toolu_1", "The subagent reads the logs.", 0)
+		m.chunk("Done.")
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{ClaudeCode: true})
+	if _, err := s.Prompt(context.Background(), textPrompt("what is borrowing?"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitIdle(t)
+	its := items(t, s)
+	want := map[Kind]map[string]string{
+		KindMessage: {"msg_a|": "Borrowing is when a session runs someone else's agent.\n\n", "msg_c|toolu_1": "The subagent reads the logs.", "Done.|": "Done."},
+		KindThought: {"msg_b|": "Weighing the options."},
+	}
+	if text := assistantText(its); !reflect.DeepEqual(text, want) {
+		t.Fatalf("assistant text by kind = %q, want %q", text, want)
+	}
+	first := slices.IndexFunc(its, func(it Item) bool { return it.Message != nil && it.Message.MessageID == "msg_a" })
+	if tool := slices.IndexFunc(its, func(it Item) bool { return it.Kind == KindToolCall }); first == -1 || first > tool {
+		t.Fatalf("the narration is item %d, the tool call %d: the narration must come first", first, tool)
+	}
+}
+
+// An adopted session's adapter may come from an earlier server that never
+// asked for assistant messages. Once one arrives, a thought being logged
+// from chunks is finished from them and not logged again.
+func TestAdoptedClaudeSessionLogsEachThoughtOnce(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	s, _ := startMock(t, m, Config{ClaudeCode: true, Adopt: &Adoption{
+		Initialize: m.fix.Initialize, Session: m.fix.SessionNew, SessionID: m.sessionID(),
+	}})
+	m.thought("msg_a", "", "Reading the logs.")
+	m.openTool("toolu_1")
+	m.thought("msg_m", "", "I checked the config.")
+	m.thought("msg_s", "toolu_1", "The subagent ")
+	m.frame("msg_m", "", "I checked the config.", 0)
+	m.thought("msg_s", "toolu_1", "reads it.")
+	m.frame("msg_s", "toolu_1", "The subagent reads it.")
+	m.thought("msg_c", "", "It reads the config.")
+	m.frame("msg_c", "", "It reads the config.", 0)
+	m.openTool("toolu_2")
+	want := map[Kind]map[string]string{
+		KindMessage: {"msg_c|": "It reads the config."},
+		KindThought: {"msg_a|": "Reading the logs.", "msg_m|": "I checked the config.", "msg_s|toolu_1": "The subagent reads it."},
+	}
+	var text map[Kind]map[string]string
+	waitFor(t, "the last tool call", func() bool {
+		its := items(t, s)
+		text = assistantText(its)
+		return slices.ContainsFunc(its, func(it Item) bool { return it.ToolCall != nil && it.ToolCall.ID == "toolu_2" })
+	})
+	if !reflect.DeepEqual(text, want) {
+		t.Fatalf("assistant text by kind = %q, want %q", text, want)
+	}
+}
+
+// assistantText joins the agent's text by kind and by message|parent.
+func assistantText(its []Item) map[Kind]map[string]string {
+	text := map[Kind]map[string]string{KindMessage: {}, KindThought: {}}
+	for _, it := range its {
+		if it.Message != nil && it.Message.Role == "assistant" {
+			text[it.Kind][it.Message.MessageID+"|"+it.Message.ParentID] += it.Message.Text
+		}
+	}
+	return text
+}
+
 func TestToolCallMerge(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	const deltas = 40

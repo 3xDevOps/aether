@@ -47,6 +47,12 @@ type projector struct {
 	labels map[string]subagentLabels
 	usage  Usage
 	title  string
+	// framed takes thinking text from claudeFrame, not thought chunks.
+	// chunked holds, by subagent, the message of a thought taken from
+	// chunks whose frame has not come: its chunks keep coming and its frame
+	// does not log it again.
+	framed  bool
+	chunked map[string]string
 }
 
 type subagentLabels struct{ title, description, prompt, status string }
@@ -74,7 +80,7 @@ type toolState struct {
 
 func newProjector(emit func(Item), arm func(), activity func(kind, target string)) *projector {
 	return &projector{emit: emit, arm: arm, activity: activity, tools: make(map[string]*toolState), plans: make(map[string][]PlanEntry),
-		labels: make(map[string]subagentLabels)}
+		labels: make(map[string]subagentLabels), chunked: make(map[string]string)}
 }
 
 // update projects an update of the main agent's session, or with parent set
@@ -111,12 +117,17 @@ func (p *projector) project(kind, parent string, raw json.RawMessage) bool {
 			return false
 		}
 		k := KindMessage
+		claude, _ := claudeMeta(u.Meta)
+		owner, id := cmp.Or(parent, claude), deref(u.MessageId)
 		if kind == "agent_thought_chunk" {
 			k = KindThought
 			p.activity("think", "")
+			if p.framed && (id == "" || p.chunked[owner] != id) {
+				return true
+			}
+			p.chunked[owner] = id
 		}
-		claude, _ := claudeMeta(u.Meta)
-		p.chunk(k, "assistant", deref(u.MessageId), cmp.Or(parent, claude), u.Content)
+		p.chunk(k, "assistant", id, owner, u.Content)
 	case "tool_call":
 		var u acp.SessionUpdateToolCall
 		if json.Unmarshal(raw, &u) != nil {
@@ -313,6 +324,46 @@ func launchedTask(meta map[string]any) string {
 func (p *projector) setTask(id string, task *ToolTask) {
 	if st, ok := p.tools[id]; ok {
 		st.call.Task = task
+	}
+}
+
+// claudeFrame projects the thinking blocks of an assistant message from
+// Claude Code, which arrives once its block ends. Claude's adapter streams
+// every thinking block as a thought, but the blocks narration_block_indexes
+// lists are Claude's summary of what the agent wrote between tool calls, so
+// they are its messages.
+func (p *projector) claudeFrame(raw json.RawMessage) {
+	var f struct {
+		Parent    string `json:"parent_tool_use_id"`
+		Narration []int  `json:"narration_block_indexes"`
+		Message   struct {
+			ID      string `json:"id"`
+			Content []struct {
+				Type     string `json:"type"`
+				Thinking string `json:"thinking"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(raw, &f) != nil {
+		return
+	}
+	p.framed = true
+	if len(f.Parent) > maxLinkBytes {
+		f.Parent = ""
+	}
+	if f.Message.ID != "" && f.Message.ID == p.chunked[f.Parent] {
+		delete(p.chunked, f.Parent)
+		return
+	}
+	for i, b := range f.Message.Content {
+		if b.Type != "thinking" || b.Thinking == "" {
+			continue
+		}
+		k := KindThought
+		if slices.Contains(f.Narration, i) {
+			k = KindMessage
+		}
+		p.chunk(k, "assistant", f.Message.ID, f.Parent, acp.TextBlock(b.Thinking))
 	}
 }
 
