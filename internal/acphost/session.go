@@ -283,7 +283,6 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 	s.turnEnded = sync.NewCond(&s.mu)
 	s.ctx, s.stop = context.WithCancel(context.Background())
 	s.proj = newProjector(s.projectLocked, s.armFlush, s.activityLocked)
-	s.proj.claude = cfg.ClaudeCode
 	go s.notify.run()
 
 	last, _, openTurn := log.state()

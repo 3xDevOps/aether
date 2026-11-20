@@ -47,8 +47,12 @@ type projector struct {
 	labels map[string]subagentLabels
 	usage  Usage
 	title  string
-	// claude takes thinking text from claudeFrame, not thought chunks.
-	claude bool
+	// framed is set by the first claudeFrame: thinking text comes from
+	// frames from then on. An adapter opened by an earlier server never
+	// sends one. thoughtID is the message of the last thought taken from
+	// chunks before that.
+	framed    bool
+	thoughtID string
 }
 
 type subagentLabels struct{ title, description, prompt, status string }
@@ -116,9 +120,10 @@ func (p *projector) project(kind, parent string, raw json.RawMessage) bool {
 		if kind == "agent_thought_chunk" {
 			k = KindThought
 			p.activity("think", "")
-			if p.claude {
+			if p.framed {
 				return true
 			}
+			p.thoughtID = deref(u.MessageId)
 		}
 		claude, _ := claudeMeta(u.Meta)
 		p.chunk(k, "assistant", deref(u.MessageId), cmp.Or(parent, claude), u.Content)
@@ -339,6 +344,12 @@ func (p *projector) claudeFrame(raw json.RawMessage) {
 		} `json:"message"`
 	}
 	if json.Unmarshal(raw, &f) != nil {
+		return
+	}
+	first := !p.framed
+	p.framed = true
+	if first && f.Message.ID != "" && f.Message.ID == p.thoughtID {
+		// Its thinking is already logged from chunks.
 		return
 	}
 	if len(f.Parent) > maxLinkBytes {

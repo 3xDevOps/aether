@@ -268,66 +268,76 @@ func TestChunksCoalesce(t *testing.T) {
 	}
 }
 
-// Claude's adapter streams Claude Code's summary of what the agent wrote
-// between tool calls as thought chunks; the assistant message that follows
-// lists it in narration_block_indexes.
+// Claude's adapter streams Claude's summary of what the agent wrote between
+// tool calls as thought chunks; the assistant message that follows lists it
+// in narration_block_indexes. An adapter an earlier server opened sends no
+// assistant messages.
 func TestClaudeNarrationIsTheAgentsMessage(t *testing.T) {
-	m := newMockAgent(t, loadFixture(t, "claude"))
-	thought := func(id, text string) {
-		m.update(map[string]any{"sessionUpdate": "agent_thought_chunk", "messageId": id, "content": map[string]any{"type": "text", "text": text}})
-	}
-	frame := func(id, parent, text string, narration ...int) {
-		f := map[string]any{"type": "assistant", "parent_tool_use_id": nil,
-			"message": map[string]any{"id": id, "content": []any{map[string]any{"type": "thinking", "thinking": text, "signature": "sig"}}}}
-		if parent != "" {
-			f["parent_tool_use_id"] = parent
-		}
-		if len(narration) > 0 {
-			f["narration_block_indexes"] = narration
-		}
-		m.sdk(f)
-	}
-	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
-		frame("msg_a", "", "")
-		thought("msg_a", "Borrowing is when a session runs ")
-		thought("msg_a", "someone else's agent.\n\n")
-		frame("msg_a", "", "Borrowing is when a session runs someone else's agent.\n\n", 0)
-		m.openTool("toolu_1")
-		thought("msg_b", "Weighing the options.")
-		frame("msg_b", "", "Weighing the options.")
-		frame("msg_c", "toolu_1", "The subagent reads the logs.", 0)
-		m.chunk("Done.")
-		return map[string]any{"stopReason": "end_turn"}, nil
-	}
-	s, rec := startMock(t, m, Config{ClaudeCode: true})
-	if _, err := s.Prompt(context.Background(), textPrompt("what is borrowing?"), false, nil); err != nil {
-		t.Fatal(err)
-	}
-	rec.waitIdle(t)
-	its := items(t, s)
-	text := map[Kind]map[string]string{KindMessage: {}, KindThought: {}}
-	var narration, tool int64
-	for _, it := range its {
-		if it.Kind == KindToolCall && tool == 0 {
-			tool = it.Seq
-		}
-		if it.Message == nil || it.Message.Role != "assistant" {
-			continue
-		}
-		text[it.Kind][it.Message.MessageID+"|"+it.Message.ParentID] += it.Message.Text
-		if it.Message.MessageID == "msg_a" && narration == 0 {
-			narration = it.Seq
-		}
-	}
-	want := map[Kind]map[string]string{
-		KindMessage: {"msg_a|": "Borrowing is when a session runs someone else's agent.\n\n", "msg_c|toolu_1": "The subagent reads the logs.", "Done.|": "Done."},
-		KindThought: {"msg_b|": "Weighing the options."},
-	}
-	if !reflect.DeepEqual(text, want) {
-		t.Fatalf("assistant text by kind = %q, want %q", text, want)
-	}
-	if narration == 0 || tool == 0 || narration > tool {
-		t.Fatalf("narration at seq %d, tool call at %d: the narration must come first", narration, tool)
+	for _, tc := range []struct {
+		name  string
+		turn  func(m *mockAgent)
+		first string
+		want  map[Kind]map[string]string
+	}{
+		{"frames", func(m *mockAgent) {
+			m.frame("msg_a", "", "")
+			m.thought("msg_a", "Borrowing is when a session runs ")
+			m.thought("msg_a", "someone else's agent.\n\n")
+			m.frame("msg_a", "", "Borrowing is when a session runs someone else's agent.\n\n", 0)
+			m.openTool("toolu_1")
+			m.thought("msg_b", "Weighing the options.")
+			m.frame("msg_b", "", "Weighing the options.")
+			m.frame("msg_c", "toolu_1", "The subagent reads the logs.", 0)
+		}, "msg_a", map[Kind]map[string]string{
+			KindMessage: {"msg_a|": "Borrowing is when a session runs someone else's agent.\n\n", "msg_c|toolu_1": "The subagent reads the logs.", "Done.|": "Done."},
+			KindThought: {"msg_b|": "Weighing the options."},
+		}},
+		{"frames start late", func(m *mockAgent) {
+			m.thought("msg_a", "Reading the logs.")
+			m.openTool("toolu_1")
+			m.thought("msg_b", "Checking the config.")
+			m.frame("msg_b", "", "Checking the config.", 0)
+			m.openTool("toolu_2")
+			m.thought("msg_c", "It reads the config.")
+			m.frame("msg_c", "", "It reads the config.", 0)
+		}, "msg_a", map[Kind]map[string]string{
+			KindMessage: {"msg_c|": "It reads the config.", "Done.|": "Done."},
+			KindThought: {"msg_a|": "Reading the logs.", "msg_b|": "Checking the config."},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMockAgent(t, loadFixture(t, "claude"))
+			m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+				tc.turn(m)
+				m.chunk("Done.")
+				return map[string]any{"stopReason": "end_turn"}, nil
+			}
+			s, rec := startMock(t, m, Config{ClaudeCode: true})
+			if _, err := s.Prompt(context.Background(), textPrompt("what is borrowing?"), false, nil); err != nil {
+				t.Fatal(err)
+			}
+			rec.waitIdle(t)
+			text := map[Kind]map[string]string{KindMessage: {}, KindThought: {}}
+			var first, tool int64
+			for _, it := range items(t, s) {
+				if it.Kind == KindToolCall && tool == 0 {
+					tool = it.Seq
+				}
+				if it.Message == nil || it.Message.Role != "assistant" {
+					continue
+				}
+				text[it.Kind][it.Message.MessageID+"|"+it.Message.ParentID] += it.Message.Text
+				if it.Message.MessageID == tc.first && first == 0 {
+					first = it.Seq
+				}
+			}
+			if !reflect.DeepEqual(text, tc.want) {
+				t.Fatalf("assistant text by kind = %q, want %q", text, tc.want)
+			}
+			if first == 0 || tool == 0 || first > tool {
+				t.Fatalf("%s at seq %d, tool call at %d: the text must come first", tc.first, first, tool)
+			}
+		})
 	}
 }
 

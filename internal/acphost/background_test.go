@@ -120,6 +120,24 @@ func (m *mockAgent) marker() {
 	m.update(map[string]any{"sessionUpdate": "usage_update", "used": 1, "size": 2, "_meta": map[string]any{"_claude/origin": map[string]any{"kind": "task-notification"}}})
 }
 
+func (m *mockAgent) thought(id, text string) {
+	m.update(map[string]any{"sessionUpdate": "agent_thought_chunk", "messageId": id, "content": map[string]any{"type": "text", "text": text}})
+}
+
+// frame sends the assistant message Claude Code sends once a thinking block
+// ends.
+func (m *mockAgent) frame(id, parent, text string, narration ...int) {
+	f := map[string]any{"type": "assistant", "parent_tool_use_id": nil,
+		"message": map[string]any{"id": id, "content": []any{map[string]any{"type": "thinking", "thinking": text, "signature": "sig"}}}}
+	if parent != "" {
+		f["parent_tool_use_id"] = parent
+	}
+	if len(narration) > 0 {
+		f["narration_block_indexes"] = narration
+	}
+	m.sdk(f)
+}
+
 func (m *mockAgent) openTool(id string) {
 	m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": id, "title": "Bash", "kind": "execute", "status": "in_progress"})
 }
