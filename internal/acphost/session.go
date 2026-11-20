@@ -283,6 +283,8 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 	s.turnEnded = sync.NewCond(&s.mu)
 	s.ctx, s.stop = context.WithCancel(context.Background())
 	s.proj = newProjector(s.projectLocked, s.armFlush, s.activityLocked)
+	// An adapter an earlier server opened may not send assistant frames.
+	s.proj.framed = cfg.ClaudeCode && cfg.Adopt == nil
 	go s.notify.run()
 
 	last, _, openTurn := log.state()

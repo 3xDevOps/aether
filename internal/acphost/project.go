@@ -47,12 +47,11 @@ type projector struct {
 	labels map[string]subagentLabels
 	usage  Usage
 	title  string
-	// framed is set by the first claudeFrame: thinking text comes from
-	// frames from then on. An adapter opened by an earlier server never
-	// sends one. thoughtID is the message of the last thought taken from
-	// chunks before that.
-	framed    bool
-	thoughtID string
+	// framed takes thinking text from claudeFrame, not thought chunks.
+	// Until then, chunked holds the message of the last thought taken from
+	// chunks, by subagent, so its frame does not log it again.
+	framed  bool
+	chunked map[string]string
 }
 
 type subagentLabels struct{ title, description, prompt, status string }
@@ -80,7 +79,7 @@ type toolState struct {
 
 func newProjector(emit func(Item), arm func(), activity func(kind, target string)) *projector {
 	return &projector{emit: emit, arm: arm, activity: activity, tools: make(map[string]*toolState), plans: make(map[string][]PlanEntry),
-		labels: make(map[string]subagentLabels)}
+		labels: make(map[string]subagentLabels), chunked: make(map[string]string)}
 }
 
 // update projects an update of the main agent's session, or with parent set
@@ -117,16 +116,17 @@ func (p *projector) project(kind, parent string, raw json.RawMessage) bool {
 			return false
 		}
 		k := KindMessage
+		claude, _ := claudeMeta(u.Meta)
+		owner := cmp.Or(parent, claude)
 		if kind == "agent_thought_chunk" {
 			k = KindThought
 			p.activity("think", "")
 			if p.framed {
 				return true
 			}
-			p.thoughtID = deref(u.MessageId)
+			p.chunked[owner] = deref(u.MessageId)
 		}
-		claude, _ := claudeMeta(u.Meta)
-		p.chunk(k, "assistant", deref(u.MessageId), cmp.Or(parent, claude), u.Content)
+		p.chunk(k, "assistant", deref(u.MessageId), owner, u.Content)
 	case "tool_call":
 		var u acp.SessionUpdateToolCall
 		if json.Unmarshal(raw, &u) != nil {
@@ -346,14 +346,12 @@ func (p *projector) claudeFrame(raw json.RawMessage) {
 	if json.Unmarshal(raw, &f) != nil {
 		return
 	}
-	first := !p.framed
 	p.framed = true
-	if first && f.Message.ID != "" && f.Message.ID == p.thoughtID {
-		// Its thinking is already logged from chunks.
-		return
-	}
 	if len(f.Parent) > maxLinkBytes {
 		f.Parent = ""
+	}
+	if f.Message.ID != "" && f.Message.ID == p.chunked[f.Parent] {
+		return
 	}
 	for i, b := range f.Message.Content {
 		if b.Type != "thinking" || b.Thinking == "" {

@@ -120,8 +120,12 @@ func (m *mockAgent) marker() {
 	m.update(map[string]any{"sessionUpdate": "usage_update", "used": 1, "size": 2, "_meta": map[string]any{"_claude/origin": map[string]any{"kind": "task-notification"}}})
 }
 
-func (m *mockAgent) thought(id, text string) {
-	m.update(map[string]any{"sessionUpdate": "agent_thought_chunk", "messageId": id, "content": map[string]any{"type": "text", "text": text}})
+func (m *mockAgent) thought(id, parent, text string) {
+	u := map[string]any{"sessionUpdate": "agent_thought_chunk", "messageId": id, "content": map[string]any{"type": "text", "text": text}}
+	if parent != "" {
+		u["_meta"] = map[string]any{"claudeCode": map[string]any{"parentToolUseId": parent}}
+	}
+	m.update(u)
 }
 
 // frame sends the assistant message Claude Code sends once a thinking block
